@@ -14,8 +14,10 @@ describe("smoke tests", () => {
     };
     cy.then(() => ({ email: loginForm.email })).as("user");
 
+    /** This will already redirect to login page */
     cy.visit("/");
-    cy.findByTestId("join").click();
+
+    cy.findByTestId("signupButton").click();
 
     cy.findByTestId("email").type(loginForm.email);
     cy.findByTestId("password").type(loginForm.password);
@@ -42,7 +44,6 @@ describe("smoke tests", () => {
     cy.log("Create account with", credentials);
     cy.createAccount(credentials);
     cy.visit("/");
-    cy.findByTestId("login").click();
 
     cy.findByTestId("email").type(credentials.email);
     cy.findByTestId("password").type(credentials.password);

@@ -153,6 +153,7 @@ export default function LoginPage() {
               {t("login.dontHaveAccount")}{" "}
               <Link
                 className="text-blue-500 underline"
+                data-test-id="signupButton"
                 to={{
                   pathname: "/join",
                   search: searchParams.toString(),
