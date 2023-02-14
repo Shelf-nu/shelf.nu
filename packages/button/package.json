@@ -1,5 +1,8 @@
 {
 	"name": "@shelf/button",
 	"version": "1.0.0",
-	"description": "A very simple React button to test the shelf.nu monorepo"
+	"description": "A very simple React button to test the shelf.nu monorepo",
+	"dependencies": {
+		"react": "^18.2.0"
+	}
 }

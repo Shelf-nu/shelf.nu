@@ -6,7 +6,7 @@ Shelf is open source infrastructure for managing phisical property/assets. For i
 
 ## Repository
 
-This project uses a monorepo, setup with the help of the following guide: https://monorepo.guide/getting-started
+This project uses a setup using Lerna, setup with the help of the following guide: https://monorepo.guide/getting-started
 
 ## Current stack overview
 

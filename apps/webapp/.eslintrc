@@ -1,0 +1,74 @@
+{
+  "plugins": ["tailwindcss"],
+  "extends": [
+    "@remix-run/eslint-config",
+    "@remix-run/eslint-config/node",
+    "plugin:tailwindcss/recommended",
+    "prettier"
+  ],
+  "parserOptions": {
+    "project": ["./tsconfig.json"]
+  },
+  "settings": {
+    // Help eslint-plugin-tailwindcss to parse Tailwind classes outside of className
+    "tailwindcss": {
+      "callees": ["tw"]
+    },
+    "jest": {
+      "version": 27
+    }
+  },
+  "rules": {
+    "no-console": "warn",
+    "arrow-body-style": ["warn", "as-needed"],
+    // @typescript-eslint
+    "@typescript-eslint/no-duplicate-imports": "error",
+    "@typescript-eslint/consistent-type-imports": "error",
+    "@typescript-eslint/no-unused-vars": [
+      "warn",
+      {
+        "vars": "all",
+        "args": "all",
+        "argsIgnorePattern": "^_",
+        "destructuredArrayIgnorePattern": "^_",
+        "ignoreRestSiblings": false
+      }
+    ],
+    //import
+    "import/no-cycle": "error",
+    "import/no-unresolved": "error",
+    "import/no-default-export": "warn",
+    "import/order": [
+      "error",
+      {
+        "groups": ["builtin", "external", "internal"],
+        "pathGroups": [
+          {
+            "pattern": "react",
+            "group": "external",
+            "position": "before"
+          }
+        ],
+        "pathGroupsExcludedImportTypes": ["react"],
+        "newlines-between": "always",
+        "alphabetize": {
+          "order": "asc",
+          "caseInsensitive": true
+        }
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "./app/root.tsx",
+        "./app/entry.client.tsx",
+        "./app/entry.server.tsx",
+        "./app/routes/**/*.tsx"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    }
+  ]
+}
