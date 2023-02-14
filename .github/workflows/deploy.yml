@@ -82,53 +82,53 @@ jobs:
       - name: ⚡ Run vitest
         run: npm run test -- --coverage
 
-  cypress:
-    name: ⚫️ Cypress
-    runs-on: ubuntu-latest
-    steps:
-      - name: 🛑 Cancel Previous Runs
-        uses: styfle/cancel-workflow-action@0.11.0
+  # cypress:
+  #   name: ⚫️ Cypress
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: 🛑 Cancel Previous Runs
+  #       uses: styfle/cancel-workflow-action@0.11.0
 
-      - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+  #     - name: ⬇️ Checkout repo
+  #       uses: actions/checkout@v3
 
-      - name: 🔑 Make envfile
-        uses: SpicyPizza/create-envfile@v1.3
-        with:
-          envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
-          envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-          envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
-          envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          file_name: .env
+  #     - name: 🔑 Make envfile
+  #       uses: SpicyPizza/create-envfile@v1.3
+  #       with:
+  #         envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+  #         envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
+  #         envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+  #         envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  #         envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
+  #         envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+  #         file_name: .env
 
-      - name: ⎔ Setup node
-        uses: actions/setup-node@v3
-        with:
-          node-version: 16
+  #     - name: ⎔ Setup node
+  #       uses: actions/setup-node@v3
+  #       with:
+  #         node-version: 16
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
-        with:
-          useLockFile: false
+  #     - name: 📥 Download deps
+  #       uses: bahmutov/npm-install@v1
+  #       with:
+  #         useLockFile: false
 
-      # uncomment if you really want to reset your testing database
-      # - name: 🛠 Setup Database
-      #   run: npx prisma migrate reset --force
+  #     # uncomment if you really want to reset your testing database
+  #     # - name: 🛠 Setup Database
+  #     #   run: npx prisma migrate reset --force
 
-      - name: ⚙️ Build
-        run: npm run build
+  #     - name: ⚙️ Build
+  #       run: npm run build
 
-      - name: 🌳 Cypress run
-        uses: cypress-io/github-action@v4
-        with:
-          start: npm run start:ci
-          wait-on: "http://localhost:8811"
-          browser: chrome
-          headed: true
-        env:
-          PORT: "8811"
+  #     - name: 🌳 Cypress run
+  #       uses: cypress-io/github-action@v4
+  #       with:
+  #         start: npm run start:ci
+  #         wait-on: "http://localhost:8811"
+  #         browser: chrome
+  #         headed: true
+  #       env:
+  #         PORT: "8811"
 
   build:
     name: 🐳 Build

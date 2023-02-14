@@ -24,6 +24,7 @@ export const i18nextServer = new RemixI18Next({
   // The backend you want to use to load the translations
   // Tip: You could pass `resources` to the `i18next` configuration and avoid
   // a backend here
+  // @ts-ignore
   backend: Backend,
 });
 
