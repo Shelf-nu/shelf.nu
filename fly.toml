@@ -1,4 +1,4 @@
-app = "app-4d80"
+app = "shelf-webapp"
 kill_signal = "SIGINT"
 kill_timeout = 5
 processes = [ ]
