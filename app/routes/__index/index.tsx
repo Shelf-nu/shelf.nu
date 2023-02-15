@@ -16,11 +16,9 @@ import { assertIsPost, isFormProcessing } from "~/utils";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
-  const title = "Login";
 
   if (authSession) return redirect("/items");
-
-  return json({ title });
+  return null;
 }
 
 const LoginFormSchema = z.object({
@@ -63,10 +61,6 @@ export async function action({ request }: ActionArgs) {
     redirectTo: redirectTo || "/items",
   });
 }
-
-export const meta: MetaFunction = () => ({
-  title: "Shelf.nu",
-});
 
 export default function IndexLoginForm() {
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
