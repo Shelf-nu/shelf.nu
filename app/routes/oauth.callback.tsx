@@ -20,7 +20,7 @@ import { assertIsPost, safeRedirect } from "~/utils";
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
 
-  if (authSession) return redirect("/notes");
+  if (authSession) return redirect("/items");
 
   return json({});
 }
@@ -46,7 +46,7 @@ export async function action({ request }: ActionArgs) {
   }
 
   const { redirectTo, refreshToken } = result.data;
-  const safeRedirectTo = safeRedirect(redirectTo, "/notes");
+  const safeRedirectTo = safeRedirect(redirectTo, "/items");
 
   // We should not trust what is sent from the client
   // https://github.com/rphlmr/supa-fly-stack/issues/45
@@ -97,7 +97,7 @@ export default function LoginCallback() {
   const error = useActionData<typeof action>();
   const fetcher = useFetcher();
   const [searchParams] = useSearchParams();
-  const redirectTo = searchParams.get("redirectTo") ?? "/notes";
+  const redirectTo = searchParams.get("redirectTo") ?? "/items";
   const supabase = useMemo(() => getSupabase(), []);
 
   useEffect(() => {

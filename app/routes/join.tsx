@@ -21,7 +21,7 @@ export async function loader({ request }: LoaderArgs) {
   const t = await i18nextServer.getFixedT(request, "auth");
   const title = t("register.title");
 
-  if (authSession) return redirect("/notes");
+  if (authSession) return redirect("/items");
 
   return json({ title });
 }
@@ -72,7 +72,7 @@ export async function action({ request }: ActionArgs) {
   return createAuthSession({
     request,
     authSession,
-    redirectTo: redirectTo || "/notes",
+    redirectTo: redirectTo || "/items",
   });
 }
 
