@@ -13,10 +13,6 @@ import {
   ScrollRestoration,
   useLoaderData,
 } from "@remix-run/react";
-import { useTranslation } from "react-i18next";
-import { useChangeLanguage } from "remix-i18next";
-
-import { i18nextServer } from "~/integrations/i18n";
 
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
@@ -34,21 +30,16 @@ export const meta: MetaFunction = () => ({
 });
 
 export const loader: LoaderFunction = async ({ request }) => {
-  const locale = await i18nextServer.getLocale(request);
   return json({
-    locale,
     env: getBrowserEnv(),
   });
 };
 
 export default function App() {
-  const { env, locale } = useLoaderData<typeof loader>();
-  const { i18n } = useTranslation();
-
-  useChangeLanguage(locale);
+  const { env } = useLoaderData<typeof loader>();
 
   return (
-    <html lang={locale} dir={i18n.dir()} className="h-full">
+    <html lang={"en-EN"} className="h-full">
       <head>
         <Meta />
         <Links />
