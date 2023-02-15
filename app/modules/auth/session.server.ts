@@ -15,7 +15,7 @@ import type { AuthSession } from "./types";
 const SESSION_KEY = "authenticated";
 const SESSION_ERROR_KEY = "error";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days;
-const LOGIN_URL = "/login";
+const LOGIN_URL = "/";
 const REFRESH_ACCESS_TOKEN_THRESHOLD = 60 * 10; // 10 minutes left before token expires
 
 /**

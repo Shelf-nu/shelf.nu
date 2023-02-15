@@ -5,9 +5,6 @@ import type { EntryContext, Headers } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import isbot from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
-import { I18nextProvider } from "react-i18next";
-
-import { createI18nextServerInstance } from "./integrations/i18n";
 
 const ABORT_DELAY = 5000;
 
@@ -24,14 +21,8 @@ export default async function handleRequest(
   return new Promise(async (res, reject) => {
     let didError = false;
 
-    // First, we create a new instance of i18next so every request will have a
-    // completely unique instance and not share any state
-    const instance = await createI18nextServerInstance(request, remixContext);
-
     const { pipe, abort } = renderToPipeableStream(
-      <I18nextProvider i18n={instance}>
-        <RemixServer context={remixContext} url={request.url} />
-      </I18nextProvider>,
+      <RemixServer context={remixContext} url={request.url} />,
       {
         [callbackName]() {
           const body = new PassThrough();

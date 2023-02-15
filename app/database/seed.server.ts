@@ -15,10 +15,7 @@ const prisma = new PrismaClient();
 
 const email = "hello@supabase.com";
 
-const getUserId = async (
-  email = "hello@supabase.com",
-  pwd = "supabase"
-): Promise<string> => {
+const getUserId = async (email = "hello@supabase.com"): Promise<string> => {
   const userList = await supabaseAdmin.auth.admin.listUsers();
 
   if (userList.error) {
@@ -49,8 +46,6 @@ const getUserId = async (
 async function seed() {
   try {
     const id = await getUserId();
-    const idCarlos = await getUserId("carlos@virreira.com");
-    const id3Jurre = await getUserId("jurre@whale-agency.com");
 
     // cleanup the existing database
     await prisma.user.delete({ where: { email } }).catch(() => {
@@ -61,20 +56,6 @@ async function seed() {
       data: {
         email,
         id,
-      },
-    });
-
-    await prisma.user.create({
-      data: {
-        email: "carlos@virreira.com",
-        id: idCarlos,
-      },
-    });
-
-    await prisma.user.create({
-      data: {
-        email: "jurre@whale-agency.com",
-        id: id3Jurre,
       },
     });
 

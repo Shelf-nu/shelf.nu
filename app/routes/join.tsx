@@ -3,11 +3,9 @@ import * as React from "react";
 import type { ActionArgs, LoaderArgs, MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { Form, Link, useSearchParams, useTransition } from "@remix-run/react";
-import { useTranslation } from "react-i18next";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
-import { i18nextServer } from "~/integrations/i18n";
 import {
   createAuthSession,
   getAuthSession,
@@ -18,8 +16,7 @@ import { assertIsPost, isFormProcessing } from "~/utils";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
-  const t = await i18nextServer.getFixedT(request, "auth");
-  const title = t("register.title");
+  const title = "Sign up";
 
   if (authSession) return redirect("/items");
 
@@ -86,7 +83,6 @@ export default function Join() {
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
   const transition = useTransition();
   const disabled = isFormProcessing(transition.state);
-  const { t } = useTranslation("auth");
 
   return (
     <div className="flex min-h-full flex-col justify-center">
@@ -97,7 +93,7 @@ export default function Join() {
               htmlFor={zo.fields.email()}
               className="block text-sm font-medium text-gray-700"
             >
-              {t("register.email")}
+              Email address
             </label>
             <div className="mt-1">
               <input
@@ -123,7 +119,7 @@ export default function Join() {
               htmlFor={zo.fields.password()}
               className="block text-sm font-medium text-gray-700"
             >
-              {t("register.password")}
+              Password
             </label>
             <div className="mt-1">
               <input
@@ -153,19 +149,19 @@ export default function Join() {
             className="w-full rounded bg-blue-500  py-2 px-4 text-white focus:bg-blue-400 hover:bg-blue-600"
             disabled={disabled}
           >
-            {t("register.action")}
+            Create Account
           </button>
           <div className="flex items-center justify-center">
             <div className="text-center text-sm text-gray-500">
-              {t("register.alreadyHaveAnAccount")}{" "}
+              Already have an account?{" "}
               <Link
                 className="text-blue-500 underline"
                 to={{
-                  pathname: "/login",
+                  pathname: "/",
                   search: searchParams.toString(),
                 }}
               >
-                {t("register.login")}
+                Log in
               </Link>
             </div>
           </div>
@@ -177,7 +173,7 @@ export default function Join() {
             </div>
             <div className="relative flex justify-center text-sm">
               <span className="bg-white px-2 text-gray-500">
-                {t("register.orContinueWith")}
+                Or Sign Up with a <strong>Magic Link</strong>
               </span>
             </div>
           </div>
