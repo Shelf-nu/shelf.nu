@@ -21,7 +21,7 @@ export async function loader({ request }: LoaderArgs) {
   const t = await i18nextServer.getFixedT(request, "auth");
   const title = t("login.title");
 
-  if (authSession) return redirect("/notes");
+  if (authSession) return redirect("/items");
 
   return json({ title });
 }
@@ -63,7 +63,7 @@ export async function action({ request }: ActionArgs) {
   return createAuthSession({
     request,
     authSession,
-    redirectTo: redirectTo || "/notes",
+    redirectTo: redirectTo || "/items",
   });
 }
 
@@ -153,6 +153,7 @@ export default function LoginPage() {
               {t("login.dontHaveAccount")}{" "}
               <Link
                 className="text-blue-500 underline"
+                data-test-id="signupButton"
                 to={{
                   pathname: "/join",
                   search: searchParams.toString(),

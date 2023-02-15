@@ -9,13 +9,13 @@ export async function loader({ request }: LoaderArgs) {
   return null;
 }
 
-export default function NoteIndexPage() {
+export default function ItemIndexPage() {
   return (
     <>
       <p>
-        No note selected. Select a note on the left, or{" "}
+        No item selected. Select a item on the left, or{" "}
         <Link to="new" className="text-blue-500 underline">
-          create a new note.
+          create a new item.
         </Link>
       </p>
     </>

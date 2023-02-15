@@ -3,42 +3,42 @@ import { redirect, json } from "@remix-run/node";
 import { Form, useCatch, useLoaderData } from "@remix-run/react";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { deleteNote, getNote } from "~/modules/note";
+import { deleteItem, getItem } from "~/modules/item";
 import { assertIsDelete, getRequiredParam } from "~/utils";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
 
-  const id = getRequiredParam(params, "noteId");
+  const id = getRequiredParam(params, "itemId");
 
-  const note = await getNote({ userId, id });
-  if (!note) {
+  const item = await getItem({ userId, id });
+  if (!item) {
     throw new Response("Not Found", { status: 404 });
   }
-  return json({ note });
+  return json({ item });
 }
 
 export async function action({ request, params }: ActionArgs) {
   assertIsDelete(request);
-  const id = getRequiredParam(params, "noteId");
+  const id = getRequiredParam(params, "itemId");
   const authSession = await requireAuthSession(request);
 
-  await deleteNote({ userId: authSession.userId, id });
+  await deleteItem({ userId: authSession.userId, id });
 
-  return redirect("/notes", {
+  return redirect("/items", {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
   });
 }
 
-export default function NoteDetailsPage() {
+export default function ItemDetailsPage() {
   const data = useLoaderData<typeof loader>();
 
   return (
     <div>
-      <h3 className="text-2xl font-bold">{data.note.title}</h3>
-      <p className="py-6">{data.note.body}</p>
+      <h3 className="text-2xl font-bold">{data.item.title}</h3>
+      <p className="py-6">{data.item.description}</p>
       <hr className="my-4" />
       <Form method="delete">
         <button
@@ -60,7 +60,7 @@ export function CatchBoundary() {
   const caught = useCatch();
 
   if (caught.status === 404) {
-    return <div>Note not found</div>;
+    return <div>Item not found</div>;
   }
 
   throw new Error(`Unexpected caught response with status: ${caught.status}`);

@@ -93,6 +93,6 @@ describe(safeRedirect.name, () => {
   });
 
   it("should return destination path", () => {
-    expect(safeRedirect("/notes")).toBe("/notes");
+    expect(safeRedirect("/items")).toBe("/items");
   });
 });
