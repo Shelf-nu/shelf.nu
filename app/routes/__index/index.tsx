@@ -67,7 +67,7 @@ export async function action({ request }: ActionArgs) {
   });
 }
 
-export const meta: MetaFunction = ({ data }) => ({
+export const meta: MetaFunction = () => ({
   title: "Shelf.nu",
 });
 

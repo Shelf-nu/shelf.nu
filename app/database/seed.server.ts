@@ -35,7 +35,7 @@ const getUserId = async (
 
   const newUser = await supabaseAdmin.auth.admin.createUser({
     email,
-    password: "supabase",
+    password: pwd,
     email_confirm: true,
   });
 

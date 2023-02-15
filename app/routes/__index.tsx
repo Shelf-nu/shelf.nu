@@ -1,6 +1,9 @@
-import { LoaderArgs, json, redirect } from "@remix-run/node";
+import * as React from "react";
+
+import type { LoaderArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Outlet } from "@remix-run/react";
-import { useTranslation } from "react-i18next";
+
 import { i18nextServer } from "~/integrations/i18n";
 import { getAuthSession } from "~/modules/auth";
 
@@ -15,14 +18,13 @@ export async function loader({ request }: LoaderArgs) {
 }
 
 export default function Index() {
-  const { t } = useTranslation(["common", "auth"]);
   return (
     <main className="relative flex min-h-screen items-center px-10">
       <div className="grid h-full grid-cols-2 gap-4">
         <div className="">
           <img
             src="/images/midJourney_shelf.png"
-            alt="MidJourney generated shelf image"
+            alt="MidJourney generated shelf"
             className="h-full"
           />
         </div>
