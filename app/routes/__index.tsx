@@ -2,15 +2,13 @@ import * as React from "react";
 
 import type { LoaderArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Outlet } from "@remix-run/react";
+import { Outlet, useLoaderData } from "@remix-run/react";
 
-import { i18nextServer } from "~/integrations/i18n";
 import { getAuthSession } from "~/modules/auth";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
-  const t = await i18nextServer.getFixedT(request, "auth");
-  const title = t("login.title");
+  const title = "Login";
 
   if (authSession) return redirect("/items");
 
@@ -18,6 +16,7 @@ export async function loader({ request }: LoaderArgs) {
 }
 
 export default function Index() {
+  const data = useLoaderData<typeof loader>();
   return (
     <main className="relative flex min-h-screen items-center px-10">
       <div className="grid h-full grid-cols-2 gap-4">
@@ -31,7 +30,7 @@ export default function Index() {
         <div className="flex flex-col justify-center text-center">
           <h1>Shelf.nu</h1>
 
-          <h2 className="mb-4">Login</h2>
+          <h2 className="mb-4">{data.title}</h2>
           <Outlet />
         </div>
       </div>

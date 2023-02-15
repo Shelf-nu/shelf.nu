@@ -3,19 +3,21 @@ import React from "react";
 import { RemixBrowser } from "@remix-run/react";
 import { hydrateRoot } from "react-dom/client";
 
-import { I18nClientProvider, initI18nextClient } from "./integrations/i18n"; // your i18n configuration file
-
 function hydrate() {
   React.startTransition(() => {
     hydrateRoot(
       document,
       <React.StrictMode>
-        <I18nClientProvider>
-          <RemixBrowser />
-        </I18nClientProvider>
+        <RemixBrowser />
       </React.StrictMode>
     );
   });
 }
 
-initI18nextClient(hydrate);
+if (typeof requestIdleCallback === "function") {
+  requestIdleCallback(hydrate);
+} else {
+  // Safari doesn't support requestIdleCallback
+  // https://caniuse.com/requestidlecallback
+  setTimeout(hydrate, 1);
+}
