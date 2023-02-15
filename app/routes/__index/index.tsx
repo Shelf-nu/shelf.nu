@@ -68,10 +68,10 @@ export async function action({ request }: ActionArgs) {
 }
 
 export const meta: MetaFunction = ({ data }) => ({
-  title: data.title,
+  title: "Shelf.nu",
 });
 
-export default function LoginPage() {
+export default function IndexLoginForm() {
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
@@ -81,7 +81,7 @@ export default function LoginPage() {
   const { t } = useTranslation("auth");
 
   return (
-    <div className="flex min-h-full flex-col justify-center">
+    <div className="flex flex-col justify-center">
       <div className="mx-auto w-full max-w-md px-8">
         <Form ref={zo.ref} method="post" className="space-y-6" replace>
           <div>
@@ -171,7 +171,7 @@ export default function LoginPage() {
             </div>
             <div className="relative flex justify-center text-sm">
               <span className="bg-white px-2 text-gray-500">
-                {t("login.orContinueWith")}
+                {t("login.orContinueWith")} <strong>Magic Link</strong>
               </span>
             </div>
           </div>

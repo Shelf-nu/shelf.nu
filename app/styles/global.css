@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-size-h1: 2.5rem;
+  --font-size-h2: 2.25rem;
+  --font-size-h3: 1.5rem;
+  --font-size-h4: 1.25rem;
+  --font-size-h5: 1rem;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  @apply font-bold;
+}

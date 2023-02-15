@@ -19,10 +19,12 @@ import { useChangeLanguage } from "remix-i18next";
 import { i18nextServer } from "~/integrations/i18n";
 
 import tailwindStylesheetUrl from "./styles/tailwind.css";
+import globalStylesheetUrl from "./styles/global.css";
 import { getBrowserEnv } from "./utils/env";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: tailwindStylesheetUrl },
+  { rel: "stylesheet", href: globalStylesheetUrl },
 ];
 
 export const meta: MetaFunction = () => ({
