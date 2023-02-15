@@ -8,7 +8,7 @@ import { getAuthSession } from "~/modules/auth";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
-  const title = "Login";
+  const title = "Shelf.nu | Login";
 
   if (authSession) return redirect("/items");
 
@@ -28,8 +28,6 @@ export default function Index() {
           />
         </div>
         <div className="flex flex-col justify-center text-center">
-          <h1>Shelf.nu</h1>
-
           <h2 className="mb-4">{data.title}</h2>
           <Outlet />
         </div>
