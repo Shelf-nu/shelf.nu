@@ -29,7 +29,7 @@ export const meta: MetaFunction = () => ({
   viewport: "width=device-width,initial-scale=1",
 });
 
-export const loader: LoaderFunction = async ({ request }) => {
+export const loader: LoaderFunction = async () => {
   return json({
     env: getBrowserEnv(),
   });
@@ -39,7 +39,7 @@ export default function App() {
   const { env } = useLoaderData<typeof loader>();
 
   return (
-    <html lang={"en-EN"} className="h-full">
+    <html lang="en" className="h-full">
       <head>
         <Meta />
         <Links />
