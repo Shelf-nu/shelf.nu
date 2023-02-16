@@ -31,7 +31,7 @@ export async function loader({ request }: LoaderArgs) {
 const LoginFormSchema = z.object({
   email: z
     .string()
-    .email("invalid-email")
+    .email("Please enter a valid email.")
     .transform((email) => email.toLowerCase()),
   password: z.string().min(8, "Password is too short. Minimum 8 characters."),
   redirectTo: z.string().optional(),
@@ -81,10 +81,9 @@ export default function IndexLoginForm() {
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
-  const data = useActionData<
-    | { errors: { email: string; password: string | null } }
-    | typeof createAuthSession
-  >();
+  const data = useActionData<{
+    errors: { email: string; password: string | null };
+  }>();
 
   const transition = useTransition();
   const disabled = isFormProcessing(transition.state);
