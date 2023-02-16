@@ -28,7 +28,7 @@ const JoinFormSchema = z.object({
     .string()
     .email("invalid-email")
     .transform((email) => email.toLowerCase()),
-  password: z.string().min(8, "password-too-short"),
+  password: z.string().min(8, "Password is too short. Minimum 8 characters."),
   redirectTo: z.string().optional(),
 });
 
