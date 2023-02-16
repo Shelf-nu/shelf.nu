@@ -1,8 +1,14 @@
 import * as React from "react";
 
-import type { ActionArgs, LoaderArgs, MetaFunction } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, Link, useSearchParams, useTransition } from "@remix-run/react";
+import {
+  Form,
+  Link,
+  useActionData,
+  useSearchParams,
+  useTransition,
+} from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
@@ -24,17 +30,19 @@ export async function loader({ request }: LoaderArgs) {
 const LoginFormSchema = z.object({
   email: z
     .string()
-    .email("invalid-email")
+    .email("Please enter a valid email.")
     .transform((email) => email.toLowerCase()),
-  password: z.string().min(8, "password-too-short"),
+  password: z.string().min(8, "Password is too short. Minimum 8 characters."),
   redirectTo: z.string().optional(),
 });
 
 export async function action({ request }: ActionArgs) {
   assertIsPost(request);
   const formData = await request.formData();
+  /** Check the zo validations */
   const result = await LoginFormSchema.safeParseAsync(parseFormAny(formData));
 
+  /** If there are some zo validation errors, show them */
   if (!result.success) {
     return json(
       {
@@ -50,7 +58,13 @@ export async function action({ request }: ActionArgs) {
 
   if (!authSession) {
     return json(
-      { errors: { email: "invalid-email-password", password: null } },
+      {
+        errors: {
+          email:
+            "Wrong password. Forgot your password? Use the magic link below.",
+          password: null,
+        },
+      },
       { status: 400 }
     );
   }
@@ -66,6 +80,9 @@ export default function IndexLoginForm() {
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
+  const data = useActionData<{
+    errors: { email: string; password: string | null };
+  }>();
 
   const transition = useTransition();
   const disabled = isFormProcessing(transition.state);
@@ -94,7 +111,7 @@ export default function IndexLoginForm() {
                 disabled={disabled}
               />
               {zo.errors.email()?.message && (
-                <div className="pt-1 text-red-700" id="email-error">
+                <div className="pt-1 text-sm text-red-700" id="email-error">
                   {zo.errors.email()?.message}
                 </div>
               )}
@@ -118,8 +135,14 @@ export default function IndexLoginForm() {
                 disabled={disabled}
               />
               {zo.errors.password()?.message && (
-                <div className="pt-1 text-red-700" id="password-error">
+                <div className="pt-1 text-sm text-red-700" id="password-error">
                   {zo.errors.password()?.message}
+                </div>
+              )}
+
+              {data?.errors?.email && (
+                <div className="pt-1 text-sm text-red-700" id="form-error">
+                  {data.errors.email}
                 </div>
               )}
             </div>
