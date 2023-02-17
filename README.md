@@ -1,8 +1,8 @@
 # shelf.nu
 
 Shelf is open source infrastructure for managing phisical property/assets. For individuals and businesses.
+![Group_71](https://user-images.githubusercontent.com/7840007/219620126-2eaabb1b-4a79-474d-b4e5-957c5124e895.jpg)
 
-![Carlitos_shelf_with_ancient_and_high_value_artifacts_with_drama_3fb6da3a-b67c-4a73-9290-0c537c758190](https://user-images.githubusercontent.com/12449255/218474753-c16a1d63-3f63-439c-a0a9-f079dc6c9477.png)
 
 ## Current stack overview
 
