@@ -13,14 +13,14 @@ export default function ContextualSidebar() {
   return (
     <AnimatePresence>
       {showSidebar && (
-        <>
+        <div className="absolute inset-0">
           <motion.div
             key="child"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.1 }}
-            className="absolute inset-x-0 h-full bg-black/60"
+            className=" absolute inset-0 z-10 h-full w-full bg-black/60"
           >
             <Link to={prevRoute.pathname} className="block h-full w-full">
               {" "}
@@ -28,7 +28,7 @@ export default function ContextualSidebar() {
           </motion.div>
 
           <motion.div
-            className="sidebar absolute right-0 z-10  h-full w-3/4 "
+            className="absolute right-0 z-20 h-full w-3/4"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
@@ -39,11 +39,11 @@ export default function ContextualSidebar() {
               duration: 0.2,
             }}
           >
-            <div className="h-full w-full bg-white p-6">
+            <div className=" h-full w-full bg-white p-6">
               <Outlet />
             </div>
           </motion.div>
-        </>
+        </div>
       )}
     </AnimatePresence>
   );

@@ -73,7 +73,7 @@
     "prisma": "^4.6.1",
     "start-server-and-test": "^1.14.0",
     "tailwind-scrollbar": "^2.0.1",
-    "tailwindcss": "^3.2.4",
+    "tailwindcss": "^3.2.7",
     "ts-node": "^10.9.1",
     "tsconfig-paths": "^4.1.0",
     "typescript": "^4.8.4",
