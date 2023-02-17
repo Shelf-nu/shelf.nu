@@ -60,9 +60,9 @@ export async function action({ request }: ActionArgs) {
     return json(
       {
         errors: {
-          email:
+          email: undefined,
+          password:
             "Wrong password. Forgot your password? Use the magic link below.",
-          password: null,
         },
       },
       { status: 400 }
@@ -81,8 +81,13 @@ export default function IndexLoginForm() {
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
   const data = useActionData<{
-    errors: { email: string; password: string | null };
+    errors: { email: string; password: string | undefined };
   }>();
+  const emailErrorMessage: string | undefined =
+    zo.errors.email()?.message || data?.errors.email;
+
+  const passwordErrorMessage: string | undefined =
+    zo.errors.password()?.message || data?.errors.password;
 
   const transition = useTransition();
   const disabled = isFormProcessing(transition.state);
@@ -110,9 +115,9 @@ export default function IndexLoginForm() {
                 className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
                 disabled={disabled}
               />
-              {zo.errors.email()?.message && (
+              {emailErrorMessage && (
                 <div className="pt-1 text-sm text-red-700" id="email-error">
-                  {zo.errors.email()?.message}
+                  {emailErrorMessage}
                 </div>
               )}
             </div>
@@ -134,15 +139,9 @@ export default function IndexLoginForm() {
                 className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
                 disabled={disabled}
               />
-              {zo.errors.password()?.message && (
+              {passwordErrorMessage && (
                 <div className="pt-1 text-sm text-red-700" id="password-error">
-                  {zo.errors.password()?.message}
-                </div>
-              )}
-
-              {data?.errors?.email && (
-                <div className="pt-1 text-sm text-red-700" id="form-error">
-                  {data.errors.email}
+                  {passwordErrorMessage}
                 </div>
               )}
             </div>
