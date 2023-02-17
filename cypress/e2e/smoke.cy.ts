@@ -55,7 +55,7 @@ describe("smoke tests", () => {
     cy.findByText("Create a new item.");
 
     cy.findByRole("link", { name: /new item/i }).click();
-    cy.wait(100);
+    cy.wait(300);
 
     cy.findByRole("textbox", { name: /title/i }).type(testItem.title);
     cy.findByRole("textbox", { name: /description/i }).type(
