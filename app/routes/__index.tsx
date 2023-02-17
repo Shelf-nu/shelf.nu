@@ -19,12 +19,12 @@ export default function Index() {
   const data = useLoaderData<typeof loader>();
   return (
     <main className="relative flex min-h-screen items-center px-10">
-      <div className="grid h-full grid-cols-2 gap-4">
-        <div className="">
+      <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="flex">
           <img
-            src="/images/midJourney_shelf.png"
+            src="/images/cover.jpg"
             alt="MidJourney generated shelf"
-            className="h-full"
+            className="h-auto w-full object-contain"
           />
         </div>
         <div className="flex flex-col justify-center text-center">
