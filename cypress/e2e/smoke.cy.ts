@@ -25,7 +25,7 @@ describe("smoke tests", () => {
     cy.findByTestId("create-account").click();
 
     cy.wait(100);
-    cy.findByText("No items yet");
+    cy.findByText("No items yet.");
 
     cy.findByTestId("logout").click();
     cy.findByTestId("login");
@@ -52,9 +52,9 @@ describe("smoke tests", () => {
     cy.findByTestId("password").type(credentials.password);
     cy.findByTestId("login").click();
     cy.wait(100);
-    cy.findByText("No items yet");
+    cy.findByText("Create a new item.");
 
-    cy.findByRole("link", { name: /\+ new item/i }).click();
+    cy.findByRole("link", { name: /new item/i }).click();
     cy.wait(100);
 
     cy.findByRole("textbox", { name: /title/i }).type(testItem.title);
@@ -67,7 +67,7 @@ describe("smoke tests", () => {
     cy.findByRole("button", { name: /delete/i }).click();
     cy.wait(100);
 
-    cy.findByText("No items yet");
+    cy.findByText("No items yet.");
     cy.findByTestId("logout").click();
     cy.findByTestId("login");
   });

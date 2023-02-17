@@ -15,7 +15,7 @@ export async function loader({ request, params }: LoaderArgs) {
   if (!item) {
     throw new Response("Not Found", { status: 404 });
   }
-  return json({ item });
+  return json({ item, showSidebar: true });
 }
 
 export async function action({ request, params }: ActionArgs) {
