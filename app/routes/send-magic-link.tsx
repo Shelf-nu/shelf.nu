@@ -14,7 +14,7 @@ export async function action({ request }: ActionArgs) {
     .object({
       email: z
         .string()
-        .email("invalid-email")
+        .email("Please enter a valid email.")
         .transform((email) => email.toLowerCase()),
     })
     .safeParseAsync(parseFormAny(formData));
@@ -22,7 +22,7 @@ export async function action({ request }: ActionArgs) {
   if (!result.success) {
     return json(
       {
-        error: "invalid-email",
+        error: "Please enter a valid email.",
       },
       { status: 400 }
     );
