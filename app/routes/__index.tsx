@@ -11,8 +11,8 @@ export async function loader({ request }: LoaderArgs) {
   const title = "Shelf.nu | Login";
 
   if (authSession) return redirect("/items");
-
-  return json({ title });
+  return null;
+  // return redirect("/login");
 }
 
 export default function Index() {
@@ -28,7 +28,7 @@ export default function Index() {
           />
         </div>
         <div className="flex flex-col justify-center text-center">
-          <h2 className="mb-4">{data.title}</h2>
+          {/* <h2 className="mb-4">{data.title}</h2> */}
           <Outlet />
         </div>
       </div>
