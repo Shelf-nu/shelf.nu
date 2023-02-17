@@ -24,7 +24,7 @@ export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
   const title = "Sign up";
 
-  if (authSession) return redirect("/items");
+  if (authSession) return redirect("/");
 
   return json({ title });
 }

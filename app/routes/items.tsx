@@ -1,8 +1,14 @@
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, Outlet, Link, NavLink } from "@remix-run/react";
+import {
+  useLoaderData,
+  Outlet,
+  Link,
+  NavLink,
+  useMatches,
+} from "@remix-run/react";
 
-import { LogoutButton, requireAuthSession } from "~/modules/auth";
+import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";
 import { notFound } from "~/utils/http.server";
 
@@ -20,49 +26,61 @@ export async function loader({ request }: LoaderArgs) {
 
 export default function ItemsPage() {
   const data = useLoaderData<typeof loader>();
+  const matches = useMatches();
+  /** Get the last item which refers to the current route */
+  const currentRoute = matches[matches.length - 1];
+
+  const showSidebar = currentRoute?.data?.showSidebar;
 
   return (
     <div className="flex h-full min-h-screen flex-col">
-      <header className="flex items-center justify-between bg-slate-800 p-4 text-white">
-        <h1 className="text-3xl font-bold">
-          <Link to=".">shelf.nu 🏺</Link>
-        </h1>
-        <p>{data.email}</p>
-        <LogoutButton />
-      </header>
-
-      <main className="flex h-full bg-white">
-        <div className="h-full w-80 border-r bg-gray-50">
-          <Link to="new" className="block p-4 text-xl text-blue-500">
-            + New Item
+      {data.items.length === 0 ? (
+        <p className="p-4">
+          No items yet.{" "}
+          <Link
+            to="new"
+            className="text-blue-500 underline"
+            role="link"
+            aria-label="new item"
+          >
+            Create a new item.
           </Link>
-
-          <hr />
-
-          {data.items.length === 0 ? (
-            <p className="p-4">No items yet</p>
-          ) : (
-            <ol>
-              {data.items.map((item) => (
-                <li key={item.id}>
-                  <NavLink
-                    className={({ isActive }) =>
-                      `block border-b p-4 text-xl ${isActive ? "bg-white" : ""}`
-                    }
-                    to={item.id}
-                  >
-                    📝 {item.title}
-                  </NavLink>
-                </li>
-              ))}
-            </ol>
-          )}
+        </p>
+      ) : (
+        <div className="px-4">
+          <ol>
+            {data.items.map((item) => (
+              <li key={item.id}>
+                <NavLink
+                  className={({ isActive }) =>
+                    `block border-b py-4 text-xl ${isActive ? "bg-white" : ""}`
+                  }
+                  to={item.id}
+                >
+                  📝 {item.title}
+                </NavLink>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-5 text-blue-600">
+            <Link to="new" role="link" aria-label="new item">
+              Create new item
+            </Link>
+          </div>
         </div>
-
-        <div className="flex-1 p-6">
-          <Outlet />
+      )}
+      {showSidebar && (
+        <div className="absolute right-0 z-10 flex h-full w-full ">
+          <div className="w-1/2 bg-black/60">
+            <Link to="/items" className="block h-full w-full">
+              {" "}
+            </Link>
+          </div>
+          <div className="w-1/2 bg-white p-6">
+            <Outlet />
+          </div>
         </div>
-      </main>
+      )}
     </div>
   );
 }

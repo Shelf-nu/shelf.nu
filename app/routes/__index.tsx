@@ -10,12 +10,13 @@ export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
   const title = "Shelf.nu | Login";
 
+  /** If there is a session already, send the user to / */
   if (authSession) return redirect("/items");
 
   return json({ title });
 }
 
-export default function Index() {
+export default function Login() {
   const data = useLoaderData<typeof loader>();
   return (
     <main className="relative flex min-h-screen items-center px-10">
