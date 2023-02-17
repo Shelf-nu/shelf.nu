@@ -33,7 +33,7 @@ describe("smoke tests", () => {
 
   it("should allow you to make a note", () => {
     const testItem = {
-      title: faker.lorem.words(1),
+      title: faker.lorem.words(2),
       description: faker.lorem.sentences(1),
     };
     const credentials = {
@@ -52,10 +52,8 @@ describe("smoke tests", () => {
     cy.findByTestId("password").type(credentials.password);
     cy.findByTestId("login").click();
     cy.wait(100);
-    cy.findByText("Create a new item.");
-
-    cy.findByRole("link", { name: /new item/i }).click();
-    cy.wait(100);
+    cy.findByTestId("createNewItem").click();
+    cy.wait(300);
 
     cy.findByRole("textbox", { name: /title/i }).type(testItem.title);
     cy.findByRole("textbox", { name: /description/i }).type(
