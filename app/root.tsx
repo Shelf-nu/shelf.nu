@@ -22,8 +22,8 @@ import tailwindStylesheetUrl from "./styles/tailwind.css";
 import { getBrowserEnv } from "./utils/env";
 
 export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: globalStylesheetUrl },
   { rel: "stylesheet", href: tailwindStylesheetUrl },
+  { rel: "stylesheet", href: globalStylesheetUrl },
 ];
 
 export const meta: MetaFunction = () => ({
