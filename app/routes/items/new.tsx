@@ -15,6 +15,12 @@ export const NewItemFormSchema = z.object({
   description: z.string().min(5, "require-description"),
 });
 
+export async function loader() {
+  return json({
+    showSidebar: true,
+  });
+}
+
 export async function action({ request }: LoaderArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);

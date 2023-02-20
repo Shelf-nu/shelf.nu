@@ -12,12 +12,7 @@ export async function loader({ request }: LoaderArgs) {
 export default function ItemIndexPage() {
   return (
     <>
-      <p>
-        No item selected. Select a item on the left, or{" "}
-        <Link to="new" className="text-blue-500 underline">
-          create a new item.
-        </Link>
-      </p>
+      <p>No item selected. Select a item on the left, or </p>
     </>
   );
 }
