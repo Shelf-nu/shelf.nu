@@ -33,7 +33,7 @@ export async function action({ request }: ActionArgs) {
   if (error) {
     return json(
       {
-        error: "unable-to-send-magic-link",
+        error: "Unable to send magic link. Please try again later. If the issue persists, contact support.",
       },
       { status: 500 }
     );
