@@ -8,11 +8,12 @@ Shelf is a simple and visual inventory and asset tracking system that allows peo
 
 ## Core Features and Benefits
 
-With Shelf, you can take a picture of any item you own and store it in your own database. From there, you can generate a printable code (QR) that you can tag onto the item, making it easy to identify and locate in the future. You can also add detailed information about the item, including its purchase date, purchase price, warranty information, and more.
+With Shelf, you can take a picture of any item you own and store it in your own database. From there, you can generate a printable code (QR) that you can tag onto the item, making it easy to identify and locate in the future. Shelf has a handy code printing area where you can add as many QR codes as you can on an A4 sticker paper sheet. You can also add detailed information about the item, including its purchase date, purchase price, warranty information, and more.
 
 ### Once your assets are online, you will be able to:
-* Check the last known location of your asset
-* Search through your assets database
+* Generate printable PDFs sheets from assets you select, so you can stick them onto anything
+* Check the last known location of your assets
+* Instant Search through your assets database
 * Use 'lost mode' for emergencies (offer a bounty for a return of an item)
 * Get notified of assets you are not using 
 * Share your asset vault with other users
