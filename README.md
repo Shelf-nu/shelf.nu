@@ -1,10 +1,33 @@
-# shelf.nu
+# Shelf.nu
 
-Shelf is open source infrastructure for managing phisical property/assets. For individuals and businesses.
-![Group_71](https://user-images.githubusercontent.com/7840007/219620126-2eaabb1b-4a79-474d-b4e5-957c5124e895.jpg)
+Shelf 🏷️ Asset tagging infrastructure for absolutely everyone.
+
+![shelfcovergithub](https://user-images.githubusercontent.com/12449255/220158652-8069a993-0251-470e-bd92-29326c899fe8.jpg)
+
+Shelf is a simple and visual inventory and asset tracking system that allows people to track their physical assets with ease.
+
+## Core Features and Benefits
+
+With Shelf, you can take a picture of any item you own and store it in your own database. From there, you can generate a printable code (QR) that you can tag onto the item, making it easy to identify and locate in the future. You can also add detailed information about the item, including its purchase date, purchase price, warranty information, and more.
+
+### Once your assets are online, you will be able to:
+* Check the last known location of your asset
+* Search through your assets database
+* Use 'lost mode' for emergencies (offer a bounty for a return of an item)
+* Get notified of assets you are not using 
+* Share your asset vault with other users
+
+### Use Shelf alone, or as a team. And, these questions will be a thing of the past.
+* Who was the last person that took X,Y or Z?
+* What gear does X have currently?
+* Which assets did we appoint to our team member abroad? 
+* What do we have in our storage facility now?
+
+## Shel's vision and ambition
+To enable and facilitate the tagging of 1 Billion assets by 2023. Shelf therefore allows users to create unlimited assets on their environments. We will fund the growth and further development of the tool by releasing premium features. However, Shelf core will be forever free for individuals.
 
 
-## Current stack overview
+### Shelf's current stack
 
 We have decided to give RemixJS a try.
 For the purpose of shipping asap, we have opted into using a template: https://github.com/rphlmr/supa-fly-stack
