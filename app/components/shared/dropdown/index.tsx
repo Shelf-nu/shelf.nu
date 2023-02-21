@@ -15,17 +15,15 @@ export default function Dropdown({ title, className = "", items }: Props) {
   const hasItems = items?.length > 0;
 
   return hasItems ? (
-    <div className={`dropdown-wrapper ${className}`}>
+    <div className={`dropdown-wrapper ${className} ${styles.menu}`}>
       <Menu>
         <Menu.Button className={styles.button}>{title}</Menu.Button>
-        <Menu.Items>
+        <Menu.Items className={styles.items}>
           {items.map((item) => (
-            <Menu.Item>
-              {({ active }) => (
-                <a className={`${active && "bg-blue-500"}`} href={item.to}>
-                  {item.title}
-                </a>
-              )}
+            <Menu.Item key={item.title}>
+              <a className={styles.item} href={item.to}>
+                {item.title}
+              </a>
             </Menu.Item>
           ))}
         </Menu.Items>
