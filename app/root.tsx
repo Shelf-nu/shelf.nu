@@ -14,6 +14,7 @@ import {
   ScrollRestoration,
   useLoaderData,
 } from "@remix-run/react";
+import { cssBundleHref } from "@remix-run/css-bundle";
 
 import LoggedInLayout from "./components/layout/logged-in";
 import { getAuthSession } from "./modules/auth";
@@ -21,10 +22,17 @@ import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
 import { getBrowserEnv } from "./utils/env";
 
-export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: tailwindStylesheetUrl },
-  { rel: "stylesheet", href: globalStylesheetUrl },
-];
+export const links: LinksFunction = () => {
+  return [
+    ...(cssBundleHref
+      ? [
+          { rel: "stylesheet", href: tailwindStylesheetUrl },
+          { rel: "stylesheet", href: globalStylesheetUrl },
+          { rel: "stylesheet", href: cssBundleHref },
+        ]
+      : []),
+  ];
+};
 
 export const meta: MetaFunction = () => ({
   charset: "utf-8",
