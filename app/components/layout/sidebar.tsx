@@ -1,11 +1,11 @@
 import { Link, NavLink } from "@remix-run/react";
 
-import { LogoutButton } from "~/modules/auth";
 import Dropdown from "../shared/dropdown";
 
 interface Props {
   email?: string;
 }
+
 export default function Sidebar({ email }: Props) {
   const menuItems = [
     {

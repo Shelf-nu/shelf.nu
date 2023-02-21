@@ -1,3 +1,4 @@
+import { cssBundleHref } from "@remix-run/css-bundle";
 import type {
   LinksFunction,
   LoaderArgs,
@@ -14,7 +15,6 @@ import {
   ScrollRestoration,
   useLoaderData,
 } from "@remix-run/react";
-import { cssBundleHref } from "@remix-run/css-bundle";
 
 import LoggedInLayout from "./components/layout/logged-in";
 import { getAuthSession } from "./modules/auth";
