@@ -46,7 +46,7 @@ describe("smoke tests", () => {
     cy.log("Create account with", credentials);
     cy.createAccount(credentials);
     cy.visit("/");
-    cy.wait(100);
+    cy.wait(200);
 
     cy.findByTestId("email").type(credentials.email);
     cy.findByTestId("password").type(credentials.password);

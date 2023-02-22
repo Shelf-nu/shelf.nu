@@ -3,7 +3,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData, Link, NavLink } from "@remix-run/react";
 
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
-import Heading from "~/components/shared/title";
+import Heading from "~/components/shared/heading";
 import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";
 import { notFound } from "~/utils/http.server";

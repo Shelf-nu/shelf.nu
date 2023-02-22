@@ -1,15 +1,15 @@
 import { Form } from "@remix-run/react";
+import IconHug from "~/components/icons/IconHug";
+import { LogoutIcon } from "~/components/icons/library";
 
 export function LogoutButton({ ...rest }) {
   return (
     <div {...rest}>
       <Form action="/logout" method="post">
-        <button
-          data-test-id="logout"
-          type="submit"
-          className="rounded bg-slate-600 py-2 px-4 text-blue-100 hover:bg-blue-500 active:bg-blue-600"
-        >
-          Logout
+        <button data-test-id="logout" type="submit">
+          <IconHug size={"sm"} className="">
+            <LogoutIcon />
+          </IconHug>
         </button>
       </Form>
     </div>

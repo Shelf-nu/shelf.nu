@@ -1,0 +1,4 @@
+/* Bottom of the footer */
+.bottom {
+  @apply flex border-t border-t-slate-400 pt-6;
+}
