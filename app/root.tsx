@@ -23,14 +23,14 @@ import tailwindStylesheetUrl from "./styles/tailwind.css";
 import { getBrowserEnv } from "./utils/env";
 
 export const links: LinksFunction = () => {
+  const alwaysPresentStyles = [
+    { rel: "stylesheet", href: tailwindStylesheetUrl },
+    { rel: "stylesheet", href: globalStylesheetUrl },
+  ];
   return [
     ...(cssBundleHref
-      ? [
-          { rel: "stylesheet", href: tailwindStylesheetUrl },
-          { rel: "stylesheet", href: globalStylesheetUrl },
-          { rel: "stylesheet", href: cssBundleHref },
-        ]
-      : []),
+      ? [...alwaysPresentStyles, { rel: "stylesheet", href: cssBundleHref }]
+      : [...alwaysPresentStyles]),
   ];
 };
 
