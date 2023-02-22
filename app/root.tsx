@@ -17,10 +17,11 @@ import {
 } from "@remix-run/react";
 
 import LoggedInLayout from "./components/layout/logged-in";
-import { getAuthSession } from "./modules/auth";
+import { getAuthSession, requireAuthSession } from "./modules/auth";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
 import { getBrowserEnv } from "./utils/env";
+import { getUserByEmail } from "./modules/user";
 
 export const links: LinksFunction = () => {
   const alwaysPresentStyles = [
@@ -43,14 +44,18 @@ export const meta: MetaFunction = () => ({
 export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   const authSession = await getAuthSession(request);
 
+  const user = authSession
+    ? await getUserByEmail(authSession?.email)
+    : undefined;
+
   return json({
     env: getBrowserEnv(),
-    authSession,
+    user,
   });
 };
 
 export default function App() {
-  const { env, authSession } = useLoaderData<typeof loader>();
+  const { env, user } = useLoaderData<typeof loader>();
 
   return (
     <html lang="en" className="h-full">
@@ -63,11 +68,7 @@ export default function App() {
          * No session, we render the outlet which will show the index which has the login form.
          * This is kinda scuffed but at this moment I am not sure how else to make the layouts work
          */}
-        {authSession ? (
-          <LoggedInLayout email={authSession.email} />
-        ) : (
-          <Outlet />
-        )}
+        {user ? <LoggedInLayout user={user} /> : <Outlet />}
         <ScrollRestoration />
         <script
           dangerouslySetInnerHTML={{

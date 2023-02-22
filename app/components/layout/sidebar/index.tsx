@@ -1,13 +1,14 @@
 import { Link, NavLink } from "@remix-run/react";
 import SidebarBottom from "./bottom";
+import { User } from "~/database";
 
 // import Dropdown from "../shared/dropdown";
 
 interface Props {
-  email: string;
+  user: User;
 }
 
-export default function Sidebar({ email }: Props) {
+export default function Sidebar({ user }: Props) {
   return (
     <div className=" flex h-full flex-col text-white">
       <div>
@@ -33,9 +34,7 @@ export default function Sidebar({ email }: Props) {
       <div>
         <SidebarBottom
           user={{
-            name: "Concha Jaramillo",
-            email: email,
-            photo: "/images/occultist.png",
+            ...user,
           }}
         />
       </div>

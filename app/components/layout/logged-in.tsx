@@ -1,17 +1,18 @@
 import { Outlet } from "@remix-run/react";
 
 import Sidebar from "./sidebar";
+import { User } from "~/database";
 
 interface Props {
-  email: string;
+  user: User;
 }
 
-export default function LoggedInLayout({ email }: Props) {
+export default function LoggedInLayout({ user }: Props) {
   return (
     <div className="flex h-full min-h-screen flex-col">
       <main className="flex h-full bg-white">
         <div className="h-full w-80 border-r  bg-slate-800 p-8">
-          <Sidebar email={email} />
+          <Sidebar user={user} />
         </div>
 
         <div className="flex-1">
