@@ -1,7 +1,9 @@
+import ProfilePicture from "~/components/user/profile-picture";
+
+import type { User } from "~/database";
+
 import { LogoutButton } from "~/modules/auth";
 import styles from "./styles.module.css";
-import { User } from "~/database";
-import ProfilePicture from "~/components/user/profile-picture";
 
 interface Props {
   user: User;

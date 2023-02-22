@@ -17,11 +17,11 @@ import {
 } from "@remix-run/react";
 
 import LoggedInLayout from "./components/layout/logged-in";
-import { getAuthSession, requireAuthSession } from "./modules/auth";
+import { getAuthSession } from "./modules/auth";
+import { getUserByEmail } from "./modules/user";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
 import { getBrowserEnv } from "./utils/env";
-import { getUserByEmail } from "./modules/user";
 
 export const links: LinksFunction = () => {
   const alwaysPresentStyles = [

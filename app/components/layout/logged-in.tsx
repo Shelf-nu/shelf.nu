@@ -1,7 +1,7 @@
 import { Outlet } from "@remix-run/react";
 
+import type { User } from "~/database";
 import Sidebar from "./sidebar";
-import { User } from "~/database";
 
 interface Props {
   user: User;

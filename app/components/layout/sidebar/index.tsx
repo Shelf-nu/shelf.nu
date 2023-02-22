@@ -1,6 +1,7 @@
 import { Link, NavLink } from "@remix-run/react";
+import type { User } from "~/database";
+
 import SidebarBottom from "./bottom";
-import { User } from "~/database";
 
 // import Dropdown from "../shared/dropdown";
 
