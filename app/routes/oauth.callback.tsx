@@ -13,7 +13,7 @@ import {
   getAuthSession,
 } from "~/modules/auth";
 import { tryCreateUser, getUserByEmail } from "~/modules/user";
-import { assertIsPost, safeRedirect } from "~/utils";
+import { assertIsPost, randomUsernameFromEmail, safeRedirect } from "~/utils";
 
 // imagine a user go back after OAuth login success or type this URL
 // we don't want him to fall in a black hole 👽
@@ -71,9 +71,10 @@ export async function action({ request }: ActionArgs) {
       },
     });
   }
+  const username = randomUsernameFromEmail(authSession.email);
 
   // first time sign in, let's create a brand-new User row in supabase
-  const user = await tryCreateUser(authSession);
+  const user = await tryCreateUser({ ...authSession, username });
 
   if (!user) {
     return json(

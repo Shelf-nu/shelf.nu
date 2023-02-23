@@ -8,7 +8,7 @@ export default function ProfilePicture({ user }: Props) {
   return (
     <img
       src={user.profilePicture || "/images/default_pfp.jpg"}
-      alt={`${user.name} profile picture`}
+      alt={`${user.username} profile picture`}
       className="h-10 w-10 rounded-full"
     />
   );
