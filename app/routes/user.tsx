@@ -51,7 +51,7 @@ export default function UserPage() {
           <input
             type="text"
             name={zo.fields.name()}
-            defaultValue={user?.name || undefined}
+            defaultValue={user?.username || undefined}
           />
         </label>
         <input type="hidden" name={zo.fields.id()} defaultValue={user?.id} />
