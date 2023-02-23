@@ -18,7 +18,7 @@ export default function SidebarBottom({ user }: Props) {
         <div className="flex items-center gap-3">
           <ProfilePicture user={user} />
           <div className="flex-1 text-[14px]">
-            <div className="font-semibold">{user.name}</div>
+            <div className="font-semibold">{user.username}</div>
             <div>{user.email}</div>
           </div>
         </div>

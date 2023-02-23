@@ -53,7 +53,6 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   const user = authSession
     ? await getUserByEmail(authSession?.email)
     : undefined;
-
   return json({
     env: getBrowserEnv(),
     user,
