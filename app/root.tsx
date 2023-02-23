@@ -1,3 +1,4 @@
+import type { User } from "@prisma/client";
 import { cssBundleHref } from "@remix-run/css-bundle";
 import type {
   LinksFunction,
@@ -22,6 +23,11 @@ import { getUserByEmail } from "./modules/user";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
 import { getBrowserEnv } from "./utils/env";
+
+export interface RootData {
+  env: typeof getBrowserEnv;
+  user: User;
+}
 
 export const links: LinksFunction = () => {
   const alwaysPresentStyles = [

@@ -1,6 +1,8 @@
 import type { User } from "~/database";
 import { db } from "~/database";
+
 import type { AuthSession } from "~/modules/auth";
+
 import {
   createEmailAuthAccount,
   signInWithEmail,
@@ -68,4 +70,19 @@ export async function createUserAccount(
   if (!user) return null;
 
   return authSession;
+}
+
+export async function updateUser(updateUserPayload: {
+  id: string;
+  name: string;
+}): Promise<User | null> {
+  return db.user
+    .update({
+      where: { id: updateUserPayload.id },
+      data: {
+        ...updateUserPayload,
+      },
+    })
+    .then((user) => user)
+    .catch(() => null);
 }
