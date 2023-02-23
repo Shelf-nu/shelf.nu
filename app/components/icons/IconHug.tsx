@@ -26,7 +26,7 @@ export default function IconHug({ size = "sm", children, className }: Props) {
   /** Classes that will add the correct class based on the size passed to the hug
    * The value corresponds to rem, related to sizes of untitled ui
    */
-  const sizeClass = sizeClasses[size];
+  const sizeClass = sizeClasses[size] || "8";
   return (
     <div
       className={`inline-flex w-${sizeClass} h-${sizeClass} items-center justify-center ${className} rounded-lg hover:cursor-pointer hover:bg-[#344054]`}

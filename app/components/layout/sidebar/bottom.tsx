@@ -1,3 +1,5 @@
+import { Link } from "@remix-run/react";
+
 import ProfilePicture from "~/components/user/profile-picture";
 
 import type { User } from "~/database";
@@ -12,14 +14,17 @@ interface Props {
 export default function SidebarBottom({ user }: Props) {
   return (
     <div className={styles.bottom}>
-      <div className="flex flex-1 items-center gap-3">
-        <ProfilePicture user={user} />
-        <div className="flex-1 text-[14px]">
-          <div className="font-semibold">{user.name}</div>
-          <div>{user.email}</div>
+      <Link to="user" className="rounded-lg p-1 hover:bg-[#344054]">
+        <div className="flex items-center gap-3">
+          <ProfilePicture user={user} />
+          <div className="flex-1 text-[14px]">
+            <div className="font-semibold">{user.name}</div>
+            <div>{user.email}</div>
+          </div>
         </div>
-      </div>
-      <LogoutButton />
+      </Link>
+
+      <LogoutButton className="h-8 w-8" />
     </div>
   );
 }
