@@ -10,8 +10,8 @@ import {
 import { USER_EMAIL, USER_ID, USER_PASSWORD } from "mocks/user";
 import { db } from "~/database";
 
-import { createUserAccount } from "./service.server";
 import { randomUsernameFromEmail } from "~/utils";
+import { createUserAccount } from "./service.server";
 
 // mock db
 vitest.mock("~/database", () => ({

@@ -8,7 +8,7 @@ import {
   signInWithEmail,
   deleteAuthAccount,
 } from "~/modules/auth";
-import { UpdateUserPayload } from "./types";
+import type { UpdateUserPayload } from "./types";
 
 export async function getUserByEmail(email: User["email"]) {
   return db.user.findUnique({ where: { email: email.toLowerCase() } });

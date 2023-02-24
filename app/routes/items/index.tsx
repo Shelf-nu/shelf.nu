@@ -1,5 +1,4 @@
 import type { LoaderArgs } from "@remix-run/node";
-import { Link } from "@remix-run/react";
 
 import { requireAuthSession } from "~/modules/auth";
 

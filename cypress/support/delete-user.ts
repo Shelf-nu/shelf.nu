@@ -29,6 +29,7 @@ async function deleteUser(email: string) {
       error instanceof PrismaClientKnownRequestError &&
       error.code === "P2025"
     ) {
+      // eslint-disable-next-line no-console
       console.log("User not found, so no need to delete");
     } else {
       throw error;

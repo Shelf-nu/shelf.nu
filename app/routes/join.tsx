@@ -12,6 +12,7 @@ import {
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
+import Input from "~/components/forms/input";
 import {
   createAuthSession,
   getAuthSession,
@@ -23,7 +24,6 @@ import {
   isFormProcessing,
   randomUsernameFromEmail,
 } from "~/utils";
-import Input from "~/components/forms/input";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);

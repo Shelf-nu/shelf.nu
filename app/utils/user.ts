@@ -1,4 +1,3 @@
-import { EmailOtpType } from "@supabase/supabase-js";
 
 /** Generates a random username based on the email and 3 random numbers
  * @param email string

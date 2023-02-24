@@ -16,7 +16,7 @@ export default function Dropdown({ title, className = "", items }: Props) {
   const hasItems = items?.length > 0;
 
   return hasItems ? (
-    <div className={`dropdown-wrapper ${className} ${styles.menu}`}>
+    <div className={`${className} ${styles.menu}`}>
       <Menu>
         <Menu.Button className={styles.button}>{title}</Menu.Button>
         <Menu.Items className={styles.items}>

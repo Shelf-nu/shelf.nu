@@ -1,3 +1,5 @@
+import { tw } from "~/utils";
+
 interface Props {
   /** Size of the hug. Defualt is sm */
   size: "sm" | "md" | "lg" | "xl" | "2xl";
@@ -7,29 +9,39 @@ interface Props {
   className?: string;
 }
 
+/** Because of how tailwind works, we cannot use props to build class names dynamically,
+ * so we need to already have the classes inside the string.
+ * https://tailwindcss.com/docs/content-configuration#dynamic-class-names  */
+
 const sizeClasses: {
   [key in Props["size"]]: string;
 } = {
   /** 32px */
-  sm: "8",
+  sm: "w-8 h-8",
   /** 40px */
-  md: "10",
+  md: "w-10 h-10",
   /** 44px */
-  lg: "11",
+  lg: "w-11 h-11",
   /** 48px */
-  xl: "12",
+  xl: "w-12 h-12",
   /** 56px */
-  "2xl": "14",
+  "2xl": "w-14 h-14",
 };
 
 export default function IconHug({ size = "sm", children, className }: Props) {
-  /** Classes that will add the correct class based on the size passed to the hug
+  /** 
+   * Classes that will add the correct class based on the size passed to the hug
    * The value corresponds to rem, related to sizes of untitled ui
    */
-  const sizeClass = sizeClasses[size] || "8";
+  const sizeClass = sizeClasses[size];
   return (
     <div
-      className={`inline-flex w-${sizeClass} h-${sizeClass} items-center justify-center ${className} rounded-lg hover:cursor-pointer hover:bg-[#344054]`}
+      className={tw(
+        "inline-flex items-center justify-center", //positioning
+        "rounded-lg hover:cursor-pointer hover:bg-[#344054]", //styling
+        sizeClass,
+        className
+      )}
     >
       {children}
     </div>
