@@ -27,9 +27,7 @@ export default function Sidebar({ user }: Props) {
           {menuItems.map((item) => (
             <li key={item.label}>
               <NavLink
-                className={({ isActive }) => {
-                  return `block py-4 text-xl ${isActive ? "border-b" : ""}`;
-                }}
+                className={({ isActive }) => `block py-4 text-xl ${isActive ? "border-b" : ""}`}
                 to={item.to}
               >
                 {item.label}

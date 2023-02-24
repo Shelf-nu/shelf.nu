@@ -12,6 +12,7 @@ import {
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
+import Input from "~/components/forms/input";
 import {
   createAuthSession,
   getAuthSession,
@@ -100,21 +101,17 @@ export default function IndexLoginForm() {
             </label>
 
             <div className="mt-1">
-              <input
+              <Input
                 data-test-id="email"
                 required
                 autoFocus={true}
                 name={zo.fields.email()}
                 type="email"
                 autoComplete="email"
-                className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
+                className="w-full"
                 disabled={disabled}
+                error={zo.errors.email()?.message}
               />
-              {zo.errors.email()?.message && (
-                <div className="pt-1 text-sm text-red-700" id="email-error">
-                  {zo.errors.email()?.message}
-                </div>
-              )}
             </div>
           </div>
 
@@ -126,25 +123,15 @@ export default function IndexLoginForm() {
               Password
             </label>
             <div className="mt-1">
-              <input
+              <Input
                 data-test-id="password"
                 name={zo.fields.password()}
                 type="password"
                 autoComplete="new-password"
                 className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
                 disabled={disabled}
+                error={zo.errors.password()?.message || data?.errors?.email}
               />
-              {zo.errors.password()?.message && (
-                <div className="pt-1 text-sm text-red-700" id="password-error">
-                  {zo.errors.password()?.message}
-                </div>
-              )}
-
-              {data?.errors?.email && (
-                <div className="pt-1 text-sm text-red-700" id="form-error">
-                  {data.errors.email}
-                </div>
-              )}
             </div>
           </div>
 

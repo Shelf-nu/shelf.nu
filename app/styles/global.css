@@ -29,3 +29,7 @@ h4 {
 h5 {
   font-size: var(--font-size-h5);
 }
+
+label span {
+  @apply capitalize;
+}

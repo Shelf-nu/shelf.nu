@@ -12,13 +12,18 @@ import {
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
+import Input from "~/components/forms/input";
 import {
   createAuthSession,
   getAuthSession,
   ContinueWithEmailForm,
 } from "~/modules/auth";
 import { getUserByEmail, createUserAccount } from "~/modules/user";
-import { assertIsPost, isFormProcessing } from "~/utils";
+import {
+  assertIsPost,
+  isFormProcessing,
+  randomUsernameFromEmail,
+} from "~/utils";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
@@ -68,7 +73,8 @@ export async function action({ request }: ActionArgs) {
     );
   }
 
-  const authSession = await createUserAccount(email, password);
+  const username = randomUsernameFromEmail(email);
+  const authSession = await createUserAccount(email, password, username);
 
   if (!authSession) {
     return json(
@@ -117,21 +123,17 @@ export default function Join() {
               Email address
             </label>
             <div className="mt-1">
-              <input
+              <Input
                 data-test-id="email"
                 required
                 autoFocus={true}
                 name={zo.fields.email()}
                 type="email"
                 autoComplete="email"
-                className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
+                className="w-full"
                 disabled={disabled}
+                error={emailErrorMessage}
               />
-              {emailErrorMessage && (
-                <div className="pt-1 text-sm text-red-700" id="email-error">
-                  {emailErrorMessage}
-                </div>
-              )}
             </div>
           </div>
 
@@ -143,19 +145,15 @@ export default function Join() {
               Password
             </label>
             <div className="mt-1">
-              <input
+              <Input
                 data-test-id="password"
                 name={zo.fields.password()}
                 type="password"
                 autoComplete="new-password"
-                className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
+                className="w-full"
                 disabled={disabled}
+                error={zo.errors.password()?.message}
               />
-              {zo.errors.password()?.message && (
-                <div className="pt-1 text-sm text-red-700" id="password-error">
-                  {zo.errors.password()?.message}
-                </div>
-              )}
             </div>
           </div>
 
