@@ -36,7 +36,9 @@ export async function action({ request }: ActionArgs) {
   }
 
   const updateUserPayload: UpdateUserPayload = result?.data;
-  return await updateUser(updateUserPayload);
+  const updatedUser = await updateUser(updateUserPayload);
+  console.log(updatedUser);
+  return updatedUser;
 }
 
 export default function UserPage() {

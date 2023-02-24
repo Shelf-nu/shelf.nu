@@ -6,3 +6,8 @@ export interface UpdateUserPayload {
   firstName?: User["firstName"];
   lastName?: User["lastName"];
 }
+
+export interface UpdateUserResponse {
+  user: User | null;
+  error: { message: string } | null;
+}
