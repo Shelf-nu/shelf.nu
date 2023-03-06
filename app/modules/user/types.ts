@@ -9,5 +9,8 @@ export interface UpdateUserPayload {
 
 export interface UpdateUserResponse {
   user: User | null;
-  error: { message: string } | null;
+  errors: {
+    /** key is the field name, value is the error message */
+    [k: string]: string | unknown 
+  } | null;
 }

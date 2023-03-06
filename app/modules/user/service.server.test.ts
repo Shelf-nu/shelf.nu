@@ -114,7 +114,6 @@ describe(createUserAccount.name, () => {
     expect(signInRequest.body).toEqual({
       email: USER_EMAIL,
       password: USER_PASSWORD,
-      data: {},
       gotrue_meta_security: {},
     });
     expect(fetchAuthAdminUserAPI.size).toEqual(1);

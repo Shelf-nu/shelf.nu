@@ -1,19 +1,26 @@
 import type { ActionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, useTransition } from "@remix-run/react";
+import { Form, useActionData, useTransition } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 
 import { useMatchesData } from "~/hooks";
 import { updateUser } from "~/modules/user";
-import type { UpdateUserPayload } from "~/modules/user/types";
+import type {
+  UpdateUserPayload,
+  UpdateUserResponse,
+} from "~/modules/user/types";
 import type { RootData } from "~/root";
 
 import { assertIsPost, isFormProcessing } from "~/utils";
 
 export const UpdateFormSchema = z.object({
   id: z.string(),
+  email: z
+    .string()
+    .email("Please enter a valid email.")
+    .transform((email) => email.toLowerCase()),
   username: z
     .string()
     .min(4, { message: "Must be at least 4 characters long" }),
@@ -35,9 +42,16 @@ export async function action({ request }: ActionArgs) {
     );
   }
 
+  /** Create the payload if the client side validation works */
   const updateUserPayload: UpdateUserPayload = result?.data;
+
+  /** Update the user */
   const updatedUser = await updateUser(updateUserPayload);
-  console.log(updatedUser);
+
+  if (updatedUser.errors) {
+    return json({ errors: updatedUser.errors }, { status: 400 });
+  }
+
   return updatedUser;
 }
 
@@ -45,6 +59,7 @@ export default function UserPage() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);
   const transition = useTransition();
   const disabled = isFormProcessing(transition.state);
+  const data = useActionData<UpdateUserResponse>();
 
   /** Get the data from the action,  */
   let user = useMatchesData<RootData>("root")?.user;
@@ -55,13 +70,25 @@ export default function UserPage() {
       <Form method="post" ref={zo.ref} className="mt-10">
         <div className="mt-4">
           <label>
+            <span>{zo.fields.email()}</span>
+            <Input
+              className="ml-10"
+              type="text"
+              name={zo.fields.email()}
+              defaultValue={user?.email || undefined}
+              error={zo.errors.email()?.message || data?.errors?.email}
+            />
+          </label>
+        </div>
+        <div className="mt-4">
+          <label>
             <span>{zo.fields.username()}</span>
             <Input
               className="ml-10"
               type="text"
               name={zo.fields.username()}
               defaultValue={user?.username || undefined}
-              error={zo.errors.username()?.message}
+              error={zo.errors.username()?.message || data?.errors?.username}
               // @TODO need to add error for unique username
             />
           </label>
