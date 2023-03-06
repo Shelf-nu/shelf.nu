@@ -8,6 +8,10 @@ import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";
 import { notFound } from "~/utils/http.server";
 
+export const handle = {
+  breadcrumb: () => <Link to="/items">Items</Link>,
+};
+
 export async function loader({ request }: LoaderArgs) {
   const { userId, email } = await requireAuthSession(request);
 
@@ -25,7 +29,7 @@ export default function ItemsPage() {
   const hasItems = data.items.length > 0;
 
   return (
-    <div className="flex h-full min-h-screen flex-col px-16 py-20">
+    <div className="">
       <div className="flex justify-between">
         <div>
           <Heading className="mr-2 inline-block">All your items</Heading>

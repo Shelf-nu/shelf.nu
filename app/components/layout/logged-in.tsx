@@ -1,6 +1,7 @@
 import { Outlet } from "@remix-run/react";
 
 import type { User } from "~/database";
+import Breadcrumbs from "./breadcrumbs";
 import Sidebar from "./sidebar";
 
 interface Props {
@@ -15,7 +16,8 @@ export default function LoggedInLayout({ user }: Props) {
           <Sidebar user={user} />
         </div>
 
-        <div className="flex-1">
+        <div className="flex h-full min-h-screen flex-1 flex-col p-8">
+          <Breadcrumbs />
           <Outlet />
         </div>
       </main>

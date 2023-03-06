@@ -13,6 +13,10 @@ export default function Sidebar({ user }: Props) {
       to: "items",
       label: "Items",
     },
+    {
+      to: "settings",
+      label: "Settings",
+    },
   ];
 
   return (
@@ -27,7 +31,9 @@ export default function Sidebar({ user }: Props) {
           {menuItems.map((item) => (
             <li key={item.label}>
               <NavLink
-                className={({ isActive }) => `block py-4 text-xl ${isActive ? "border-b" : ""}`}
+                className={({ isActive }) =>
+                  `block py-4 text-xl ${isActive ? "border-b" : ""}`
+                }
                 to={item.to}
               >
                 {item.label}

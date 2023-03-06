@@ -8,6 +8,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
+  Link,
   Links,
   LiveReload,
   Meta,
@@ -17,6 +18,7 @@ import {
   useLoaderData,
 } from "@remix-run/react";
 
+import { HomeIcon } from "./components/icons/library";
 import LoggedInLayout from "./components/layout/logged-in";
 import { getAuthSession } from "./modules/auth";
 import { getUserByEmail } from "./modules/user";
@@ -28,6 +30,14 @@ export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
 }
+
+export const handle = {
+  breadcrumb: () => (
+    <Link to="/">
+      <HomeIcon className="inline" />
+    </Link>
+  ),
+};
 
 export const links: LinksFunction = () => {
   const alwaysPresentStyles = [

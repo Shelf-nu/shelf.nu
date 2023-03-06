@@ -1,6 +1,6 @@
 import type { ActionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, useActionData, useTransition } from "@remix-run/react";
+import { Form, Link, useActionData, useTransition } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -14,6 +14,10 @@ import type {
 import type { RootData } from "~/root";
 
 import { assertIsPost, isFormProcessing } from "~/utils";
+
+export const handle = {
+  breadcrumb: () => <Link to="/settings">Settings</Link>,
+};
 
 export const UpdateFormSchema = z.object({
   id: z.string(),
@@ -65,8 +69,8 @@ export default function UserPage() {
   let user = useMatchesData<RootData>("root")?.user;
 
   return (
-    <div className="flex h-full min-h-screen flex-col px-16 py-20">
-      <h2>Your user</h2>
+    <div className="">
+      <h2>Settings</h2>
       <Form method="post" ref={zo.ref} className="mt-10">
         <div className="mt-4">
           <label>
