@@ -1,5 +1,13 @@
 {
-  "plugins": ["tailwindcss"],
+  "plugins": [
+    "tailwindcss"
+    // "jsx-a11y",
+    // "react-hooks",
+    // "react",
+    // "import",
+    // "@typescript-eslint",
+    // "node"
+  ],
   "extends": [
     "@remix-run/eslint-config",
     "@remix-run/eslint-config/node",

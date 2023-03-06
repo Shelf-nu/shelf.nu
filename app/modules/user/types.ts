@@ -6,3 +6,11 @@ export interface UpdateUserPayload {
   firstName?: User["firstName"];
   lastName?: User["lastName"];
 }
+
+export interface UpdateUserResponse {
+  user: User | null;
+  errors: {
+    /** key is the field name, value is the error message */
+    [k: string]: string | unknown 
+  } | null;
+}

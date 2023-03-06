@@ -17,6 +17,8 @@ model User {
   lastName      String?
   profilePicture String?
   items         Item[]
+
+  @@unique([email, username])
 }
 
 model Item {
