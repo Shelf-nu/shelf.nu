@@ -1,4 +1,4 @@
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime";
+import { Prisma } from "@prisma/client";
 import type { User } from "~/database";
 import { db } from "~/database";
 
@@ -87,14 +87,16 @@ export async function updateUser(updateUserPayload: UpdateUserPayload): Promise<
         ...updateUserPayload,
       },
     })
-    return { user: updatedUser, error: null }
+    return { user: updatedUser, errors: null }
   } catch (e) {
-    if (e instanceof PrismaClientKnownRequestError && e.code === 'P2002') {
-      const message = `Could not update user: ${e.meta.target} already exists`
-      return { user: null, error: { message } }
-    } else {
-      const message = `Unknown error: ${e.message}`
-      return { user: null, error: { message } }
+    if (e instanceof Prisma.PrismaClientKnownRequestError) {
+      // The .code property can be accessed in a type-safe manner
+      if (e.code === 'P2002') {
+        return { user: null, errors: {[e?.meta?.target as string]: `${e?.meta?.target} is already taken.` } }
+      } else {
+        return { user: null, errors: {global: "Unknown error."}}
+      }
     }
+    return {user: null, errors: null}
   }
 }
