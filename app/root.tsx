@@ -22,6 +22,7 @@ import { HomeIcon } from "./components/icons/library";
 import LoggedInLayout from "./components/layout/logged-in";
 import { getAuthSession } from "./modules/auth";
 import { getUserByEmail } from "./modules/user";
+import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
 import { getBrowserEnv } from "./utils/env";
@@ -42,6 +43,7 @@ export const handle = {
 export const links: LinksFunction = () => {
   const alwaysPresentStyles = [
     { rel: "stylesheet", href: tailwindStylesheetUrl },
+    { rel: "stylesheet", href: fontsStylesheetUrl },
     { rel: "stylesheet", href: globalStylesheetUrl },
   ];
   return [
