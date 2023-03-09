@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  @font-face {
+    font-family: "InterRegular";
+    font-style: normal;
+    font-variation-settings: "wght" 400;
+    src: url("/fonts/inter/Inter.var.woff2") format("woff2-variations");
+  }
+  @font-face {
+    font-family: "InterMedium";
+    font-style: normal;
+    font-variation-settings: "wght" 500;
+    src: url("/fonts/inter/Inter.var.woff2") format("woff2-variations");
+  }
+  @font-face {
+    font-family: "InterSemibold";
+    font-style: normal;
+    font-variation-settings: "wght" 600;
+    src: url("/fonts/inter/Inter.var.woff2") format("woff2-variations");
+  }
+}

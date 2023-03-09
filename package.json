@@ -12,7 +12,6 @@
     "dev:css": "npm run generate:css -- --watch",
     "dev:remix": "remix dev",
     "format": "prettier --write .",
-    "generate:css": "tailwindcss -o ./app/styles/tailwind.css",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
     "setup": "run-s setup:db setup:seed",
     "setup:db": "prisma generate && prisma migrate deploy",
