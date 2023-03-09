@@ -1,6 +1,12 @@
 import type { ActionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, Link, useActionData, useTransition } from "@remix-run/react";
+import {
+  Form,
+  Link,
+  useActionData,
+  useMatches,
+  useTransition,
+} from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -64,9 +70,8 @@ export default function UserPage() {
   const transition = useTransition();
   const disabled = isFormProcessing(transition.state);
   const data = useActionData<UpdateUserResponse>();
-
   /** Get the data from the action,  */
-  let user = useMatchesData<RootData>("root")?.user;
+  let user = useMatchesData<RootData>("routes/__app")?.user;
 
   return (
     <div className="">

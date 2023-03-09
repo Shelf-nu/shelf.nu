@@ -2,7 +2,6 @@ import type { User } from "@prisma/client";
 import { cssBundleHref } from "@remix-run/css-bundle";
 import type {
   LinksFunction,
-  LoaderArgs,
   LoaderFunction,
   MetaFunction,
 } from "@remix-run/node";
@@ -19,9 +18,6 @@ import {
 } from "@remix-run/react";
 
 import { HomeIcon } from "./components/icons/library";
-import LoggedInLayout from "./components/layout/logged-in";
-import { getAuthSession } from "./modules/auth";
-import { getUserByEmail } from "./modules/user";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
@@ -59,20 +55,25 @@ export const meta: MetaFunction = () => ({
   viewport: "width=device-width,initial-scale=1",
 });
 
-export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
-  const authSession = await getAuthSession(request);
+// export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
+//   const authSession = await getAuthSession(request);
 
-  const user = authSession
-    ? await getUserByEmail(authSession?.email)
-    : undefined;
-  return json({
+//   const user = authSession
+//     ? await getUserByEmail(authSession?.email)
+//     : undefined;
+//   return json({
+//     env: getBrowserEnv(),
+//     user,
+//   });
+// };
+
+export const loader: LoaderFunction = async () =>
+  json({
     env: getBrowserEnv(),
-    user,
   });
-};
 
 export default function App() {
-  const { env, user } = useLoaderData<typeof loader>();
+  const { env } = useLoaderData<typeof loader>();
 
   return (
     <html lang="en" className="h-full">
@@ -81,11 +82,7 @@ export default function App() {
         <Links />
       </head>
       <body className="h-full">
-        {/* If there is a session, we show the logged in layout,
-         * No session, we render the outlet which will show the index which has the login form.
-         * This is kinda scuffed but at this moment I am not sure how else to make the layouts work
-         */}
-        {user ? <LoggedInLayout user={user} /> : <Outlet />}
+        <Outlet />
         <ScrollRestoration />
         <script
           dangerouslySetInnerHTML={{
