@@ -3,11 +3,77 @@ module.exports = {
   theme: {
     extend: {
       fontSize: {
-        h1: ["var(--font-size-h1)", "1.2"],
-        h2: ["var(--font-size-h2)", "1.2"],
-        h3: ["var(--font-size-h3)", "1.2"],
-        h4: ["var(--font-size-h4)", "1.2"],
-        h5: ["var(--font-size-h5)", "1.2"],
+        "text-xs": [
+          "0.75rem",
+          {
+            lineHeight: "1.125rem",
+          },
+        ],
+        "text-sm": [
+          "0.875rem",
+          {
+            lineHeight: "1.25rem",
+          },
+        ],
+        "text-md": [
+          "1rem",
+          {
+            lineHeight: "1.5rem",
+          },
+        ],
+        "text-lg": [
+          "1.125rem",
+          {
+            lineHeight: "1.75rem",
+          },
+        ],
+        "text-xl": [
+          "1.125rem",
+          {
+            lineHeight: "1.75rem",
+          },
+        ],
+
+        "display-xs": [
+          "1.5rem",
+          {
+            lineHeight: "2rem",
+          },
+        ],
+        "display-sm": [
+          "1.875rem",
+          {
+            lineHeight: "2.375rem",
+          },
+        ],
+        "display-md": [
+          "2.25rem",
+          {
+            lineHeight: "2.75rem",
+            letterSpacing: "-2%",
+          },
+        ],
+        "display-lg": [
+          "3rem",
+          {
+            lineHeight: "3.75rem",
+            letterSpacing: "-2%",
+          },
+        ],
+        "display-xl": [
+          "3.75rem",
+          {
+            lineHeight: "4.5rem",
+            letterSpacing: "-2%",
+          },
+        ],
+        "display-2xl": [
+          "4.5rem",
+          {
+            lineHeight: "5.625rem",
+            letterSpacing: "-2%",
+          },
+        ],
       },
       colors: {
         white: "#ffffff",
@@ -77,6 +143,9 @@ module.exports = {
           800: "#05603A",
           900: "#054F31",
         },
+      },
+      fontFamily: {
+        inter: ["Inter", "sans-serif"],
       },
     },
   },

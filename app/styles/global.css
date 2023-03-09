@@ -1,9 +1,8 @@
 :root {
-  --font-size-h1: 2.5rem;
-  --font-size-h2: 2.25rem;
-  --font-size-h3: 1.5rem;
-  --font-size-h4: 1.25rem;
-  --font-size-h5: 1rem;
+}
+
+html {
+  @apply font-inter;
 }
 
 h1,
@@ -11,23 +10,26 @@ h2,
 h3,
 h4,
 h5 {
-  @apply font-bold;
+  @apply font-semibold;
 }
 
 h1 {
-  font-size: var(--font-size-h1);
+  @apply text-display-2xl;
 }
 h2 {
-  font-size: var(--font-size-h2);
+  @apply text-display-xl;
 }
 h3 {
-  font-size: var(--font-size-h3);
+  @apply text-display-lg;
 }
 h4 {
-  font-size: var(--font-size-h4);
+  @apply text-display-md;
 }
 h5 {
-  font-size: var(--font-size-h5);
+  @apply text-display-sm;
+}
+h5 {
+  @apply text-display-xs;
 }
 
 label span {
