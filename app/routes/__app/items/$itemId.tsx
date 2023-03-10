@@ -1,6 +1,7 @@
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { Form, useCatch, useLoaderData } from "@remix-run/react";
+import Header from "~/components/layout/header";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
@@ -37,7 +38,7 @@ export default function ItemDetailsPage() {
 
   return (
     <div>
-      <h3 className="text-2xl font-bold">{data.item.title}</h3>
+      <Header title={data.item.title} />
       <p className="py-6">{data.item.description}</p>
       <hr className="my-4" />
       <Form method="delete">

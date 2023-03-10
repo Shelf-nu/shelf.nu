@@ -1,15 +1,10 @@
 import type { ActionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import {
-  Form,
-  Link,
-  useActionData,
-  useMatches,
-  useTransition,
-} from "@remix-run/react";
+import { Form, Link, useActionData, useTransition } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
+import Header from "~/components/layout/header";
 
 import { useMatchesData } from "~/hooks";
 import { updateUser } from "~/modules/user";
@@ -75,7 +70,8 @@ export default function UserPage() {
 
   return (
     <div className="">
-      <h2>Settings</h2>
+      <Header title={"Settings"} />
+
       <Form method="post" ref={zo.ref} className="mt-10">
         <div className="mt-4">
           <label>

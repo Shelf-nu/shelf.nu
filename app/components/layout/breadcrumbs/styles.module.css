@@ -5,6 +5,11 @@
 .breadcrumb {
   @apply flex;
 }
+.breadcrumb a,
+.breadcrumb span {
+  @apply mb-[-1px] block h-full text-[14px] text-[#475467];
+}
+
 .breadcrumb a {
-  @apply mb-[-1px] block h-full text-[14px] text-[#475467] hover:underline;
+  @apply hover:underline;
 }

@@ -55,18 +55,6 @@ export const meta: MetaFunction = () => ({
   viewport: "width=device-width,initial-scale=1",
 });
 
-// export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
-//   const authSession = await getAuthSession(request);
-
-//   const user = authSession
-//     ? await getUserByEmail(authSession?.email)
-//     : undefined;
-//   return json({
-//     env: getBrowserEnv(),
-//     user,
-//   });
-// };
-
 export const loader: LoaderFunction = async () =>
   json({
     env: getBrowserEnv(),
