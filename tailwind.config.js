@@ -78,6 +78,8 @@ module.exports = {
       colors: {
         white: "#ffffff",
         black: "#000000",
+        'brand-orange': "#FF7809",
+        "brand-blue": "#070732",
         gray: {
           25: "#FCFCFD",
           50: "#F9FAFB",

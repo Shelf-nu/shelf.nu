@@ -1,7 +1,7 @@
 import type { LoaderArgs } from "@remix-run/node";
 
 import { json } from "@remix-run/node";
-import { Link, NavLink, useLoaderData } from "@remix-run/react";
+import { NavLink, useLoaderData } from "@remix-run/react";
 
 import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";

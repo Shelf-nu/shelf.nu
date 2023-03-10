@@ -22,9 +22,13 @@ export default function Sidebar({ user }: Props) {
   return (
     <div className=" flex h-full flex-col text-white">
       <div>
-        <h1 className="text-3xl font-bold">
-          <Link to=".">Shelf</Link>
-        </h1>
+        <Link to=".">
+          <img
+            src="/images/shelf-logo-white-text.png"
+            alt="Shelf Logo"
+            className="h-[30px]"
+          />
+        </Link>
       </div>
       <div className="flex-1">
         <ul className="mt-10">
