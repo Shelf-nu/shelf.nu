@@ -1,9 +1,10 @@
-import type { LoaderArgs } from "@remix-run/node";
+import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const handle = {
   breadcrumb: () => <Link to="/items">Items</Link>,
@@ -35,6 +36,10 @@ export async function loader({ request }: LoaderArgs) {
   };
   return json({ header });
 }
+
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.header.title) },
+];
 
 export default function ItemsPage() {
   return (

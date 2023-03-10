@@ -1,4 +1,4 @@
-import type { ActionArgs } from "@remix-run/node";
+import type { ActionArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useActionData, useTransition } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -14,6 +14,7 @@ import type {
 import type { RootData } from "~/root";
 
 import { assertIsPost, isFormProcessing } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const handle = {
   breadcrumb: () => <Link to="/settings">Settings</Link>,
@@ -66,6 +67,10 @@ export async function loader() {
   };
   return json({ header });
 }
+
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.header.title) },
+];
 
 export default function UserPage() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);

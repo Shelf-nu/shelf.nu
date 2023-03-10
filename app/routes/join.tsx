@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import type { ActionArgs, LoaderArgs, MetaFunction } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import {
   Form,
@@ -95,9 +95,11 @@ export async function action({ request }: ActionArgs) {
   });
 }
 
-export const meta: MetaFunction = ({ data }) => ({
-  title: data.title,
-});
+export const meta: V2_MetaFunction = ({ data }) => [
+  {
+    title: data.title,
+  },
+];
 
 export default function Join() {
   const zo = useZorm("NewQuestionWizardScreen", JoinFormSchema);
