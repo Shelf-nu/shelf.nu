@@ -26,18 +26,7 @@ export default function ItemIndexPage() {
   return (
     <div>
       {!hasItems ? (
-        <p className="p-4">
-          No items yet.{" "}
-          <Link
-            to="new"
-            className="text-blue-500 underline"
-            role="link"
-            aria-label="new item"
-            data-test-id="createNewItem"
-          >
-            + Create new item
-          </Link>
-        </p>
+        <p className="p-4">No items yet. </p>
       ) : (
         <div className="py-4">
           <ol>

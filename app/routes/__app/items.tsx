@@ -19,7 +19,7 @@ export async function loader({ request }: LoaderArgs) {
   if (!user) return redirect("/login");
 
   const header = {
-    title: `${user.firstName}'s stash`,
+    title: user.firstName ? `${user.firstName}'s stash` : `Your stash`,
     actions: [
       {
         props: {
