@@ -1,7 +1,6 @@
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { Form, useCatch, useLoaderData } from "@remix-run/react";
-import Header from "~/components/layout/header";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
@@ -16,7 +15,12 @@ export async function loader({ request, params }: LoaderArgs) {
   if (!item) {
     throw new Response("Not Found", { status: 404 });
   }
-  return json({ item, showSidebar: true });
+
+  const header = {
+    title: item.title,
+  };
+
+  return json({ item, header });
 }
 
 export async function action({ request, params }: ActionArgs) {
@@ -38,7 +42,6 @@ export default function ItemDetailsPage() {
 
   return (
     <div>
-      <Header title={data.item.title} />
       <p className="py-6">{data.item.description}</p>
       <hr className="my-4" />
       <Form method="delete">

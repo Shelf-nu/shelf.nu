@@ -1,7 +1,7 @@
 import type { LoaderArgs, LoaderFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
-import Breadcrumbs from "~/components/layout/breadcrumbs";
+import Header from "~/components/layout/header";
 import Sidebar from "~/components/layout/sidebar";
 import { getAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
@@ -18,7 +18,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   });
 };
 
-export default function Dashboard() {
+export default function App() {
   const { user } = useLoaderData<typeof loader>();
 
   return (
@@ -29,7 +29,7 @@ export default function Dashboard() {
         </div>
 
         <div className="flex h-full min-h-screen flex-1 flex-col p-8">
-          <Breadcrumbs />
+          <Header />
           <Outlet />
         </div>
       </main>

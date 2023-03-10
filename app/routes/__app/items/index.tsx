@@ -2,7 +2,6 @@ import type { LoaderArgs } from "@remix-run/node";
 
 import { json } from "@remix-run/node";
 import { Link, NavLink, useLoaderData } from "@remix-run/react";
-import Header from "~/components/layout/header";
 
 import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";
@@ -17,28 +16,15 @@ export async function loader({ request }: LoaderArgs) {
     throw notFound(`No user with id ${userId}`);
   }
 
-  const title = "All your items";
-
-  return json({ email, items, title });
+  return json({ email, items });
 }
 
 export default function ItemIndexPage() {
   const data = useLoaderData<typeof loader>();
-  const hasItems = data.items.length > 0;
-  const Actions = () => (
-    <Link
-      to="new"
-      role="link"
-      aria-label="new item"
-      className="mt-5 text-blue-600"
-    >
-      + Create new item
-    </Link>
-  );
+  const hasItems = data?.items?.length > 0;
 
   return (
     <div>
-      <Header title={data.title} actions={Actions} />
       {!hasItems ? (
         <p className="p-4">
           No items yet.{" "}

@@ -5,7 +5,6 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useTransition } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
-import Header from "~/components/layout/header";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createItem } from "~/modules/item";
@@ -17,6 +16,14 @@ export const NewItemFormSchema = z.object({
 });
 
 const title = "New Item";
+
+export async function loader() {
+  const header = {
+    title,
+  };
+
+  return json({ header });
+}
 
 export const handle = {
   breadcrumb: () => <span>{title}</span>,
@@ -63,7 +70,6 @@ export default function NewItemPage() {
 
   return (
     <div>
-      <Header title={title} />
       <Form
         ref={zo.ref}
         method="post"
