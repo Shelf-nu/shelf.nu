@@ -1,12 +1,6 @@
 import type { ActionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import {
-  Form,
-  Link,
-  useActionData,
-  useMatches,
-  useTransition,
-} from "@remix-run/react";
+import { Form, Link, useActionData, useTransition } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -65,6 +59,14 @@ export async function action({ request }: ActionArgs) {
   return updatedUser;
 }
 
+export async function loader() {
+  const title = "Settings";
+  const header = {
+    title,
+  };
+  return json({ header });
+}
+
 export default function UserPage() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);
   const transition = useTransition();
@@ -75,7 +77,6 @@ export default function UserPage() {
 
   return (
     <div className="">
-      <h2>Settings</h2>
       <Form method="post" ref={zo.ref} className="mt-10">
         <div className="mt-4">
           <label>

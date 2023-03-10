@@ -15,7 +15,12 @@ export async function loader({ request, params }: LoaderArgs) {
   if (!item) {
     throw new Response("Not Found", { status: 404 });
   }
-  return json({ item, showSidebar: true });
+
+  const header = {
+    title: item.title,
+  };
+
+  return json({ item, header });
 }
 
 export async function action({ request, params }: ActionArgs) {
@@ -37,7 +42,6 @@ export default function ItemDetailsPage() {
 
   return (
     <div>
-      <h3 className="text-2xl font-bold">{data.item.title}</h3>
       <p className="py-6">{data.item.description}</p>
       <hr className="my-4" />
       <Form method="delete">
