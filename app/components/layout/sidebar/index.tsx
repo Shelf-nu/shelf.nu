@@ -1,4 +1,6 @@
 import { Link, NavLink } from "@remix-run/react";
+import { ItemsIcon, SettingsIcon } from "~/components/icons/library";
+
 import type { User } from "~/database";
 
 import SidebarBottom from "./bottom";
@@ -10,10 +12,12 @@ interface Props {
 export default function Sidebar({ user }: Props) {
   const menuItems = [
     {
+      icon: <ItemsIcon />,
       to: "items",
       label: "Items",
     },
     {
+      icon: <SettingsIcon />,
       to: "settings",
       label: "Settings",
     },
@@ -36,10 +40,13 @@ export default function Sidebar({ user }: Props) {
             <li key={item.label}>
               <NavLink
                 className={({ isActive }) =>
-                  `block py-4 text-xl ${isActive ? "border-b" : ""}`
+                  `text-md semibold my-1 flex items-center gap-3 rounded-md py-2 px-3 text-gray-100 transition-all duration-75 hover:bg-primary-700 hover:text-white ${
+                    isActive ? "bg-primary-700 text-white" : ""
+                  }`
                 }
                 to={item.to}
               >
+                {item.icon}
                 {item.label}
               </NavLink>
             </li>
