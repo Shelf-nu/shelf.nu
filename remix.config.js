@@ -6,5 +6,6 @@ module.exports = {
   future: {
     unstable_tailwind: true,
     unstable_cssModules: true,
+    v2_meta: true,
   },
 };

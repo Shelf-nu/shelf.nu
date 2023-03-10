@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import type { LoaderArgs } from "@remix-run/node";
+import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useTransition } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -9,6 +9,7 @@ import { z } from "zod";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createItem } from "~/modules/item";
 import { assertIsPost, isFormProcessing } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const NewItemFormSchema = z.object({
   title: z.string().min(2, "require-title"),
@@ -24,6 +25,10 @@ export async function loader() {
 
   return json({ header });
 }
+
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.header.title) },
+];
 
 export const handle = {
   breadcrumb: () => <span>{title}</span>,
