@@ -23,14 +23,25 @@ export async function loader({ request }: LoaderArgs) {
     title: user.firstName ? `${user.firstName}'s stash` : `Your stash`,
     actions: [
       {
+        component: "Button",
         props: {
           to: "items/new",
-          className: "text-blue-500 underline",
+          role: "link",
+          variant: "secondary",
+          "aria-label": "new item",
+          "data-test-id": "createNewItem",
+        },
+        children: "New item 2",
+      },
+      {
+        component: "Button",
+        props: {
+          to: "items/new",
           role: "link",
           "aria-label": "new item",
           "data-test-id": "createNewItem",
         },
-        children: "+ Create new item",
+        children: "New item",
       },
     ],
   };
