@@ -1,22 +1,20 @@
-import { Link } from "@remix-run/react/";
+import type { LinkProps } from "@remix-run/react";
 
-import type { RemixLinkProps } from "@remix-run/react/dist/components";
 import Heading from "~/components/shared/heading";
 import { useCurrentRouteData } from "~/hooks";
 
+import { renderActionFromJson } from "./render-action-from-json";
 import Breadcrumbs from "../breadcrumbs";
 
-/** An action is an object that descibes one of the actions that will be
- * rendered on the right side of the screen, next to the title.
- * An action will always render Remix's <Link/> component
- * */
-interface Action {
-  /** Link props */
-  props: RemixLinkProps;
+export type Action = {
+  /** Name of the component that should be rendered */
+  component: string;
+  /** Props to be passed to the component */
+  props: LinkProps;
 
-  /** Children to be rendered inside the link component */
-  children: JSX.Element | string;
-}
+  /** Children to be rendered inside the component */
+  children: "+ Create new item";
+};
 
 export type HeaderData =
   | {
@@ -28,6 +26,11 @@ export type HeaderData =
 export default function Header() {
   const data = useCurrentRouteData();
   const header = data?.header as HeaderData;
+
+  const actions = header?.actions?.map((action: Action) =>
+    renderActionFromJson(action)
+  );
+
   return (
     <header>
       <Breadcrumbs />
@@ -36,11 +39,7 @@ export default function Header() {
         <Heading as="h2" className="text-display-sm font-semibold">
           {header?.title}
         </Heading>
-        {header?.actions?.map((action, index) => (
-          <Link {...action.props} key={index}>
-            {action.children}
-          </Link>
-        ))}
+        <div className="flex gap-3">{actions}</div>
       </div>
     </header>
   );
