@@ -106,3 +106,67 @@ export function SettingsIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+
+export function PlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={20}
+      height={20}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M10 4.167v11.666M4.167 10h11.666"
+        stroke="currentColor"
+        strokeWidth={1.667}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+
+  );
+}
+
+export function TrashIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={20}
+      height={20}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M13.333 5v-.667c0-.933 0-1.4-.181-1.756a1.667 1.667 0 0 0-.729-.729c-.356-.181-.823-.181-1.756-.181H9.333c-.933 0-1.4 0-1.756.181-.314.16-.569.415-.729.729-.181.356-.181.823-.181 1.756V5m1.666 4.583v4.167m3.334-4.167v4.167M2.5 5h15m-1.667 0v9.333c0 1.4 0 2.1-.272 2.635a2.5 2.5 0 0 1-1.093 1.093c-.534.272-1.235.272-2.635.272H8.167c-1.4 0-2.1 0-2.635-.272a2.5 2.5 0 0 1-1.093-1.093c-.272-.535-.272-1.235-.272-2.635V5"
+        stroke="currentColor"
+        strokeWidth={1.667}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+
+  );
+}
+
+export function ArchiveIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={20}
+      height={20}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M3.333 6.664a1.912 1.912 0 0 1-.325-.03 1.667 1.667 0 0 1-1.31-1.309c-.032-.16-.032-.354-.032-.742 0-.387 0-.58.032-.741a1.667 1.667 0 0 1 1.31-1.31c.16-.032.354-.032.741-.032h12.5c.388 0 .581 0 .742.032a1.667 1.667 0 0 1 1.31 1.31c.032.16.032.354.032.741 0 .388 0 .581-.032.742a1.667 1.667 0 0 1-1.31 1.31c-.09.017-.188.025-.325.029m-8.333 4.17h3.333M3.333 6.666h13.333V13.5c0 1.4 0 2.1-.273 2.635a2.5 2.5 0 0 1-1.092 1.092c-.535.273-1.235.273-2.635.273H7.333c-1.4 0-2.1 0-2.635-.273a2.5 2.5 0 0 1-1.093-1.092c-.272-.535-.272-1.235-.272-2.635V6.667Z"
+        stroke="currentColor"
+        strokeWidth={1.667}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+
+  );
+}

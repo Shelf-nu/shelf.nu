@@ -1,29 +1,34 @@
 import { Link } from "@remix-run/react";
+import { ButtonIcon, ButtonVariant, ButtonWidth } from "../layout/header/types";
+import iconsMap from "./icons-map";
+
+
 
 export function Button({
   as = "button",
   className = "",
   variant = "primary",
   width = "auto",
+  icon,
   children,
   ...props
 }: {
   as?: React.ElementType;
   className?: string;
-  variant?: "primary" | "secondary" | "tertiary";
-  width?: "auto" | "full";
-  icon?: JSX.Element;
+  variant?: ButtonVariant;
+  width?: ButtonWidth;
+  icon?: ButtonIcon;
   [key: string]: any;
 }) {
   const Component = props?.to ? Link : as;
 
   const baseButtonClasses =
-    "inline-block rounded-lg font-semibold text-center py-3 px-6 max-w-xl border text-sm";
+    "inline-flex items-center rounded-lg font-semibold text-center py-[10px] gap-2 px-4 max-w-xl border text-sm drop-shadow";
 
   const variants = {
-    primary: `${baseButtonClasses} bg-primary-600 text-white border-primary-600`,
-    secondary: `${baseButtonClasses} bg-white  border-gray-300`,
-    tertiary: "border-b border-primary/10 leading-none pb-1",
+    primary: `${baseButtonClasses} bg-primary-600 text-white border-primary-600 hover:bg-primary-700 hover:border-primary-700`,
+    secondary: `${baseButtonClasses} bg-white border-gray-300 hover:bg-gray-50`,
+    tertiary: `${baseButtonClasses} border-b border-primary/10 leading-none pb-1`,
   };
 
   const widths = {
@@ -36,7 +41,7 @@ export function Button({
       className={`${variants[variant]} ${widths[width]}  ${className}`}
       {...props}
     >
-      {children}
+      {icon && iconsMap[icon]} <span>{children}</span>
     </Component>
   );
 }

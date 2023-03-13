@@ -1,6 +1,7 @@
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
+import { HeaderData } from "~/components/layout/header/types";
 
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
@@ -19,9 +20,21 @@ export async function loader({ request }: LoaderArgs) {
   /* Just in case */
   if (!user) return redirect("/login");
 
-  const header = {
+  const header: HeaderData = {
     title: user.firstName ? `${user.firstName}'s stash` : `Your stash`,
     actions: [
+      {
+        component: "Button",
+        props: {
+          to: "items/new",
+          variant: 'secondary',
+          role: "link",
+          "aria-label": "new item",
+          "data-test-id": "createNewItem",
+          icon: "trash",
+        },
+        children: "Delete",
+      },
       {
         component: "Button",
         props: {
@@ -29,9 +42,11 @@ export async function loader({ request }: LoaderArgs) {
           role: "link",
           "aria-label": "new item",
           "data-test-id": "createNewItem",
+          icon: "plus",
         },
         children: "New item",
       },
+      
     ],
   };
   return json({ header });
