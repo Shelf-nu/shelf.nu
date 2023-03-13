@@ -27,17 +27,6 @@ export async function loader({ request }: LoaderArgs) {
         props: {
           to: "items/new",
           role: "link",
-          variant: "secondary",
-          "aria-label": "new item",
-          "data-test-id": "createNewItem",
-        },
-        children: "New item 2",
-      },
-      {
-        component: "Button",
-        props: {
-          to: "items/new",
-          role: "link",
           "aria-label": "new item",
           "data-test-id": "createNewItem",
         },
