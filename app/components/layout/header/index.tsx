@@ -1,11 +1,10 @@
-import type { LinkProps } from "@remix-run/react";
 
 import Heading from "~/components/shared/heading";
 import { useCurrentRouteData } from "~/hooks";
 
 import { renderActionFromJson } from "./render-action-from-json";
-import Breadcrumbs from "../breadcrumbs";
 import type { Action, HeaderData } from "./types";
+import Breadcrumbs from "../breadcrumbs";
 
 
 export default function Header() {

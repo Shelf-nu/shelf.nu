@@ -1,7 +1,7 @@
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
-import { HeaderData } from "~/components/layout/header/types";
+import type { HeaderData } from "~/components/layout/header/types";
 
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";

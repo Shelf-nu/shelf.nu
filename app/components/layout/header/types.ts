@@ -7,7 +7,7 @@
  * Those will be rendered on on top of the layout
  */
 
-import { LinkProps } from "@remix-run/react";
+import type { LinkProps } from "@remix-run/react";
 
 export interface HeaderData {
 	/** Heading/title that will be rendered on top of the view */

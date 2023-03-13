@@ -1,5 +1,5 @@
 import { ArchiveIcon, PlusIcon, TrashIcon } from "../icons/library"
-import { ButtonIcon } from "../layout/header/types"
+import type { ButtonIcon } from "../layout/header/types"
 
 type IconsMap = {
 	[key in ButtonIcon]: JSX.Element;

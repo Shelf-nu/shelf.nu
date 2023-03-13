@@ -1,6 +1,7 @@
 import { Link } from "@remix-run/react";
-import { ButtonIcon, ButtonVariant, ButtonWidth } from "../layout/header/types";
 import iconsMap from "./icons-map";
+
+import type { ButtonIcon, ButtonVariant, ButtonWidth } from "../layout/header/types";
 
 
 
