@@ -1,6 +1,6 @@
 import type { ActionArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, Link, useActionData, useMatches, useTransition } from "@remix-run/react";
+import { Form, Link, useActionData, useMatches, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -74,11 +74,12 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 
 export default function UserPage() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);
-  const transition = useTransition();
+  const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const data = useActionData<UpdateUserResponse>();
+
   /** Get the data from the action,  */
-  let user = useMatchesData<RootData>("routes/_layout")?.user;
+  let user = useMatchesData<RootData>("routes/_layout+/_layout")?.user;
 
   return (
     <div className="">
