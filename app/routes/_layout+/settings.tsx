@@ -1,6 +1,6 @@
 import type { ActionArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, Link, useActionData, useTransition } from "@remix-run/react";
+import { Form, Link, useActionData, useMatches, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -74,11 +74,12 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 
 export default function UserPage() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);
-  const transition = useTransition();
+  const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const data = useActionData<UpdateUserResponse>();
+
   /** Get the data from the action,  */
-  let user = useMatchesData<RootData>("routes/__app")?.user;
+  let user = useMatchesData<RootData>("routes/_layout+/_layout")?.user;
 
   return (
     <div className="">
@@ -104,7 +105,6 @@ export default function UserPage() {
               name={zo.fields.username()}
               defaultValue={user?.username || undefined}
               error={zo.errors.username()?.message || data?.errors?.username}
-              // @TODO need to add error for unique username
             />
           </label>
         </div>
@@ -118,7 +118,6 @@ export default function UserPage() {
               name={zo.fields.firstName()}
               defaultValue={user?.firstName || undefined}
               error={zo.errors.firstName()?.message}
-              // @TODO need to add error for unique username
             />
           </label>
         </div>
