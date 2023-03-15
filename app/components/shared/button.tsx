@@ -30,7 +30,7 @@ export function Button({
   const baseButtonClasses = `inline-flex items-center rounded-lg font-semibold text-center py-[10px] gap-2 px-4 max-w-xl border text-sm drop-shadow`;
 
   const variants = {
-    primary: `${baseButtonClasses} bg-primary-600 text-white border-primary-600 hover:bg-primary-700 hover:border-primary-700`,
+    primary: `${baseButtonClasses} bg-primary-700 text-white border-primary-700 hover:bg-primary-800 hover:border-primary-800`,
     secondary: `${baseButtonClasses} bg-white border-gray-300 hover:bg-gray-50`,
     tertiary: `${baseButtonClasses} border-b border-primary/10 leading-none pb-1`,
   };

@@ -41,8 +41,8 @@ export default function Sidebar({ user }: Props) {
             <li key={item.label}>
               <NavLink
                 className={({ isActive }) =>
-                  `text-md semibold my-1 flex items-center gap-3 rounded-md py-2 px-3 text-gray-100 transition-all duration-75 hover:bg-primary-700 hover:text-white ${
-                    isActive ? "bg-primary-700 text-white" : ""
+                  `text-md semibold my-1 flex items-center gap-3 rounded-md py-2 px-3 text-gray-100 transition-all duration-75 hover:bg-gray-700 hover:text-white ${
+                    isActive ? "bg-gray-700 text-white" : ""
                   }`
                 }
                 to={item.to}
