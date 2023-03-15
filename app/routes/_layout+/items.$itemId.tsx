@@ -1,6 +1,7 @@
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { Form, useCatch, useLoaderData } from "@remix-run/react";
+import type { HeaderData } from "~/components/layout/header/types";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
@@ -17,8 +18,9 @@ export async function loader({ request, params }: LoaderArgs) {
     throw new Response("Not Found", { status: 404 });
   }
 
-  const header = {
+  const header: HeaderData = {
     title: item.title,
+    subHeading: item.id,
   };
 
   return json({ item, header });

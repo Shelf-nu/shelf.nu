@@ -17,7 +17,7 @@ export interface HeaderData {
   subHeading?: string;
 
   /** Array of the actions that will be rendered on the left side of the view */
-  actions: Action[];
+  actions?: Action[];
 }
 
 export type Action = {
