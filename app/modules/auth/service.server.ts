@@ -37,10 +37,8 @@ export async function sendMagicLink(email: string) {
 }
 
 export async function sendResetPasswordLink(email: string) {
-  const url = `${SERVER_URL}/reset-password`;
-  console.log(url);
   return getSupabaseAdmin().auth.resetPasswordForEmail(email, {
-    redirectTo: url,
+    redirectTo: `${SERVER_URL}/reset-password`,
   });
 }
 
