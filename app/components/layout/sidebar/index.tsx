@@ -20,6 +20,7 @@ export default function Sidebar({ user }: Props) {
       icon: <SettingsIcon />,
       to: "settings",
       label: "Settings",
+      end: true,
     },
   ];
 
