@@ -34,7 +34,6 @@ export async function loader({ request }: LoaderArgs) {
         },
         children: "New item",
       },
-      
     ],
   };
   return json({ header });

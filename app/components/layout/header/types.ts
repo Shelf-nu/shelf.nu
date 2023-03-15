@@ -37,6 +37,9 @@ export type Action = {
 
     /** Width of the button. Default is auto */
     width?: ButtonWidth;
+
+    /** Is this button disabled */
+    disabled?: boolean;
   };
 
   /** Children to be rendered inside the component. Can only be a string as components are not serializable so they cannot be returned as part of the json response */
