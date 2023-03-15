@@ -1,4 +1,5 @@
 # Shelf.nu
+
 [![Twitter](https://img.shields.io/twitter/url/https/twitter.com/cloudposse.svg?style=social&label=Follow%20%40ShelfQR)](https://twitter.com/ShelfQR)
 
 Shelf 🏷️ Asset tagging infrastructure for absolutely everyone.
@@ -12,24 +13,26 @@ Shelf is a simple and visual inventory and asset tracking system that allows peo
 With Shelf, you can take a picture of any item you own and store it in your own database. From there, you can generate a printable code (QR) that you can tag onto the item, making it easy to identify and locate in the future. Shelf has a handy code printing area where you can add as many QR codes as you can on an A4 sticker paper sheet. You can also add detailed information about the item, including its purchase date, purchase price, warranty information, and more.
 
 ### Once your assets are online, you will be able to:
-* Generate printable PDFs sheets from assets you select, so you can stick them onto anything
-* Check the last known location of your assets
-* Instant Search through your assets database
-* Use 'lost mode' for emergencies (offer a bounty for a return of an item)
-* Get notified of assets you are not using 
-* Share your asset vault with other users
+
+- Generate printable PDFs sheets from assets you select, so you can stick them onto anything
+- Check the last known location of your assets
+- Instant Search through your assets database
+- Use 'lost mode' for emergencies (offer a bounty for a return of an item)
+- Get notified of assets you are not using
+- Share your asset vault with other users
 
 ### Use Shelf alone, or as a team. And, these questions will be a thing of the past.
-* Who was the last person that took X,Y or Z?
-* What gear does X have currently?
-* Which assets did we appoint to our team member abroad? 
-* What do we have in our storage facility now?
+
+- Who was the last person that took X,Y or Z?
+- What gear does X have currently?
+- Which assets did we appoint to our team member abroad?
+- What do we have in our storage facility now?
 
 ## Shelf's vision and ambition
+
 To enable and facilitate the tagging of 1 Billion assets by 2023. Shelf therefore allows users to create unlimited assets on their environments. We will fund the growth and further development of the tool by releasing premium features. However, Shelf core will be forever free for individuals.
 
-___
-
+---
 
 ### Shelf's current stack
 
@@ -82,7 +85,6 @@ Not a fan of bits of the stack? Fork it, change it, and use `npx create-remix --
 - "Project API keys"
 - Add your `SUPABASE_URL`, `SERVER_URL`, `SUPABASE_SERVICE_ROLE` (aka `service_role` `secret`), `SUPABASE_ANON_PUBLIC` (aka `anon` `public`) and `DATABASE_URL` in the `.env` file
   > **Note:** `SERVER_URL` is your localhost on dev. It'll work for magic link login
-
 
 ```en
 DATABASE_URL="postgres://postgres:{STAGING_POSTGRES_PASSWORD}@db.{STAGING_YOUR_INSTANCE_NAME}.supabase.co:5432/postgres"
@@ -248,6 +250,7 @@ We use [Prettier](https://prettier.io/) for auto-formatting in this project. It'
 You are now ready to go further, congrats!
 
 To extend your Prisma schema and apply changes on your supabase database :
+
 - Make your changes in [./app/database/schema.prisma](./app/database/schema.prisma)
 - Prepare your schema migration
   ```sh
@@ -265,6 +268,7 @@ To extend your Prisma schema and apply changes on your supabase database :
 If you have a lower token lifetime than me (1 hour), you should take a look at `REFRESH_ACCESS_TOKEN_THRESHOLD` in [./app/modules/auth/session.server.ts](./app/modules/auth/session.server.ts) and set what you think is the best value for your use case.
 
 ## Supabase RLS
+
 You may ask "can I use RLS with Remix".
 
 The answer is "Yes" but It has a cost.
@@ -280,5 +284,10 @@ You need to add the site url as well as the redirect urls of your local, test an
 To do that navigate to Authentication > URL configiration and add the folowing values:
 
 - https://localhost:3000/oauth/callback
+- https://localhost:3000/reset-password
+
 - https://staging-domain.com/oauth/callback
+- https://staging-domain.com/reset-password
+
 - https://live-domain.com/oauth/callback
+- https://live-domain.com/reset-password
