@@ -160,7 +160,7 @@ export default function IndexLoginForm() {
                 >
                   Log in
                 </button>
-                <div className="flex items-center justify-center">
+                <div className="flex flex-col items-center justify-center">
                   <div className="text-center text-sm text-gray-500">
                     Don't have an account?{" "}
                     <Link
@@ -172,6 +172,18 @@ export default function IndexLoginForm() {
                       }}
                     >
                       Sign up
+                    </Link>
+                  </div>
+                  <div className="text-center text-sm text-gray-500">
+                    Don't remember your passwor?{" "}
+                    <Link
+                      className="text-blue-500 underline"
+                      to={{
+                        pathname: "/forgot-password",
+                        search: searchParams.toString(),
+                      }}
+                    >
+                      Reset password
                     </Link>
                   </div>
                 </div>
