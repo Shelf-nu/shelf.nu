@@ -1,5 +1,7 @@
 
 import Heading from "~/components/shared/heading";
+import SubHeading from "~/components/shared/sub-heading";
+
 import { useCurrentRouteData } from "~/hooks";
 
 import { renderActionFromJson } from "./render-action-from-json";
@@ -20,9 +22,13 @@ export default function Header() {
       <Breadcrumbs />
 
       <div className="flex justify-between">
-        <Heading as="h2" className="text-display-sm font-semibold">
+        <div>
+ <Heading as="h2" className="text-display-sm font-semibold">
           {header?.title}
         </Heading>
+        {header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>}
+        </div>
+       
         <div className="flex gap-3">{actions}</div>
       </div>
     </header>

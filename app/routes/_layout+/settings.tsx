@@ -1,6 +1,6 @@
 import type { ActionArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, Link, useActionData, useMatches, useNavigation } from "@remix-run/react";
+import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -62,8 +62,10 @@ export async function action({ request }: ActionArgs) {
 
 export async function loader() {
   const title = "Settings";
+  const subHeading = "Manage your preferences here."
   const header = {
     title,
+    subHeading
   };
   return json({ header });
 }

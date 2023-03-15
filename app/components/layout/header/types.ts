@@ -12,6 +12,10 @@ import type { LinkProps } from "@remix-run/react";
 export interface HeaderData {
 	/** Heading/title that will be rendered on top of the view */
 	title: string;
+
+	/** Subheading rendered below the heading */
+	subHeading: string;
+
 	/** Array of the actions that will be rendered on the left side of the view */
 	actions: Action[]
 }
