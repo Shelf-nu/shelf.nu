@@ -107,7 +107,6 @@ export function SettingsIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-
 export function PlusIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -125,7 +124,6 @@ export function PlusIcon(props: SVGProps<SVGSVGElement>) {
         strokeLinejoin="round"
       />
     </svg>
-
   );
 }
 
@@ -146,7 +144,6 @@ export function TrashIcon(props: SVGProps<SVGSVGElement>) {
         strokeLinejoin="round"
       />
     </svg>
-
   );
 }
 
@@ -167,6 +164,25 @@ export function ArchiveIcon(props: SVGProps<SVGSVGElement>) {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
 
+export function MailIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={20}
+      height={16}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M1.667 3.833 8.47 8.596c.55.386.826.579 1.126.653.265.066.541.066.806 0 .3-.074.575-.267 1.126-.653l6.804-4.763M5.667 14.667h8.666c1.4 0 2.1 0 2.635-.273a2.5 2.5 0 0 0 1.093-1.092c.272-.535.272-1.235.272-2.635V5.333c0-1.4 0-2.1-.272-2.635a2.5 2.5 0 0 0-1.093-1.092c-.535-.273-1.235-.273-2.635-.273H5.667c-1.4 0-2.1 0-2.635.273a2.5 2.5 0 0 0-1.093 1.092c-.272.535-.272 1.235-.272 2.635v5.334c0 1.4 0 2.1.272 2.635a2.5 2.5 0 0 0 1.093 1.092c.534.273 1.235.273 2.635.273Z"
+        stroke="#667085"
+        strokeWidth={1.667}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

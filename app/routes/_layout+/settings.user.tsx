@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
+import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 
 import { useMatchesData } from "~/hooks";
@@ -77,58 +78,57 @@ export default function UserPage() {
 
   return (
     <div className="">
+      <div className=" mb-6">
+        <h3 className="text-text-lg font-semibold">My details</h3>
+        <p className="text-sm text-gray-600">
+          Update your photo and personal details here.
+        </p>
+      </div>
       <Form method="post" ref={zo.ref} className="mt-10">
-        <div className="mt-4">
-          <label>
-            <span>{zo.fields.email()}</span>
+        <FormRow rowLabel={"Full name"} className="border-t-[1px]">
+          <div className="flex gap-6">
             <Input
-              className="ml-10"
-              type="text"
-              name={zo.fields.email()}
-              defaultValue={user?.email || undefined}
-              error={zo.errors.email()?.message || data?.errors?.email}
-            />
-          </label>
-        </div>
-        <div className="mt-4">
-          <label>
-            <span>{zo.fields.username()}</span>
-            <Input
-              className="ml-10"
-              type="text"
-              name={zo.fields.username()}
-              defaultValue={user?.username || undefined}
-              error={zo.errors.username()?.message || data?.errors?.username}
-            />
-          </label>
-        </div>
-
-        <div className="mt-4">
-          <label>
-            <span>First name</span>
-            <Input
-              className="ml-10"
+              label="First name"
               type="text"
               name={zo.fields.firstName()}
               defaultValue={user?.firstName || undefined}
               error={zo.errors.firstName()?.message}
             />
-          </label>
-        </div>
-
-        <div className="mt-4">
-          <label>
-            <span>Last name</span>
             <Input
-              className="ml-10"
+              label="Last name"
               type="text"
               name={zo.fields.lastName()}
               defaultValue={user?.lastName || undefined}
               error={zo.errors.lastName()?.message}
               // @TODO need to add error for unique username
             />
-          </label>
-        </div>
+          </div>
+        </FormRow>
+
+        <FormRow rowLabel="Email address">
+          <Input
+            label={zo.fields.email()}
+            icon="mail"
+            hideLabel={true}
+            placeholder="zaans@huisje.com"
+            type="text"
+            name={zo.fields.email()}
+            defaultValue={user?.email || undefined}
+            error={zo.errors.email()?.message || data?.errors?.email}
+          />
+        </FormRow>
+
+        <FormRow rowLabel="Username">
+          <Input
+            label="Username"
+            hideLabel={true}
+            addOn="shelf.nu/"
+            type="text"
+            name={zo.fields.username()}
+            defaultValue={user?.username || undefined}
+            error={zo.errors.username()?.message || data?.errors?.username}
+          />
+        </FormRow>
 
         <input type="hidden" name={zo.fields.id()} defaultValue={user?.id} />
 

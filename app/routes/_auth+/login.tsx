@@ -103,43 +103,34 @@ export default function IndexLoginForm() {
             <div className="mx-auto w-full max-w-md px-8">
               <Form ref={zo.ref} method="post" className="space-y-6" replace>
                 <div>
-                  <label
-                    htmlFor={zo.fields.email()}
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    Email address
-                  </label>
-
                   <div className="mt-1">
                     <Input
                       data-test-id="email"
+                      label="Email address"
+                      placeholder="zaans@huisje.com"
                       required
                       autoFocus={true}
                       name={zo.fields.email()}
                       type="email"
                       autoComplete="email"
-                      className="w-full"
                       disabled={disabled}
+                      className="w-full"
                       error={zo.errors.email()?.message}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label
-                    htmlFor={zo.fields.password()}
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    Password
-                  </label>
                   <div className="mt-1">
                     <Input
+                      label="Password"
+                      placeholder="**********"
                       data-test-id="password"
                       name={zo.fields.password()}
                       type="password"
                       autoComplete="new-password"
-                      className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
                       disabled={disabled}
+                      className="w-full"
                       error={
                         zo.errors.password()?.message || data?.errors?.email
                       }
@@ -175,7 +166,7 @@ export default function IndexLoginForm() {
                     </Link>
                   </div>
                   <div className="text-center text-sm text-gray-500">
-                    Don't remember your passwor?{" "}
+                    Don't remember your password?{" "}
                     <Link
                       className="text-blue-500 underline"
                       to={{

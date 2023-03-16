@@ -1,4 +1,5 @@
 import React from "react";
+import Input from "~/components/forms/input";
 
 import { useTypedFetcher } from "~/hooks/use-fetcher";
 import type { action } from "~/routes/_auth+/send-magic-link";
@@ -26,11 +27,14 @@ export function ContinueWithEmailForm() {
       replace={false}
       ref={ref}
     >
-      <input
+      <Input
+        label="Magic link"
+        hideLabel={true}
         type="email"
         name="email"
         id="magic-link"
-        className="mb-1 w-full rounded border border-gray-500 px-2 py-1 text-lg"
+        className="w-full"
+        placeholder="zaans@huisje.com"
         disabled={isLoading}
       />
       <div

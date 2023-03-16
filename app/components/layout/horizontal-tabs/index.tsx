@@ -14,7 +14,7 @@ export default function HorizontalTabs({ items }: HorizontalTabsProps) {
             } pt-[1px] pb-[11px] text-text-sm font-semibold  ${
               isActive
                 ? "border-b-2 border-b-primary-700 text-primary-700"
-                : "border-b-[1px] border-b-gray-200 pb-[12px] text-gray-600"
+                : "border-b border-b-gray-200 pb-[12px] text-gray-500"
             }`
           }
         >

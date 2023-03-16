@@ -118,15 +118,11 @@ export default function Join() {
       <div className="mx-auto w-full max-w-md px-8">
         <Form ref={zo.ref} method="post" className="space-y-6" replace>
           <div>
-            <label
-              htmlFor={zo.fields.email()}
-              className="block text-sm font-medium text-gray-700"
-            >
-              Email address
-            </label>
             <div className="mt-1">
               <Input
                 data-test-id="email"
+                label="Email address"
+                placeholder="zaans@huisje.com"
                 required
                 autoFocus={true}
                 name={zo.fields.email()}
@@ -140,14 +136,10 @@ export default function Join() {
           </div>
 
           <div>
-            <label
-              htmlFor={zo.fields.password()}
-              className="block text-sm font-medium text-gray-700"
-            >
-              Password
-            </label>
             <div className="mt-1">
               <Input
+                label="Password"
+                placeholder="********"
                 data-test-id="password"
                 name={zo.fields.password()}
                 type="password"

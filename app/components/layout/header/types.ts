@@ -8,6 +8,7 @@
  */
 
 import type { LinkProps } from "@remix-run/react";
+import type { Icon } from "~/components/shared/icons-map";
 
 export interface HeaderData {
   /** Heading/title that will be rendered on top of the view */
@@ -30,7 +31,7 @@ export type Action = {
     "data-test-id"?: string;
 
     /** The possible options for icons to be rendered in the button */
-    icon: ButtonIcon;
+    icon: Icon;
 
     /** The button variant. Default is primary */
     variant?: ButtonVariant;
@@ -45,9 +46,6 @@ export type Action = {
   /** Children to be rendered inside the component. Can only be a string as components are not serializable so they cannot be returned as part of the json response */
   children: string;
 };
-
-/** The possible options for icons to be rendered in the button */
-export type ButtonIcon = "plus" | "trash" | "archive";
 
 /** The button variant. Default is primary */
 export type ButtonVariant = "primary" | "secondary" | "tertiary";

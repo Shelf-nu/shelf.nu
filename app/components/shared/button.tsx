@@ -1,11 +1,8 @@
 import { Link } from "@remix-run/react";
+import type { Icon } from "./icons-map";
 import iconsMap from "./icons-map";
 
-import type {
-  ButtonIcon,
-  ButtonVariant,
-  ButtonWidth,
-} from "../layout/header/types";
+import type { ButtonVariant, ButtonWidth } from "../layout/header/types";
 
 export function Button({
   as = "button",
@@ -21,7 +18,7 @@ export function Button({
   className?: string;
   variant?: ButtonVariant;
   width?: ButtonWidth;
-  icon?: ButtonIcon;
+  icon?: Icon;
   disabled?: boolean;
   [key: string]: any;
 }) {
