@@ -13,6 +13,8 @@ import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
 import Input from "~/components/forms/input";
+import { Button } from "~/components/shared/button";
+
 import {
   createAuthSession,
   getAuthSession,
@@ -24,14 +26,16 @@ import {
   isFormProcessing,
   randomUsernameFromEmail,
 } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
-  const title = "Sign up";
+  const title = "Create an account";
+  const subHeading = "Start your journey with Shelf";
 
   if (authSession) return redirect("/");
 
-  return json({ title });
+  return json({ title, subHeading });
 }
 
 const JoinFormSchema = z.object({
@@ -95,10 +99,8 @@ export async function action({ request }: ActionArgs) {
   });
 }
 
-export const meta: V2_MetaFunction = ({ data }) => [
-  {
-    title: data.title,
-  },
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.title) },
 ];
 
 export default function Join() {
@@ -114,85 +116,69 @@ export default function Join() {
     zo.errors.email()?.message || data?.errors.email;
 
   return (
-    <div className="flex min-h-full flex-col justify-center">
-      <div className="mx-auto w-full max-w-md px-8">
-        <Form ref={zo.ref} method="post" className="space-y-6" replace>
-          <div>
-            <div className="mt-1">
-              <Input
-                data-test-id="email"
-                label="Email address"
-                placeholder="zaans@huisje.com"
-                required
-                autoFocus={true}
-                name={zo.fields.email()}
-                type="email"
-                autoComplete="email"
-                className="w-full"
-                disabled={disabled}
-                error={emailErrorMessage}
-              />
-            </div>
-          </div>
-
-          <div>
-            <div className="mt-1">
-              <Input
-                label="Password"
-                placeholder="********"
-                data-test-id="password"
-                name={zo.fields.password()}
-                type="password"
-                autoComplete="new-password"
-                className="w-full"
-                disabled={disabled}
-                error={zo.errors.password()?.message}
-              />
-            </div>
-          </div>
-
-          <input
-            type="hidden"
-            name={zo.fields.redirectTo()}
-            value={redirectTo}
-          />
-          <button
-            data-test-id="create-account"
-            type="submit"
-            className="w-full rounded bg-blue-500  py-2 px-4 text-white focus:bg-blue-400 hover:bg-blue-600"
+    <div className="w-full max-w-md">
+      <Form ref={zo.ref} method="post" className="flex flex-col gap-5" replace>
+        <div>
+          <Input
+            data-test-id="email"
+            label="Email address"
+            placeholder="zaans@huisje.com"
+            required
+            autoFocus={true}
+            name={zo.fields.email()}
+            type="email"
+            autoComplete="email"
+            className="w-full"
             disabled={disabled}
-          >
-            Create Account
-          </button>
-          <div className="flex items-center justify-center">
-            <div className="text-center text-sm text-gray-500">
-              Already have an account?{" "}
-              <Link
-                className="text-blue-500 underline"
-                to={{
-                  pathname: "/",
-                  search: searchParams.toString(),
-                }}
-              >
-                Log in
-              </Link>
-            </div>
+            error={emailErrorMessage}
+          />
+        </div>
+
+        <div>
+          <Input
+            label="Password"
+            placeholder="********"
+            data-test-id="password"
+            name={zo.fields.password()}
+            type="password"
+            autoComplete="new-password"
+            className="w-full"
+            disabled={disabled}
+            error={zo.errors.password()?.message}
+          />
+        </div>
+
+        <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
+        <Button data-test-id="create-account" type="submit" disabled={disabled}>
+          Create Account
+        </Button>
+        <div className="flex items-center justify-center">
+          <div className="text-center text-sm text-gray-500">
+            Already have an account?{" "}
+            <Link
+              to={{
+                pathname: "/",
+                search: searchParams.toString(),
+              }}
+            >
+              Log in
+            </Link>
           </div>
-        </Form>
+        </div>
+      </Form>
+      <div className="mt-6">
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-300" />
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="bg-white px-2 text-gray-500">
+              Or Sign Up with a <strong>Magic Link</strong>
+            </span>
+          </div>
+        </div>
         <div className="mt-6">
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-300" />
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="bg-white px-2 text-gray-500">
-                Or Sign Up with a <strong>Magic Link</strong>
-              </span>
-            </div>
-          </div>
-          <div className="mt-6">
-            <ContinueWithEmailForm />
-          </div>
+          <ContinueWithEmailForm />
         </div>
       </div>
     </div>

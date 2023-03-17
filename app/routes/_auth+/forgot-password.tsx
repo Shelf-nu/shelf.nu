@@ -1,25 +1,29 @@
-import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
+import Input from "~/components/forms/input";
+import { Button } from "~/components/shared/button";
 
 import { getAuthSession, sendResetPasswordLink } from "~/modules/auth";
 import { assertIsPost, isFormProcessing, tw } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
-  const title = "Forgot password";
+  const title = "Forgot password?";
+  const subHeading = "No worries, we’ll send you reset instructions.";
 
   if (authSession) return redirect("/items");
 
-  return json({ title });
+  return json({ title, subHeading });
 }
 
 const ForgotPasswordSchema = z.object({
   email: z
     .string()
-    .email("invalid-email")
+    .email("Please enter a valid Email address")
     .transform((email) => email.toLowerCase()),
 });
 
@@ -34,7 +38,8 @@ export async function action({ request }: ActionArgs) {
   if (!result.success) {
     return json(
       {
-        message: "invalid-request",
+        message: "Invalid request",
+        email: null,
       },
       { status: 400 }
     );
@@ -48,19 +53,25 @@ export async function action({ request }: ActionArgs) {
     return json(
       {
         message: "Unable to send password reset link",
+        email: null,
       },
       { status: 500 }
     );
   }
 
-  return json({ message: null });
+  return json({ message: null, email });
 }
+
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.title) },
+];
 
 export default function ForgotPassword() {
   const zo = useZorm("ForgotPasswordForm", ForgotPasswordSchema);
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
+  const error = zo.errors.email()?.message || actionData?.message || "";
 
   return (
     <div className="flex min-h-full flex-col justify-center">
@@ -68,48 +79,36 @@ export default function ForgotPassword() {
         {!actionData ? (
           <Form ref={zo.ref} method="post" className="space-y-6" replace>
             <div>
-              <label
-                htmlFor={zo.fields.email()}
-                className="block text-sm font-medium text-gray-700"
-              >
-                Email address
-              </label>
-              <div className="mt-1">
-                <input
-                  data-test-id="email"
-                  name={zo.fields.email()}
-                  type="email"
-                  autoComplete="email"
-                  className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
-                  disabled={disabled}
-                />
-                {zo.errors.email()?.message && (
-                  <div className="pt-1 text-red-700" id="password-error">
-                    {zo.errors.email()?.message}
-                  </div>
-                )}
-              </div>
+              <Input
+                label="Email address"
+                data-test-id="email"
+                name={zo.fields.email()}
+                type="email"
+                autoComplete="email"
+                className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
+                disabled={disabled}
+                error={error}
+              />
             </div>
 
-            <button
+            <Button
               data-test-id="send-password-reset-link"
+              width="full"
               type="submit"
-              className="w-full rounded bg-blue-500  py-2 px-4 text-white focus:bg-blue-400 hover:bg-blue-600"
               disabled={disabled}
             >
-              Send me a link
-            </button>
+              {!disabled ? "Reset password" : "Sending link..."}
+            </Button>
           </Form>
         ) : (
-          <div
-            className={tw(
-              `mb-2 h-6 text-center`,
-              actionData.message ? "text-red-600" : "text-green-600"
-            )}
-          >
-            {actionData.message || "Check your emails ✌️"}
+          <div className={tw(`mb-2 h-6 text-center text-gray-600`)}>
+            We sent a passowrd reset link to{" "}
+            <span className="font-semibold">{actionData?.email}</span>
           </div>
         )}
+        <div className="mt-8 text-center">
+          <Link to={"/login"}>Back to Log in</Link>
+        </div>
       </div>
     </div>
   );

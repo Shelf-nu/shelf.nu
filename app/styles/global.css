@@ -5,6 +5,9 @@ html {
   @apply font-inter;
 }
 
+body {
+}
+
 h1,
 h2,
 h3,
@@ -14,7 +17,7 @@ h5 {
 }
 
 h1 {
-  @apply text-display-2xl;
+  @apply text-display-sm font-semibold;
 }
 h2 {
   @apply text-display-xl;
@@ -34,4 +37,8 @@ h5 {
 
 label span {
   @apply capitalize;
+}
+
+a {
+  @apply text-text-sm font-semibold text-primary-700 underline hover:text-primary-800;
 }

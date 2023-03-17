@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
+import Input from "~/components/forms/input";
 
+import { Button } from "~/components/shared/button";
 import { getSupabase } from "~/integrations/supabase";
+
 import {
   commitAuthSession,
   getAuthSession,
@@ -14,14 +17,17 @@ import {
   updateAccountPassword,
 } from "~/modules/auth";
 import { assertIsPost, isFormProcessing, tw } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
-  const title = "Change password";
+  const title = "Set new password";
+  const subHeading =
+    "Your new password must be different to previously used passwords.";
 
   if (authSession) return redirect("/items");
 
-  return json({ title });
+  return json({ title, subHeading });
 }
 
 const ResetPasswordSchema = z
@@ -96,6 +102,10 @@ export async function action({ request }: ActionArgs) {
   });
 }
 
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.title) },
+];
+
 export default function ResetPassword() {
   const zo = useZorm("ResetPasswordForm", ResetPasswordSchema);
   const [userRefreshToken, setUserRefreshToken] = useState("");
@@ -128,50 +138,28 @@ export default function ResetPassword() {
       <div className="mx-auto w-full max-w-md px-8">
         <Form ref={zo.ref} method="post" className="space-y-6" replace>
           <div>
-            <label
-              htmlFor={zo.fields.password()}
-              className="block text-sm font-medium text-gray-700"
-            >
-              Password
-            </label>
-            <div className="mt-1">
-              <input
-                data-test-id="password"
-                name={zo.fields.password()}
-                type="password"
-                autoComplete="new-password"
-                className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
-                disabled={disabled}
-              />
-              {zo.errors.password()?.message && (
-                <div className="pt-1 text-red-700" id="password-error">
-                  {zo.errors.password()?.message}
-                </div>
-              )}
-            </div>
+            <Input
+              label="Password"
+              data-test-id="password"
+              name={zo.fields.password()}
+              type="password"
+              autoComplete="new-password"
+              className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
+              disabled={disabled}
+              error={zo.errors.password()?.message}
+            />
           </div>
           <div>
-            <label
-              htmlFor={zo.fields.confirmPassword()}
-              className="block text-sm font-medium text-gray-700"
-            >
-              Confirm password
-            </label>
-            <div className="mt-1">
-              <input
-                data-test-id="confirmPassword"
-                name={zo.fields.confirmPassword()}
-                type="password"
-                autoComplete="new-password"
-                className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
-                disabled={disabled}
-              />
-              {zo.errors.confirmPassword()?.message && (
-                <div className="pt-1 text-red-700" id="password-error">
-                  {zo.errors.confirmPassword()?.message}
-                </div>
-              )}
-            </div>
+            <Input
+              label="Confirm password"
+              data-test-id="confirmPassword"
+              name={zo.fields.confirmPassword()}
+              type="password"
+              autoComplete="new-password"
+              className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
+              disabled={disabled}
+              error={zo.errors.confirmPassword()?.message}
+            />
           </div>
 
           <input
@@ -179,14 +167,14 @@ export default function ResetPassword() {
             name={zo.fields.refreshToken()}
             value={userRefreshToken}
           />
-          <button
+          <Button
             data-test-id="change-password"
             type="submit"
-            className="w-full rounded bg-blue-500  py-2 px-4 text-white focus:bg-blue-400 hover:bg-blue-600"
+            className="w-full "
             disabled={disabled}
           >
             Change password
-          </button>
+          </Button>
         </Form>
         {actionData?.message ? (
           <div className="flex flex-col items-center">

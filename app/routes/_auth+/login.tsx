@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
   Form,
@@ -13,6 +13,8 @@ import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
 import Input from "~/components/forms/input";
+import { Button } from "~/components/shared/button";
+
 import {
   createAuthSession,
   getAuthSession,
@@ -20,12 +22,14 @@ import {
   ContinueWithEmailForm,
 } from "~/modules/auth";
 import { assertIsPost, isFormProcessing } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
-
+  const title = "Log in";
+  const subHeading = "Welcome back! Enter your details below to log in.";
   if (authSession) return redirect("/items");
-  return null;
+  return json({ title, subHeading });
 }
 
 const LoginFormSchema = z.object({
@@ -77,6 +81,10 @@ export async function action({ request }: ActionArgs) {
   });
 }
 
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.title) },
+];
+
 export default function IndexLoginForm() {
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
@@ -89,115 +97,90 @@ export default function IndexLoginForm() {
   const disabled = isFormProcessing(transition.state);
 
   return (
-    <main className="relative flex min-h-screen items-center px-10">
-      <div className="grid h-full grid-cols-2 gap-4">
-        <div className="">
-          <img
-            src="/images/cover.jpg"
-            alt="MidJourney generated shelf"
-            className="h-full"
+    <div className="w-full max-w-md">
+      <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
+        <div>
+          <Input
+            data-test-id="email"
+            label="Email address"
+            placeholder="zaans@huisje.com"
+            required
+            autoFocus={true}
+            name={zo.fields.email()}
+            type="email"
+            autoComplete="email"
+            disabled={disabled}
+            className="w-full"
+            error={zo.errors.email()?.message}
           />
         </div>
-        <div className="flex flex-col justify-center text-center">
-          <div className="flex flex-col justify-center">
-            <div className="mx-auto w-full max-w-md px-8">
-              <Form ref={zo.ref} method="post" className="space-y-6" replace>
-                <div>
-                  <div className="mt-1">
-                    <Input
-                      data-test-id="email"
-                      label="Email address"
-                      placeholder="zaans@huisje.com"
-                      required
-                      autoFocus={true}
-                      name={zo.fields.email()}
-                      type="email"
-                      autoComplete="email"
-                      disabled={disabled}
-                      className="w-full"
-                      error={zo.errors.email()?.message}
-                    />
-                  </div>
-                </div>
 
-                <div>
-                  <div className="mt-1">
-                    <Input
-                      label="Password"
-                      placeholder="**********"
-                      data-test-id="password"
-                      name={zo.fields.password()}
-                      type="password"
-                      autoComplete="new-password"
-                      disabled={disabled}
-                      className="w-full"
-                      error={
-                        zo.errors.password()?.message || data?.errors?.email
-                      }
-                    />
-                  </div>
-                </div>
+        <div>
+          <Input
+            label="Password"
+            placeholder="**********"
+            data-test-id="password"
+            name={zo.fields.password()}
+            type="password"
+            autoComplete="new-password"
+            disabled={disabled}
+            className="w-full"
+            error={zo.errors.password()?.message || data?.errors?.email}
+          />
+        </div>
 
-                <input
-                  type="hidden"
-                  name={zo.fields.redirectTo()}
-                  value={redirectTo}
-                />
-                <button
-                  data-test-id="login"
-                  type="submit"
-                  className="w-full rounded bg-blue-500 py-2 px-4 text-white focus:bg-blue-400 hover:bg-blue-600"
-                  disabled={disabled}
-                >
-                  Log in
-                </button>
-                <div className="flex flex-col items-center justify-center">
-                  <div className="text-center text-sm text-gray-500">
-                    Don't have an account?{" "}
-                    <Link
-                      className="text-blue-500 underline"
-                      data-test-id="signupButton"
-                      to={{
-                        pathname: "/join",
-                        search: searchParams.toString(),
-                      }}
-                    >
-                      Sign up
-                    </Link>
-                  </div>
-                  <div className="text-center text-sm text-gray-500">
-                    Don't remember your password?{" "}
-                    <Link
-                      className="text-blue-500 underline"
-                      to={{
-                        pathname: "/forgot-password",
-                        search: searchParams.toString(),
-                      }}
-                    >
-                      Reset password
-                    </Link>
-                  </div>
-                </div>
-              </Form>
-              <div className="mt-6">
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-300" />
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="bg-white px-2 text-gray-500">
-                      Or Sign Up with a <strong>Magic Link</strong>
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-6">
-                  <ContinueWithEmailForm />
-                </div>
-              </div>
-            </div>
+        <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
+        <Button
+          className="text-center"
+          type="submit"
+          data-test-id="login"
+          disabled={disabled}
+        >
+          Log In
+        </Button>
+        <div className="flex flex-col items-center justify-center">
+          <div className="text-center text-sm text-gray-500">
+            Don't remember your password?{" "}
+            <Link
+              className=""
+              to={{
+                pathname: "/forgot-password",
+                search: searchParams.toString(),
+              }}
+            >
+              Reset password
+            </Link>
           </div>
         </div>
+      </Form>
+      <div className="mt-6">
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-300" />
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="bg-white px-2 text-gray-500">
+              Or use a <strong>Magic Link</strong>
+            </span>
+          </div>
+        </div>
+        <div className="mt-6">
+          <ContinueWithEmailForm />
+        </div>
+        <div className="mt-6 text-center text-sm text-gray-500">
+          Don't have an account?{" "}
+          <Link
+            className=""
+            data-test-id="signupButton"
+            to={{
+              pathname: "/join",
+              search: searchParams.toString(),
+            }}
+          >
+            Sign up
+          </Link>
+        </div>
       </div>
-    </main>
+    </div>
   );
 }
