@@ -38,7 +38,3 @@ h5 {
 label span {
   @apply capitalize;
 }
-
-a {
-  @apply text-text-sm font-semibold text-primary-700 underline hover:text-primary-800;
-}

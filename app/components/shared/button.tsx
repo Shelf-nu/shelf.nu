@@ -30,6 +30,7 @@ export function Button({
     primary: `${baseButtonClasses} bg-primary-700 text-white border-primary-700 hover:bg-primary-800 hover:border-primary-800`,
     secondary: `${baseButtonClasses} bg-white text-gray-700 border-gray-300 hover:bg-gray-50`,
     tertiary: `${baseButtonClasses} border-b border-primary/10 leading-none pb-1`,
+    link: `text-text-sm font-semibold text-primary-700 underline hover:text-primary-800;`,
   };
 
   const widths = {

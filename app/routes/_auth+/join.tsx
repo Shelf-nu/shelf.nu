@@ -155,14 +155,15 @@ export default function Join() {
         <div className="flex items-center justify-center">
           <div className="text-center text-sm text-gray-500">
             Already have an account?{" "}
-            <Link
+            <Button
+              variant="link"
               to={{
                 pathname: "/",
                 search: searchParams.toString(),
               }}
             >
               Log in
-            </Link>
+            </Button>
           </div>
         </div>
       </Form>

@@ -107,7 +107,9 @@ export default function ForgotPassword() {
           </div>
         )}
         <div className="mt-8 text-center">
-          <Link to={"/login"}>Back to Log in</Link>
+          <Button variant="link" to={"/login"}>
+            Back to Log in
+          </Button>
         </div>
       </div>
     </div>

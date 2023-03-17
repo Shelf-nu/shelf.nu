@@ -181,9 +181,13 @@ export default function ResetPassword() {
             <div className={tw(`mb-2 h-6 text-center text-red-600`)}>
               {actionData.message}
             </div>
-            <Link className="text-blue-500 underline" to="/forgot-password">
+            <Button
+              variant="link"
+              className="text-blue-500 underline"
+              to="/forgot-password"
+            >
               Resend link
-            </Link>
+            </Button>
           </div>
         ) : null}
       </div>

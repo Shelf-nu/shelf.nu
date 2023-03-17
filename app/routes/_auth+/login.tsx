@@ -141,15 +141,15 @@ export default function IndexLoginForm() {
         <div className="flex flex-col items-center justify-center">
           <div className="text-center text-sm text-gray-500">
             Don't remember your password?{" "}
-            <Link
-              className=""
+            <Button
+              variant="link"
               to={{
                 pathname: "/forgot-password",
                 search: searchParams.toString(),
               }}
             >
               Reset password
-            </Link>
+            </Button>
           </div>
         </div>
       </Form>
@@ -169,8 +169,8 @@ export default function IndexLoginForm() {
         </div>
         <div className="mt-6 text-center text-sm text-gray-500">
           Don't have an account?{" "}
-          <Link
-            className=""
+          <Button
+            variant="link"
             data-test-id="signupButton"
             to={{
               pathname: "/join",
@@ -178,7 +178,7 @@ export default function IndexLoginForm() {
             }}
           >
             Sign up
-          </Link>
+          </Button>
         </div>
       </div>
     </div>
