@@ -38,3 +38,7 @@ h5 {
 label span {
   @apply capitalize;
 }
+
+p {
+  @apply text-text-sm font-normal text-gray-600;
+}

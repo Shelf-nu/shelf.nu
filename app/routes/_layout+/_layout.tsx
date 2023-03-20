@@ -3,11 +3,11 @@ import { json } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import Sidebar from "~/components/layout/sidebar";
-import { getAuthSession } from "~/modules/auth";
+import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
 
 export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
-  const authSession = await getAuthSession(request);
+  const authSession = await requireAuthSession(request);
 
   const user = authSession
     ? await getUserByEmail(authSession?.email)

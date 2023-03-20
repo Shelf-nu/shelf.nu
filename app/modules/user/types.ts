@@ -13,4 +13,7 @@ export interface UpdateUserResponse {
     /** key is the field name, value is the error message */
     [k: string]: string | unknown;
   } | null;
+
+  /** Used when sending a pwd reset link for the user */
+  passwordUpdated?: boolean;
 }

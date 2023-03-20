@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -144,7 +144,6 @@ export default function ResetPassword() {
               name={zo.fields.password()}
               type="password"
               autoComplete="new-password"
-              className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
               disabled={disabled}
               error={zo.errors.password()?.message}
             />
@@ -156,7 +155,6 @@ export default function ResetPassword() {
               name={zo.fields.confirmPassword()}
               type="password"
               autoComplete="new-password"
-              className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
               disabled={disabled}
               error={zo.errors.confirmPassword()?.message}
             />
