@@ -41,7 +41,7 @@ export function Button({
       disabled ? "text-gray-300" : ""
     ),
     link: tw(
-      `border-none p-0 text-text-sm font-semibold text-primary-700 underline hover:text-primary-800`
+      `border-none p-0 text-text-sm font-semibold text-primary-700 hover:text-primary-800`
     ),
   };
 
