@@ -1,4 +1,5 @@
 :root {
+  --tw-ring-color: #eaf2ff;
 }
 
 html {
@@ -6,6 +7,7 @@ html {
 }
 
 body {
+  @apply bg-white text-gray-900;
 }
 
 h1,
@@ -13,7 +15,7 @@ h2,
 h3,
 h4,
 h5 {
-  @apply font-semibold text-primary;
+  @apply font-semibold text-gray-900;
 }
 
 h1 {

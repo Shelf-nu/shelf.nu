@@ -2,6 +2,7 @@ import { Link, NavLink } from "@remix-run/react";
 import { ItemsIcon, SettingsIcon } from "~/components/icons/library";
 
 import type { User } from "~/database";
+import { tw } from "~/utils";
 
 import SidebarBottom from "./bottom";
 
@@ -25,11 +26,11 @@ export default function Sidebar({ user }: Props) {
   ];
 
   return (
-    <div className=" flex h-full flex-col text-white">
+    <div className=" flex h-full flex-col ">
       <div>
         <Link to=".">
           <img
-            src="/images/shelf-logo-white-text.png"
+            src="/images/logo-full-color(x2).png"
             alt="Shelf Logo"
             className="h-[30px]"
           />
@@ -41,9 +42,10 @@ export default function Sidebar({ user }: Props) {
             <li key={item.label}>
               <NavLink
                 className={({ isActive }) =>
-                  `text-md semibold my-1 flex items-center gap-3 rounded-md py-2 px-3 text-gray-100 transition-all duration-75 hover:bg-gray-700 hover:text-white ${
-                    isActive ? "bg-gray-700 text-white" : ""
-                  }`
+                  tw(
+                    "my-1 flex items-center gap-3 rounded-md py-2 px-3 text-text-md font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900",
+                    isActive ? "bg-gray-100 text-gray-900" : ""
+                  )
                 }
                 to={item.to}
               >

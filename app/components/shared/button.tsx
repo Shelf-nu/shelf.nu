@@ -1,4 +1,5 @@
 import { Link } from "@remix-run/react";
+import { tw } from "~/utils";
 import type { Icon } from "./icons-map";
 import iconsMap from "./icons-map";
 
@@ -24,13 +25,24 @@ export function Button({
 }) {
   const Component = props?.to ? Link : as;
 
-  const baseButtonClasses = `inline-flex items-center justify-center rounded-lg font-semibold text-center py-[10px] gap-2 px-4 max-w-xl border text-sm drop-shadow`;
+  const baseButtonClasses = `inline-flex items-center justify-center rounded-lg font-semibold text-center py-[10px] gap-2 px-4 max-w-xl border text-sm box-shadow-xs`;
 
   const variants = {
-    primary: `${baseButtonClasses} bg-primary-700 text-white border-primary-700 hover:bg-primary-800 hover:border-primary-800`,
-    secondary: `${baseButtonClasses} bg-white text-gray-700 border-gray-300 hover:bg-gray-50`,
-    tertiary: `${baseButtonClasses} border-b border-primary/10 leading-none pb-1`,
-    link: `text-text-sm font-semibold text-primary-700 underline hover:text-primary-800;`,
+    primary: tw(
+      `border-primary-400 bg-primary-500 text-white focus:ring-2 hover:bg-primary-400`,
+      disabled ? "border-primary-300 bg-primary-300" : ""
+    ),
+    secondary: tw(
+      `border-gray-300 bg-white text-gray-700 hover:bg-gray-50`,
+      disabled ? "border-gray-200 text-gray-300" : ""
+    ),
+    tertiary: tw(
+      `border-b border-primary/10 pb-1 leading-none`,
+      disabled ? "text-gray-300" : ""
+    ),
+    link: tw(
+      `border-none p-0 text-text-sm font-semibold text-primary-700 underline hover:text-primary-800`
+    ),
   };
 
   const widths = {
@@ -38,15 +50,17 @@ export function Button({
     full: "w-full",
   };
 
-  const disabledStyles = disabled
-    ? "pointer-events-none bg-primary-300 border-primary-100"
-    : undefined;
+  const disabledStyles = disabled ? "pointer-events-none " : undefined;
 
+  const finalStyles = tw(
+    baseButtonClasses,
+    variants[variant],
+    widths[width],
+    disabledStyles,
+    className
+  );
   return (
-    <Component
-      className={`${variants[variant]} ${widths[width]} ${disabledStyles} ${className}`}
-      {...props}
-    >
+    <Component className={finalStyles} {...props}>
       {icon && iconsMap[icon]} <span>{children}</span>
     </Component>
   );

@@ -23,13 +23,13 @@ export default function App() {
 
   return (
     <div className="flex h-full min-h-screen flex-col ">
-      <main className="flex h-full bg-primary ">
-        <div className="h-full w-80  p-8">
+      <main className="flex h-full ">
+        <div className="h-full w-80 border-r border-gray-200 p-8">
           <Sidebar user={user} />
         </div>
 
-        <div className="h-full w-full py-3">
-          <div className="flex h-full flex-1 flex-col rounded-l-[40px] bg-primary-25 p-8">
+        <div className="h-full w-full bg-gray-25 py-3">
+          <div className="flex h-full flex-1 flex-col p-8">
             <Header />
             <Outlet />
           </div>

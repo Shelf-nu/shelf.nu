@@ -1,5 +1,9 @@
 .breadcrumbs {
-  @apply flex items-center;
+  @apply flex items-center font-semibold text-gray-600;
+}
+
+.breadcrumb:last-child {
+  @apply pointer-events-none text-primary;
 }
 
 .breadcrumb {
@@ -7,9 +11,5 @@
 }
 .breadcrumb a,
 .breadcrumb span {
-  @apply mb-[-1px] block h-full text-[14px] text-[#475467];
-}
-
-.breadcrumb a {
-  @apply hover:underline;
+  @apply mb-[-1px] block h-full text-[14px];
 }
