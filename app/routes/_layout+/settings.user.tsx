@@ -1,14 +1,16 @@
 import type { ActionArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
+
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import PasswordResetForm from "~/components/user/password-reset-form";
 
 import { useMatchesData } from "~/hooks";
-import { requireAuthSession, updateAccountPassword } from "~/modules/auth";
+import { sendResetPasswordLink } from "~/modules/auth";
 import { updateUser } from "~/modules/user";
 import type {
   UpdateUserPayload,
@@ -18,25 +20,6 @@ import type { RootData } from "~/root";
 
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-
-const ResetPasswordSchema = z
-  .object({
-    password: z.string().min(8, "Passowrd is too short. Minimum 8 characters."),
-    confirmPassword: z
-      .string()
-      .min(8, "Passowrd is too short. Minimum 8 characters."),
-  })
-  .superRefine(({ password, confirmPassword }, ctx) => {
-    if (password !== confirmPassword) {
-      return ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Password and confirm password must match",
-        path: ["confirmPassword"],
-      });
-    }
-
-    return { password, confirmPassword };
-  });
 
 export const UpdateFormSchema = z.object({
   id: z.string(),
@@ -56,35 +39,22 @@ export async function action({ request }: ActionArgs) {
   const formData = await request.formData();
 
   /** Handle Password Reset */
-  if (formData.get("intent") === "updatePassword") {
-    const result = await ResetPasswordSchema.safeParseAsync(
-      parseFormAny(formData)
-    );
+  if (formData.get("intent") === "resetPassword") {
+    const email = formData.get("email") as string;
 
-    if (!result.success) {
+    const { error } = await sendResetPasswordLink(email);
+
+    if (error) {
       return json(
         {
-          message:
-            "Invalid request. Please try again. If the issue persists, contact support.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const { password } = result.data;
-    const authSession = await requireAuthSession(request);
-    const user = await updateAccountPassword(authSession.userId, password);
-
-    if (!user) {
-      return json(
-        {
-          message: "Issue updating passowrd",
+          message: "Unable to send password reset link",
+          email: null,
         },
         { status: 500 }
       );
     }
 
-    return json({ message: null, email: null, passwordUpdated: true });
+    return json({ error: null, passwordReset: true });
   }
 
   /** Handle the use update */
@@ -128,15 +98,12 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 
 export default function UserPage() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);
-  const zoResetPwd = useZorm("ResetPasswordForm", ResetPasswordSchema);
-
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const data = useActionData<UpdateUserResponse>();
 
   /** Get the data from the action,  */
   let user = useMatchesData<RootData>("routes/_layout+/_layout")?.user;
-
   return (
     <div className="">
       <div className=" mb-6">
@@ -205,50 +172,11 @@ export default function UserPage() {
         </div>
       </Form>
 
-      <div className="my-10" />
       <div className=" mb-6">
         <h3 className="text-text-lg font-semibold">Password</h3>
         <p className="text-sm text-gray-600">Update your password here</p>
       </div>
-
-      <Form method="post" ref={zoResetPwd.ref} replace>
-        <FormRow rowLabel="New password" className="border-t">
-          <Input
-            label="Password"
-            hideLabel={true}
-            data-test-id="password"
-            name={zoResetPwd.fields.password()}
-            type="password"
-            autoComplete="new-password"
-            placeholder="********"
-            disabled={disabled}
-            error={zoResetPwd.errors.password()?.message}
-          />
-        </FormRow>
-        <FormRow rowLabel="Confirm password">
-          <Input
-            label="Confirm password"
-            hideLabel={true}
-            data-test-id="confirmPassword"
-            name={zoResetPwd.fields.confirmPassword()}
-            type="password"
-            autoComplete="new-password"
-            placeholder="********"
-            disabled={disabled}
-            error={zoResetPwd.errors.confirmPassword()?.message}
-          />
-        </FormRow>
-        <div className="mt-4 text-right">
-          <Button
-            type="submit"
-            disabled={disabled}
-            name="intent"
-            value="updatePassword"
-          >
-            Change password
-          </Button>
-        </div>
-      </Form>
+      <PasswordResetForm userEmail={user?.email || ""} />
     </div>
   );
 }

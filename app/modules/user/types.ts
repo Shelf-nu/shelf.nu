@@ -15,5 +15,5 @@ export interface UpdateUserResponse {
   } | null;
 
   /** Used when sending a pwd reset link for the user */
-  passwordUpdated?: boolean;
+  passwordReset?: boolean;
 }

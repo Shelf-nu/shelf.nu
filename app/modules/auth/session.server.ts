@@ -89,7 +89,6 @@ export async function commitAuthSession(
 
 export async function destroyAuthSession(request: Request) {
   const session = await getSession(request);
-
   return redirect("/", {
     headers: {
       "Set-Cookie": await sessionStorage.destroySession(session),
