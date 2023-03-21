@@ -5,6 +5,8 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useTransition } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
+import Input from "~/components/forms/input";
+import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createItem } from "~/modules/item";
@@ -75,57 +77,32 @@ export default function NewItemPage() {
 
   return (
     <div>
-      <Form
-        ref={zo.ref}
-        method="post"
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          width: "100%",
-        }}
-      >
-        <div>
-          <label className="flex w-full flex-col gap-1">
-            <span>Title: </span>
-            <input
-              name={zo.fields.title()}
-              className="flex-1 rounded-md border-2 border-blue-500 px-3 text-lg leading-loose"
-              disabled={disabled}
-            />
-          </label>
-          {zo.errors.title()?.message && (
-            <div className="pt-1 text-red-700" id="title-error">
-              {zo.errors.title()?.message}
-            </div>
-          )}
+      <Form ref={zo.ref} method="post" className="flex w-full flex-col gap-2">
+        <div className="mt-6">
+          <Input
+            label="Title"
+            name={zo.fields.title()}
+            disabled={disabled}
+            error={zo.errors.title()?.message}
+          />
         </div>
 
         <div>
-          <label className="flex w-full flex-col gap-1">
-            <span>Description: </span>
-            <textarea
-              name={zo.fields.description()}
-              rows={8}
-              className="w-full flex-1 rounded-md border-2 border-blue-500 py-2 px-3 text-lg leading-6"
-              disabled={disabled}
-            />
-          </label>
-          {zo.errors.description()?.message && (
-            <div className="pt-1 text-red-700" id="body-error">
-              {zo.errors.description()?.message}
-            </div>
-          )}
+          <Input
+            label="Description"
+            inputType="textarea"
+            name={zo.fields.description()}
+            rows={8}
+            className="w-full"
+            disabled={disabled}
+            error={zo.errors.description()?.message}
+          />
         </div>
 
         <div className="text-right">
-          <button
-            type="submit"
-            className="rounded bg-blue-500  py-2 px-4 text-white focus:bg-blue-400 hover:bg-blue-600"
-            disabled={disabled}
-          >
+          <Button type="submit" disabled={disabled}>
             Save
-          </button>
+          </Button>
         </div>
       </Form>
     </div>

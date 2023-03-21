@@ -1,9 +1,17 @@
+import { tw } from "~/utils";
 import type { Icon } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
-interface Props extends React.InputHTMLAttributes<HTMLInputElement> {
+interface Props
+  extends React.InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement> {
   /** Label for the input field */
   label: string;
+
+  /** Type of the input. Default is input. Possible options are:
+   * - input
+   * - textarea
+   */
+  inputType?: "input" | "textarea";
 
   /** Weather the label is hidden */
   hideLabel?: boolean;
@@ -18,17 +26,54 @@ interface Props extends React.InputHTMLAttributes<HTMLInputElement> {
 
   /** Error message */
   error?: string;
+
+  /** Needed for input type textarea */
+  rows?: number;
 }
 
 export default function Input({
   className,
   error,
+  inputType = "input",
   label,
   hideLabel,
   addOn,
   icon,
   ...rest
 }: Props) {
+  const iconClasses = tw(
+    "pointer-events-none absolute flex h-full items-center  border-gray-300  px-[14px]"
+  );
+
+  const addonClasses = tw(
+    "pointer-events-none flex items-center rounded-l-[8px] border-y border-l border-gray-300 bg-white px-[14px] text-gray-600"
+  );
+
+  const inputClasses = tw(
+    "border border-gray-300 px-[14px] py-2 text-text-md text-gray-900 shadow placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0]",
+    /** Add some border for error */
+    error ? "border-error-300 focus:border-error-300 focus:ring-error-100" : "",
+
+    /** Add or remove classes depending on weather we use an icon or addOn */
+    icon || addOn
+      ? icon
+        ? "rounded-[8px] pl-[42px]"
+        : "rounded-r-[8px] rounded-l-none"
+      : "rounded-[8px]",
+    className
+  );
+
+  /** Store props in an object for easier dynamic rendering of input type */
+  const inputProps = {
+    className: inputClasses,
+    ...rest,
+  };
+  let input = <input {...inputProps} />;
+
+  if (inputType === "textarea") {
+    input = <textarea {...inputProps} rows={rest.rows || 8} />;
+  }
+
   return (
     <label className="relative flex flex-col">
       {/* Label */}
@@ -40,38 +85,13 @@ export default function Input({
         {label}
       </span>
 
-      <div
-        className={`relative flex flex-wrap items-stretch  ${icon ? "" : ""}`}
-      >
+      <div className={`relative flex flex-wrap items-stretch`}>
         {/* Icon */}
-        {icon && (
-          <div className="pointer-events-none absolute flex h-full items-center  border-gray-300  px-[14px]">
-            {iconsMap[icon]}
-          </div>
-        )}
-
+        {icon && <div className={iconClasses}>{iconsMap[icon]}</div>}
         {/* Addon */}
-        {addOn && (
-          <div className="pointer-events-none flex items-center rounded-l-[8px] border-y border-l border-gray-300 bg-white px-[14px] text-gray-600">
-            {addOn}
-          </div>
-        )}
-
+        {addOn && <div className={addonClasses}>{addOn}</div>}
         {/* Input */}
-        <input
-          className={` border px-[14px] py-2 text-text-md text-gray-900 shadow placeholder:text-gray-500 focus:ring-2 ${
-            error
-              ? "border-error-300 focus:border-error-300 focus:ring-error-100"
-              : "border-gray-300 focus:border-primary-300 focus:ring-primary-100"
-          } ${
-            icon || addOn
-              ? icon
-                ? "rounded-[8px] pl-[42px]"
-                : "rounded-r-[8px] rounded-l-none"
-              : "rounded-[8px]"
-          } ${className}`}
-          {...rest}
-        />
+        {input}
       </div>
 
       {/* Error */}
