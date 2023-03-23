@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 
 import { Form } from "@remix-run/react";
 import { useFetcher } from "react-router-dom";
-import { useDelayedLogout } from "~/hooks";
 import { isFormProcessing } from "~/utils";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
@@ -12,30 +11,9 @@ interface Props {
 }
 
 export default function PasswordResetForm({ userEmail }: Props) {
-  const [isSending, setIsSending] = useState<boolean>(false);
   const fetcher = useFetcher();
   const isProcessing = isFormProcessing(fetcher.state);
   const logoutFormRef = useRef(null);
-
-  /** Hook that handles the delayed logout */
-  useDelayedLogout({
-    trigger: fetcher?.data?.passwordReset,
-    logoutFormRef,
-  });
-
-  useEffect(() => {
-    /** If fetcher is processing, set the value to true
-     * We use this because we are submitting 2 forms in a row and that way i ensure the correct state is used for displaying the link text
-     *
-     */
-    if (isProcessing) {
-      setIsSending(true);
-    }
-    /** IF ther is an error, set it back to default state */
-    if (fetcher?.data?.message) {
-      setIsSending(false);
-    }
-  }, [isProcessing, fetcher]);
 
   return (
     <div>
@@ -52,7 +30,7 @@ export default function PasswordResetForm({ userEmail }: Props) {
             value="resetPassword"
             variant="link"
           >
-            {isProcessing || isSending
+            {isProcessing
               ? "Sending link and logging you out..."
               : "Send password reset email."}
           </Button>
@@ -62,7 +40,7 @@ export default function PasswordResetForm({ userEmail }: Props) {
             data-test-id="email"
             name="email"
             type="hidden"
-            disabled={isProcessing || isSending}
+            disabled={isProcessing}
             value={userEmail}
             error={fetcher?.data?.error}
           />

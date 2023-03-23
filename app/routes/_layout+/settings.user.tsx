@@ -10,7 +10,7 @@ import { Button } from "~/components/shared/button";
 import PasswordResetForm from "~/components/user/password-reset-form";
 
 import { useMatchesData } from "~/hooks";
-import { sendResetPasswordLink } from "~/modules/auth";
+import { destroyAuthSession, sendResetPasswordLink } from "~/modules/auth";
 import { updateUser } from "~/modules/user";
 import type {
   UpdateUserPayload,
@@ -20,6 +20,7 @@ import type { RootData } from "~/root";
 
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { delay } from "~/utils/delay";
 
 export const UpdateFormSchema = z.object({
   id: z.string(),
@@ -36,6 +37,7 @@ export const UpdateFormSchema = z.object({
 
 export async function action({ request }: ActionArgs) {
   assertIsPost(request);
+
   const formData = await request.formData();
 
   /** Handle Password Reset */
@@ -54,7 +56,9 @@ export async function action({ request }: ActionArgs) {
       );
     }
 
-    return json({ error: null, passwordReset: true });
+    /** Logout user after 3 seconds */
+    await delay(2000);
+    return destroyAuthSession(request);
   }
 
   /** Handle the use update */
