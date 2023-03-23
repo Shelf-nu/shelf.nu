@@ -102,7 +102,7 @@ export default function ForgotPassword() {
           </Form>
         ) : (
           <div className={tw(`mb-2 h-6 text-center text-gray-600`)}>
-            We sent a passowrd reset link to{" "}
+            We sent a password reset link to{" "}
             <span className="font-semibold">{actionData?.email}</span>
           </div>
         )}

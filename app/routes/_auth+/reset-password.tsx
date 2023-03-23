@@ -32,10 +32,10 @@ export async function loader({ request }: LoaderArgs) {
 
 const ResetPasswordSchema = z
   .object({
-    password: z.string().min(8, "Passowrd is too short. Minimum 8 characters."),
+    password: z.string().min(8, "Password is too short. Minimum 8 characters."),
     confirmPassword: z
       .string()
-      .min(8, "Passowrd is too short. Minimum 8 characters."),
+      .min(8, "Password is too short. Minimum 8 characters."),
     refreshToken: z.string(),
   })
   .superRefine(({ password, confirmPassword, refreshToken }, ctx) => {
