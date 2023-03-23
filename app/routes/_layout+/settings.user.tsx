@@ -7,16 +7,17 @@ import { z } from "zod";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { FileDropzone } from "~/components/shared/file-dropzone";
 import PasswordResetForm from "~/components/user/password-reset-form";
+import ProfilePicture from "~/components/user/profile-picture";
 
-import { useMatchesData } from "~/hooks";
+import { useUserData } from "~/hooks";
 import { destroyAuthSession, sendResetPasswordLink } from "~/modules/auth";
 import { updateUser } from "~/modules/user";
 import type {
   UpdateUserPayload,
   UpdateUserResponse,
 } from "~/modules/user/types";
-import type { RootData } from "~/root";
 
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -107,7 +108,7 @@ export default function UserPage() {
   const data = useActionData<UpdateUserResponse>();
 
   /** Get the data from the action,  */
-  let user = useMatchesData<RootData>("routes/_layout+/_layout")?.user;
+  let user = useUserData();
   return (
     <div className="">
       <div className=" mb-6">
@@ -176,7 +177,28 @@ export default function UserPage() {
         </div>
       </Form>
 
-      <div className=" mb-6">
+      <FormRow
+        rowLabel="Profile picture"
+        subHeading="This will be displayed on your profile."
+        className="mt-6 border-t"
+      >
+        <div className="flex gap-5">
+          <ProfilePicture />
+          <FileDropzone />
+        </div>
+
+        {/* <Input
+          label="Username"
+          hideLabel={true}
+          addOn="shelf.nu/"
+          type="text"
+          name={zo.fields.username()}
+          defaultValue={user?.username || undefined}
+          error={zo.errors.username()?.message || data?.errors?.username}
+        /> */}
+      </FormRow>
+
+      <div className=" my-6">
         <h3 className="text-text-lg font-semibold">Password</h3>
         <p className="text-sm text-gray-600">Update your password here</p>
       </div>
