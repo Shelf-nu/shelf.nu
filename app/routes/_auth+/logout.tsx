@@ -6,7 +6,6 @@ import { assertIsPost } from "~/utils";
 
 export async function action({ request }: ActionArgs) {
   assertIsPost(request);
-
   return destroyAuthSession(request);
 }
 
