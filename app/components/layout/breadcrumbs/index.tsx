@@ -1,6 +1,5 @@
 import { useMatches } from "@remix-run/react";
 import { BreadcrumbChevron } from "~/components/icons/library";
-import styles from "./styles.module.css";
 
 export default function Breadcrumbs() {
   const matches = useMatches();
@@ -11,11 +10,11 @@ export default function Breadcrumbs() {
   );
   return (
     <header className="mb-5">
-      <div className={styles.breadcrumbs}>
+      <div className="breadcrumbs">
         {breadcrumbs.map((match, index) => {
           const isLastItem = index === breadcrumbs.length - 1;
           return (
-            <div key={index} className={styles.breadcrumb}>
+            <div key={index} className="breadcrumb">
               {match?.handle?.breadcrumb(match)}{" "}
               {!isLastItem && (
                 <span className="mx-4">

@@ -1,4 +1,6 @@
-/* Bottom of the footer */
+/** Sidebar */
+
+/* Bottom of the sidebar */
 .bottom {
   @apply flex justify-between border-t border-t-slate-400 pt-6;
 }

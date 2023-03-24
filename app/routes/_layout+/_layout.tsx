@@ -1,10 +1,17 @@
-import type { LoaderArgs, LoaderFunction } from "@remix-run/node";
+import type {
+  LinksFunction,
+  LoaderArgs,
+  LoaderFunction,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import Sidebar from "~/components/layout/sidebar";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
+import styles from "~/styles/layout/index.css";
+
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   const authSession = await requireAuthSession(request);
