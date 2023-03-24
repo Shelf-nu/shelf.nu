@@ -1,7 +1,3 @@
 @import "breadcrumbs.css";
 @import "sidebar.css";
 @import "dropdown.css";
-
-.dropzone {
-  @apply border border-gray-400 py-10 px-10;
-}

@@ -19,6 +19,7 @@
     }
   },
   "rules": {
+    "tailwindcss/no-custom-classname": "off",
     "no-console": "warn",
     "arrow-body-style": ["warn", "as-needed"],
     // @typescript-eslint

@@ -110,14 +110,14 @@ export default function UserPage() {
   /** Get the data from the action,  */
   let user = useUserData();
   return (
-    <div className="">
+    <div className=" flex flex-col">
       <div className=" mb-6">
         <h3 className="text-text-lg font-semibold">My details</h3>
         <p className="text-sm text-gray-600">
           Update your photo and personal details here.
         </p>
       </div>
-      <Form method="post" ref={zo.ref} className="mt-10" replace>
+      <Form method="post" ref={zo.ref} className="" replace>
         <FormRow rowLabel={"Full name"} className="border-t-[1px]">
           <div className="flex gap-6">
             <Input
@@ -187,7 +187,7 @@ export default function UserPage() {
       <FormRow
         rowLabel="Upload profile picture"
         // subHeading="This will be displayed on your profile."
-        className="mt-6 border-t"
+        className="border-t"
       >
         <div className="flex gap-5">
           <ProfilePicture />

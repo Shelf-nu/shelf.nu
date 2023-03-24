@@ -1,0 +1,39 @@
+import { ImageFileIcon } from "~/components/icons/library";
+import { tw } from "~/utils";
+import { Spinner } from "../spinner";
+
+export interface StatusMessageProps {
+  filename: string | null;
+  message: string | null;
+  status: "success" | "pending" | "error" | null;
+}
+export function StatusMessage({
+  message,
+  status,
+  filename,
+}: StatusMessageProps) {
+  const isError = status === "error";
+  const isPending = status === "pending";
+  const isSuccess = status === "success";
+
+  const styles = tw(
+    "flex gap-[14px] rounded-xl border bg-white p-[14px] text-text-sm text-gray-600", // default class
+    isError && "border-error-300 bg-error-25 text-error-600" // Class indicating the current status
+  );
+
+  const filenameStyles = tw(
+    "font-medium text-gray-700", // default style
+    isError && "text-error-700"
+  );
+
+  return (
+    <div className={styles}>
+      <ImageFileIcon error={isError} />
+      <div className="flex-1">
+        <div className={filenameStyles}>{filename}</div>
+        <div>{message}</div>
+      </div>
+      {isPending && <Spinner />}
+    </div>
+  );
+}

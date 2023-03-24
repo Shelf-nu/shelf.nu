@@ -1,5 +1,4 @@
 import type { User } from "@prisma/client";
-import { redirect } from "@remix-run/node";
 
 import { useMatchesData } from "./use-matches-data";
 
@@ -11,8 +10,5 @@ import { useMatchesData } from "./use-matches-data";
 export function useUserData(): User | undefined {
   let user = useMatchesData<{ user: User }>("routes/_layout+/_layout")?.user;
 
-  if (!user) {
-    redirect("/login");
-  }
   return user;
 }
