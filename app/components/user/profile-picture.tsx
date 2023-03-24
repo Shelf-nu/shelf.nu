@@ -3,19 +3,26 @@ import { tw } from "~/utils";
 
 /** Returns the current user's profile picture */
 export default function ProfilePicture({
-  size = 64,
+  width = "w-16",
+  height = "h-16",
+  className = "",
 }: {
-  /** Size of the item in px. Default is 64 */
-  size?: number;
+  /** Tailwind class for width */
+  width?: string;
+  /** Tailwind class for height */
+  height?: string;
+
+  /** Extra classes */
+  className?: string;
 }) {
   let user = useUserData();
+  const styles = tw(width, height, "rounded-[10px]", className);
 
-  const sizeClasses = `h-[${size}] w-[${size}]`;
   return user ? (
     <img
       src={user.profilePicture || "/images/default_pfp.jpg"}
       alt={`${user.username}`}
-      className={`${sizeClasses} rounded-[10px]`}
+      className={styles}
     />
   ) : null;
 }

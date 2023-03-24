@@ -1,0 +1,21 @@
+/* Bottom of the footer */
+.bottom {
+  @apply flex justify-between border-t border-t-slate-400 pt-6;
+}
+
+/* Breadcrumbs */
+.breadcrumbs {
+  @apply flex items-center font-semibold text-gray-600;
+}
+.breadcrumbs:last-child {
+  @apply pointer-events-none text-primary;
+}
+.breadcrumbs .breadcrumb {
+  @apply flex;
+}
+.breadcrumbs .breadcrumb a,
+.breadcrumbs .breadcrumb span {
+  @apply mb-[-1px] block h-full text-[14px];
+}
+
+/*# sourceMappingURL=layout.css.map */

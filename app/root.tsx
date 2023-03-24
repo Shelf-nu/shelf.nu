@@ -1,5 +1,4 @@
 import type { User } from "@prisma/client";
-import { cssBundleHref } from "@remix-run/css-bundle";
 import type {
   LinksFunction,
   LoaderFunction,
@@ -36,18 +35,11 @@ export const handle = {
   ),
 };
 
-export const links: LinksFunction = () => {
-  const alwaysPresentStyles = [
-    { rel: "stylesheet", href: tailwindStylesheetUrl },
-    { rel: "stylesheet", href: fontsStylesheetUrl },
-    { rel: "stylesheet", href: globalStylesheetUrl },
-  ];
-  return [
-    ...(cssBundleHref
-      ? [...alwaysPresentStyles, { rel: "stylesheet", href: cssBundleHref }]
-      : [...alwaysPresentStyles]),
-  ];
-};
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: tailwindStylesheetUrl },
+  { rel: "stylesheet", href: fontsStylesheetUrl },
+  { rel: "stylesheet", href: globalStylesheetUrl },
+];
 
 export const meta: V2_MetaFunction = () => [
   {

@@ -1,4 +1,0 @@
-/* Bottom of the footer */
-.bottom {
-  @apply flex justify-between border-t border-t-slate-400 pt-6;
-}

@@ -1,5 +1,8 @@
 node_modules
 
+/styles/*.css
+/styles/*.css.map
+/styles/*/
 /build
 /public/build
 .env
