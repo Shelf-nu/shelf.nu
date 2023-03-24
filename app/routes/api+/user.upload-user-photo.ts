@@ -11,7 +11,7 @@ export const action = async ({ request }: ActionArgs) => {
 
     // const formData = await unstable_parseMultipartFormData(
     //   request,
-    //   uploadHandler // <-- we'll look at this deeper next
+    //   uploadHandler // <-- can use this example > https://dev.to/aaronksaunders/how-to-upload-to-storage-buckets-and-write-data-with-remix-and-supabase-3l7c
     // );
 
     // const someData = { 1: "hello world" };

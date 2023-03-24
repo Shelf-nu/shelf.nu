@@ -78,25 +78,31 @@ export async function createUserAccount(
   return authSession;
 }
 
-
-export async function updateUser(updateUserPayload: UpdateUserPayload): Promise<UpdateUserResponse> {
+export async function updateUser(
+  updateUserPayload: UpdateUserPayload
+): Promise<UpdateUserResponse> {
   try {
     const updatedUser = await db.user.update({
       where: { id: updateUserPayload.id },
       data: {
         ...updateUserPayload,
       },
-    })
-    return { user: updatedUser, errors: null }
+    });
+    return { user: updatedUser, errors: null };
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError) {
       // The .code property can be accessed in a type-safe manner
-      if (e.code === 'P2002') {
-        return { user: null, errors: {[e?.meta?.target as string]: `${e?.meta?.target} is already taken.` } }
+      if (e.code === "P2002") {
+        return {
+          user: null,
+          errors: {
+            [e?.meta?.target as string]: `${e?.meta?.target} is already taken.`,
+          },
+        };
       } else {
-        return { user: null, errors: {global: "Unknown error."}}
+        return { user: null, errors: { global: "Unknown error." } };
       }
     }
-    return {user: null, errors: null}
+    return { user: null, errors: null };
   }
 }

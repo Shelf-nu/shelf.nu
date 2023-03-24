@@ -15,16 +15,15 @@ export function FileDropzone() {
 
   const isPending = ["actionSubmission", "loaderSubmission"].includes(type);
   const isDone = type === "done";
-
-  // useEffect(() => {
-  //   console.log("data:", data);
-  // }, [data]);
-
   const [status, setStatus] = useState<StatusMessageProps>({
     filename: null,
     status: null,
     message: null,
   });
+
+  // useEffect(() => {
+  //   console.log("data:", data);
+  // }, [data]);
 
   useEffect(() => {
     /** if its done, update the local state. */
@@ -81,6 +80,7 @@ export function FileDropzone() {
     },
   });
 
+  /** @TODO Make a useMemoizeStyles hook that can be used for dynamic styles */
   const style = useMemo(
     () =>
       tw(
@@ -90,9 +90,14 @@ export function FileDropzone() {
     [isDragActive]
   );
 
-  const fakeLinkStyles = tw(
-    "text-text-sm font-semibold text-gray-300", // base
-    !isPending && "text-primary-700"
+  const fakeLinkStyles = useMemo(
+    () =>
+      tw(
+        "text-text-sm font-semibold  text-primary-700 hover:cursor-pointer hover:text-primary-800", // base
+        isPending &&
+          "border-gray-200 bg-gray-50 text-gray-300 hover:pointer-events-none" // disabled state
+      ),
+    [isPending]
   );
 
   return (
