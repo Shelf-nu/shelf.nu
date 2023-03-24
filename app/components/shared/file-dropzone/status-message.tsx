@@ -1,11 +1,11 @@
-import { ImageFileIcon } from "~/components/icons/library";
+import { CheckmarkIcon, ImageFileIcon } from "~/components/icons/library";
 import { tw } from "~/utils";
 import { Spinner } from "../spinner";
 
 export interface StatusMessageProps {
   filename: string | null;
   message: string | null;
-  status: "success" | "pending" | "error" | null;
+  status: "done" | "pending" | "error" | null;
 }
 export function StatusMessage({
   message,
@@ -14,7 +14,7 @@ export function StatusMessage({
 }: StatusMessageProps) {
   const isError = status === "error";
   const isPending = status === "pending";
-  const isSuccess = status === "success";
+  const isDone = status === "done";
 
   const styles = tw(
     "flex gap-[14px] rounded-xl border bg-white p-[14px] text-text-sm text-gray-600", // default class
@@ -34,6 +34,7 @@ export function StatusMessage({
         <div>{message}</div>
       </div>
       {isPending && <Spinner />}
+      {isDone && <CheckmarkIcon />}
     </div>
   );
 }
