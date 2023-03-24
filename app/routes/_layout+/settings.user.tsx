@@ -177,9 +177,16 @@ export default function UserPage() {
         </div>
       </Form>
 
+      <div className=" mb-6">
+        <h3 className="text-text-lg font-semibold">Profile picture</h3>
+        <p className="text-sm text-gray-600">
+          This will be displayed on your profile.
+        </p>
+      </div>
+
       <FormRow
-        rowLabel="Profile picture"
-        subHeading="This will be displayed on your profile."
+        rowLabel="Upload profile picture"
+        // subHeading="This will be displayed on your profile."
         className="mt-6 border-t"
       >
         <div className="flex gap-5">
