@@ -1,14 +1,15 @@
+/** Breadcrumbs */
 .breadcrumbs {
   @apply flex items-center font-semibold text-gray-600;
-}
-
-.breadcrumb:last-child {
-  @apply pointer-events-none text-primary;
 }
 
 .breadcrumb {
   @apply flex;
 }
+.breadcrumb:last-child {
+  @apply pointer-events-none text-primary;
+}
+
 .breadcrumb a,
 .breadcrumb span {
   @apply mb-[-1px] block h-full text-[14px];

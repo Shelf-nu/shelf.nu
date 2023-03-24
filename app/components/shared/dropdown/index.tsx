@@ -1,6 +1,5 @@
 import { Menu } from "@headlessui/react";
-
-import styles from "./styles.module.css";
+import { tw } from "~/utils";
 
 interface Props {
   /** Title to be shown on the dropdown */
@@ -15,14 +14,16 @@ interface Props {
 export default function Dropdown({ title, className = "", items }: Props) {
   const hasItems = items?.length > 0;
 
+  const styles = tw("dropdown", className);
+
   return hasItems ? (
-    <div className={`${className} ${styles.menu}`}>
+    <div className={styles}>
       <Menu>
-        <Menu.Button className={styles.button}>{title}</Menu.Button>
-        <Menu.Items className={styles.items}>
+        <Menu.Button className="button">{title}</Menu.Button>
+        <Menu.Items className="items">
           {items.map((item) => (
             <Menu.Item key={item.title}>
-              <a className={styles.item} href={item.to}>
+              <a className="item" href={item.to}>
                 {item.title}
               </a>
             </Menu.Item>

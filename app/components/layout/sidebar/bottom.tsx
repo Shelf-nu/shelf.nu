@@ -5,7 +5,6 @@ import ProfilePicture from "~/components/user/profile-picture";
 import type { User } from "~/database";
 
 import { LogoutButton } from "~/modules/auth";
-import styles from "./styles.module.css";
 
 interface Props {
   user: User;
@@ -13,7 +12,7 @@ interface Props {
 
 export default function SidebarBottom({ user }: Props) {
   return (
-    <div className={styles.bottom}>
+    <div className="bottom">
       <Link to="settings" className="rounded-lg p-1 hover:bg-gray-100">
         <div className="flex items-center gap-3">
           <ProfilePicture width="w-12" height="h-12" />
