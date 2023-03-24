@@ -13,21 +13,9 @@ export function StatusMessage({
   status,
   filename,
 }: StatusMessageProps) {
-  const [visible, setVisible] = useState<boolean>(true);
   const isError = status === "error";
   const isPending = status === "pending";
   const isDone = status === "done";
-
-  useEffect(() => {
-    if (isDone) {
-      /** Hides the status message after 5 after successfull upload */
-      const hide = setTimeout(() => {
-        setVisible(() => false);
-      }, 5000);
-
-      return () => clearTimeout(hide);
-    }
-  }, [isDone]);
 
   const styles = tw(
     "flex gap-[14px] rounded-xl border bg-white p-[14px] text-text-sm text-gray-600", // default class
@@ -39,7 +27,7 @@ export function StatusMessage({
     isError && "text-error-700"
   );
 
-  return message && visible ? (
+  return message ? (
     <div className={styles}>
       <ImageFileIcon error={isError} />
       <div className="flex-1">
