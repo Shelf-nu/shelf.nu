@@ -108,7 +108,7 @@ export function FileDropzone() {
           <p>PNG, JPG or JPEG (max. 400x400px, max. 2MB)</p>
         </Form>
       </div>
-      {status?.message ? <StatusMessage {...status} /> : null}
+      <StatusMessage {...status} />
     </div>
   );
 }
