@@ -42,8 +42,12 @@ export function FileDropzone() {
         const { name, size } = acceptedFiles[0];
 
         fetcher.submit(
-          { filename: name },
-          { method: "post", action: "/api/user/upload-user-photo" }
+          { file: acceptedFiles[0] },
+          {
+            method: "post",
+            action: "/api/user/upload-user-photo",
+            encType: "multipart/form-data",
+          }
         );
 
         /** We just support singular file upload so we get it like this */
@@ -80,7 +84,6 @@ export function FileDropzone() {
     },
   });
 
-  /** @TODO Make a useMemoizeStyles hook that can be used for dynamic styles */
   const style = useMemo(
     () =>
       tw(
@@ -101,10 +104,14 @@ export function FileDropzone() {
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex max-w-full flex-col gap-4">
       <div {...getRootProps({ className: style })}>
         <Form className="flex flex-col items-center">
-          <input {...getInputProps()} disabled={isPending} />
+          <input
+            {...getInputProps()}
+            disabled={isPending}
+            name="profile-picture"
+          />
           <FileUploadIcon />
           <p>
             <span className={fakeLinkStyles}>Click to upload</span> or drag and

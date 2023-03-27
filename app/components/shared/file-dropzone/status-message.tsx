@@ -17,7 +17,7 @@ export function StatusMessage({
   const isDone = status === "done";
 
   const styles = tw(
-    "flex gap-[14px] rounded-xl border bg-white p-[14px] text-text-sm text-gray-600", // default class
+    "flex max-w-full gap-[14px] rounded-xl border bg-white p-[14px] text-text-sm text-gray-600", // default class
     isError && "border-error-300 bg-error-25 text-error-600" // Class indicating the current status
   );
 

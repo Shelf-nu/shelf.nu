@@ -8,15 +8,15 @@ generator client {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  username      String   @unique @default(cuid())
-  firstName      String?
-  lastName      String?
-  profilePicture String?
-  items         Item[]
+  id              String   @id @default(cuid())
+  email           String   @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  username        String   @unique @default(cuid())
+  firstName       String?
+  lastName        String?
+  profilePicture  String?
+  items           Item[]
 
   @@unique([email, username])
 }
