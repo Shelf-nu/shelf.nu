@@ -7,7 +7,7 @@ html {
 }
 
 body {
-  @apply bg-white text-gray-900;
+  @apply bg-white text-text-sm text-gray-900;
 }
 
 h1,
@@ -43,4 +43,28 @@ label span {
 
 p {
   @apply text-text-sm font-normal text-gray-600;
+}
+
+@keyframes spinner {
+  0% {
+    transform: translate3d(-50%, -50%, 0) rotate(0deg);
+  }
+  100% {
+    transform: translate3d(-50%, -50%, 0) rotate(360deg);
+  }
+}
+
+.spinner::before {
+  @apply border-[5px] border-gray-100 border-b-primary-600;
+  animation: 1.5s linear infinite spinner;
+  animation-play-state: inherit;
+  border-radius: 50%;
+  content: "";
+  height: 25px;
+  position: absolute;
+  top: 14px;
+  left: 0;
+  transform: translate3d(-50%, -50%, 0);
+  width: 25px;
+  will-change: transform;
 }

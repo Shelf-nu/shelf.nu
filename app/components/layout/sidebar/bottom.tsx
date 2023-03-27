@@ -15,7 +15,7 @@ export default function SidebarBottom({ user }: Props) {
     <div className="bottom">
       <Link to="settings" className="rounded-lg p-1 hover:bg-gray-100">
         <div className="flex items-center gap-3">
-          <ProfilePicture user={user} />
+          <ProfilePicture width="w-12" height="h-12" />
           <div className="flex-1 text-[14px]">
             <div className="font-semibold">{user.username}</div>
             <div>{user.email}</div>

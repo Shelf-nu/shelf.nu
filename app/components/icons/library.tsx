@@ -186,3 +186,98 @@ export function MailIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function FileUploadIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={46}
+      height={46}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <rect x={3} y={3} width={40} height={40} rx={20} fill="#F2F4F7" />
+      <path
+        d="M19.667 26.333 23 23m0 0 3.333 3.333M23 23v7.5m6.667-3.548a4.583 4.583 0 0 0-2.917-8.12.516.516 0 0 1-.445-.25 6.25 6.25 0 1 0-9.816 7.58"
+        stroke="#475467"
+        strokeWidth={1.667}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect
+        x={3}
+        y={3}
+        width={40}
+        height={40}
+        rx={20}
+        stroke="#F9FAFB"
+        strokeWidth={6}
+      />
+    </svg>
+  );
+}
+
+export function ImageFileIcon({
+  error = undefined,
+  ...rest
+}: {
+  rest?: SVGProps<SVGSVGElement>;
+  error?: boolean | undefined;
+}) {
+  return (
+    <svg
+      width={36}
+      height={36}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...rest}
+    >
+      <rect
+        x={2}
+        y={2}
+        width={32}
+        height={32}
+        rx={16}
+        fill={error ? "#FEE4E2" : "#FDEAD7"}
+      />
+      <path
+        d="M20.8 24h-6.18c-.403 0-.605 0-.698-.08a.333.333 0 0 1-.116-.28c.01-.122.152-.265.438-.55l5.668-5.67c.264-.263.396-.395.549-.445a.667.667 0 0 1 .412 0c.152.05.284.182.548.446L24 20v.8M20.8 24c1.12 0 1.68 0 2.108-.218a2 2 0 0 0 .874-.874C24 22.48 24 21.92 24 20.8M20.8 24h-5.6c-1.12 0-1.68 0-2.108-.218a2 2 0 0 1-.874-.874C12 22.48 12 21.92 12 20.8v-5.6c0-1.12 0-1.68.218-2.108a2 2 0 0 1 .874-.874C13.52 12 14.08 12 15.2 12h5.6c1.12 0 1.68 0 2.108.218a2 2 0 0 1 .874.874C24 13.52 24 14.08 24 15.2v5.6m-7-5.133a1.333 1.333 0 1 1-2.667 0 1.333 1.333 0 0 1 2.667 0Z"
+        stroke={error ? "#D92D20" : "#EF6820"}
+        strokeWidth={1.333}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect
+        x={2}
+        y={2}
+        width={32}
+        height={32}
+        rx={16}
+        stroke={error ? "#FEF3F2" : "#FEF6EE"}
+        strokeWidth={4}
+      />
+    </svg>
+  );
+}
+
+export function CheckmarkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={16}
+      height={16}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <rect x={0.5} y={0.5} width={15} height={15} rx={7.5} fill="#EF6820" />
+      <path
+        d="M11.333 5.5 6.75 10.083 4.667 8"
+        stroke="#fff"
+        strokeWidth={1.667}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x={0.5} y={0.5} width={15} height={15} rx={7.5} stroke="#EF6820" />
+    </svg>
+  );
+}

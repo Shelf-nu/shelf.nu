@@ -1,15 +1,28 @@
-import type { User } from "~/database";
+import { useUserData } from "~/hooks";
+import { tw } from "~/utils";
 
-interface Props {
-  user: User;
-}
+/** Returns the current user's profile picture */
+export default function ProfilePicture({
+  width = "w-16",
+  height = "h-16",
+  className = "",
+}: {
+  /** Tailwind class for width */
+  width?: string;
+  /** Tailwind class for height */
+  height?: string;
 
-export default function ProfilePicture({ user }: Props) {
-  return (
+  /** Extra classes */
+  className?: string;
+}) {
+  let user = useUserData();
+  const styles = tw(width, height, "rounded-[10px]", className);
+
+  return user ? (
     <img
       src={user.profilePicture || "/images/default_pfp.jpg"}
       alt={`${user.username}`}
-      className="h-10 w-10 rounded-full"
+      className={styles}
     />
-  );
+  ) : null;
 }
