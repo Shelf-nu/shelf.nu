@@ -11,7 +11,7 @@ import { StatusMessage } from "./status-message";
 export function FileDropzone() {
   const fetcher = useFetcher();
 
-  const { data, type } = fetcher;
+  const { type } = fetcher;
 
   const isPending = ["actionSubmission", "loaderSubmission"].includes(type);
   const isDone = type === "done";
@@ -20,10 +20,6 @@ export function FileDropzone() {
     status: null,
     message: null,
   });
-
-  // useEffect(() => {
-  //   console.log("data:", data);
-  // }, [data]);
 
   useEffect(() => {
     /** if its done, update the local state. */
@@ -121,7 +117,7 @@ export function FileDropzone() {
             <span className={fakeLinkStyles}>Click to upload</span> or drag and
             drop
           </p>
-          <p>PNG, JPG or JPEG (Recomended square aspect ratio, max. 2MB)</p>
+          <p>PNG, JPG or JPEG (max. 2MB)</p>
         </Form>
       </div>
       <StatusMessage {...status} />
