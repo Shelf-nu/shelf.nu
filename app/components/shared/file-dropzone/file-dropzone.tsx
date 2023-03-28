@@ -117,7 +117,7 @@ export function FileDropzone() {
             <span className={fakeLinkStyles}>Click to upload</span> or drag and
             drop
           </p>
-          <p>PNG, JPG or JPEG (Recomended square aspect ratio, max. 2MB)</p>
+          <p>PNG, JPG or JPEG (max. 2MB)</p>
         </Form>
       </div>
       <StatusMessage {...status} />
