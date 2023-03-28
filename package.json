@@ -44,6 +44,7 @@
     "react-dom": "^18.2.0",
     "react-dropzone": "^14.2.3",
     "react-zorm": "^0.6.1",
+    "sharp": "^0.32.0",
     "tailwind-merge": "^1.8.0",
     "zod": "^3.19.1"
   },
