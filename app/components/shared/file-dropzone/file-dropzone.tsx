@@ -42,6 +42,10 @@ export function FileDropzone() {
         const { name, size } = acceptedFiles[0];
 
         fetcher.submit(
+          /**
+           * For some reason even tho its multipart/form-data submit() is not
+           *  happy with me passing a file as part of the POST body
+           @ts-ignore */
           { file: acceptedFiles[0] },
           {
             method: "post",

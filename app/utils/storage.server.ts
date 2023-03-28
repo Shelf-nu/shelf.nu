@@ -6,12 +6,19 @@ import {
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { requireAuthSession } from "~/modules/auth";
 import { createFileFromAsyncIterable } from "./create-buffer-from-async-iterable";
+import { SUPABASE_URL } from "./env";
 
-export function getPublicFileURL(filePath: string, bucketName: string) {
+export function getPublicFileURL({
+  filename,
+  bucketName = "profile-pictures",
+}: {
+  filename: string;
+  bucketName?: string;
+}) {
   try {
     const { data: url } = getSupabaseAdmin()
       .storage.from(bucketName)
-      .getPublicUrl(filePath);
+      .getPublicUrl(filename);
 
     return url.publicUrl;
   } catch (error) {
@@ -26,11 +33,15 @@ async function uploadFile(
   try {
     const file = await createFileFromAsyncIterable(data);
 
-    const d = await getSupabaseAdmin()
+    const upload = await getSupabaseAdmin()
       .storage.from(bucketName)
       .upload(filename, file, { contentType, upsert: true });
 
-    return d?.data?.path;
+    const publicUrl = getPublicFileURL({
+      filename: upload?.data?.path || "",
+    }) as string;
+
+    return publicUrl;
   } catch (error) {
     throw error;
   }
@@ -47,10 +58,12 @@ export async function parseFileFormData(request: Request) {
 
   try {
     const uploadHandler = unstable_composeUploadHandlers(
-      async ({ name, data, contentType }) => {
+      async ({ data, contentType }) => {
         const fileExtension = contentType.split("/")[1];
         const uploadedFileURL = await uploadFile(data, {
-          filename: `${userId}/profile.${fileExtension}`,
+          filename: `${userId}/profile-${Math.floor(
+            Date.now() / 1000
+          )}.${fileExtension}`,
           contentType,
         });
 
@@ -64,6 +77,35 @@ export async function parseFileFormData(request: Request) {
     );
 
     return formData;
+  } catch (error) {
+    throw error;
+  }
+}
+
+export async function deleteProfilePicture({
+  url,
+  bucketName = "profile-pictures",
+}: {
+  url: string;
+  bucketName?: string;
+}) {
+  try {
+    if (
+      !url.startsWith(
+        `${SUPABASE_URL}/storage/v1/object/public/profile-pictures/`
+      ) ||
+      url === ""
+    ) {
+      throw new Error("Wrong url");
+    }
+
+    const { error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .remove([url.split(`${bucketName}/`)[1]]);
+
+    if (error) {
+      throw error;
+    }
   } catch (error) {
     throw error;
   }
