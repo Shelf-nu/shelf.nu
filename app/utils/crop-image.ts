@@ -4,6 +4,7 @@ export const cropImage = async (data: AsyncIterable<Uint8Array>) => {
     chunks.push(chunk);
   }
 
+  // @ts-ignore
   const sharp = (await import("sharp")).default;
 
   return sharp(Buffer.concat(chunks))
