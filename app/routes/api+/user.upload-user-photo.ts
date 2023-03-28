@@ -1,22 +1,37 @@
 import type { ActionArgs } from "@remix-run/node";
-// import { unstable_parseMultipartFormData } from "@remix-run/node";
 import { json } from "react-router";
+import { requireAuthSession } from "~/modules/auth";
+import { getUserByID, updateUser } from "~/modules/user";
+
 import { assertIsPost } from "~/utils";
+import {
+  deleteProfilePicture,
+  parseFileFormData,
+} from "~/utils/storage.server";
 
 export const action = async ({ request }: ActionArgs) => {
   assertIsPost(request);
+  const { userId } = await requireAuthSession(request);
+
   try {
-    const formData = await request.formData();
-    const filename = formData.get("filename");
+    const user = await getUserByID(userId);
+    /** needed for deleting */
+    const previousProfilePictureUrl = user?.profilePicture || undefined;
 
-    // const formData = await unstable_parseMultipartFormData(
-    //   request,
-    //   uploadHandler // <-- can use this example > https://dev.to/aaronksaunders/how-to-upload-to-storage-buckets-and-write-data-with-remix-and-supabase-3l7c
-    // );
+    const formData = await parseFileFormData(request);
+    const profilePicture = formData.get("file") as string;
 
-    // const someData = { 1: "hello world" };
-    return json({ filename });
+    /** Delete the old picture */
+    await deleteProfilePicture({ url: previousProfilePictureUrl || "" });
+
+    /** Update user with new picture */
+    const updatedUser = await updateUser({
+      id: userId,
+      profilePicture,
+    });
+
+    return json({ updatedUser });
   } catch (error) {
-    return json({ error, ok: false });
+    return json({ error });
   }
 };
