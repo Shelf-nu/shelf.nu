@@ -3,8 +3,10 @@ import {
   unstable_composeUploadHandlers,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
+
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { requireAuthSession } from "~/modules/auth";
+import { cropImage } from ".";
 import { createFileFromAsyncIterable } from "./create-buffer-from-async-iterable";
 import { SUPABASE_URL } from "./env";
 
@@ -31,7 +33,7 @@ async function uploadFile(
   { filename, contentType, bucketName = "profile-pictures" }: UploadOptions
 ) {
   try {
-    const file = await createFileFromAsyncIterable(data);
+    const file = await cropImage(await createFileFromAsyncIterable(data));
 
     const upload = await getSupabaseAdmin()
       .storage.from(bucketName)
