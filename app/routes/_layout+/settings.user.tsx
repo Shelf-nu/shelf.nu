@@ -1,4 +1,4 @@
-import type { ActionArgs, V2_MetaFunction } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 
 import { Form, useActionData, useNavigation } from "@remix-run/react";
@@ -12,7 +12,11 @@ import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
 
 import { useUserData } from "~/hooks";
-import { destroyAuthSession, sendResetPasswordLink } from "~/modules/auth";
+import {
+  destroyAuthSession,
+  requireAuthSession,
+  sendResetPasswordLink,
+} from "~/modules/auth";
 import { updateUser } from "~/modules/user";
 import type {
   UpdateUserPayload,
@@ -24,7 +28,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { delay } from "~/utils/delay";
 
 export const UpdateFormSchema = z.object({
-  id: z.string(),
   email: z
     .string()
     .email("Please enter a valid email.")
@@ -37,6 +40,7 @@ export const UpdateFormSchema = z.object({
 });
 
 export async function action({ request }: ActionArgs) {
+  const { userId } = await requireAuthSession(request);
   assertIsPost(request);
 
   const formData = await request.formData();
@@ -78,8 +82,10 @@ export async function action({ request }: ActionArgs) {
     }
 
     /** Create the payload if the client side validation works */
-    const updateUserPayload: UpdateUserPayload = result?.data;
-
+    const updateUserPayload: UpdateUserPayload = {
+      ...result?.data,
+      id: userId,
+    };
     /** Update the user */
     const updatedUser = await updateUser(updateUserPayload);
 
@@ -91,7 +97,9 @@ export async function action({ request }: ActionArgs) {
   }
 }
 
-export async function loader() {
+export async function loader({ request }: LoaderArgs) {
+  await requireAuthSession(request);
+
   const title = "User Settings";
 
   return json({ title });
@@ -162,8 +170,6 @@ export default function UserPage() {
             error={zo.errors.username()?.message || data?.errors?.username}
           />
         </FormRow>
-
-        <input type="hidden" name={zo.fields.id()} defaultValue={user?.id} />
 
         <div className="mt-4 text-right">
           <Button

@@ -7,10 +7,15 @@ import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";
 import { notFound } from "~/utils";
 
+const getPage = (searchParams: URLSearchParams) => ({
+  page: Number(searchParams.get("page") || "0"),
+});
+
 export async function loader({ request }: LoaderArgs) {
   const { userId, email } = await requireAuthSession(request);
+  const { page } = getPage(new URL(request.url).searchParams);
 
-  const items = await getItems({ userId });
+  const items = await getItems({ userId, page, per_page: 2 });
 
   if (!items) {
     throw notFound(`No user with id ${userId}`);

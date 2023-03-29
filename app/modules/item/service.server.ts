@@ -14,13 +14,20 @@ export async function getItem({
 
 export async function getItems({
   userId,
-  page,
+  page = 1,
+  per_page = 2,
 }: {
   userId: User["id"];
+
+  /** Page number. Starts at 1 */
   page: number;
+
+  /** Items to be loaded per page */
+  per_page?: number;
 }) {
   return db.item.findMany({
-    take: 4,
+    skip: page > 1 ? (page - 1) * per_page : 0,
+    take: per_page,
     where: { userId },
     select: { id: true, title: true },
     orderBy: { updatedAt: "desc" },
