@@ -15,7 +15,7 @@ export async function getItem({
 export async function getItems({
   userId,
   page = 1,
-  per_page = 2,
+  perPage = 8,
 }: {
   userId: User["id"];
 
@@ -23,11 +23,13 @@ export async function getItems({
   page: number;
 
   /** Items to be loaded per page */
-  per_page?: number;
+  perPage?: number;
 }) {
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
   return db.item.findMany({
-    skip: page > 1 ? (page - 1) * per_page : 0,
-    take: per_page,
+    skip,
+    take,
     where: { userId },
     select: { id: true, title: true },
     orderBy: { updatedAt: "desc" },
@@ -60,5 +62,13 @@ export async function deleteItem({
 }: Pick<Item, "id"> & { userId: User["id"] }) {
   return db.item.deleteMany({
     where: { id, userId },
+  });
+}
+
+export async function countTotalItems(userId: User["id"]) {
+  return db.item.count({
+    where: {
+      userId,
+    },
   });
 }
