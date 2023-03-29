@@ -58,7 +58,7 @@ export default function Input({
     icon || addOn
       ? icon
         ? "rounded-[8px] pl-[42px]"
-        : "rounded-r-[8px] rounded-l-none"
+        : "rounded-l-none rounded-r-[8px]"
       : "rounded-[8px]",
     className
   );

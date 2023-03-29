@@ -43,7 +43,7 @@ export default function Sidebar({ user }: Props) {
               <NavLink
                 className={({ isActive }) =>
                   tw(
-                    "my-1 flex items-center gap-3 rounded-md py-2 px-3 text-text-md font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900",
+                    "my-1 flex items-center gap-3 rounded-md px-3 py-2 text-text-md font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900",
                     isActive ? "bg-gray-100 text-gray-900" : ""
                   )
                 }
