@@ -12,8 +12,15 @@ export async function getItem({
   });
 }
 
-export async function getItems({ userId }: { userId: User["id"] }) {
+export async function getItems({
+  userId,
+  page,
+}: {
+  userId: User["id"];
+  page: number;
+}) {
   return db.item.findMany({
+    take: 4,
     where: { userId },
     select: { id: true, title: true },
     orderBy: { updatedAt: "desc" },
