@@ -9,7 +9,7 @@ export function Breadcrumbs() {
     (match) => match.handle && match.handle.breadcrumb
   );
   return (
-    <header className="mb-5">
+    <div className="mb-5">
       <div className="breadcrumbs">
         {breadcrumbs.map((match, index) => (
           <Breadcrumb
@@ -19,6 +19,6 @@ export function Breadcrumbs() {
           />
         ))}
       </div>
-    </header>
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { Form, useCatch, useLoaderData, useMatches } from "@remix-run/react";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
@@ -50,21 +51,13 @@ export async function action({ request, params }: ActionArgs) {
 
 export default function ItemDetailsPage() {
   const data = useLoaderData<typeof loader>();
-  const m = useMatches();
-
-  console.log(m);
-
   return (
-    <div>
+    <div className=" items-top flex justify-between">
       <p className="py-6">{data.item.description}</p>
-      <hr className="my-4" />
       <Form method="delete">
-        <button
-          type="submit"
-          className="rounded bg-blue-500  px-4 py-2 text-white focus:bg-blue-400 hover:bg-blue-600"
-        >
+        <Button variant="secondary" type="submit">
           Delete
-        </button>
+        </Button>
       </Form>
     </div>
   );
