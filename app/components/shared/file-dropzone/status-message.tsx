@@ -1,3 +1,4 @@
+import type { Fetcher } from "@remix-run/react";
 import { CheckmarkIcon, ImageFileIcon } from "~/components/icons/library";
 import { tw } from "~/utils";
 import { Spinner } from "../spinner";
@@ -8,13 +9,22 @@ export interface StatusMessageProps {
   status: "done" | "pending" | "error" | null;
 }
 export function StatusMessage({
-  message,
-  status,
+  fetcher,
   filename,
-}: StatusMessageProps) {
-  const isError = status === "error";
-  const isPending = status === "pending";
-  const isDone = status === "done";
+  message,
+  error,
+}: {
+  fetcher: Fetcher;
+  filename: string;
+  message: string | null;
+  /** Indicates if tehre was a front-end error with the dropzone */
+  error: boolean;
+}) {
+  const { data, type } = fetcher;
+
+  const isError = data?.error || error;
+  const isPending = ["actionSubmission", "loaderSubmission"].includes(type);
+  const isDone = type === "done";
 
   const styles = tw(
     "flex max-w-full gap-[14px] rounded-xl border bg-white p-[14px] text-text-sm text-gray-600", // default class
@@ -34,7 +44,7 @@ export function StatusMessage({
         <div>{message}</div>
       </div>
       {isPending && <Spinner />}
-      {isDone && <CheckmarkIcon />}
+      {isDone && !isError && <CheckmarkIcon />}
     </div>
   ) : null;
 }
