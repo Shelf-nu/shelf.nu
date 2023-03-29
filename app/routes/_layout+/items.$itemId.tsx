@@ -1,6 +1,6 @@
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { Form, useCatch, useLoaderData, useMatches } from "@remix-run/react";
+import { Form, useCatch, useLoaderData } from "@remix-run/react";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 
