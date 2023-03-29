@@ -14,8 +14,8 @@ import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const NewItemFormSchema = z.object({
-  title: z.string().min(2, "require-title"),
-  description: z.string().min(5, "require-description"),
+  title: z.string().min(2, "Title is required"),
+  description: z.string(),
 });
 
 const title = "New Item";
@@ -86,6 +86,7 @@ export default function NewItemPage() {
             name={zo.fields.title()}
             disabled={disabled}
             error={zo.errors.title()?.message}
+            autoFocus
           />
         </div>
 

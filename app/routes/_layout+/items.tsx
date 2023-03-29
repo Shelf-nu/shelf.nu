@@ -42,9 +42,5 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function ItemsPage() {
-  return (
-    <div>
-      <Outlet />
-    </div>
-  );
+  return <Outlet />;
 }
