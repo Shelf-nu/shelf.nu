@@ -54,7 +54,7 @@ export const loader: LoaderFunction = async () =>
 
 export default function App() {
   const { env } = useLoaderData<typeof loader>();
-
+  // @TODO need to add error & catch boundries here
   return (
     <html lang="en" className="h-full">
       <head>
