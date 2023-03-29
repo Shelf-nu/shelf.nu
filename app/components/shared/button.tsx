@@ -10,6 +10,7 @@ export function Button({
   className = "",
   variant = "primary",
   width = "auto",
+  size = "md",
   icon,
   disabled = undefined,
   children,
@@ -19,13 +20,14 @@ export function Button({
   className?: string;
   variant?: ButtonVariant;
   width?: ButtonWidth;
+  size?: "sm" | "md";
   icon?: Icon;
   disabled?: boolean;
   [key: string]: any;
 }) {
   const Component = props?.to ? Link : as;
 
-  const baseButtonClasses = `inline-flex items-center justify-center rounded-lg font-semibold text-center py-[10px] gap-2 px-4 max-w-xl border text-sm box-shadow-xs`;
+  const baseButtonClasses = `inline-flex items-center justify-center rounded-lg font-semibold text-center  gap-2  max-w-xl border text-sm box-shadow-xs`;
 
   const variants = {
     primary: tw(
@@ -45,6 +47,11 @@ export function Button({
     ),
   };
 
+  const sizes = {
+    sm: tw("px-[14px] py-2"),
+    md: tw("px-4 py-[10px]"),
+  };
+
   const widths = {
     auto: "w-auto",
     full: "w-full",
@@ -56,6 +63,7 @@ export function Button({
     baseButtonClasses,
     variants[variant],
     widths[width],
+    sizes[size],
     disabledStyles,
     className
   );

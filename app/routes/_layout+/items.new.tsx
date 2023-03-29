@@ -20,7 +20,9 @@ export const NewItemFormSchema = z.object({
 
 const title = "New Item";
 
-export async function loader() {
+export async function loader({ request }: LoaderArgs) {
+  await requireAuthSession(request);
+
   const header = {
     title,
   };

@@ -1,8 +1,10 @@
-import type { V2_MetaFunction } from "@remix-run/node";
+import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { requireAuthSession } from "~/modules/auth";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader() {
+export async function loader({ request }: LoaderArgs) {
+  await requireAuthSession(request);
   const title = "Items Settings";
 
   return json({ title });

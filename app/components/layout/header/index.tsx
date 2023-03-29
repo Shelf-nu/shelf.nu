@@ -5,7 +5,7 @@ import { useCurrentRouteData } from "~/hooks";
 
 import { renderActionFromJson } from "./render-action-from-json";
 import type { Action, HeaderData } from "./types";
-import Breadcrumbs from "../breadcrumbs";
+import { Breadcrumbs } from "../breadcrumbs";
 
 export default function Header() {
   const data = useCurrentRouteData();

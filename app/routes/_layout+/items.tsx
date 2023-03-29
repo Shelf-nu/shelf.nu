@@ -4,7 +4,7 @@ import { Link, Outlet } from "@remix-run/react";
 import type { HeaderData } from "~/components/layout/header/types";
 
 import { requireAuthSession } from "~/modules/auth";
-import { getUserByEmail } from "~/modules/user";
+import { getUserByID } from "~/modules/user";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const handle = {
@@ -12,10 +12,8 @@ export const handle = {
 };
 
 export async function loader({ request }: LoaderArgs) {
-  const authSession = await requireAuthSession(request);
-  const user = authSession
-    ? await getUserByEmail(authSession?.email)
-    : undefined;
+  const { userId } = await requireAuthSession(request);
+  const user = await getUserByID(userId);
 
   /* Just in case */
   if (!user) return redirect("/login");
