@@ -13,25 +13,30 @@ export const action = async ({ request }: ActionArgs) => {
   assertIsPost(request);
   const { userId } = await requireAuthSession(request);
 
-  try {
-    const user = await getUserByID(userId);
-    /** needed for deleting */
-    const previousProfilePictureUrl = user?.profilePicture || undefined;
+  const user = await getUserByID(userId);
+  /** needed for deleting */
+  const previousProfilePictureUrl = user?.profilePicture || undefined;
 
-    const formData = await parseFileFormData(request);
-    const profilePicture = formData.get("file") as string;
+  const formData = await parseFileFormData(request);
+  const profilePicture = formData.get("file") as string;
 
-    /** Delete the old picture */
-    await deleteProfilePicture({ url: previousProfilePictureUrl || "" });
-
-    /** Update user with new picture */
-    const updatedUser = await updateUser({
-      id: userId,
-      profilePicture,
-    });
-
-    return json({ updatedUser });
-  } catch (error) {
-    return json({ error });
+  /** if profile picture is an empty string, the upload failed so we return an error */
+  if (profilePicture === "") {
+    return json(
+      {
+        error: "Something went wrong. Please refresh and try again",
+      },
+      { status: 500 }
+    );
   }
+
+  /** Delete the old picture  */
+  await deleteProfilePicture({ url: previousProfilePictureUrl || "" });
+  /** Update user with new picture */
+  const updatedUser = await updateUser({
+    id: userId,
+    profilePicture,
+  });
+
+  return json({ updatedUser });
 };

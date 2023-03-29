@@ -16,35 +16,35 @@ export function getPublicFileURL({
   filename: string;
   bucketName?: string;
 }) {
-  try {
-    const { data: url } = getSupabaseAdmin()
-      .storage.from(bucketName)
-      .getPublicUrl(filename);
+  const { data } = getSupabaseAdmin()
+    .storage.from(bucketName)
+    .getPublicUrl(filename);
 
-    return url.publicUrl;
-  } catch (error) {
-    return json({ error });
-  }
+  return data.publicUrl;
 }
 
 async function uploadFile(
-  data: AsyncIterable<Uint8Array>,
+  fileData: AsyncIterable<Uint8Array>,
   { filename, contentType, bucketName = "profile-pictures" }: UploadOptions
 ) {
   try {
-    const file = await cropImage(data);
+    const file = await cropImage(fileData);
 
-    const upload = await getSupabaseAdmin()
+    const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
       .upload(filename, file, { contentType, upsert: true });
 
-    const publicUrl = getPublicFileURL({
-      filename: upload?.data?.path || "",
-    }) as string;
+    if (!error) {
+      const publicUrl = getPublicFileURL({
+        filename: data?.path || "",
+      }) as string;
 
-    return publicUrl;
-  } catch (error) {
+      return publicUrl;
+    }
+
     throw error;
+  } catch (error) {
+    return json({ error });
   }
 }
 
@@ -57,30 +57,27 @@ export interface UploadOptions {
 export async function parseFileFormData(request: Request) {
   const { userId } = await requireAuthSession(request);
 
-  try {
-    const uploadHandler = unstable_composeUploadHandlers(
-      async ({ data, contentType }) => {
-        const fileExtension = contentType.split("/")[1];
-        const uploadedFileURL = await uploadFile(data, {
-          filename: `${userId}/profile-${Math.floor(
-            Date.now() / 1000
-          )}.${fileExtension}`,
-          contentType,
-        });
+  const uploadHandler = unstable_composeUploadHandlers(
+    // @ts-ignore
+    async ({ data, contentType }) => {
+      const fileExtension = contentType.split("/")[1];
+      const uploadedFileURL = await uploadFile(data, {
+        filename: `${userId}/profile-${Math.floor(
+          Date.now() / 1000
+        )}.${fileExtension}`,
+        contentType,
+      });
 
-        return uploadedFileURL;
-      }
-    );
+      return uploadedFileURL;
+    }
+  );
 
-    const formData = await unstable_parseMultipartFormData(
-      request,
-      uploadHandler
-    );
+  const formData = await unstable_parseMultipartFormData(
+    request,
+    uploadHandler
+  );
 
-    return formData;
-  } catch (error) {
-    throw error;
-  }
+  return formData;
 }
 
 export async function deleteProfilePicture({
@@ -108,6 +105,6 @@ export async function deleteProfilePicture({
       throw error;
     }
   } catch (error) {
-    throw error;
+    return json({ error });
   }
 }
