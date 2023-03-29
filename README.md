@@ -1,6 +1,7 @@
 # Shelf.nu
 
 [![Twitter](https://img.shields.io/twitter/url/https/twitter.com/cloudposse.svg?style=social&label=Follow%20%40ShelfQR)](https://twitter.com/ShelfQR)
+[![🚀 Deploy](https://github.com/Shelf-nu/shelf.nu/actions/workflows/deploy.yml/badge.svg?branch=dev)](https://github.com/Shelf-nu/shelf.nu/actions/workflows/deploy.yml)
 
 Shelf 🏷️ Asset tagging infrastructure for absolutely everyone.
 
