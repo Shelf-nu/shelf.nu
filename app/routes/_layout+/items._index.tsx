@@ -46,7 +46,7 @@ export async function loader({ request }: LoaderArgs) {
 
 export default function ItemIndexPage() {
   return (
-    <div className="mt-8 flex-1 ">
+    <div className="mt-8 flex flex-1 flex-col gap-2">
       <Filters />
       <List />
     </div>

@@ -21,6 +21,9 @@ export interface ListData {
   totalItems: number;
 
   totalPages: number;
+
+  /** Search string */
+  search: string | null;
 }
 
 /**
@@ -30,7 +33,7 @@ export interface ListData {
  * The route is required to export {@link ListData}
  */
 export const List = () => {
-  const { page, items, totalItems, perPage, totalPages } =
+  const { page, items, totalItems, perPage, totalPages, search } =
     useLoaderData<ListData>();
 
   const hasItems = items?.length > 0;
@@ -48,8 +51,15 @@ export const List = () => {
         <EmptyState />
       ) : (
         <div>
-          <div className="flex justify-between border-b px-6 py-[14px] text-gray-600">
-            {totalItems} items
+          <div className=" flex justify-between border-b px-6 py-[14px] text-gray-600">
+            {search ? (
+              <p>
+                {items.length} item{items.length > 1 && "s"}{" "}
+                <span className="text-gray-400">out of {totalItems}</span>
+              </p>
+            ) : (
+              <p>{totalItems} items</p>
+            )}
           </div>
 
           <div>
@@ -58,7 +68,7 @@ export const List = () => {
             ))}
           </div>
 
-          <div className="flex items-center justify-between px-6 py-[18px]">
+          <div className="flex items-center justify-between border-t px-6 py-[18px]">
             <Button
               variant="secondary"
               size="sm"
@@ -75,7 +85,7 @@ export const List = () => {
             <Button
               variant="secondary"
               size="sm"
-              to={`.?page=${page + 1}`}
+              to={`.?page=${page >= 1 ? page + 1 : 2}`}
               disabled={page * perPage >= totalItems}
             >
               {"Next >"}
