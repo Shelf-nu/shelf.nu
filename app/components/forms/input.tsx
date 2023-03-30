@@ -1,3 +1,5 @@
+import { forwardRef } from "react";
+
 import { tw } from "~/utils";
 import type { Icon } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
@@ -29,18 +31,25 @@ interface Props
 
   /** Needed for input type textarea */
   rows?: number;
+
+  /** Sometimes you want to append a button to the input field. Set this to true to manage the style */
+  hasAttachedButton?: boolean;
 }
 
-export default function Input({
-  className,
-  error,
-  inputType = "input",
-  label,
-  hideLabel,
-  addOn,
-  icon,
-  ...rest
-}: Props) {
+const Input = forwardRef(function Input(
+  {
+    className,
+    error,
+    inputType = "input",
+    label,
+    hideLabel,
+    hasAttachedButton = false,
+    addOn,
+    icon,
+    ...rest
+  }: Props,
+  ref
+) {
   const iconClasses = tw(
     "pointer-events-none absolute flex h-full items-center  border-gray-300  px-[14px]"
   );
@@ -60,17 +69,23 @@ export default function Input({
         ? "rounded-[8px] pl-[42px]"
         : "rounded-l-none rounded-r-[8px]"
       : "rounded-[8px]",
+    hasAttachedButton ? tw("rounded-r-none") : undefined,
     className
   );
 
   /** Store props in an object for easier dynamic rendering of input type */
   const inputProps = {
     className: inputClasses,
+    ref,
     ...rest,
   };
+  // @TODO dont know how to fix that.
+  // @ts-ignore
   let input = <input {...inputProps} />;
 
   if (inputType === "textarea") {
+    // @TODO dont know how to fix that.
+    // @ts-ignore
     input = <textarea {...inputProps} rows={rest.rows || 8} />;
   }
 
@@ -98,4 +113,6 @@ export default function Input({
       {error && <div className="text-sm text-error-500">{error}</div>}
     </label>
   );
-}
+});
+
+export default Input;

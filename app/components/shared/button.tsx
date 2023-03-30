@@ -5,17 +5,7 @@ import iconsMap from "./icons-map";
 
 import type { ButtonVariant, ButtonWidth } from "../layout/header/types";
 
-export function Button({
-  as = "button",
-  className = "",
-  variant = "primary",
-  width = "auto",
-  size = "md",
-  icon,
-  disabled = undefined,
-  children,
-  ...props
-}: {
+export interface ButtonProps {
   as?: React.ElementType;
   className?: string;
   variant?: ButtonVariant;
@@ -23,8 +13,22 @@ export function Button({
   size?: "sm" | "md";
   icon?: Icon;
   disabled?: boolean;
+  attachToInput?: boolean;
   [key: string]: any;
-}) {
+}
+
+export function Button({
+  as = "button",
+  className = "",
+  variant = "primary",
+  width = "auto",
+  size = "md",
+  attachToInput = false,
+  icon,
+  disabled = undefined,
+  children,
+  ...props
+}: ButtonProps) {
   const Component = props?.to ? Link : as;
 
   const baseButtonClasses = `inline-flex items-center justify-center rounded-lg font-semibold text-center  gap-2  max-w-xl border text-sm box-shadow-xs`;
@@ -58,6 +62,9 @@ export function Button({
   };
 
   const disabledStyles = disabled ? "pointer-events-none " : undefined;
+  const attachedStyles = attachToInput
+    ? tw(" rounded-l-none border-l-0")
+    : undefined;
 
   const finalStyles = tw(
     baseButtonClasses,
@@ -65,6 +72,7 @@ export function Button({
     widths[width],
     sizes[size],
     disabledStyles,
+    attachedStyles,
     className
   );
   return (

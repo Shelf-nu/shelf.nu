@@ -1,11 +1,11 @@
 import { useMemo } from "react";
 
-import { NavLink, useLoaderData } from "@remix-run/react";
-import { tw } from "~/utils";
+import { useLoaderData } from "@remix-run/react";
 import { EmptyState } from "./empty-state";
 
 import { ListItem } from "./list-item";
 import type { ListItemData } from "./list-item";
+import { PageNumber } from "./page-number";
 import { Button } from "../shared/button";
 
 export interface ListData {
@@ -43,7 +43,7 @@ export const List = () => {
     return pages;
   }, [totalPages]);
   return (
-    <main className=" rounded-[12px] border border-gray-200 bg-white">
+    <main className="rounded-[12px] border border-gray-200 bg-white">
       {!hasItems ? (
         <EmptyState />
       ) : (
@@ -69,19 +69,7 @@ export const List = () => {
             </Button>
             <ul className="flex gap-[2px]">
               {pageNumbers.map((pageNumber) => (
-                <li key={pageNumber}>
-                  <NavLink
-                    to={`.?page=${pageNumber}`}
-                    className={tw(
-                      "rounded-[8px] px-4 py-[10px] text-gray-600 hover:bg-gray-50 hover:text-gray-800",
-                      pageNumber === page
-                        ? "pointer-events-none bg-gray-50 text-gray-800"
-                        : ""
-                    )}
-                  >
-                    {pageNumber}
-                  </NavLink>
-                </li>
+                <PageNumber number={pageNumber} page={page} key={pageNumber} />
               ))}
             </ul>
             <Button
