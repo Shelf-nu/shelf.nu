@@ -117,7 +117,7 @@ export function FileDropzone() {
   );
 
   return (
-    <div className="flex max-w-full flex-col gap-4">
+    <div className="flex w-full max-w-[800px] flex-col gap-4">
       <div {...getRootProps({ className: style })}>
         <Form className="flex flex-col items-center">
           <input

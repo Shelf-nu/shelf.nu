@@ -9,7 +9,6 @@ export function Breadcrumb({
   isLastItem: boolean;
 }) {
   let breadcrumb = match?.handle?.breadcrumb(match);
-
   /**
    * If the value is "single" that means we have to
    * take the page title and render it.

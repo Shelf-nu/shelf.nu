@@ -1,12 +1,18 @@
-import * as React from "react";
+import { useState } from "react";
+import type { ChangeEvent } from "react";
 
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useTransition } from "@remix-run/react";
+import { Form, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
+
+import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
+import Header from "~/components/layout/header";
+
 import { Button } from "~/components/shared/button";
+import { FileDropzone } from "~/components/shared/file-dropzone";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createItem } from "~/modules/item";
@@ -37,9 +43,10 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
+
 export async function action({ request }: LoaderArgs) {
-  assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  assertIsPost(request);
   const formData = await request.formData();
   const result = await NewItemFormSchema.safeParseAsync(parseFormAny(formData));
 
@@ -73,41 +80,64 @@ export async function action({ request }: LoaderArgs) {
 }
 
 export default function NewItemPage() {
+  const [title, setTitle] = useState<string>("Untitled item");
   const zo = useZorm("NewQuestionWizardScreen", NewItemFormSchema);
-  const transition = useTransition();
-  const disabled = isFormProcessing(transition.state);
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
+
+  const handleTitleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setTitle(() => event.target.value);
+  };
 
   return (
-    <div>
-      <Form ref={zo.ref} method="post" className="flex w-full flex-col gap-2">
-        <div className="mt-6">
-          <Input
-            label="Title"
-            name={zo.fields.title()}
-            disabled={disabled}
-            error={zo.errors.title()?.message}
-            autoFocus
-          />
-        </div>
+    <>
+      <Header title={title} />
+      <div>
+        <Form ref={zo.ref} method="post" className="flex w-full flex-col gap-2">
+          <FormRow rowLabel={"Name"} className="border-b-0">
+            <Input
+              label="Name"
+              hideLabel
+              name={zo.fields.title()}
+              disabled={disabled}
+              error={zo.errors.title()?.message}
+              autoFocus
+              className="w-full max-w-[640px]"
+              onChange={handleTitleChange}
+            />
+          </FormRow>
+          {/* 
+          <FormRow rowLabel={"Main image"}>
+            <FileDropzone />
+          </FormRow> */}
 
-        <div>
-          <Input
-            label="Description"
-            inputType="textarea"
-            name={zo.fields.description()}
-            rows={8}
-            className="w-full"
-            disabled={disabled}
-            error={zo.errors.description()?.message}
-          />
-        </div>
+          <div>
+            <FormRow
+              rowLabel="Description"
+              subHeading="This is the initial object description. It will be shown on the item’s overview page. You can always change it."
+            >
+              <Input
+                label="Description"
+                hideLabel
+                inputType="textarea"
+                role="textbox"
+                name={zo.fields.description()}
+                rows={8}
+                className="w-full max-w-[800px]"
+                disabled={disabled}
+                error={zo.errors.description()?.message}
+                data-test-id="itemDescription"
+              />
+            </FormRow>
+          </div>
 
-        <div className="text-right">
-          <Button type="submit" disabled={disabled}>
-            Save
-          </Button>
-        </div>
-      </Form>
-    </div>
+          <div className="text-right">
+            <Button type="submit" disabled={disabled}>
+              Save
+            </Button>
+          </div>
+        </Form>
+      </div>
+    </>
   );
 }
