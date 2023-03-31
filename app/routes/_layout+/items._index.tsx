@@ -1,11 +1,17 @@
-import type { LoaderArgs } from "@remix-run/node";
+import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { Link } from "@remix-run/react";
 import { redirect } from "react-router";
+import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import type { ListItemData } from "~/components/list/list-item";
+import { Button } from "~/components/shared/button";
 import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";
+import { getUserByID } from "~/modules/user";
 import { getCurrentSearchParams, mergeSearchParams, notFound } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */
@@ -41,6 +47,12 @@ const getParamsValues = (searchParams: URLSearchParams) => ({
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
+  const user = await getUserByID(userId);
+
+  if (!user) {
+    return redirect("/login");
+  }
+
   const searchParams = getCurrentSearchParams(request);
   const { page, perPage, search } = getParamsValues(searchParams);
 
@@ -68,7 +80,12 @@ export async function loader({ request }: LoaderArgs) {
     throw notFound(`No user with id ${userId}`);
   }
 
+  const header: HeaderData = {
+    title: user?.firstName ? `${user.firstName}'s stash` : `Your stash`,
+  };
+
   return json({
+    header,
     items,
     search,
     page,
@@ -80,11 +97,28 @@ export async function loader({ request }: LoaderArgs) {
   });
 }
 
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.header.title) },
+];
+
 export default function ItemIndexPage() {
   return (
-    <div className="mt-8 flex flex-1 flex-col gap-2">
-      <Filters />
-      <List />
-    </div>
+    <>
+      <Header>
+        <Button
+          to="new"
+          role="link"
+          ariaLabel="new item"
+          icon="plus"
+          data-test-id="createNewItem"
+        >
+          New Item
+        </Button>
+      </Header>
+      <div className="mt-8 flex flex-1 flex-col gap-2">
+        <Filters />
+        <List />
+      </div>
+    </>
   );
 }

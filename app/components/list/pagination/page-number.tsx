@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { NavLink, useLoaderData, useSearchParams } from "@remix-run/react";
-import type { IndexResponse } from "~/routes/_layout+/items._index";
+import type { IndexResponse } from "~/routes/_layout+/222";
 import { mergeSearchParams, tw } from "~/utils";
 
 export const PageNumber = ({ number }: { number: number }) => {

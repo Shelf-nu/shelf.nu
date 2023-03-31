@@ -5,7 +5,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
-import Header from "~/components/layout/header";
+import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
@@ -37,7 +37,7 @@ export default function App() {
 
         <div className="h-full w-full bg-gray-25 py-3">
           <div className="flex h-full flex-1 flex-col p-8">
-            <Header />
+            <Breadcrumbs />
             <Outlet />
           </div>
         </div>

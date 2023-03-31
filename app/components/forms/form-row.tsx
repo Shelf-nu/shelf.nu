@@ -18,14 +18,12 @@ export default function FormRow({
     <div
       className={`flex gap-8 border-b-[1px] border-y-gray-200 py-6 ${className}`}
     >
-      <div>
-        <div className="w-[280px] text-text-sm font-medium text-gray-700">
-          {rowLabel}
-        </div>
-        <SubHeading className="text-text-sm">{subHeading}</SubHeading>
+      <div className="w-[280px]">
+        <div className="text-text-sm font-medium text-gray-700">{rowLabel}</div>
+        <SubHeading className="text-text-xs">{subHeading}</SubHeading>
       </div>
 
-      <div>{children}</div>
+      <div className="w-full">{children}</div>
     </div>
   );
 }

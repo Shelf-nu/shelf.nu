@@ -68,9 +68,9 @@ export function Button({
 
   const finalStyles = tw(
     baseButtonClasses,
+    sizes[size],
     variants[variant],
     widths[width],
-    sizes[size],
     disabledStyles,
     attachedStyles,
     className

@@ -1,6 +1,7 @@
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
+import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { requireAuthSession } from "~/modules/auth";
 
@@ -31,11 +32,14 @@ export default function SettingsPage() {
     { to: "items", content: "Items" },
   ];
   return (
-    <div>
-      <HorizontalTabs items={items} />
+    <>
+      <Header />
       <div>
-        <Outlet />
+        <HorizontalTabs items={items} />
+        <div>
+          <Outlet />
+        </div>
       </div>
-    </div>
+    </>
   );
 }
