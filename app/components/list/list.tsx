@@ -64,7 +64,7 @@ export const List = () => {
 
             <ul className="flex gap-[2px]">
               {pageNumbers.map((pageNumber) => (
-                <PageNumber number={pageNumber} page={page} key={pageNumber} />
+                <PageNumber number={pageNumber} key={pageNumber} />
               ))}
             </ul>
 

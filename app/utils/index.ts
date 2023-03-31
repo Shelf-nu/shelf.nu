@@ -7,3 +7,4 @@ export * from "./form";
 export * from "./user";
 export * from "./format-bytes";
 export * from "./create-buffer-from-async-iterable";
+export * from "./merge-search-params";

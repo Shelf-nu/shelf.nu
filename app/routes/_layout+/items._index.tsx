@@ -5,7 +5,7 @@ import { Filters, List } from "~/components/list";
 import type { ListItemData } from "~/components/list/list-item";
 import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";
-import { getCurrentSearchParams, mergeQueryParams, notFound } from "~/utils";
+import { getCurrentSearchParams, mergeSearchParams, notFound } from "~/utils";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */
@@ -46,11 +46,11 @@ export async function loader({ request }: LoaderArgs) {
   const { page, perPage, search, intent } = getParamsValues(searchParams);
 
   let prev = search
-    ? mergeQueryParams(searchParams, { page: page - 1 })
+    ? mergeSearchParams(searchParams, { page: page - 1 })
     : `?page=${page - 1}`;
 
   let next = search
-    ? mergeQueryParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
+    ? mergeSearchParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
     : `?page=${page >= 1 ? page + 1 : 2}`;
 
   const clearSearch = intent === "clearSearch";

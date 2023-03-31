@@ -1,7 +1,3 @@
-type ExtraParams = {
-  [key: string]: string | number | boolean;
-};
-
 export function getCurrentPath(request: Request) {
   return new URL(request.url).pathname;
 }
@@ -12,20 +8,6 @@ export function getCurrentSearchParams(request: Request) {
 
 export function makeRedirectToFromHere(request: Request) {
   return new URLSearchParams([["redirectTo", getCurrentPath(request)]]);
-}
-
-export function mergeQueryParams(
-  searchParams: URLSearchParams,
-  extraParams: ExtraParams
-) {
-  // Merge the existing query parameters with the extra parameters
-  const mergedParams = new URLSearchParams(searchParams);
-  Object.entries(extraParams).forEach(([key, value]) =>
-    mergedParams.set(key, value?.toString())
-  );
-
-  // Return the merged query parameters as a string
-  return `?${mergedParams.toString()}`;
 }
 
 export function getRedirectTo(request: Request, defaultRedirectTo = "/") {
