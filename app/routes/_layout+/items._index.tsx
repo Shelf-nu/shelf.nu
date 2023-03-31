@@ -5,7 +5,7 @@ import { Filters, List } from "~/components/list";
 import type { ListItemData } from "~/components/list/list-item";
 import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";
-import { notFound } from "~/utils";
+import { getCurrentSearchParams, mergeQueryParams, notFound } from "~/utils";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */
@@ -33,7 +33,7 @@ export interface IndexResponse {
   prev: string;
 }
 
-const getParams = (searchParams: URLSearchParams) => ({
+const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "0"),
   perPage: Number(searchParams.get("per_page") || "1"),
   search: searchParams.get("s") || null,
@@ -42,23 +42,16 @@ const getParams = (searchParams: URLSearchParams) => ({
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search, intent } = getParamsValues(searchParams);
 
-  const searchParams = new URL(request.url).searchParams;
-  const { page, perPage, search, intent } = getParams(searchParams);
+  let prev = search
+    ? mergeQueryParams(searchParams, { page: page - 1 })
+    : `?page=${page - 1}`;
 
-  let prev = `?page=${page - 1}`;
-  let next = `?page=${page >= 1 ? page + 1 : 2}`;
-
-  if (search) {
-    const prevCopy = searchParams;
-    prevCopy.append("page", `${page - 1}`);
-
-    prev = prevCopy.toString();
-
-    const nextCopy = searchParams;
-    nextCopy.append("page", `${page >= 1 ? page + 1 : 2}`);
-    next = nextCopy.toString();
-  }
+  let next = search
+    ? mergeQueryParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
+    : `?page=${page >= 1 ? page + 1 : 2}`;
 
   const clearSearch = intent === "clearSearch";
 
