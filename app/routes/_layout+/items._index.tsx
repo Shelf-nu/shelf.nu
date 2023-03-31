@@ -2,27 +2,62 @@ import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { redirect } from "react-router";
 import { Filters, List } from "~/components/list";
+import type { ListItemData } from "~/components/list/list-item";
 import { requireAuthSession } from "~/modules/auth";
-import { countTotalItems, getItems } from "~/modules/item";
-import { notFound } from "~/utils";
+import { getItems } from "~/modules/item";
+import { getCurrentSearchParams, mergeSearchParams, notFound } from "~/utils";
 
-const getParams = (searchParams: URLSearchParams) => ({
+export interface IndexResponse {
+  /** Page number. Starts at 1 */
+  page: number;
+
+  /** Items to be loaded per page */
+  perPage: number;
+
+  /** Items to be rendered in the list */
+  items: ListItemData[];
+
+  /** Total items - before filtering */
+  totalItems: number;
+
+  /** Total pages */
+  totalPages: number;
+
+  /** Search string */
+  search: string | null;
+
+  /** Next page url - used for pagination */
+  next: string;
+
+  /** Prev page url - used for pagination */
+  prev: string;
+}
+
+const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "0"),
-  perPage: Number(searchParams.get("per_page") || "8"),
+  perPage: Number(searchParams.get("per_page") || "1"),
   search: searchParams.get("s") || null,
-  intent: searchParams.get("intent") || null,
 });
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search } = getParamsValues(searchParams);
 
-  const { page, perPage, search, intent } = getParams(
-    new URL(request.url).searchParams
-  );
-  const clearSearch = intent === "clearSearch";
+  let prev = search
+    ? mergeSearchParams(searchParams, { page: page - 1 })
+    : `?page=${page - 1}`;
 
-  const items = await getItems({ userId, page, perPage, search });
-  const totalItems = await countTotalItems(userId);
+  let next = search
+    ? mergeSearchParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
+    : `?page=${page >= 1 ? page + 1 : 2}`;
+
+  const { items, totalItems } = await getItems({
+    userId,
+    page,
+    perPage,
+    search,
+  });
   const totalPages = Math.ceil(totalItems / perPage);
 
   if (page > totalPages) {
@@ -36,11 +71,12 @@ export async function loader({ request }: LoaderArgs) {
   return json({
     items,
     search,
-    clearSearch,
     page,
     totalItems,
     perPage,
     totalPages,
+    next,
+    prev,
   });
 }
 

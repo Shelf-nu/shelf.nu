@@ -76,7 +76,11 @@ export function Button({
     className
   );
   return (
-    <Component className={finalStyles} {...props}>
+    <Component
+      className={finalStyles}
+      prefetch={props.to ? "intent" : "none"}
+      {...props}
+    >
       {icon && iconsMap[icon]} <span>{children}</span>
     </Component>
   );
