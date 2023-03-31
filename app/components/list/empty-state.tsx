@@ -1,6 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 
-import { ClearSearchForm } from "./filters";
+import { ClearSearch } from "./filters/clear-search";
 import { Button } from "../shared/button";
 
 export const EmptyState = () => {
@@ -29,12 +29,13 @@ export const EmptyState = () => {
       </div>
       <div className="flex justify-center gap-3">
         {search && (
-          <ClearSearchForm
-            buttonContent="Clear search"
+          <ClearSearch
             buttonProps={{
               variant: "secondary",
             }}
-          />
+          >
+            Clear Search
+          </ClearSearch>
         )}
         <Button to="new" aria-label="new item" icon="plus">
           New Item

@@ -1,23 +1,27 @@
 import { useEffect, useRef } from "react";
 
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { ClearSearchForm } from "./clear-search-form";
+import { useFocusSearch } from "~/hooks";
+import { ClearSearch } from "./clear-search";
 
 export const SearchForm = () => {
-  const { search, clearSearch } = useLoaderData();
+  const { search, isMac } = useLoaderData();
   const formRef = useRef<HTMLFormElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const navigation = useNavigation();
-  const isSearching = navigation.state === "loading";
+  useFocusSearch(searchInputRef);
+  const state = useNavigation().state;
+  const isSearching = state === "loading";
 
   useEffect(() => {
-    if (clearSearch) {
+    /** If no search, clear the form and focus on the search field */
+    if (!search) {
       formRef?.current?.reset();
       searchInputRef?.current?.focus();
     }
-  }, [clearSearch]);
+  }, [search]);
 
   return (
     <div className="relative">
@@ -31,7 +35,7 @@ export const SearchForm = () => {
           defaultValue={search}
           disabled={isSearching}
           ref={searchInputRef}
-          autoFocus
+          autoFocus={true}
           hideLabel
           hasAttachedButton
         />
@@ -40,14 +44,11 @@ export const SearchForm = () => {
           type="submit"
           variant="secondary"
           disabled={isSearching}
-          name="intent"
-          value="search"
           attachToInput
         />
       </Form>
       {search && (
-        <ClearSearchForm
-          buttonContent={""}
+        <ClearSearch
           buttonProps={{
             icon: "x",
             type: "submit",

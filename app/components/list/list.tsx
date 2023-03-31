@@ -1,13 +1,10 @@
-import { useMemo } from "react";
-
 import { useLoaderData } from "@remix-run/react";
 import type { IndexResponse } from "~/routes/_layout+/items._index";
 
 import { EmptyState } from "./empty-state";
 
 import { ListItem } from "./list-item";
-import { PageNumber } from "./page-number";
-import { Button } from "../shared/button";
+import { Pagination } from "./pagination";
 
 /**
  * List components takes advantage use `useFetcher()`
@@ -16,18 +13,9 @@ import { Button } from "../shared/button";
  * The route is required to export {@link ListData}
  */
 export const List = () => {
-  const { page, items, totalItems, perPage, totalPages, search, next, prev } =
-    useLoaderData<IndexResponse>();
+  const { items, totalItems, search } = useLoaderData<IndexResponse>();
 
   const hasItems = items?.length > 0;
-
-  const pageNumbers = useMemo(() => {
-    const pages = [];
-    for (let i = 1; i <= totalPages; i++) {
-      pages.push(i);
-    }
-    return pages;
-  }, [totalPages]);
 
   return (
     <main className="rounded-[12px] border border-gray-200 bg-white">
@@ -52,31 +40,7 @@ export const List = () => {
             ))}
           </div>
 
-          <div className="flex items-center justify-between border-t px-6 py-[18px]">
-            <Button
-              variant="secondary"
-              size="sm"
-              to={prev}
-              disabled={page <= 1}
-            >
-              {"< Previous"}
-            </Button>
-
-            <ul className="flex gap-[2px]">
-              {pageNumbers.map((pageNumber) => (
-                <PageNumber number={pageNumber} key={pageNumber} />
-              ))}
-            </ul>
-
-            <Button
-              variant="secondary"
-              size="sm"
-              to={next}
-              disabled={page * perPage >= totalItems}
-            >
-              {"Next >"}
-            </Button>
-          </div>
+          <Pagination />
         </div>
       )}
     </main>

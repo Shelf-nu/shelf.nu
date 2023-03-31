@@ -37,13 +37,16 @@ const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "0"),
   perPage: Number(searchParams.get("per_page") || "1"),
   search: searchParams.get("s") || null,
-  intent: searchParams.get("intent") || null,
 });
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search, intent } = getParamsValues(searchParams);
+  const { page, perPage, search } = getParamsValues(searchParams);
+
+  /** Needed for search placeholder text */
+  const isMac =
+    request?.headers?.get("user-agent")?.toLowerCase().includes("mac") || false;
 
   let prev = search
     ? mergeSearchParams(searchParams, { page: page - 1 })
@@ -52,8 +55,6 @@ export async function loader({ request }: LoaderArgs) {
   let next = search
     ? mergeSearchParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
     : `?page=${page >= 1 ? page + 1 : 2}`;
-
-  const clearSearch = intent === "clearSearch";
 
   const { items, totalItems } = await getItems({
     userId,
@@ -74,11 +75,11 @@ export async function loader({ request }: LoaderArgs) {
   return json({
     items,
     search,
-    clearSearch,
     page,
     totalItems,
     perPage,
     totalPages,
+    isMac,
     next,
     prev,
   });
