@@ -10,10 +10,10 @@ import { Pagination } from "./pagination";
  * List components takes advantage use `useFetcher()`
  * to get the data of the parent route.
  *
- * The route is required to export {@link ListData}
+ * The route is required to export {@link IndexResponse}
  */
 export const List = () => {
-  const { items, totalItems, search } = useLoaderData<IndexResponse>();
+  const { items, totalItems, perPage } = useLoaderData<IndexResponse>();
 
   const hasItems = items?.length > 0;
 
@@ -24,13 +24,13 @@ export const List = () => {
       ) : (
         <div>
           <div className=" flex justify-between border-b px-6 py-[14px] text-gray-600">
-            {search ? (
+            {perPage < totalItems ? (
               <p>
                 {items.length} item{items.length > 1 && "s"}{" "}
                 <span className="text-gray-400">out of {totalItems}</span>
               </p>
             ) : (
-              <p>{totalItems} items</p>
+              <span>{totalItems} items</span>
             )}
           </div>
 

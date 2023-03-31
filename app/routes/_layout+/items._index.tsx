@@ -35,7 +35,7 @@ export interface IndexResponse {
 
 const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "0"),
-  perPage: Number(searchParams.get("per_page") || "1"),
+  perPage: Number(searchParams.get("per_page") || "8"),
   search: searchParams.get("s") || null,
 });
 
