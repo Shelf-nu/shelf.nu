@@ -2,13 +2,40 @@ import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { redirect } from "react-router";
 import { Filters, List } from "~/components/list";
+import type { ListItemData } from "~/components/list/list-item";
 import { requireAuthSession } from "~/modules/auth";
-import { countTotalItems, getItems } from "~/modules/item";
+import { getItems } from "~/modules/item";
 import { notFound } from "~/utils";
+
+export interface IndexResponse {
+  /** Page number. Starts at 1 */
+  page: number;
+
+  /** Items to be loaded per page */
+  perPage: number;
+
+  /** Items to be rendered in the list */
+  items: ListItemData[];
+
+  /** Total items - before filtering */
+  totalItems: number;
+
+  /** Total pages */
+  totalPages: number;
+
+  /** Search string */
+  search: string | null;
+
+  /** Next page url - used for pagination */
+  next: string;
+
+  /** Prev page url - used for pagination */
+  prev: string;
+}
 
 const getParams = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "0"),
-  perPage: Number(searchParams.get("per_page") || "8"),
+  perPage: Number(searchParams.get("per_page") || "1"),
   search: searchParams.get("s") || null,
   intent: searchParams.get("intent") || null,
 });
@@ -16,13 +43,31 @@ const getParams = (searchParams: URLSearchParams) => ({
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
 
-  const { page, perPage, search, intent } = getParams(
-    new URL(request.url).searchParams
-  );
+  const searchParams = new URL(request.url).searchParams;
+  const { page, perPage, search, intent } = getParams(searchParams);
+
+  let prev = `?page=${page - 1}`;
+  let next = `?page=${page >= 1 ? page + 1 : 2}`;
+
+  if (search) {
+    const prevCopy = searchParams;
+    prevCopy.append("page", `${page - 1}`);
+
+    prev = prevCopy.toString();
+
+    const nextCopy = searchParams;
+    nextCopy.append("page", `${page >= 1 ? page + 1 : 2}`);
+    next = nextCopy.toString();
+  }
+
   const clearSearch = intent === "clearSearch";
 
-  const items = await getItems({ userId, page, perPage, search });
-  const totalItems = await countTotalItems(userId);
+  const { items, totalItems } = await getItems({
+    userId,
+    page,
+    perPage,
+    search,
+  });
   const totalPages = Math.ceil(totalItems / perPage);
 
   if (page > totalPages) {
@@ -41,6 +86,8 @@ export async function loader({ request }: LoaderArgs) {
     totalItems,
     perPage,
     totalPages,
+    next,
+    prev,
   });
 }
 

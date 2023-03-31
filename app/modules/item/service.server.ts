@@ -43,13 +43,21 @@ export async function getItems({
     };
   }
 
-  return db.item.findMany({
-    skip,
-    take,
-    where,
-    select: { id: true, title: true },
-    orderBy: { updatedAt: "desc" },
-  });
+  const [items, totalItems] = await db.$transaction([
+    /** Get the items */
+    db.item.findMany({
+      skip,
+      take,
+      where,
+      select: { id: true, title: true },
+      orderBy: { updatedAt: "desc" },
+    }),
+
+    /** Count them */
+    db.item.count({ where }),
+  ]);
+
+  return { items, totalItems };
 }
 
 export async function createItem({
@@ -78,13 +86,5 @@ export async function deleteItem({
 }: Pick<Item, "id"> & { userId: User["id"] }) {
   return db.item.deleteMany({
     where: { id, userId },
-  });
-}
-
-export async function countTotalItems(userId: User["id"]) {
-  return db.item.count({
-    where: {
-      userId,
-    },
   });
 }
