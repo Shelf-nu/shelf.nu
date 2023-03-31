@@ -53,12 +53,11 @@ describe("smoke tests", () => {
     cy.findByTestId("login").click();
     cy.wait(300);
     cy.findByTestId("createNewItem").click();
-    cy.wait(300);
+    cy.wait(500);
 
-    cy.findByRole("textbox", { name: /title/i }).type(testItem.title);
-    cy.findByRole("textbox", { name: /description/i }).type(
-      testItem.description
-    );
+    cy.focused().should("have.attr", "name", "title");
+    cy.focused().type(testItem.title);
+    cy.findByTestId("itemDescription").type(testItem.description);
     cy.findByRole("button", { name: /save/i }).click();
     cy.wait(100);
 

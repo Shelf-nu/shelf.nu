@@ -120,11 +120,13 @@ export default function NewItemPage() {
                 label="Description"
                 hideLabel
                 inputType="textarea"
+                role="textbox"
                 name={zo.fields.description()}
                 rows={8}
                 className="w-full max-w-[800px]"
                 disabled={disabled}
                 error={zo.errors.description()?.message}
+                data-test-id="itemDescription"
               />
             </FormRow>
           </div>
