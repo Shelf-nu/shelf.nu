@@ -108,7 +108,7 @@ export default function ItemIndexPage() {
         <Button
           to="new"
           role="link"
-          ariaLabel="new item"
+          aria-label="new item"
           icon="plus"
           data-test-id="createNewItem"
         >
