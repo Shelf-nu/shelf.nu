@@ -44,10 +44,6 @@ export async function loader({ request }: LoaderArgs) {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPage, search } = getParamsValues(searchParams);
 
-  /** Needed for search placeholder text */
-  const isMac =
-    request?.headers?.get("user-agent")?.toLowerCase().includes("mac") || false;
-
   let prev = search
     ? mergeSearchParams(searchParams, { page: page - 1 })
     : `?page=${page - 1}`;
@@ -79,7 +75,6 @@ export async function loader({ request }: LoaderArgs) {
     totalItems,
     perPage,
     totalPages,
-    isMac,
     next,
     prev,
   });

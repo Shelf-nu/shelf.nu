@@ -4,14 +4,12 @@ import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { useFocusSearch } from "~/hooks";
 import { ClearSearch } from "./clear-search";
 
 export const SearchForm = () => {
-  const { search, isMac } = useLoaderData();
+  const { search } = useLoaderData();
   const formRef = useRef<HTMLFormElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  useFocusSearch(searchInputRef);
   const state = useNavigation().state;
   const isSearching = state === "loading";
 
