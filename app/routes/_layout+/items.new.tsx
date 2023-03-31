@@ -106,8 +106,8 @@ export default function NewItemPage() {
               onChange={handleTitleChange}
             />
           </FormRow>
-
-          {/* <FormRow rowLabel={"Main image"}>
+          {/* 
+          <FormRow rowLabel={"Main image"}>
             <FileDropzone />
           </FormRow> */}
 
