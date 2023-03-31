@@ -1,4 +1,5 @@
-import * as React from "react";
+import { useState } from "react";
+import type { ChangeEvent } from "react";
 
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
@@ -23,7 +24,7 @@ export const NewItemFormSchema = z.object({
   description: z.string(),
 });
 
-const title = "Untitled item";
+const title = "New Item";
 
 export async function loader({ request }: LoaderArgs) {
   await requireAuthSession(request);
@@ -79,13 +80,18 @@ export async function action({ request }: LoaderArgs) {
 }
 
 export default function NewItemPage() {
+  const [title, setTitle] = useState<string>("Untitled item");
   const zo = useZorm("NewQuestionWizardScreen", NewItemFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  const handleTitleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setTitle(() => event.target.value);
+  };
+
   return (
     <>
-      <Header />
+      <Header title={title} />
       <div>
         <Form ref={zo.ref} method="post" className="flex w-full flex-col gap-2">
           <FormRow rowLabel={"Name"} className="border-b-0">
@@ -97,12 +103,13 @@ export default function NewItemPage() {
               error={zo.errors.title()?.message}
               autoFocus
               className="w-full max-w-[640px]"
+              onChange={handleTitleChange}
             />
           </FormRow>
 
-          <FormRow rowLabel={"Main image"}>
+          {/* <FormRow rowLabel={"Main image"}>
             <FileDropzone />
-          </FormRow>
+          </FormRow> */}
 
           <div>
             <FormRow

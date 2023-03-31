@@ -45,6 +45,7 @@ const Input = forwardRef(function Input(
     hideLabel,
     hasAttachedButton = false,
     addOn,
+    onChange,
     icon,
     ...rest
   }: Props,
@@ -76,6 +77,7 @@ const Input = forwardRef(function Input(
   /** Store props in an object for easier dynamic rendering of input type */
   const inputProps = {
     className: inputClasses,
+    onChange,
     ref,
     ...rest,
   };

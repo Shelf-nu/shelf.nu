@@ -4,7 +4,16 @@ import SubHeading from "~/components/shared/sub-heading";
 
 import type { HeaderData } from "./types";
 
-export default function Header({ children }: { children?: React.ReactNode }) {
+export default function Header({
+  title = null,
+  children,
+}: {
+  /** Pass a title to replace the default route title set in the loader
+   * This is very useful for interactive adjustments of the title
+   */
+  title?: string | null;
+  children?: React.ReactNode;
+}) {
   const data = useLoaderData();
   const header = data?.header as HeaderData;
 
@@ -13,7 +22,7 @@ export default function Header({ children }: { children?: React.ReactNode }) {
       <div className="flex justify-between">
         <div>
           <Heading as="h2" className="text-display-sm font-semibold">
-            {header?.title}
+            {title || header?.title}
           </Heading>
           {header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>}
         </div>
