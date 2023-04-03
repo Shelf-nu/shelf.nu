@@ -1,6 +1,9 @@
 import type { Prisma } from "@prisma/client";
 import type { Item, User } from "~/database";
 import { db } from "~/database";
+import { oneWeekFromNow } from "~/utils";
+import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import { requireAuthSession } from "../auth";
 
 export async function getItem({
   userId,
@@ -49,7 +52,6 @@ export async function getItems({
       skip,
       take,
       where,
-      select: { id: true, title: true },
       orderBy: { updatedAt: "desc" },
     }),
 
@@ -80,11 +82,59 @@ export async function createItem({
   });
 }
 
+interface UpdateItemPayload {
+  id: Item["id"];
+  title?: Item["title"];
+  description?: Item["description"];
+  mainImage?: Item["mainImage"];
+  mainImageExpiration?: Item["mainImageExpiration"];
+}
+
+export async function updateItem(payload: UpdateItemPayload) {
+  return db.item.update({
+    where: { id: payload.id },
+    data: {
+      ...payload,
+    },
+  });
+}
+
 export async function deleteItem({
   id,
   userId,
 }: Pick<Item, "id"> & { userId: User["id"] }) {
   return db.item.deleteMany({
     where: { id, userId },
+  });
+}
+
+export async function updateItemMainImage({
+  request,
+  itemId,
+}: {
+  request: Request;
+  itemId: string;
+}) {
+  const authSession = await requireAuthSession(request);
+
+  const fileData = await parseFileFormData({
+    request,
+    bucketName: "items",
+    newFileName: `${authSession.userId}/${itemId}/main-image`,
+  });
+
+  const image = fileData.get("mainImage") as string;
+
+  // @TODO handle this better
+  if (!image) return { error: "Couldn't upload image" };
+
+  const signedUrl = await createSignedUrl({ filename: image });
+
+  if (typeof signedUrl !== "string") return signedUrl;
+
+  return await updateItem({
+    id: itemId,
+    mainImage: signedUrl,
+    mainImageExpiration: oneWeekFromNow(),
   });
 }

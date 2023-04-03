@@ -22,12 +22,13 @@ model User {
 }
 
 model Item {
-  id          String   @id @default(cuid())
-  title       String
-  description String?
-  mainImage   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId      String
+  id                    String   @id @default(cuid())
+  title                 String
+  description           String?
+  mainImage             String?
+  mainImageExpiration   DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId                String
 }

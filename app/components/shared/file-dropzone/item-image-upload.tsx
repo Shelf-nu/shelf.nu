@@ -45,6 +45,9 @@ export function ItemImageUpload() {
         fetcher={fetcher}
         fileInputName="mainImage"
         fileInfo={fileMeta}
+        dropzoneOptions={{
+          maxSize: 4_000_000,
+        }}
       />
     </div>
   );

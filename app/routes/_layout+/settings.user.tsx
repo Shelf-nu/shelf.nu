@@ -7,7 +7,6 @@ import { z } from "zod";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { FileDropzone } from "~/components/shared/file-dropzone";
 import { ProfilePictureUpload } from "~/components/shared/file-dropzone/profile-picture-upload";
 import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";

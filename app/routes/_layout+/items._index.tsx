@@ -1,6 +1,5 @@
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link } from "@remix-run/react";
 import { redirect } from "react-router";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";

@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { Form } from "@remix-run/react";
 import type { Fetcher } from "@remix-run/react";
 import type { DropzoneOptions, FileRejection } from "react-dropzone";
 import { useDropzone } from "react-dropzone";
 import Input from "~/components/forms/input";
 
 import { FileUploadIcon } from "~/components/icons/library";
-import { tw } from "~/utils";
+import { formatBytes, tw } from "~/utils";
 import type { FileInfo } from "./profile-picture-upload";
 
 import { StatusMessage } from "./status-message";
@@ -15,6 +14,7 @@ import { StatusMessage } from "./status-message";
 export function FileDropzone({
   fetcher,
   onDropAccepted,
+  dropzoneOptions,
   fileInfo,
   fileInputName,
 }: // onDropRejected,
@@ -23,8 +23,7 @@ export function FileDropzone({
   onDropAccepted: DropzoneOptions["onDropAccepted"];
   fileInfo: FileInfo;
   fileInputName: string;
-
-  // onDropRejected?: DropzoneOptions["onDropRejected"];
+  dropzoneOptions?: DropzoneOptions;
 }) {
   const [filename, setFilename] = useState<string>("");
   const [message, setMessage] = useState<string>("");
@@ -75,17 +74,21 @@ export function FileDropzone({
     setDropzoneError(() => true);
   }, []);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const mergedDropzoneOptions = {
     onDropAccepted,
     onDropRejected,
-    maxSize: 2e6,
+    maxSize: 2_000_000,
     maxFiles: 1,
     accept: {
       "image/png": [".png"],
       "image/jpeg": [".jpg", ".jpeg"],
-      "image/heic": ["heic"],
     },
-  });
+    ...dropzoneOptions,
+  };
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone(
+    mergedDropzoneOptions
+  );
 
   const style = useMemo(
     () =>
@@ -115,7 +118,10 @@ export function FileDropzone({
           <span className={fakeLinkStyles}>Click to upload</span> or drag and
           drop
         </p>
-        <p>PNG, JPG or JPEG (max. 2MB)</p>
+        <p>
+          PNG, JPG or JPEG (max.{" "}
+          {formatBytes(mergedDropzoneOptions?.maxSize as number)})
+        </p>
       </div>
       <StatusMessage
         fetcher={fetcher}

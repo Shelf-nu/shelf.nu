@@ -3,9 +3,10 @@ import { json } from "react-router";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByID, updateUser } from "~/modules/user";
 
-import { assertIsPost } from "~/utils";
+import { assertIsPost, dateTimeInUnix } from "~/utils";
 import {
   deleteProfilePicture,
+  getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
 
@@ -19,12 +20,12 @@ export const action = async ({ request }: ActionArgs) => {
 
   const formData = await parseFileFormData({
     request,
-    newFileName: `${userId}/profile-${Math.floor(Date.now() / 1000)}`,
+    newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
   });
   const profilePicture = formData.get("file") as string;
 
   /** if profile picture is an empty string, the upload failed so we return an error */
-  if (profilePicture === "") {
+  if (!profilePicture && profilePicture === "") {
     return json(
       {
         error: "Something went wrong. Please refresh and try again",
@@ -33,12 +34,14 @@ export const action = async ({ request }: ActionArgs) => {
     );
   }
 
-  /** Delete the old picture  */
-  await deleteProfilePicture({ url: previousProfilePictureUrl || "" });
+  if (previousProfilePictureUrl) {
+    /** Delete the old picture  */
+    await deleteProfilePicture({ url: previousProfilePictureUrl });
+  }
   /** Update user with new picture */
   const updatedUser = await updateUser({
     id: userId,
-    profilePicture,
+    profilePicture: getPublicFileURL({ filename: profilePicture }),
   });
 
   return json({ updatedUser });

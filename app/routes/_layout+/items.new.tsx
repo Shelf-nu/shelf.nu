@@ -15,10 +15,9 @@ import { Button } from "~/components/shared/button";
 import { ItemImageUpload } from "~/components/shared/file-dropzone/item-image-upload";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { createItem } from "~/modules/item";
+import { createItem, updateItemMainImage } from "~/modules/item";
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { parseFileFormData } from "~/utils/storage.server";
 
 export const NewItemFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
@@ -83,26 +82,13 @@ export async function action({ request }: LoaderArgs) {
     userId: authSession.userId,
   });
 
-  console.log(item);
+  await updateItemMainImage({ request, itemId: item.id });
 
-  const fileData = await parseFileFormData({
-    request,
-    bucketName: "items",
-    newFileName: `${authSession.userId}/${item.id}/main-image`,
+  return redirect(`/items/${item.id}`, {
+    headers: {
+      "Set-Cookie": await commitAuthSession(request, { authSession }),
+    },
   });
-
-  const image = fileData.get("mainImage");
-
-  console.log(image);
-  // console.log(fileData);
-
-  return null;
-
-  // return redirect(`/items/${item.id}`, {
-  //   headers: {
-  //     "Set-Cookie": await commitAuthSession(request, { authSession }),
-  //   },
-  // });
 }
 
 export default function NewItemPage() {

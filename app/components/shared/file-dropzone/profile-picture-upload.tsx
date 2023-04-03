@@ -42,6 +42,14 @@ export function ProfilePictureUpload() {
   return (
     <FileDropzone
       onDropAccepted={onDropAccepted}
+      dropzoneOptions={{
+        maxSize: 2_000_000,
+        maxFiles: 1,
+        accept: {
+          "image/png": [".png"],
+          "image/jpeg": [".jpg", ".jpeg"],
+        },
+      }}
       fetcher={fetcher}
       fileInfo={fileInfo}
       fileInputName="profile-picture"

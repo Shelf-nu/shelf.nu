@@ -23,6 +23,22 @@ export function getPublicFileURL({
   return data.publicUrl;
 }
 
+export async function createSignedUrl({
+  filename,
+  bucketName = "items",
+}: {
+  filename: string;
+  bucketName?: string;
+}) {
+  const { data, error } = await getSupabaseAdmin()
+    .storage.from(bucketName)
+    .createSignedUrl(filename, 604_800_000); //1 week
+
+  if (error) return error;
+
+  return data.signedUrl;
+}
+
 async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
   { filename, contentType, bucketName }: UploadOptions
@@ -35,16 +51,12 @@ async function uploadFile(
       .upload(filename, file, { contentType, upsert: true });
 
     if (!error) {
-      const publicUrl = getPublicFileURL({
-        filename: data?.path || "",
-      }) as string;
-
-      return publicUrl;
+      return data.path;
     }
 
     throw error;
   } catch (error) {
-    return json({ error });
+    return { error };
   }
 }
 
@@ -69,13 +81,13 @@ export async function parseFileFormData({
     // @ts-ignore
     async ({ contentType, data, filename }) => {
       const fileExtension = filename?.split(".").pop();
-      const uploadedFileURL = await uploadFile(data, {
+      const uploadedFilePath = await uploadFile(data, {
         filename: `${newFileName}.${fileExtension}`,
         contentType,
         bucketName,
       });
 
-      return uploadedFileURL;
+      return uploadedFilePath;
     }
   );
 
