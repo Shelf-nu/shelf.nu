@@ -67,6 +67,7 @@ export default function ItemDetailsPage() {
             mainImageExpiration: item.mainImageExpiration,
             alt: item.title,
           }}
+          className=" h-[400px]"
         />
         <p className="py-6">{item.description}</p>
         <Form method="delete">

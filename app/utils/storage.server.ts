@@ -3,6 +3,7 @@ import {
   unstable_composeUploadHandlers,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
+import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { requireAuthSession } from "~/modules/auth";
@@ -41,10 +42,10 @@ export async function createSignedUrl({
 
 async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
-  { filename, contentType, bucketName }: UploadOptions
+  { filename, contentType, bucketName, resizeOptions }: UploadOptions
 ) {
   try {
-    const file = await cropImage(fileData);
+    const file = await cropImage(fileData, resizeOptions);
 
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
@@ -64,16 +65,19 @@ export interface UploadOptions {
   bucketName: string;
   filename: string;
   contentType: string;
+  resizeOptions?: ResizeOptions;
 }
 
 export async function parseFileFormData({
   request,
   newFileName,
   bucketName = "profile-pictures",
+  resizeOptions,
 }: {
   request: Request;
   newFileName: string;
   bucketName?: string;
+  resizeOptions?: ResizeOptions;
 }) {
   await requireAuthSession(request);
 
@@ -85,6 +89,7 @@ export async function parseFileFormData({
         filename: `${newFileName}.${fileExtension}`,
         contentType,
         bucketName,
+        resizeOptions,
       });
 
       return uploadedFilePath;

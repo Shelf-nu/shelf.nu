@@ -1,5 +1,6 @@
 import type { ActionArgs } from "@remix-run/node";
 import { json } from "react-router";
+import sharp from "sharp";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByID, updateUser } from "~/modules/user";
 
@@ -21,6 +22,12 @@ export const action = async ({ request }: ActionArgs) => {
   const formData = await parseFileFormData({
     request,
     newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
+    resizeOptions: {
+      height: 150,
+      width: 150,
+      fit: sharp.fit.cover,
+      withoutEnlargement: true,
+    },
   });
   const profilePicture = formData.get("file") as string;
 

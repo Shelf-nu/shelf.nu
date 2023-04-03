@@ -121,6 +121,10 @@ export async function updateItemMainImage({
     request,
     bucketName: "items",
     newFileName: `${authSession.userId}/${itemId}/main-image`,
+    resizeOptions: {
+      width: 800,
+      withoutEnlargement: true,
+    },
   });
 
   const image = fileData.get("mainImage") as string;
