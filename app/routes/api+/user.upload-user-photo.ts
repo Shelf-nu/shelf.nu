@@ -17,7 +17,10 @@ export const action = async ({ request }: ActionArgs) => {
   /** needed for deleting */
   const previousProfilePictureUrl = user?.profilePicture || undefined;
 
-  const formData = await parseFileFormData(request);
+  const formData = await parseFileFormData({
+    request,
+    newFileName: `${userId}/profile-${Math.floor(Date.now() / 1000)}`,
+  });
   const profilePicture = formData.get("file") as string;
 
   /** if profile picture is an empty string, the upload failed so we return an error */

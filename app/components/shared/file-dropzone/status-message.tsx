@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { Fetcher } from "@remix-run/react";
 import { CheckmarkIcon, ImageFileIcon } from "~/components/icons/library";
 import { tw } from "~/utils";
@@ -26,14 +27,22 @@ export function StatusMessage({
   const isPending = ["actionSubmission", "loaderSubmission"].includes(type);
   const isDone = type === "done";
 
-  const styles = tw(
-    "flex max-w-full gap-[14px] rounded-xl border bg-white p-[14px] text-text-sm text-gray-600", // default class
-    isError && "border-error-300 bg-error-25 text-error-600" // Class indicating the current status
+  const styles = useMemo(
+    () =>
+      tw(
+        "flex max-w-full gap-[14px] rounded-xl border bg-white p-[14px] text-text-sm text-gray-600", // default class
+        isError && "border-error-300 bg-error-25 text-error-600" // Class indicating the current status
+      ),
+    [isError]
   );
 
-  const filenameStyles = tw(
-    "font-medium text-gray-700", // default style
-    isError && "text-error-700"
+  const filenameStyles = useMemo(
+    () =>
+      tw(
+        "font-medium text-gray-700", // default style
+        isError && "text-error-700"
+      ),
+    [isError]
   );
 
   return message ? (

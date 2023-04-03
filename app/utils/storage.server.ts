@@ -25,7 +25,7 @@ export function getPublicFileURL({
 
 async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
-  { filename, contentType, bucketName = "profile-pictures" }: UploadOptions
+  { filename, contentType, bucketName }: UploadOptions
 ) {
   try {
     const file = await cropImage(fileData);
@@ -49,23 +49,30 @@ async function uploadFile(
 }
 
 export interface UploadOptions {
-  bucketName?: string;
+  bucketName: string;
   filename: string;
   contentType: string;
 }
 
-export async function parseFileFormData(request: Request) {
-  const { userId } = await requireAuthSession(request);
+export async function parseFileFormData({
+  request,
+  newFileName,
+  bucketName = "profile-pictures",
+}: {
+  request: Request;
+  newFileName: string;
+  bucketName?: string;
+}) {
+  await requireAuthSession(request);
 
   const uploadHandler = unstable_composeUploadHandlers(
     // @ts-ignore
-    async ({ data, contentType }) => {
-      const fileExtension = contentType.split("/")[1];
+    async ({ contentType, data, filename }) => {
+      const fileExtension = filename?.split(".").pop();
       const uploadedFileURL = await uploadFile(data, {
-        filename: `${userId}/profile-${Math.floor(
-          Date.now() / 1000
-        )}.${fileExtension}`,
+        filename: `${newFileName}.${fileExtension}`,
         contentType,
+        bucketName,
       });
 
       return uploadedFileURL;

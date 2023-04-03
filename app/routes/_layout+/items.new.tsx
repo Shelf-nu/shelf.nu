@@ -12,15 +12,17 @@ import Input from "~/components/forms/input";
 import Header from "~/components/layout/header";
 
 import { Button } from "~/components/shared/button";
-import { FileDropzone } from "~/components/shared/file-dropzone";
+import { ItemImageUpload } from "~/components/shared/file-dropzone/item-image-upload";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createItem } from "~/modules/item";
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { parseFileFormData } from "~/utils/storage.server";
 
 export const NewItemFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
+  // mainImage:
   description: z.string(),
 });
 
@@ -47,7 +49,16 @@ export const handle = {
 export async function action({ request }: LoaderArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
-  const formData = await request.formData();
+
+  /** Here we need to clone the request as we need 2 different streams:
+   * 1. Access form data for creating item
+   * 2. Access form data via upload handler to be able to upload the file
+   *
+   * This solution is based on : https://github.com/remix-run/remix/issues/3971#issuecomment-1222127635
+   */
+  const clonedRequest = request.clone();
+
+  const formData = await clonedRequest.formData();
   const result = await NewItemFormSchema.safeParseAsync(parseFormAny(formData));
 
   if (!result.success) {
@@ -72,11 +83,26 @@ export async function action({ request }: LoaderArgs) {
     userId: authSession.userId,
   });
 
-  return redirect(`/items/${item.id}`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+  console.log(item);
+
+  const fileData = await parseFileFormData({
+    request,
+    bucketName: "items",
+    newFileName: `${authSession.userId}/${item.id}/main-image`,
   });
+
+  const image = fileData.get("mainImage");
+
+  console.log(image);
+  // console.log(fileData);
+
+  return null;
+
+  // return redirect(`/items/${item.id}`, {
+  //   headers: {
+  //     "Set-Cookie": await commitAuthSession(request, { authSession }),
+  //   },
+  // });
 }
 
 export default function NewItemPage() {
@@ -93,7 +119,12 @@ export default function NewItemPage() {
     <>
       <Header title={title} />
       <div>
-        <Form ref={zo.ref} method="post" className="flex w-full flex-col gap-2">
+        <Form
+          ref={zo.ref}
+          method="post"
+          className="flex w-full flex-col gap-2"
+          encType="multipart/form-data"
+        >
           <FormRow rowLabel={"Name"} className="border-b-0">
             <Input
               label="Name"
@@ -106,10 +137,10 @@ export default function NewItemPage() {
               onChange={handleTitleChange}
             />
           </FormRow>
-          {/* 
+
           <FormRow rowLabel={"Main image"}>
-            <FileDropzone />
-          </FormRow> */}
+            <ItemImageUpload />
+          </FormRow>
 
           <div>
             <FormRow
