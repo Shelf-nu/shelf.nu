@@ -33,7 +33,6 @@ export const SearchForm = () => {
           defaultValue={search}
           disabled={isSearching}
           ref={searchInputRef}
-          autoFocus={true}
           hideLabel
           hasAttachedButton
         />
@@ -55,7 +54,7 @@ export const SearchForm = () => {
             name: "intent",
             value: "clearSearch",
             className:
-              " absolute right-[46px] top-[50%] translate-y-[-50%] z-10 h-full border-0 text-center text-gray-400 hover:text-gray-900",
+              " p-0 absolute right-[63px] top-[50%] translate-y-[-50%] z-10 h-full text-center border-0 text-center text-gray-400 hover:text-gray-900",
           }}
         />
       )}

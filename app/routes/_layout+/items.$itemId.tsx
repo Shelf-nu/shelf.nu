@@ -1,6 +1,8 @@
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { Form, useCatch, useLoaderData } from "@remix-run/react";
+import { ItemImage } from "~/components/items/item-image";
+
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
@@ -51,12 +53,23 @@ export async function action({ request, params }: ActionArgs) {
 }
 
 export default function ItemDetailsPage() {
-  const data = useLoaderData<typeof loader>();
+  const { item } = useLoaderData<typeof loader>();
+
   return (
     <>
       <Header />
       <div className=" items-top flex justify-between">
-        <p className="py-6">{data.item.description}</p>
+        <ItemImage
+          item={{
+            itemId: item.id,
+            mainImage: item.mainImage,
+            // @ts-ignore
+            mainImageExpiration: item.mainImageExpiration,
+            alt: item.title,
+          }}
+          className=" h-[400px]"
+        />
+        <p className="py-6">{item.description}</p>
         <Form method="delete">
           <Button variant="secondary" type="submit">
             Delete
