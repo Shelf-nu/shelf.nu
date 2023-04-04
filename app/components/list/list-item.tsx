@@ -18,8 +18,9 @@ export const ListItem = ({ item }: { item: ListItemData }) => (
             mainImageExpiration: item.mainImageExpiration,
             alt: item.title,
           }}
-          className="h-10 w-10 rounded-[4px] border"
+          className="h-10 w-10 rounded-[4px] object-cover"
         />
+
         <div className="flex flex-col">
           <div className="font-medium">{item.title}</div>
           <div className="text-gray-600">{item.id}</div>

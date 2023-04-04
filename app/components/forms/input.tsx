@@ -24,7 +24,11 @@ interface Props
   /** Add on to the input. Cannot be used together with icon  */
   addOn?: string;
 
+  /** Class name for the wrapper element */
   className?: string;
+
+  /** Class name for the input element */
+  inputClassName?: string;
 
   /** Error message */
   error?: string;
@@ -39,6 +43,7 @@ interface Props
 const Input = forwardRef(function Input(
   {
     className,
+    inputClassName,
     error,
     inputType = "input",
     label,
@@ -60,7 +65,7 @@ const Input = forwardRef(function Input(
   );
 
   const inputClasses = tw(
-    "border border-gray-300 px-[14px] py-2 text-text-md text-gray-900 shadow placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0]",
+    "w-full max-w-full border border-gray-300 px-[14px] py-2 text-text-md text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0]",
     /** Add some border for error */
     error ? "border-error-300 focus:border-error-300 focus:ring-error-100" : "",
 
@@ -71,7 +76,7 @@ const Input = forwardRef(function Input(
         : "rounded-l-none rounded-r-[8px]"
       : "rounded-[8px]",
     hasAttachedButton ? tw("rounded-r-none") : undefined,
-    className
+    inputClassName
   );
 
   /** Store props in an object for easier dynamic rendering of input type */
@@ -92,7 +97,7 @@ const Input = forwardRef(function Input(
   }
 
   return (
-    <label className="relative flex flex-col">
+    <label className={tw("relative flex flex-col", className)}>
       {/* Label */}
       <span
         className={`mb-[6px] text-text-sm font-medium text-gray-700 ${

@@ -17,6 +17,7 @@ export function FileDropzone({
   dropzoneOptions,
   fileInfo,
   fileInputName,
+  className,
 }: // onDropRejected,
 {
   fetcher: Fetcher;
@@ -24,6 +25,7 @@ export function FileDropzone({
   fileInfo: FileInfo;
   fileInputName: string;
   dropzoneOptions?: DropzoneOptions;
+  className?: string;
 }) {
   const [filename, setFilename] = useState<string>("");
   const [message, setMessage] = useState<string>("");
@@ -93,7 +95,7 @@ export function FileDropzone({
   const style = useMemo(
     () =>
       tw(
-        "flex min-w-[420px] flex-col items-center rounded-xl border-2 border-dashed border-gray-200 p-4", // default dropzone styles
+        "flex flex-col items-center rounded-xl border-2 border-dashed border-gray-200 p-4", // default dropzone styles
         isDragActive && "border-solid border-primary bg-gray-50" // classes added when draggin item on top
       ),
     [isDragActive]
@@ -110,7 +112,7 @@ export function FileDropzone({
   );
 
   return (
-    <div className="flex w-full max-w-[800px] flex-col gap-4">
+    <div className={tw("flex grow flex-col gap-4", className)}>
       <div {...getRootProps({ className: style })}>
         <Input {...getInputProps()} disabled={isPending} name={fileInputName} />
         <FileUploadIcon />

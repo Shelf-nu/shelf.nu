@@ -119,8 +119,8 @@ export default function NewItemPage() {
               disabled={disabled}
               error={zo.errors.title()?.message}
               autoFocus
-              className="w-full max-w-[640px]"
               onChange={handleTitleChange}
+              className="w-full"
             />
           </FormRow>
 
@@ -140,7 +140,7 @@ export default function NewItemPage() {
                 role="textbox"
                 name={zo.fields.description()}
                 rows={8}
-                className="w-full max-w-[800px]"
+                className="w-full"
                 disabled={disabled}
                 error={zo.errors.description()?.message}
                 data-test-id="itemDescription"

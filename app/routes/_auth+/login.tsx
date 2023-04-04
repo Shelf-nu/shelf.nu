@@ -109,7 +109,7 @@ export default function IndexLoginForm() {
             type="email"
             autoComplete="email"
             disabled={disabled}
-            className="w-full"
+            inputClassName="w-full"
             error={zo.errors.email()?.message}
           />
         </div>
@@ -123,7 +123,7 @@ export default function IndexLoginForm() {
             type="password"
             autoComplete="new-password"
             disabled={disabled}
-            className="w-full"
+            inputClassName="w-full"
             error={zo.errors.password()?.message || data?.errors?.email}
           />
         </div>

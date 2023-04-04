@@ -34,7 +34,7 @@ export function ContinueWithEmailForm() {
         type="email"
         name="email"
         id="magic-link"
-        className="w-full"
+        inputClassName="w-full"
         placeholder="zaans@huisje.com"
         disabled={isLoading}
         error={data?.error || ""}

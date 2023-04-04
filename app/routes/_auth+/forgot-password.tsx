@@ -85,7 +85,7 @@ export default function ForgotPassword() {
                 name={zo.fields.email()}
                 type="email"
                 autoComplete="email"
-                className="w-full rounded border border-gray-500 px-2 py-1 text-lg"
+                inputClassName="w-full"
                 disabled={disabled}
                 error={error}
               />

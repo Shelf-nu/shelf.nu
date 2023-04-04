@@ -15,7 +15,7 @@ export const ItemImage = ({
     mainImageExpiration: Date;
     alt: string;
   };
-  className: string;
+  className?: string;
   rest?: HTMLImageElement;
 }) => {
   const fetcher = useFetcher();

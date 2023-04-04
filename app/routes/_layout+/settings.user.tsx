@@ -141,7 +141,6 @@ export default function UserPage() {
               name={zo.fields.lastName()}
               defaultValue={user?.lastName || undefined}
               error={zo.errors.lastName()?.message}
-              // @TODO need to add error for unique username
             />
           </div>
         </FormRow>
@@ -156,6 +155,7 @@ export default function UserPage() {
             name={zo.fields.email()}
             defaultValue={user?.email || undefined}
             error={zo.errors.email()?.message || data?.errors?.email}
+            className="w-full"
           />
         </FormRow>
 
@@ -168,6 +168,8 @@ export default function UserPage() {
             name={zo.fields.username()}
             defaultValue={user?.username || undefined}
             error={zo.errors.username()?.message || data?.errors?.username}
+            className="w-full"
+            inputClassName="flex-1"
           />
         </FormRow>
 
@@ -195,20 +197,10 @@ export default function UserPage() {
         // subHeading="This will be displayed on your profile."
         className="border-t"
       >
-        <div className="flex gap-5">
+        <div className="flex w-full gap-5">
           <ProfilePicture />
           <ProfilePictureUpload />
         </div>
-
-        {/* <Input
-          label="Username"
-          hideLabel={true}
-          addOn="shelf.nu/"
-          type="text"
-          name={zo.fields.username()}
-          defaultValue={user?.username || undefined}
-          error={zo.errors.username()?.message || data?.errors?.username}
-        /> */}
       </FormRow>
 
       <div className=" my-6">

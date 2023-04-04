@@ -127,7 +127,7 @@ export default function Join() {
             name={zo.fields.email()}
             type="email"
             autoComplete="email"
-            className="w-full"
+            inputClassName="w-full"
             disabled={disabled}
             error={emailErrorMessage}
           />
@@ -141,7 +141,7 @@ export default function Join() {
             name={zo.fields.password()}
             type="password"
             autoComplete="new-password"
-            className="w-full"
+            inputClassName="w-full"
             disabled={disabled}
             error={zo.errors.password()?.message}
           />

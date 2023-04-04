@@ -30,7 +30,7 @@ export function ItemImageUpload() {
   }, []);
 
   return (
-    <div className="flex gap-[20px]">
+    <div className="flex w-full gap-[20px]">
       <div className=" h-[128px] w-[128px]">
         <img
           className=" h-full object-contain"
