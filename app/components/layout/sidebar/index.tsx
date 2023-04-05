@@ -1,5 +1,9 @@
 import { Link, NavLink } from "@remix-run/react";
-import { ItemsIcon, SettingsIcon } from "~/components/icons/library";
+import {
+  AssetsIcon,
+  ItemsIcon,
+  SettingsIcon,
+} from "~/components/icons/library";
 
 import type { User } from "~/database";
 import { tw } from "~/utils";
@@ -13,9 +17,14 @@ interface Props {
 export default function Sidebar({ user }: Props) {
   const menuItems = [
     {
-      icon: <ItemsIcon />,
+      icon: <AssetsIcon />,
       to: "items",
       label: "Items",
+    },
+    {
+      icon: <ItemsIcon />,
+      to: "categories",
+      label: "Categories",
     },
     {
       icon: <SettingsIcon />,

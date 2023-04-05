@@ -25,7 +25,7 @@ describe("smoke tests", () => {
     cy.findByTestId("create-account").click();
 
     cy.wait(300);
-    cy.findByText("No Items on database");
+    cy.findByText("No items on database");
 
     cy.findByTestId("logout").click();
     cy.findByTestId("login");
@@ -64,7 +64,7 @@ describe("smoke tests", () => {
     cy.findByRole("button", { name: /delete/i }).click();
     cy.wait(100);
 
-    cy.findByText("No Items on database");
+    cy.findByText("No items on database");
     cy.findByTestId("logout").click();
     cy.findByTestId("login");
   });

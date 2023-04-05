@@ -4,8 +4,10 @@ import { tw } from "~/utils";
 import type { Icon } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
-interface Props
+export interface InputProps
   extends React.InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement> {
+  name?: string;
+
   /** Label for the input field */
   label: string;
 
@@ -33,6 +35,9 @@ interface Props
   /** Error message */
   error?: string;
 
+  /** Choose to hide the error text. Only outline will show */
+  hideErrorText?: boolean;
+
   /** Needed for input type textarea */
   rows?: number;
 
@@ -45,6 +50,7 @@ const Input = forwardRef(function Input(
     className,
     inputClassName,
     error,
+    hideErrorText,
     inputType = "input",
     label,
     hideLabel,
@@ -53,7 +59,7 @@ const Input = forwardRef(function Input(
     onChange,
     icon,
     ...rest
-  }: Props,
+  }: InputProps,
   ref
 ) {
   const iconClasses = tw(
@@ -117,7 +123,9 @@ const Input = forwardRef(function Input(
       </div>
 
       {/* Error */}
-      {error && <div className="text-sm text-error-500">{error}</div>}
+      {!hideErrorText && error && (
+        <div className="text-sm text-error-500">{error}</div>
+      )}
     </label>
   );
 });

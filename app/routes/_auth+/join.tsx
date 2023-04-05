@@ -5,8 +5,8 @@ import { redirect, json } from "@remix-run/node";
 import {
   Form,
   useActionData,
+  useNavigation,
   useSearchParams,
-  useTransition,
 } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
@@ -106,8 +106,8 @@ export default function Join() {
   const zo = useZorm("NewQuestionWizardScreen", JoinFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
-  const transition = useTransition();
-  const disabled = isFormProcessing(transition.state);
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
   const data = useActionData<{
     errors: { email: string; password: string | null };
   }>();

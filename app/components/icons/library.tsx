@@ -319,3 +319,39 @@ export const XIcon = (props: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
+
+export const AssetsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width={20}
+    height={22}
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M18.5 6.278 10 11m0 0L1.5 6.278M10 11v9.5m9-5.441V6.94c0-.342 0-.514-.05-.666a1 1 0 0 0-.215-.364c-.109-.119-.258-.202-.558-.368l-7.4-4.111c-.284-.158-.425-.237-.575-.268a1 1 0 0 0-.403 0c-.15.031-.292.11-.576.268l-7.4 4.11c-.3.167-.45.25-.558.369a1 1 0 0 0-.215.364C1 6.427 1 6.599 1 6.94v8.118c0 .342 0 .514.05.666a1 1 0 0 0 .215.364c.109.119.258.202.558.368l7.4 4.111c.284.158.425.237.576.267.132.028.27.028.402 0 .15-.03.292-.11.576-.267l7.4-4.11c.3-.167.45-.25.558-.369a1 1 0 0 0 .215-.364c.05-.152.05-.324.05-.666Z"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+export const RefreshIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width={22}
+    height={20}
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M7.547 17.767A8.5 8.5 0 0 0 18.362 5.75l-.25-.433M3.638 14.25A8.5 8.5 0 0 1 14.453 2.233m-12.96 12.1 2.732.733.733-2.732m12.085-4.668.732-2.732 2.732.732"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);

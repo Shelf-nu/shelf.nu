@@ -7,7 +7,8 @@ import { Button } from "~/components/shared/button";
 import { ClearSearch } from "./clear-search";
 
 export const SearchForm = () => {
-  const { search } = useLoaderData();
+  const { search, modelName } = useLoaderData();
+  const { singular } = modelName;
   const formRef = useRef<HTMLFormElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const state = useNavigation().state;
@@ -27,9 +28,9 @@ export const SearchForm = () => {
         <Input
           type="text"
           name="s"
-          label={"Search by item name"}
-          aria-label="Search by item name"
-          placeholder="Search by item name"
+          label={`Search by ${singular} name`}
+          aria-label={`Search by ${singular} name`}
+          placeholder={`Search by ${singular} name`}
           defaultValue={search}
           disabled={isSearching}
           ref={searchInputRef}

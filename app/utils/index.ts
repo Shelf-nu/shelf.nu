@@ -12,3 +12,5 @@ export * from "./date-time-in-unix";
 export * from "./one-week-from-now";
 export * from "./verify-file-accept";
 export * from "./extract-image-name-from-supabase-url";
+export * from "./get-random-color";
+export * from "./list";
