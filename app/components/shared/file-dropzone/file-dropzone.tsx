@@ -114,7 +114,7 @@ export function FileDropzone({
   return (
     <div className={tw("flex grow flex-col gap-4", className)}>
       <div {...getRootProps({ className: style })}>
-        <Input {...getInputProps()} disabled={isPending} name={fileInputName} />
+        <input {...getInputProps()} disabled={isPending} name={fileInputName} />
         <FileUploadIcon />
         <p>
           <span className={fakeLinkStyles}>Click to upload</span> or drag and

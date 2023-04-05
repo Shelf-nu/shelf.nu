@@ -19,6 +19,7 @@ export const action = async ({ request }: ActionArgs) => {
   /** needed for deleting */
   const previousProfilePictureUrl = user?.profilePicture || undefined;
 
+  console.count("this runs");
   const formData = await parseFileFormData({
     request,
     newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,

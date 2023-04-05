@@ -82,7 +82,18 @@ export async function action({ request }: LoaderArgs) {
     userId: authSession.userId,
   });
 
-  await updateItemMainImage({ request, itemId: item.id });
+  // @ts-ignore
+  const { error } = await updateItemMainImage({ request, itemId: item.id });
+
+  // Not sure how to handle this as the item is already created
+  // if (error) {
+  //   return json(
+  //     { error },
+  //     {
+  //       status: 500,
+  //     }
+  //   );
+  // }
 
   return redirect(`/items/${item.id}`, {
     headers: {

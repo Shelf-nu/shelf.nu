@@ -35,7 +35,7 @@ export async function createSignedUrl({
     .storage.from(bucketName)
     .createSignedUrl(filename, 604_800_000); //1 week
 
-  if (error) return error;
+  if (error) throw error;
 
   return data.signedUrl;
 }
@@ -51,13 +51,17 @@ async function uploadFile(
       .storage.from(bucketName)
       .upload(filename, file, { contentType, upsert: true });
 
-    if (!error) {
-      return data.path;
-    }
+    console.log(error);
 
-    throw error;
+    if (error) {
+      throw error;
+    }
+    return data.path;
   } catch (error) {
-    return { error };
+    /** We have to return null as thats what composeUploadHandlers expects
+     * also we have to use try/catch. If i dont use it i get an error
+     */
+    return null;
   }
 }
 
@@ -80,10 +84,16 @@ export async function parseFileFormData({
   resizeOptions?: ResizeOptions;
 }) {
   await requireAuthSession(request);
+  console.log(request);
 
   const uploadHandler = unstable_composeUploadHandlers(
-    // @ts-ignore
-    async ({ contentType, data, filename }) => {
+    async ({ name, contentType, data, filename }) => {
+      console.log(contentType);
+      console.log(name);
+      console.log(typeof data);
+      console.log(filename);
+      if (!contentType?.includes("image")) return undefined;
+
       const fileExtension = filename?.split(".").pop();
       const uploadedFilePath = await uploadFile(data, {
         filename: `${newFileName}.${fileExtension}`,
@@ -91,7 +101,6 @@ export async function parseFileFormData({
         bucketName,
         resizeOptions,
       });
-
       return uploadedFilePath;
     }
   );

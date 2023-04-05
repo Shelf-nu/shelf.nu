@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
+import { json } from "@remix-run/node";
 import type { Item, User } from "~/database";
 import { db } from "~/database";
-import { oneWeekFromNow } from "~/utils";
+import { dateTimeInUnix, oneWeekFromNow } from "~/utils";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import { requireAuthSession } from "../auth";
 
@@ -120,7 +121,9 @@ export async function updateItemMainImage({
   const fileData = await parseFileFormData({
     request,
     bucketName: "items",
-    newFileName: `${authSession.userId}/${itemId}/main-image`,
+    newFileName: `${authSession.userId}/${itemId}/main-image-${dateTimeInUnix(
+      Date.now()
+    )}`,
     resizeOptions: {
       width: 800,
       withoutEnlargement: true,
@@ -128,8 +131,8 @@ export async function updateItemMainImage({
   });
 
   const image = fileData.get("mainImage") as string;
+  console.log(image);
 
-  // @TODO handle this better
   if (!image) return { error: "Couldn't upload image" };
 
   const signedUrl = await createSignedUrl({ filename: image });
