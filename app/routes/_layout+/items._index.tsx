@@ -1,5 +1,6 @@
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import { redirect } from "react-router";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -36,6 +37,12 @@ export interface IndexResponse {
 
   /** Prev page url - used for pagination */
   prev: string;
+
+  /** Used so all the default actions can be generate such as empty state, creating and so on */
+  modelName: {
+    singular: string;
+    plural: string;
+  };
 }
 
 const getParamsValues = (searchParams: URLSearchParams) => ({
@@ -83,6 +90,11 @@ export async function loader({ request }: LoaderArgs) {
     title: user?.firstName ? `${user.firstName}'s stash` : `Your stash`,
   };
 
+  const modelName = {
+    singular: "item",
+    plural: "items",
+  };
+
   return json({
     header,
     items,
@@ -93,6 +105,7 @@ export async function loader({ request }: LoaderArgs) {
     totalPages,
     next,
     prev,
+    modelName,
   });
 }
 
@@ -101,17 +114,19 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function ItemIndexPage() {
+  const { modelName } = useLoaderData<typeof loader>();
+  const { singular } = modelName;
   return (
     <>
       <Header>
         <Button
           to="new"
           role="link"
-          aria-label="new item"
+          aria-label={`new ${singular}`}
           icon="plus"
           data-test-id="createNewItem"
         >
-          New Item
+          New {singular}
         </Button>
       </Header>
       <div className="mt-8 flex flex-1 flex-col gap-2">

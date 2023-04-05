@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   MailIcon,
   PlusIcon,
+  RefreshIcon,
   SearchIcon,
   TrashIcon,
   XIcon,
@@ -17,7 +18,8 @@ export type Icon =
   | "mail"
   | "search"
   | "spinner"
-  | "x";
+  | "x"
+  | "refresh";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -31,6 +33,7 @@ const iconsMap: IconsMap = {
   search: <SearchIcon />,
   spinner: <Spinner />,
   x: <XIcon />,
+  refresh: <RefreshIcon />,
 };
 
 export default iconsMap;

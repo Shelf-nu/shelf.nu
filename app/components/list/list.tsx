@@ -13,7 +13,9 @@ import { Pagination } from "./pagination";
  * The route is required to export {@link IndexResponse}
  */
 export const List = () => {
-  const { items, totalItems, perPage } = useLoaderData<IndexResponse>();
+  const { items, totalItems, perPage, modelName } =
+    useLoaderData<IndexResponse>();
+  const { singular, plural } = modelName;
 
   const hasItems = items?.length > 0;
 
@@ -26,11 +28,13 @@ export const List = () => {
           <div className=" flex justify-between border-b px-6 py-[14px] text-gray-600">
             {perPage < totalItems ? (
               <p>
-                {items.length} item{items.length > 1 && "s"}{" "}
+                {items.length} {items.length > 1 ? plural : singular}{" "}
                 <span className="text-gray-400">out of {totalItems}</span>
               </p>
             ) : (
-              <span>{totalItems} items</span>
+              <span>
+                {totalItems} {items.length > 1 ? plural : singular}
+              </span>
             )}
           </div>
 

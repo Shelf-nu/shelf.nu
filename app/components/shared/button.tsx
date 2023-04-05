@@ -27,6 +27,7 @@ export function Button({
   icon,
   disabled = undefined,
   children,
+  title,
   ...props
 }: ButtonProps) {
   const Component = props?.to ? Link : as;
@@ -80,8 +81,9 @@ export function Button({
       className={finalStyles}
       prefetch={props.to ? "intent" : "none"}
       {...props}
+      title={title || children}
     >
-      {icon && iconsMap[icon]} <span>{children}</span>
+      {icon && iconsMap[icon]} {children ? <span>{children}</span> : null}
     </Component>
   );
 }

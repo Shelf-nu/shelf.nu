@@ -4,13 +4,14 @@ import { ClearSearch } from "./filters/clear-search";
 import { Button } from "../shared/button";
 
 export const EmptyState = () => {
-  const { search } = useLoaderData();
+  const { search, modelName } = useLoaderData();
+  const { singular, plural } = modelName;
 
   const texts = {
-    title: search ? "No items found" : "No Items on database",
+    title: search ? `No ${plural} found` : `No ${plural} on database`,
     p: search
-      ? `Your search for "${search}" did not \n match any items in the database.`
-      : "What are you waiting for? Create your first item now!",
+      ? `Your search for "${search}" did not \n match any ${plural} in the database.`
+      : `What are you waiting for? Create your first ${singular} now!`,
   };
 
   return (
@@ -38,7 +39,7 @@ export const EmptyState = () => {
           </ClearSearch>
         )}
         <Button to="new" aria-label="new item" icon="plus">
-          New Item
+          New {singular}
         </Button>
       </div>
     </div>
