@@ -11,3 +11,4 @@ export * from "./merge-search-params";
 export * from "./date-time-in-unix";
 export * from "./one-week-from-now";
 export * from "./verify-file-accept";
+export * from "./extract-image-name-from-supabase-url";
