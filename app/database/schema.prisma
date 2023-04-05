@@ -8,27 +8,54 @@ generator client {
 }
 
 model User {
-  id              String   @id @default(cuid())
-  email           String   @unique
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  username        String   @unique @default(cuid())
-  firstName       String?
-  lastName        String?
-  profilePicture  String?
-  items           Item[]
+  id             String  @id @default(cuid())
+  email          String  @unique
+  username       String  @unique @default(cuid())
+  firstName      String?
+  lastName       String?
+  profilePicture String?
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  items    Item[]
+  Category Category[]
 
   @@unique([email, username])
 }
 
 model Item {
-  id                    String   @id @default(cuid())
-  title                 String
-  description           String?
-  mainImage             String?
-  mainImageExpiration   DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId                String
+  id                  String    @id @default(cuid())
+  title               String
+  description         String?
+  mainImage           String?
+  mainImageExpiration DateTime?
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId     String
+  Category   Category? @relation(fields: [categoryId], references: [id])
+  categoryId String?
+}
+
+model Category {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+  color       String
+
+  // DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  items  Item[]
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
 }
