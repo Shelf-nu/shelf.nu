@@ -12,16 +12,14 @@ import Input from "~/components/forms/input";
 import Header from "~/components/layout/header";
 
 import { Button } from "~/components/shared/button";
-import { ItemImageUpload } from "~/components/shared/file-dropzone/item-image-upload";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createItem, updateItemMainImage } from "~/modules/item";
-import { assertIsPost, isFormProcessing } from "~/utils";
+import { assertIsPost, isFormProcessing, verifyAccept } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const NewItemFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
-  // mainImage:
   description: z.string(),
 });
 
@@ -82,6 +80,7 @@ export async function action({ request }: LoaderArgs) {
     userId: authSession.userId,
   });
 
+  // Not sure how to handle this failign as the item is already created
   await updateItemMainImage({ request, itemId: item.id });
 
   return redirect(`/items/${item.id}`, {
@@ -97,8 +96,34 @@ export default function NewItemPage() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  const [fileError, setFileError] = useState<string | undefined>(undefined);
+
   const handleTitleChange = (event: ChangeEvent<HTMLInputElement>) => {
     setTitle(() => event.target.value);
+  };
+
+  const validateFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e?.target?.files?.[0];
+
+    if (file) {
+      const allowedType = verifyAccept(file.type, e.target.accept);
+      const allowedSize = file.size < 4_000_000;
+
+      if (!allowedType) {
+        e.target.value = "";
+        setFileError(`Allowed file types are: PNG, JPG or JPEG`);
+      }
+
+      if (!allowedSize) {
+        /** Clean the field */
+        e.target.value = "";
+        setFileError("Max file size is 4MB");
+      }
+
+      if (allowedSize && allowedType) {
+        setFileError(undefined);
+      }
+    }
   };
 
   return (
@@ -125,7 +150,21 @@ export default function NewItemPage() {
           </FormRow>
 
           <FormRow rowLabel={"Main image"}>
-            <ItemImageUpload />
+            <div>
+              <p>Accepts PNG, JPG or JPEG (max.4 MB)</p>
+              <Input
+                disabled={disabled}
+                accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+                name="mainImage"
+                type="file"
+                onChange={validateFile}
+                label={"mainImage"}
+                hideLabel
+                error={fileError}
+                className="mt-2"
+                inputClassName="border-0 shadow-none p-0 rounded-none"
+              />
+            </div>
           </FormRow>
 
           <div>

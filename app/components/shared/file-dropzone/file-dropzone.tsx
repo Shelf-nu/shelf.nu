@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Fetcher } from "@remix-run/react";
 import type { DropzoneOptions, FileRejection } from "react-dropzone";
 import { useDropzone } from "react-dropzone";
-import Input from "~/components/forms/input";
 
 import { FileUploadIcon } from "~/components/icons/library";
 import { formatBytes, tw } from "~/utils";
@@ -114,7 +113,7 @@ export function FileDropzone({
   return (
     <div className={tw("flex grow flex-col gap-4", className)}>
       <div {...getRootProps({ className: style })}>
-        <Input {...getInputProps()} disabled={isPending} name={fileInputName} />
+        <input {...getInputProps()} disabled={isPending} name={fileInputName} />
         <FileUploadIcon />
         <p>
           <span className={fakeLinkStyles}>Click to upload</span> or drag and

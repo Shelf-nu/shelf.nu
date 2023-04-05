@@ -33,9 +33,9 @@ export async function createSignedUrl({
 }) {
   const { data, error } = await getSupabaseAdmin()
     .storage.from(bucketName)
-    .createSignedUrl(filename, 604_800_000); //1 week
+    .createSignedUrl(filename, 86_400_000); //24h
 
-  if (error) return error;
+  if (error) throw error;
 
   return data.signedUrl;
 }
@@ -51,13 +51,15 @@ async function uploadFile(
       .storage.from(bucketName)
       .upload(filename, file, { contentType, upsert: true });
 
-    if (!error) {
-      return data.path;
+    if (error) {
+      throw error;
     }
-
-    throw error;
+    return data.path;
   } catch (error) {
-    return { error };
+    /** We have to return null as thats what composeUploadHandlers expects
+     * also we have to use try/catch. If i dont use it i get an error
+     */
+    return null;
   }
 }
 
@@ -82,8 +84,8 @@ export async function parseFileFormData({
   await requireAuthSession(request);
 
   const uploadHandler = unstable_composeUploadHandlers(
-    // @ts-ignore
     async ({ contentType, data, filename }) => {
+      if (!contentType?.includes("image")) return undefined;
       const fileExtension = filename?.split(".").pop();
       const uploadedFilePath = await uploadFile(data, {
         filename: `${newFileName}.${fileExtension}`,
@@ -91,7 +93,6 @@ export async function parseFileFormData({
         bucketName,
         resizeOptions,
       });
-
       return uploadedFilePath;
     }
   );
