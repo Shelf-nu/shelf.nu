@@ -1,8 +1,7 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
 import type { Item, User } from "~/database";
 import { db } from "~/database";
-import { dateTimeInUnix, oneWeekFromNow } from "~/utils";
+import { dateTimeInUnix, oneDayFromNow } from "~/utils";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import { requireAuthSession } from "../auth";
 
@@ -131,7 +130,6 @@ export async function updateItemMainImage({
   });
 
   const image = fileData.get("mainImage") as string;
-  console.log(image);
 
   if (!image) return { error: "Couldn't upload image" };
 
@@ -142,6 +140,6 @@ export async function updateItemMainImage({
   return await updateItem({
     id: itemId,
     mainImage: signedUrl,
-    mainImageExpiration: oneWeekFromNow(),
+    mainImageExpiration: oneDayFromNow(),
   });
 }

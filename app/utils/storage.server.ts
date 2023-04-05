@@ -33,7 +33,7 @@ export async function createSignedUrl({
 }) {
   const { data, error } = await getSupabaseAdmin()
     .storage.from(bucketName)
-    .createSignedUrl(filename, 604_800_000); //1 week
+    .createSignedUrl(filename, 86_400_000); //24h
 
   if (error) throw error;
 
@@ -50,8 +50,6 @@ async function uploadFile(
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
       .upload(filename, file, { contentType, upsert: true });
-
-    console.log(error);
 
     if (error) {
       throw error;
@@ -84,16 +82,10 @@ export async function parseFileFormData({
   resizeOptions?: ResizeOptions;
 }) {
   await requireAuthSession(request);
-  console.log(request);
 
   const uploadHandler = unstable_composeUploadHandlers(
-    async ({ name, contentType, data, filename }) => {
-      console.log(contentType);
-      console.log(name);
-      console.log(typeof data);
-      console.log(filename);
+    async ({ contentType, data, filename }) => {
       if (!contentType?.includes("image")) return undefined;
-
       const fileExtension = filename?.split(".").pop();
       const uploadedFilePath = await uploadFile(data, {
         filename: `${newFileName}.${fileExtension}`,
