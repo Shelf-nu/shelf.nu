@@ -6,7 +6,7 @@ import Input from "./input";
 import { Button } from "../shared/button";
 
 export const ColorInput = ({ ...rest }) => {
-  const [color, setColor] = useState<string>(`${getRandomColor()}`);
+  const [color, setColor] = useState<string>(`#6bd0e6`);
 
   const handleColorChange = (e: ChangeEvent<HTMLInputElement>) => {
     setColor(() => `${e.target.value}`);
@@ -25,7 +25,7 @@ export const ColorInput = ({ ...rest }) => {
         as="a"
         onClick={handleRefresh}
         className="cursor-pointer p-2"
-        style={{ backgroundColor: `${color}4D` }}
+        style={{ backgroundColor: `${color}33` }}
         title="Generate random color"
       />
       <Input

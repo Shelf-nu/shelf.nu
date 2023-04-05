@@ -1,6 +1,3 @@
-import { useState } from "react";
-import type { ChangeEvent } from "react";
-
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useNavigation } from "@remix-run/react";
@@ -12,6 +9,7 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { createCategory } from "~/modules/category";
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -40,6 +38,24 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 export async function action({ request }: LoaderArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
+  const formData = await request.formData();
+  const result = await NewCategoryFormSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
+
+  if (!result.success) {
+    return json(
+      {
+        errors: result.error,
+      },
+      { status: 400 }
+    );
+  }
+
+  await createCategory({
+    ...result.data,
+    userId: authSession.userId,
+  });
 
   return redirect("/categories", {
     headers: {
@@ -76,7 +92,6 @@ export default function NewItemPage() {
             placeholder="Description (optional)"
             name={zo.fields.description()}
             disabled={disabled}
-            autoFocus
           />
           <ColorInput
             name={zo.fields.color()}

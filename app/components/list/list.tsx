@@ -1,3 +1,5 @@
+import React from "react";
+
 import { useLoaderData } from "@remix-run/react";
 import type { IndexResponse } from "~/routes/_layout+/items._index";
 
@@ -12,7 +14,7 @@ import { Pagination } from "./pagination";
  *
  * The route is required to export {@link IndexResponse}
  */
-export const List = () => {
+export const List = ({ ItemComponent }: { ItemComponent: any }) => {
   const { items, totalItems, perPage, modelName } =
     useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
@@ -40,7 +42,9 @@ export const List = () => {
 
           <div>
             {items.map((item) => (
-              <ListItem item={item} key={item.id} />
+              <ListItem item={item} key={item.id}>
+                <ItemComponent item={item} />
+              </ListItem>
             ))}
           </div>
 

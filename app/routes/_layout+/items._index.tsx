@@ -1,7 +1,9 @@
+import type { Item } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { redirect } from "react-router";
+import { ItemImage } from "~/components/items/item-image";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
@@ -10,7 +12,12 @@ import { Button } from "~/components/shared/button";
 import { requireAuthSession } from "~/modules/auth";
 import { getItems } from "~/modules/item";
 import { getUserByID } from "~/modules/user";
-import { getCurrentSearchParams, mergeSearchParams, notFound } from "~/utils";
+import {
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+  notFound,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export interface IndexResponse {
@@ -45,12 +52,6 @@ export interface IndexResponse {
   };
 }
 
-const getParamsValues = (searchParams: URLSearchParams) => ({
-  page: Number(searchParams.get("page") || "0"),
-  perPage: Number(searchParams.get("per_page") || "8"),
-  search: searchParams.get("s") || null,
-});
-
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
   const user = await getUserByID(userId);
@@ -61,14 +62,7 @@ export async function loader({ request }: LoaderArgs) {
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPage, search } = getParamsValues(searchParams);
-
-  let prev = search
-    ? mergeSearchParams(searchParams, { page: page - 1 })
-    : `?page=${page - 1}`;
-
-  let next = search
-    ? mergeSearchParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
-    : `?page=${page >= 1 ? page + 1 : 2}`;
+  const { prev, next } = generatePageMeta(request);
 
   const { items, totalItems } = await getItems({
     userId,
@@ -116,6 +110,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 export default function ItemIndexPage() {
   const { modelName } = useLoaderData<typeof loader>();
   const { singular } = modelName;
+
   return (
     <>
       <Header>
@@ -131,8 +126,34 @@ export default function ItemIndexPage() {
       </Header>
       <div className="mt-8 flex flex-1 flex-col gap-2">
         <Filters />
-        <List />
+        <List ItemComponent={ListItemContent} />
       </div>
     </>
   );
 }
+
+const ListItemContent = ({ item }: { item: Item }) => (
+  <>
+    <Link className={`block `} to={item.id}>
+      <article className="flex gap-3">
+        <div className="flex gap-3">
+          <ItemImage
+            item={{
+              itemId: item.id,
+              mainImage: item.mainImage,
+              // @ts-ignore
+              mainImageExpiration: item.mainImageExpiration,
+              alt: item.title,
+            }}
+            className="h-10 w-10 rounded-[4px] object-cover"
+          />
+
+          <div className="flex flex-col">
+            <div className="font-medium">{item.title}</div>
+            <div className="text-gray-600">{item.id}</div>
+          </div>
+        </div>
+      </article>
+    </Link>
+  </>
+);

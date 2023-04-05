@@ -1,14 +1,29 @@
-import { json, type LoaderArgs } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
+import type { Category } from "@prisma/client";
+import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { Link, Outlet, useFetcher } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 
 import { requireAuthSession } from "~/modules/auth";
+import { deleteCategory, getCategories } from "~/modules/category";
+import {
+  assertIsDelete,
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+  isFormProcessing,
+} from "~/utils";
 
 export async function loader({ request }: LoaderArgs) {
-  await requireAuthSession(request);
+  const { userId } = await requireAuthSession(request);
+
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search } = getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
 
   const header: HeaderData = {
     title: "Categories",
@@ -18,7 +33,32 @@ export async function loader({ request }: LoaderArgs) {
     plural: "categories",
   };
 
-  return json({ header, modelName });
+  const { categories, totalCategories } = await getCategories({
+    userId,
+    page,
+    perPage,
+    search,
+  });
+
+  return json({
+    header,
+    items: categories,
+    totalItems: totalCategories,
+    modelName,
+    prev,
+    next,
+  });
+}
+
+export async function action({ request }: ActionArgs) {
+  const { userId } = await requireAuthSession(request);
+  assertIsDelete(request);
+  const formData = await request.formData();
+  const id = formData.get("id") as string;
+
+  await deleteCategory({ id, userId });
+
+  return true;
 }
 
 export const handle = {
@@ -42,8 +82,44 @@ export default function CategoriesPage() {
       <div className="mt-8 flex flex-1 flex-col gap-2">
         <Filters />
         <Outlet />
-        <List />
+        <List ItemComponent={CategoryItem} />
       </div>
     </>
   );
 }
+
+const CategoryItem = ({
+  item,
+}: {
+  item: Pick<Category, "id" | "description" | "name" | "color">;
+}) => {
+  const fetcher = useFetcher();
+  const disabled = isFormProcessing(fetcher.state);
+
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex grow items-center gap-4">
+        <div title={`Category: ${item.name}`} className="w-1/3">
+          <Badge color={item.color}>{item.name}</Badge>
+        </div>
+        <div className="w-2/3 text-gray-500" title="Description">
+          {item.description}
+        </div>
+      </div>
+      <div>
+        <fetcher.Form method="delete" action="/categories">
+          <input type="hidden" name="id" value={item.id} />
+          <Button
+            disabled={disabled}
+            variant="secondary"
+            size="sm"
+            type="submit"
+            className="text-[12px]"
+            icon={"trash"}
+            title={"Delete"}
+          />
+        </fetcher.Form>
+      </div>
+    </div>
+  );
+};

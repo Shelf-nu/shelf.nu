@@ -3,7 +3,7 @@
  * @returns random hex color
  */
 export function getRandomColor(): string {
-  const minBrightness = 150; // minimum brightness value (out of 255)
+  const minBrightness = 10; // minimum brightness value (out of 255)
 
   while (true) {
     // Generate random RGB values
@@ -12,7 +12,7 @@ export function getRandomColor(): string {
     const b = Math.floor(Math.random() * 256);
 
     // Calculate brightness value
-    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    const brightness = (r * 299 + g * 587 + b * 114) / 100;
 
     // If brightness is below minimum threshold, generate a new color
     if (brightness < minBrightness) {
