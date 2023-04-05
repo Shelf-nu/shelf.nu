@@ -11,6 +11,7 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
 import { assertIsDelete, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { deleteAssets } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -42,8 +43,14 @@ export async function action({ request, params }: ActionArgs) {
   assertIsDelete(request);
   const id = getRequiredParam(params, "itemId");
   const authSession = await requireAuthSession(request);
+  const formData = await request.formData();
+  const mainImageUrl = formData.get("mainImage") as string;
 
   await deleteItem({ userId: authSession.userId, id });
+  await deleteAssets({
+    url: mainImageUrl,
+    bucketName: "items",
+  });
 
   return redirect("/items", {
     headers: {
@@ -71,6 +78,9 @@ export default function ItemDetailsPage() {
         />
         <p className="py-6">{item.description}</p>
         <Form method="delete">
+          {item.mainImage && (
+            <input type="hidden" value={item.mainImage} name="mainImage" />
+          )}
           <Button variant="secondary" type="submit">
             Delete
           </Button>

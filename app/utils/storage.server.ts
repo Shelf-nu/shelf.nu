@@ -7,7 +7,7 @@ import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { requireAuthSession } from "~/modules/auth";
-import { cropImage } from ".";
+import { cropImage, extractImageNameFromSupabaseUrl } from ".";
 import { SUPABASE_URL } from "./env";
 
 export function getPublicFileURL({
@@ -131,5 +131,33 @@ export async function deleteProfilePicture({
     }
   } catch (error) {
     return json({ error });
+  }
+}
+
+export async function deleteAssets({
+  url,
+  bucketName,
+}: {
+  url: string;
+  bucketName: string;
+}) {
+  try {
+    const path = extractImageNameFromSupabaseUrl({ url, bucketName });
+
+    if (!path) {
+      throw new Error("Cannot find image");
+    }
+
+    const { error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .remove([path]);
+
+    if (error) {
+      throw error;
+    }
+
+    return true;
+  } catch (error) {
+    return { error };
   }
 }
