@@ -86,6 +86,7 @@ export default function NewItemPage() {
             error={zo.errors.name()?.message}
             hideErrorText
             autoFocus
+            tabIndex={-1}
           />
           <Input
             label="Description"

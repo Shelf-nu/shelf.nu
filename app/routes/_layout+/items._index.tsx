@@ -1,4 +1,4 @@
-import type { Item } from "@prisma/client";
+import type { Category, Item } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
@@ -8,6 +8,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import type { ListItemData } from "~/components/list/list-item";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { requireAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
@@ -139,28 +140,44 @@ export default function ItemIndexPage() {
   );
 }
 
-const ListItemContent = ({ item }: { item: Item }) => (
-  <>
-    <Link className={`block `} to={item.id}>
-      <article className="flex gap-3">
-        <div className="flex gap-3">
-          <ItemImage
-            item={{
-              itemId: item.id,
-              mainImage: item.mainImage,
-              // @ts-ignore
-              mainImageExpiration: item.mainImageExpiration,
-              alt: item.title,
-            }}
-            className="h-10 w-10 rounded-[4px] object-cover"
-          />
+const ListItemContent = ({
+  item,
+}: {
+  item: Item & {
+    category?: Category;
+  };
+}) => {
+  const category = item?.category;
+  return (
+    <>
+      <Link className={`block `} to={item.id}>
+        <article className="flex gap-3">
+          <div className="flex w-full items-center justify-between gap-3">
+            <div className="flex gap-3">
+              <ItemImage
+                item={{
+                  itemId: item.id,
+                  mainImage: item.mainImage,
+                  // @ts-ignore
+                  mainImageExpiration: item.mainImageExpiration,
+                  alt: item.title,
+                }}
+                className="h-10 w-10 rounded-[4px] object-cover"
+              />
 
-          <div className="flex flex-col">
-            <div className="font-medium">{item.title}</div>
-            <div className="text-gray-600">{item.id}</div>
+              <div className="flex flex-col">
+                <div className="font-medium">{item.title}</div>
+                <div className="text-gray-600">{item.id}</div>
+              </div>
+            </div>
+            <div>
+              {category ? (
+                <Badge color={category.color}>{category.name}</Badge>
+              ) : null}
+            </div>
           </div>
-        </div>
-      </article>
-    </Link>
-  </>
-);
+        </article>
+      </Link>
+    </>
+  );
+};

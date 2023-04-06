@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { Category } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
@@ -30,10 +30,6 @@ export const CategorySelect = () => {
 
   const isFiltering = filter !== "";
 
-  useEffect(() => {
-    inputRef?.current?.focus();
-  }, [filter]);
-
   const handleFilter = (e: ChangeEvent<HTMLInputElement>) => {
     setFilter(() => e.target.value);
   };
@@ -55,14 +51,17 @@ export const CategorySelect = () => {
     >
       {() => (
         <div className="relative w-full">
-          <Select name="category">
+          <Select
+            name="category"
+            onOpenChange={() => inputRef.current?.focus()}
+          >
             <SelectTrigger className="">
               <SelectValue placeholder="Select category" />
             </SelectTrigger>
 
             <div>
               <SelectContent
-                className="w-[350px]"
+                className=" w-[350px]"
                 position="popper"
                 align="end"
                 sideOffset={4}
@@ -90,7 +89,7 @@ export const CategorySelect = () => {
                   )}
                 </div>
 
-                <div className="mx-2 border-b border-b-gray-300 py-2">
+                <div className="border-b border-b-gray-300 py-2 ">
                   {filteredCategories.map((c: Category) => (
                     <SelectItem value={c.id} key={c.id}>
                       <Badge color={c.color} noBg>
@@ -101,7 +100,7 @@ export const CategorySelect = () => {
                 </div>
 
                 <Button
-                  to={"/categories"}
+                  to={"/categories/new"}
                   variant="link"
                   icon="plus"
                   className="w-full justify-start pt-4"

@@ -79,12 +79,13 @@ export async function action({ request }: LoaderArgs) {
     );
   }
 
-  const { title, description } = result.data;
+  const { title, description, category } = result.data;
 
   const item = await createItem({
     title,
     description,
     userId: authSession.userId,
+    categoryId: category,
   });
 
   // Not sure how to handle this failign as the item is already created

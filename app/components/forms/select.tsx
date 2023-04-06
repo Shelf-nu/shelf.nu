@@ -38,14 +38,12 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={tw(
-        "animate-in fade-in-80 relative z-50  overflow-hidden rounded-md border border-gray-100 bg-white p-3 shadow-md",
+        "animate-in fade-in-80 relative z-50 overflow-hidden  rounded-lg  border border-gray-300 bg-white p-3 shadow-md",
         className
       )}
       {...props}
     >
-      <SelectPrimitive.Viewport className="p-1">
-        {children}
-      </SelectPrimitive.Viewport>
+      <SelectPrimitive.Viewport>{children}</SelectPrimitive.Viewport>
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
 ));
@@ -70,7 +68,7 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={tw(
-      "relative flex cursor-default select-none items-center rounded-sm px-1 py-2 text-sm font-medium outline-none focus:bg-gray-50 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 ",
+      "relative flex cursor-default select-none items-center rounded-lg p-1 text-sm font-medium outline-none focus:bg-gray-50 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 ",
       className
     )}
     {...props}
