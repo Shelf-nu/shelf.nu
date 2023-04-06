@@ -21,7 +21,7 @@ model User {
 
   // Relationships
   items    Item[]
-  Category Category[]
+  category Category[]
 
   @@unique([email, username])
 }
@@ -40,7 +40,7 @@ model Item {
   // Relationships
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId     String
-  Category   Category? @relation(fields: [categoryId], references: [id])
+  category   Category? @relation(fields: [categoryId], references: [id])
   categoryId String?
 }
 
