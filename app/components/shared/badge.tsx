@@ -1,13 +1,15 @@
 export const Badge = ({
   children,
   color,
+  noBg = false,
 }: {
   children: string;
   color: string;
+  noBg?: boolean;
 }) => (
   <span
     style={{
-      backgroundColor: `${color}33`, // 30%
+      backgroundColor: !noBg ? `${color}33` : undefined, // 30%
       color: `${color}`, // 90%
       mixBlendMode: "multiply",
     }}

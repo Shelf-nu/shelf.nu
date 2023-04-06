@@ -30,6 +30,7 @@
   "prettier": {},
   "dependencies": {
     "@prisma/client": "^4.12.0",
+    "@radix-ui/react-select": "^1.2.1",
     "@remix-run/css-bundle": "^1.14.3",
     "@remix-run/node": "^1.14.3",
     "@remix-run/react": "^1.14.3",
@@ -42,6 +43,7 @@
     "react-dom": "^18.2.0",
     "react-dropzone": "^14.2.3",
     "react-zorm": "^0.6.2",
+    "remix-utils": "^6.1.0",
     "sharp": "^0.32.0",
     "tailwind-merge": "^1.11.0",
     "zod": "^3.21.4"

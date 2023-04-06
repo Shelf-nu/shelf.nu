@@ -52,6 +52,7 @@ export async function getItems({
       skip,
       take,
       where,
+      include: { category: true },
       orderBy: { updatedAt: "desc" },
     }),
 
@@ -66,19 +67,32 @@ export async function createItem({
   title,
   description,
   userId,
-}: Pick<Item, "description" | "title"> & {
+  categoryId,
+}: Pick<Item, "description" | "title" | "categoryId"> & {
   userId: User["id"];
 }) {
-  return db.item.create({
-    data: {
-      title,
-      description,
-      user: {
-        connect: {
-          id: userId,
-        },
+  const data = {
+    title,
+    description,
+    user: {
+      connect: {
+        id: userId,
       },
     },
+  };
+
+  if (categoryId) {
+    Object.assign(data, {
+      category: {
+        connect: {
+          id: categoryId,
+        },
+      },
+    });
+  }
+
+  return db.item.create({
+    data,
   });
 }
 

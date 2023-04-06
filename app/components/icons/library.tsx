@@ -40,7 +40,7 @@ export function HomeIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export function BreadcrumbChevron(props: SVGProps<SVGSVGElement>) {
+export function ChevronRight(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       width={6}
@@ -282,6 +282,27 @@ export function CheckmarkIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** This one doesnt have a circle around it. Its a clean version */
+export function CheckIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={18}
+      height={13}
+      fill="none"
+      {...props}
+    >
+      <path
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M17 1 6 12 1 7"
+      />
+    </svg>
+  );
+}
+
 export function SearchIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -353,5 +374,30 @@ export const RefreshIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeLinecap="round"
       strokeLinejoin="round"
     />
+  </svg>
+);
+
+export const CoinsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={20}
+    height={20}
+    fill="none"
+    {...props}
+  >
+    <g clipPath="url(#a)">
+      <path
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.667}
+        d="M13.281 13.281A5.834 5.834 0 1 0 6.72 6.72m6.614 5.781a5.833 5.833 0 1 1-11.666 0 5.833 5.833 0 0 1 11.666 0Z"
+      />
+    </g>
+    <defs>
+      <clipPath id="a">
+        <path fill="currentColor" d="M0 0h20v20H0z" />
+      </clipPath>
+    </defs>
   </svg>
 );
