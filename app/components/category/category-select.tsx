@@ -55,7 +55,7 @@ export const CategorySelect = () => {
     >
       {() => (
         <div className="relative w-full">
-          <Select>
+          <Select name="category">
             <SelectTrigger className="">
               <SelectValue placeholder="Select category" />
             </SelectTrigger>
@@ -69,7 +69,6 @@ export const CategorySelect = () => {
               >
                 <div className="relative">
                   <Input
-                    name="s"
                     type="text"
                     label="Filter categories"
                     placeholder="Filter categories"

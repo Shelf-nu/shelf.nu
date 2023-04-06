@@ -23,6 +23,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 export const NewItemFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
   description: z.string(),
+  category: z.string(),
 });
 
 const title = "New Item";
