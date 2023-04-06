@@ -25,6 +25,14 @@ export async function loader({ request }: LoaderArgs) {
   const { page, perPage, search } = getParamsValues(searchParams);
   const { prev, next } = generatePageMeta(request);
 
+  const { categories, totalCategories } = await getCategories({
+    userId,
+    page,
+    perPage,
+    search,
+  });
+  const totalPages = Math.ceil(totalCategories / perPage);
+
   const header: HeaderData = {
     title: "Categories",
   };
@@ -32,21 +40,17 @@ export async function loader({ request }: LoaderArgs) {
     singular: "category",
     plural: "categories",
   };
-
-  const { categories, totalCategories } = await getCategories({
-    userId,
-    page,
-    perPage,
-    search,
-  });
-
   return json({
     header,
     items: categories,
+    search,
+    page,
     totalItems: totalCategories,
-    modelName,
+    totalPages,
+    perPage,
     prev,
     next,
+    modelName,
   });
 }
 
