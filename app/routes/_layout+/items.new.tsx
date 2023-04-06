@@ -6,6 +6,7 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
+import { CategorySelect } from "~/components/category/category-select";
 
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
@@ -14,6 +15,7 @@ import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { getCategories } from "~/modules/category";
 import { createItem, updateItemMainImage } from "~/modules/item";
 import { assertIsPost, isFormProcessing, verifyAccept } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -26,13 +28,17 @@ export const NewItemFormSchema = z.object({
 const title = "New Item";
 
 export async function loader({ request }: LoaderArgs) {
-  await requireAuthSession(request);
+  const { userId } = await requireAuthSession(request);
+  const { categories } = await getCategories({
+    userId,
+    perPage: 100,
+  });
 
   const header = {
     title,
   };
 
-  return json({ header });
+  return json({ header, categories });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -165,6 +171,13 @@ export default function NewItemPage() {
                 inputClassName="border-0 shadow-none p-0 rounded-none"
               />
             </div>
+          </FormRow>
+
+          <FormRow
+            rowLabel={"Cateogry"}
+            subHeading="Make it unique. Each item can have 1 category. It will show on your index."
+          >
+            <CategorySelect />
           </FormRow>
 
           <div>

@@ -1,5 +1,5 @@
 import type { RouteMatch } from "@remix-run/react";
-import { BreadcrumbChevron } from "~/components/icons/library";
+import { ChevronRight } from "~/components/icons/library";
 
 export function Breadcrumb({
   match,
@@ -22,7 +22,7 @@ export function Breadcrumb({
       {breadcrumb}{" "}
       {!isLastItem && (
         <span className="mx-4">
-          <BreadcrumbChevron className="inline align-middle" />
+          <ChevronRight className="inline align-middle" />
         </span>
       )}
     </div>

@@ -10,6 +10,7 @@ import { Filters, List } from "~/components/list";
 import type { ListItemData } from "~/components/list/list-item";
 import { Button } from "~/components/shared/button";
 import { requireAuthSession } from "~/modules/auth";
+import { getCategories } from "~/modules/category";
 import { getItems } from "~/modules/item";
 import { getUserByID } from "~/modules/user";
 import {
@@ -64,6 +65,11 @@ export async function loader({ request }: LoaderArgs) {
   const { page, perPage, search } = getParamsValues(searchParams);
   const { prev, next } = generatePageMeta(request);
 
+  const { categories } = await getCategories({
+    userId,
+    perPage: 100,
+  });
+
   const { items, totalItems } = await getItems({
     userId,
     page,
@@ -92,6 +98,7 @@ export async function loader({ request }: LoaderArgs) {
   return json({
     header,
     items,
+    categories,
     search,
     page,
     totalItems,

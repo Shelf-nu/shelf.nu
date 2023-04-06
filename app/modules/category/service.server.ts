@@ -32,7 +32,7 @@ export async function getCategories({
   userId: User["id"];
 
   /** Page number. Starts at 1 */
-  page: number;
+  page?: number;
 
   /** Items to be loaded per page */
   perPage?: number;

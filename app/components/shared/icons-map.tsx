@@ -2,6 +2,7 @@ import { Spinner } from "./spinner";
 
 import {
   ArchiveIcon,
+  CoinsIcon,
   MailIcon,
   PlusIcon,
   RefreshIcon,
@@ -19,7 +20,8 @@ export type Icon =
   | "search"
   | "spinner"
   | "x"
-  | "refresh";
+  | "refresh"
+  | "coins";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -34,6 +36,7 @@ const iconsMap: IconsMap = {
   spinner: <Spinner />,
   x: <XIcon />,
   refresh: <RefreshIcon />,
+  coins: <CoinsIcon />,
 };
 
 export default iconsMap;
