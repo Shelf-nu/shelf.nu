@@ -46,7 +46,7 @@ model Item {
 
 model Category {
   id          String  @id @default(cuid())
-  name        String  @unique
+  name        String
   description String?
   color       String
 
