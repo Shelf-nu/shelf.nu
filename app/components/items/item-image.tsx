@@ -38,7 +38,7 @@ export const ItemImage = ({
         );
       }
     }
-  });
+  }, []);
 
   return <img src={url} className={tw(className)} alt={alt} {...rest} />;
 };
