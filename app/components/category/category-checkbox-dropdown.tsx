@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Category } from "@prisma/client";
-import { Form, useSearchParams, useSubmit } from "@remix-run/react";
-
+import { useSearchParams } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 
 import { ClientOnly } from "remix-utils";
@@ -18,7 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "../shared/dropdown";
 
-const selectedCategoriesAtom = atom<string[]>([]);
+export const selectedCategoriesAtom = atom<string[]>([]);
 const addInitialSelectedCategoriesAtom = atom(
   null,
   (_get, set, selected: string[]) => {
@@ -39,10 +38,8 @@ const addOrRemoveSelectedIdAtom = atom(null, (_get, set, event: Event) => {
 });
 
 export const CategoryCheckboxDropdown = () => {
-  const submit = useSubmit();
   const [params] = useSearchParams();
   const inputRef = useRef<HTMLInputElement>();
-  const formRef = useRef(null);
   const {
     filter,
     filteredCategories,
@@ -58,24 +55,13 @@ export const CategoryCheckboxDropdown = () => {
   /** Sets the initial selected categories based on the url params. Runs on first load only */
   useEffect(() => {
     setInitialSelect(params.getAll("category"));
-  }, [params, setInitialSelect]);
-
-  /**
-   * @TODO this needs to be imporved. I dont like submitting in a useEffect with the delay
-   * Submit the form when the selected array changes
-   * Delay the submit with 500ms to prevent the user spamming multiple requests
-   * This should be solved better with fetcher. There is a remix-single about this
-   */
-  useEffect(() => {
-    const t = setTimeout(() => submit(formRef.current), 100);
-
-    return () => clearTimeout(t);
-  }, [selected, submit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <ClientOnly>
       {() => (
-        <Form ref={formRef}>
+        <div>
           <div className="relative w-full text-right">
             <div className="hidden">
               {selected.map((cat) => (
@@ -138,7 +124,7 @@ export const CategoryCheckboxDropdown = () => {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-        </Form>
+        </div>
       )}
     </ClientOnly>
   );

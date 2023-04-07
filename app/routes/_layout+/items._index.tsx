@@ -1,7 +1,7 @@
 import type { Category, Item } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link } from "@remix-run/react";
 import { redirect } from "react-router";
 import { CategoryCheckboxDropdown } from "~/components/category/category-checkbox-dropdown";
 import { ItemImage } from "~/components/items/item-image";
@@ -119,27 +119,22 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function ItemIndexPage() {
-  const { modelName } = useLoaderData<typeof loader>();
-  const { singular } = modelName;
-
   return (
     <>
       <Header>
         <Button
           to="new"
           role="link"
-          aria-label={`new ${singular}`}
+          aria-label={`new item`}
           icon="plus"
           data-test-id="createNewItem"
         >
-          New {singular}
+          New Item
         </Button>
       </Header>
       <div className="mt-8 flex flex-1 flex-col gap-2">
         <Filters>
-          <div className="inline-flex w-1/4 justify-end">
-            <CategoryCheckboxDropdown />
-          </div>
+          <CategoryCheckboxDropdown />
         </Filters>
         <List ItemComponent={ListItemContent} />
       </div>

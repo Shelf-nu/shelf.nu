@@ -11,15 +11,17 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
 /** Generates prev & next links  */
 export const generatePageMeta = (request: Request) => {
   const searchParams = getCurrentSearchParams(request);
-  const { page, search } = getParamsValues(searchParams);
+  const { page, search, categoriesIds } = getParamsValues(searchParams);
 
-  let prev = search
-    ? mergeSearchParams(searchParams, { page: page - 1 })
-    : `?page=${page - 1}`;
+  let prev =
+    search || categoriesIds
+      ? mergeSearchParams(searchParams, { page: page - 1 })
+      : `?page=${page - 1}`;
 
-  let next = search
-    ? mergeSearchParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
-    : `?page=${page >= 1 ? page + 1 : 2}`;
+  let next =
+    search || categoriesIds
+      ? mergeSearchParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
+      : `?page=${page >= 1 ? page + 1 : 2}`;
 
   return { prev, next };
 };
