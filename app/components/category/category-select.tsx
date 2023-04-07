@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import { useRef } from "react";
 import type { Category } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import type { SelectProps } from "@radix-ui/react-select/";
 import { ClientOnly } from "remix-utils";
+import { useFilter } from "./useFilter";
 
 import {
   Select,
@@ -15,28 +15,15 @@ import Input from "../forms/input";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 
-export const CategorySelect = () => {
-  const data = useLoaderData();
+export const CategorySelect = ({ ...props }: { props?: SelectProps }) => {
   const inputRef = useRef<HTMLInputElement>();
-  const [filter, setFilter] = useState("");
-
-  const filteredCategories = useMemo(
-    () =>
-      data?.categories.filter((cat: Category) =>
-        cat.name.toLowerCase().includes(filter.toLowerCase())
-      ),
-    [filter, data.categories]
-  );
-
-  const isFiltering = filter !== "";
-
-  const handleFilter = (e: ChangeEvent<HTMLInputElement>) => {
-    setFilter(() => e.target.value);
-  };
-
-  const clearFilters = () => {
-    setFilter(() => "");
-  };
+  const {
+    filter,
+    filteredCategories,
+    isFiltering,
+    clearFilters,
+    handleFilter,
+  } = useFilter();
 
   return (
     <ClientOnly
@@ -51,10 +38,7 @@ export const CategorySelect = () => {
     >
       {() => (
         <div className="relative w-full">
-          <Select
-            name="category"
-            onOpenChange={() => inputRef.current?.focus()}
-          >
+          <Select name="category">
             <SelectTrigger className="">
               <SelectValue placeholder="Select category" />
             </SelectTrigger>

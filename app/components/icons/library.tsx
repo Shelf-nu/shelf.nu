@@ -51,7 +51,7 @@ export function ChevronRight(props: SVGProps<SVGSVGElement>) {
     >
       <path
         d="m1 9 4-4-4-4"
-        stroke="#D0D5DD"
+        stroke="currentColor"
         strokeWidth={1.333}
         strokeLinecap="round"
         strokeLinejoin="round"

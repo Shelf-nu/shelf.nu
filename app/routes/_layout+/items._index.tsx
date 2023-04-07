@@ -3,6 +3,8 @@ import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { redirect } from "react-router";
+import { CategoryCheckboxDropdown } from "~/components/category/category-checkbox-dropdown";
+import { CategorySelect } from "~/components/category/category-select";
 import { ItemImage } from "~/components/items/item-image";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -133,7 +135,11 @@ export default function ItemIndexPage() {
         </Button>
       </Header>
       <div className="mt-8 flex flex-1 flex-col gap-2">
-        <Filters />
+        <Filters>
+          <div className="inline-flex w-1/4">
+            <CategoryCheckboxDropdown />
+          </div>
+        </Filters>
         <List ItemComponent={ListItemContent} />
       </div>
     </>
