@@ -1,6 +1,5 @@
 import { useRef } from "react";
 import type { Category } from "@prisma/client";
-import type { SelectProps } from "@radix-ui/react-select/";
 import { ClientOnly } from "remix-utils";
 import { useFilter } from "./useFilter";
 
@@ -15,7 +14,7 @@ import Input from "../forms/input";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 
-export const CategorySelect = ({ ...props }: { props?: SelectProps }) => {
+export const CategorySelect = () => {
   const inputRef = useRef<HTMLInputElement>();
   const {
     filter,

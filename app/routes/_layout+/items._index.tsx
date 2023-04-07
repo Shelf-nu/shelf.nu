@@ -4,7 +4,6 @@ import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { redirect } from "react-router";
 import { CategoryCheckboxDropdown } from "~/components/category/category-checkbox-dropdown";
-import { CategorySelect } from "~/components/category/category-select";
 import { ItemImage } from "~/components/items/item-image";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -65,7 +64,8 @@ export async function loader({ request }: LoaderArgs) {
   }
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search } = getParamsValues(searchParams);
+  const { page, perPage, search, categoriesIds } =
+    getParamsValues(searchParams);
   const { prev, next } = generatePageMeta(request);
 
   const { categories } = await getCategories({
@@ -78,6 +78,7 @@ export async function loader({ request }: LoaderArgs) {
     page,
     perPage,
     search,
+    categoriesIds,
   });
   const totalPages = Math.ceil(totalItems / perPage);
 
@@ -136,7 +137,7 @@ export default function ItemIndexPage() {
       </Header>
       <div className="mt-8 flex flex-1 flex-col gap-2">
         <Filters>
-          <div className="inline-flex w-1/4">
+          <div className="inline-flex w-1/4 justify-end">
             <CategoryCheckboxDropdown />
           </div>
         </Filters>

@@ -1,6 +1,8 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { Category } from "@prisma/client";
-import { Provider, atom, useAtom } from "jotai";
+import { Form, useSearchParams, useSubmit } from "@remix-run/react";
+
+import { atom, useAtom } from "jotai";
 
 import { ClientOnly } from "remix-utils";
 import { useFilter } from "./useFilter";
@@ -16,10 +18,31 @@ import {
   DropdownMenuTrigger,
 } from "../shared/dropdown";
 
-const selectedCategories = atom<string[]>([]);
+const selectedCategoriesAtom = atom<string[]>([]);
+const addInitialSelectedCategoriesAtom = atom(
+  null,
+  (_get, set, selected: string[]) => {
+    set(selectedCategoriesAtom, selected);
+  }
+);
+
+const addOrRemoveSelectedIdAtom = atom(null, (_get, set, event: Event) => {
+  set(selectedCategoriesAtom, (prev) => {
+    event.preventDefault();
+    const node = event.target as HTMLDivElement;
+    const id = node.dataset.categoryId as string;
+    const newSelected = prev.includes(id)
+      ? prev.filter((string) => string !== id)
+      : [...prev, id];
+    return newSelected;
+  });
+});
 
 export const CategoryCheckboxDropdown = () => {
+  const submit = useSubmit();
+  const [params] = useSearchParams();
   const inputRef = useRef<HTMLInputElement>();
+  const formRef = useRef(null);
   const {
     filter,
     filteredCategories,
@@ -28,41 +51,52 @@ export const CategoryCheckboxDropdown = () => {
     handleFilter,
   } = useFilter();
 
-  const [selected, setSelected] = useAtom(selectedCategories);
+  const [selected] = useAtom(selectedCategoriesAtom);
+  const [, addOrRemoveSelectedId] = useAtom(addOrRemoveSelectedIdAtom);
+  const [, setInitialSelect] = useAtom(addInitialSelectedCategoriesAtom);
 
-  const addOrRemoveSelectedId = (id: string) => {
-    if (selected.includes(id)) {
-      setSelected((prev) => prev.filter((string) => string !== id));
-    } else {
-      setSelected((prev) => [...prev, id]);
-    }
-  };
+  /** Sets the initial selected categories based on the url params. Runs on first load only */
+  useEffect(() => {
+    setInitialSelect(params.getAll("category"));
+  }, [params, setInitialSelect]);
 
-  const onSelect = (e: Event) => {
-    e.preventDefault();
-    const node = e.target as HTMLDivElement;
-    const id = node.dataset.categoryId as string;
-    addOrRemoveSelectedId(id);
-  };
+  /**
+   * @TODO this needs to be imporved. I dont like submitting in a useEffect with the delay
+   * Submit the form when the selected array changes
+   * Delay the submit with 500ms to prevent the user spamming multiple requests
+   * This should be solved better with fetcher. There is a remix-single about this
+   */
+  useEffect(() => {
+    const t = setTimeout(() => submit(formRef.current), 100);
+
+    return () => clearTimeout(t);
+  }, [selected, submit]);
 
   return (
-    <ClientOnly
-    // fallback={
-    //   <Input
-    //     defaultValue="Select category"
-    //     label=""
-    //     className="w-full rounded-md border border-gray-300 bg-transparent text-sm   disabled:opacity-50 "
-    //     disabled
-    //   />
-    // }
-    >
+    <ClientOnly>
       {() => (
-        <div className="relative w-full text-right">
-          <Provider>
+        <Form ref={formRef}>
+          <div className="relative w-full text-right">
+            <div className="hidden">
+              {selected.map((cat) => (
+                <input
+                  type="checkbox"
+                  checked
+                  value={cat}
+                  key={cat}
+                  name="category"
+                  readOnly
+                />
+              ))}
+            </div>
             <DropdownMenu>
               <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
                 Categories <ChevronRight className="rotate-90" />{" "}
-                <div>{selected.length > 0 && selected.length}</div>
+                {selected.length > 0 && (
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
+                    {selected.length}
+                  </div>
+                )}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <div className="relative">
@@ -91,7 +125,8 @@ export const CategoryCheckboxDropdown = () => {
                   {filteredCategories.map((c: Category) => (
                     <DropdownMenuCheckboxItem
                       key={c.id}
-                      onSelect={onSelect}
+                      checked={selected.includes(c.id)}
+                      onSelect={addOrRemoveSelectedId}
                       data-category-id={c.id}
                     >
                       <Badge color={c.color} noBg>
@@ -102,8 +137,8 @@ export const CategoryCheckboxDropdown = () => {
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
-          </Provider>
-        </div>
+          </div>
+        </Form>
       )}
     </ClientOnly>
   );

@@ -43,11 +43,11 @@ export async function getCategories({
   const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
   /** Default value of where. Takes the items belonging to current user */
-  let where: Prisma.ItemWhereInput = { userId };
+  let where: Prisma.CategoryWhereInput = { userId };
 
   /** If the search string exists, add it to the where object */
   if (search) {
-    where.title = {
+    where.name = {
       contains: search,
       mode: "insensitive",
     };

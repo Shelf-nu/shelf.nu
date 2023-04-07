@@ -38,6 +38,7 @@ export const ItemImage = ({
         );
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return <img src={url} className={tw(className)} alt={alt} {...rest} />;
