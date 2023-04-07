@@ -1,21 +1,24 @@
 import { useRef } from "react";
 import type { Category } from "@prisma/client";
-import type { SelectProps } from "@radix-ui/react-select/";
+import { Provider, atom, useAtom } from "jotai";
+
 import { ClientOnly } from "remix-utils";
 import { useFilter } from "./useFilter";
+import Input from "../forms/input";
+import { ChevronRight } from "../icons";
+
+import { Badge, Button } from "../shared";
 
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../forms";
-import Input from "../forms/input";
-import { Badge } from "../shared/badge";
-import { Button } from "../shared/button";
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "../shared/dropdown";
 
-export const CategorySelect = ({ ...props }: { props?: SelectProps }) => {
+const selectedCategories = atom<string[]>([]);
+
+export const CategoryCheckboxDropdown = () => {
   const inputRef = useRef<HTMLInputElement>();
   const {
     filter,
@@ -24,6 +27,23 @@ export const CategorySelect = ({ ...props }: { props?: SelectProps }) => {
     clearFilters,
     handleFilter,
   } = useFilter();
+
+  const [selected, setSelected] = useAtom(selectedCategories);
+
+  const addOrRemoveSelectedId = (id: string) => {
+    if (selected.includes(id)) {
+      setSelected((prev) => prev.filter((string) => string !== id));
+    } else {
+      setSelected((prev) => [...prev, id]);
+    }
+  };
+
+  const onSelect = (e: Event) => {
+    e.preventDefault();
+    const node = e.target as HTMLDivElement;
+    const id = node.dataset.categoryId as string;
+    addOrRemoveSelectedId(id);
+  };
 
   return (
     <ClientOnly
@@ -37,19 +57,14 @@ export const CategorySelect = ({ ...props }: { props?: SelectProps }) => {
     // }
     >
       {() => (
-        <div className="relative w-full">
-          <Select name="category">
-            <SelectTrigger className="">
-              <SelectValue placeholder="Select category" />
-            </SelectTrigger>
-
-            <div>
-              <SelectContent
-                className=" w-[350px]"
-                position="popper"
-                align="end"
-                sideOffset={4}
-              >
+        <div className="relative w-full text-right">
+          <Provider>
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
+                Categories <ChevronRight className="rotate-90" />{" "}
+                <div>{selected.length > 0 && selected.length}</div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
                 <div className="relative">
                   <Input
                     type="text"
@@ -72,28 +87,22 @@ export const CategorySelect = ({ ...props }: { props?: SelectProps }) => {
                     />
                   )}
                 </div>
-
-                <div className="border-b border-b-gray-300 py-2 ">
+                <div className="">
                   {filteredCategories.map((c: Category) => (
-                    <SelectItem value={c.id} key={c.id}>
+                    <DropdownMenuCheckboxItem
+                      key={c.id}
+                      onSelect={onSelect}
+                      data-category-id={c.id}
+                    >
                       <Badge color={c.color} noBg>
                         {c.name}
                       </Badge>
-                    </SelectItem>
+                    </DropdownMenuCheckboxItem>
                   ))}
                 </div>
-
-                <Button
-                  to={"/categories/new"}
-                  variant="link"
-                  icon="plus"
-                  className="w-full justify-start pt-4"
-                >
-                  Create new category
-                </Button>
-              </SelectContent>
-            </div>
-          </Select>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </Provider>
         </div>
       )}
     </ClientOnly>
