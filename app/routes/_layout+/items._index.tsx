@@ -1,14 +1,13 @@
 import type { Category, Item } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link } from "@remix-run/react";
 import { redirect } from "react-router";
-import { CategoryCheckboxDropdown } from "~/components/category/category-checkbox-dropdown";
-import { CategorySelect } from "~/components/category/category-select";
 import { ItemImage } from "~/components/items/item-image";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
+import { CategoryCheckboxDropdown } from "~/components/list/filters/category-checkbox-dropdown";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
@@ -33,6 +32,8 @@ export interface IndexResponse {
 
   /** Items to be rendered in the list */
   items: ListItemData[];
+
+  categoriesIds?: string[];
 
   /** Total items - before filtering */
   totalItems: number;
@@ -65,7 +66,8 @@ export async function loader({ request }: LoaderArgs) {
   }
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search } = getParamsValues(searchParams);
+  const { page, perPage, search, categoriesIds } =
+    getParamsValues(searchParams);
   const { prev, next } = generatePageMeta(request);
 
   const { categories } = await getCategories({
@@ -78,6 +80,7 @@ export async function loader({ request }: LoaderArgs) {
     page,
     perPage,
     search,
+    categoriesIds,
   });
   const totalPages = Math.ceil(totalItems / perPage);
 
@@ -118,27 +121,22 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function ItemIndexPage() {
-  const { modelName } = useLoaderData<typeof loader>();
-  const { singular } = modelName;
-
   return (
     <>
       <Header>
         <Button
           to="new"
           role="link"
-          aria-label={`new ${singular}`}
+          aria-label={`new item`}
           icon="plus"
           data-test-id="createNewItem"
         >
-          New {singular}
+          New Item
         </Button>
       </Header>
       <div className="mt-8 flex flex-1 flex-col gap-2">
         <Filters>
-          <div className="inline-flex w-1/4">
-            <CategoryCheckboxDropdown />
-          </div>
+          <CategoryCheckboxDropdown />
         </Filters>
         <List ItemComponent={ListItemContent} />
       </div>

@@ -4,6 +4,9 @@
 
 html {
   @apply font-inter;
+  /** this is neede because tailwind adds just the property for webkit and tailwind adds just the webkit version*/
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {

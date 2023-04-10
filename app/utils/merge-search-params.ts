@@ -8,6 +8,7 @@ export function mergeSearchParams(
 ) {
   // Merge the existing query parameters with the extra parameters
   const mergedParams = new URLSearchParams(searchParams);
+
   Object.entries(extraParams).forEach(([key, value]) =>
     mergedParams.set(key, value?.toString())
   );

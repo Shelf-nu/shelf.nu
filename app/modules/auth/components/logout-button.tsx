@@ -6,7 +6,7 @@ export function LogoutButton({ ...rest }) {
   return (
     <div {...rest}>
       <Form action="/logout" method="post">
-        <button data-test-id="logout" type="submit">
+        <button data-test-id="logout" type="submit" title="Logout">
           <IconHug size={"sm"} className="">
             <LogoutIcon />
           </IconHug>
