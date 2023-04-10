@@ -26,6 +26,8 @@ export const MarkdownEditor = ({ label, name, disabled, ...rest }: Props) => {
     );
   };
 
+  // https://github.com/remarkjs/react-markdown maybe use this? Markdoc is awesome but it doesnt work with GFM and i cant find a proper editor except the GH one
+
   return (
     <ClientOnly>
       {() => (
