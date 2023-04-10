@@ -3,7 +3,6 @@ import type { Category } from "@prisma/client";
 import { useSearchParams } from "@remix-run/react";
 import { useAtom } from "jotai";
 
-import { ClientOnly } from "remix-utils";
 import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
 import {
   addInitialSelectedCategoriesAtom,
@@ -64,79 +63,73 @@ export const CategoryCheckboxDropdown = () => {
   }, []);
 
   return (
-    <ClientOnly>
-      {() => (
-        <div>
-          <div className="relative w-full text-right">
-            <div className="hidden">
-              {selected.map((cat) => (
-                <input
-                  type="checkbox"
-                  checked
-                  value={cat}
-                  key={cat}
-                  name="category"
-                  readOnly
-                />
-              ))}
+    <div className="relative w-full text-right">
+      <div className="hidden">
+        {selected.map((cat) => (
+          <input
+            type="checkbox"
+            checked
+            value={cat}
+            key={cat}
+            name="category"
+            readOnly
+          />
+        ))}
+      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
+          Categories <ChevronRight className="rotate-90" />{" "}
+          {selected.length > 0 && (
+            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
+              {selected.length}
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
-                Categories <ChevronRight className="rotate-90" />{" "}
-                {selected.length > 0 && (
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
-                    {selected.length}
-                  </div>
+          )}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className=" w-[350px]">
+          {hasCategories ? (
+            <>
+              <div className="relative">
+                <Input
+                  type="text"
+                  label="Filter categories"
+                  placeholder="Filter categories"
+                  hideLabel
+                  className="mb-2 text-gray-500"
+                  icon="coins"
+                  value={filter}
+                  onChange={handleFilter}
+                  ref={inputRef}
+                />
+                {isFiltering && (
+                  <Button
+                    icon="x"
+                    variant="tertiary"
+                    disabled={isFiltering}
+                    onClick={clearFilters}
+                    className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
+                  />
                 )}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className=" w-[350px]">
-                {hasCategories ? (
-                  <>
-                    <div className="relative">
-                      <Input
-                        type="text"
-                        label="Filter categories"
-                        placeholder="Filter categories"
-                        hideLabel
-                        className="mb-2 text-gray-500"
-                        icon="coins"
-                        value={filter}
-                        onChange={handleFilter}
-                        ref={inputRef}
-                      />
-                      {isFiltering && (
-                        <Button
-                          icon="x"
-                          variant="tertiary"
-                          disabled={isFiltering}
-                          onClick={clearFilters}
-                          className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
-                        />
-                      )}
-                    </div>
-                    <div className="">
-                      {filteredCategories.map((c: Category) => (
-                        <DropdownMenuCheckboxItem
-                          key={c.id}
-                          checked={selected.includes(c.id)}
-                          onSelect={handleOnSelect}
-                          data-category-id={c.id}
-                        >
-                          <Badge color={c.color} noBg>
-                            {c.name}
-                          </Badge>
-                        </DropdownMenuCheckboxItem>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <CategorySelectNoCategories />
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      )}
-    </ClientOnly>
+              </div>
+              <div className="">
+                {filteredCategories.map((c: Category) => (
+                  <DropdownMenuCheckboxItem
+                    key={c.id}
+                    checked={selected.includes(c.id)}
+                    onSelect={handleOnSelect}
+                    data-category-id={c.id}
+                  >
+                    <Badge color={c.color} noBg>
+                      {c.name}
+                    </Badge>
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </div>
+            </>
+          ) : (
+            <CategorySelectNoCategories />
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 };
