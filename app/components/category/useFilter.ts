@@ -1,28 +1,35 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { ChangeEvent } from "react";
 import type { Category } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
+import { atom, useAtom, useAtomValue } from "jotai";
+
+const filterAtom = atom("");
+const isFilteringAtom = atom((get) => get(filterAtom) !== "");
 
 export const useFilter = () => {
-  const [filter, setFilter] = useState("");
-  const data = useLoaderData();
+  const [filter, setFilter] = useAtom(filterAtom);
+  const isFiltering = useAtomValue(isFilteringAtom);
+
+  /** Get the categories from the loader */
+  const categories = useLoaderData().categories;
 
   const filteredCategories = useMemo(
     () =>
-      data.categories.filter((cat: Category) =>
-        cat.name.toLowerCase().includes(filter.toLowerCase())
+      atom(
+        categories.filter((cat: Category) =>
+          cat.name.toLowerCase().includes(filter.toLowerCase())
+        )
       ),
-    [filter, data.categories]
-  );
-
-  const isFiltering = filter !== "";
+    [filter, categories]
+  ).init;
 
   const handleFilter = (e: ChangeEvent<HTMLInputElement>) => {
-    setFilter(() => e.target.value);
+    setFilter(e.target.value);
   };
 
   const clearFilters = () => {
-    setFilter(() => "");
+    setFilter("");
   };
 
   return {

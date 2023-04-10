@@ -1,21 +1,24 @@
 import { useMemo } from "react";
-import { NavLink, useLoaderData, useSearchParams } from "@remix-run/react";
-import type { IndexResponse } from "~/routes/_layout+/items._index";
-import { mergeSearchParams, tw } from "~/utils";
+import { NavLink, useSearchParams } from "@remix-run/react";
+import { getParamsValues, mergeSearchParams, tw } from "~/utils";
 
 export const PageNumber = ({ number }: { number: number }) => {
-  const { page, search } = useLoaderData<IndexResponse>();
+  const [searchParams] = useSearchParams();
+  const { page, search, categoriesIds } = getParamsValues(searchParams);
+  const isFiltering = search || categoriesIds;
 
   /** This handles setting page 1 button to active when there are no url params for page */
-  const isActive = (page === 0 && number === 1) || page === number;
-  const [searchParams] = useSearchParams();
+  const isActive = useMemo(
+    () => (page === 0 && number === 1) || page === number,
+    [page, number]
+  );
 
   const to = useMemo(
     () =>
-      search
+      isFiltering
         ? mergeSearchParams(searchParams, { page: number })
         : `.?page=${number}`,
-    [search, number, searchParams]
+    [isFiltering, number, searchParams]
   );
 
   return (

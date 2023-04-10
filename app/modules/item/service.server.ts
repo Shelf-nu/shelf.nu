@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Category, Prisma } from "@prisma/client";
 import type { Item, User } from "~/database";
 import { db } from "~/database";
 import { dateTimeInUnix, oneDayFromNow } from "~/utils";
@@ -21,6 +21,7 @@ export async function getItems({
   page = 1,
   perPage = 8,
   search,
+  categoriesIds,
 }: {
   userId: User["id"];
 
@@ -31,6 +32,8 @@ export async function getItems({
   perPage?: number;
 
   search?: string | null;
+
+  categoriesIds?: Category["id"][] | null;
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
@@ -43,6 +46,12 @@ export async function getItems({
     where.title = {
       contains: search,
       mode: "insensitive",
+    };
+  }
+
+  if (categoriesIds && categoriesIds.length > 0) {
+    where.categoryId = {
+      in: categoriesIds,
     };
   }
 

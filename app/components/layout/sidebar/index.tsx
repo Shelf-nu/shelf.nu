@@ -37,7 +37,7 @@ export default function Sidebar({ user }: Props) {
   return (
     <div className=" flex h-full flex-col ">
       <div>
-        <Link to=".">
+        <Link to="." title="Home">
           <img
             src="/images/logo-full-color(x2).png"
             alt="Shelf Logo"

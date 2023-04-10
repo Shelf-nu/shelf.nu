@@ -1,9 +1,7 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { Category } from "@prisma/client";
-import type { SelectProps } from "@radix-ui/react-select/";
-import { ClientOnly } from "remix-utils";
+import { CategorySelectNoCategories } from "./category-select-no-categories";
 import { useFilter } from "./useFilter";
-
 import {
   Select,
   SelectContent,
@@ -15,7 +13,7 @@ import Input from "../forms/input";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 
-export const CategorySelect = ({ ...props }: { props?: SelectProps }) => {
+export const CategorySelect = () => {
   const inputRef = useRef<HTMLInputElement>();
   const {
     filter,
@@ -25,31 +23,27 @@ export const CategorySelect = ({ ...props }: { props?: SelectProps }) => {
     handleFilter,
   } = useFilter();
 
-  return (
-    <ClientOnly
-    // fallback={
-    //   <Input
-    //     defaultValue="Select category"
-    //     label=""
-    //     className="w-full rounded-md border border-gray-300 bg-transparent text-sm   disabled:opacity-50 "
-    //     disabled
-    //   />
-    // }
-    >
-      {() => (
-        <div className="relative w-full">
-          <Select name="category">
-            <SelectTrigger className="">
-              <SelectValue placeholder="Select category" />
-            </SelectTrigger>
+  const hasCategories = useMemo(
+    () => filteredCategories.length > 0,
+    [filteredCategories]
+  );
 
-            <div>
-              <SelectContent
-                className=" w-[350px]"
-                position="popper"
-                align="end"
-                sideOffset={4}
-              >
+  return (
+    <div className="relative w-full">
+      <Select name="category">
+        <SelectTrigger className="">
+          <SelectValue placeholder="Select category" />
+        </SelectTrigger>
+
+        <div>
+          <SelectContent
+            className=" w-[350px]"
+            position="popper"
+            align="end"
+            sideOffset={4}
+          >
+            {hasCategories ? (
+              <>
                 <div className="relative">
                   <Input
                     type="text"
@@ -91,11 +85,13 @@ export const CategorySelect = ({ ...props }: { props?: SelectProps }) => {
                 >
                   Create new category
                 </Button>
-              </SelectContent>
-            </div>
-          </Select>
+              </>
+            ) : (
+              <CategorySelectNoCategories />
+            )}
+          </SelectContent>
         </div>
-      )}
-    </ClientOnly>
+      </Select>
+    </div>
   );
 };

@@ -16,9 +16,17 @@ export const Pagination = () => {
     return pages;
   }, [totalPages]);
 
+  const { prevDisabled, nextDisabled } = useMemo(
+    () => ({
+      prevDisabled: totalPages <= 1 || page <= 1,
+      nextDisabled: totalPages <= 1 || page * perPage >= totalItems,
+    }),
+    [page, totalPages, perPage, totalItems]
+  );
+
   return (
     <div className="flex items-center justify-between border-t px-6 py-[18px]">
-      <Button variant="secondary" size="sm" to={prev} disabled={page <= 1}>
+      <Button variant="secondary" size="sm" to={prev} disabled={prevDisabled}>
         {"< Previous"}
       </Button>
 
@@ -28,12 +36,7 @@ export const Pagination = () => {
         ))}
       </ul>
 
-      <Button
-        variant="secondary"
-        size="sm"
-        to={next}
-        disabled={page * perPage >= totalItems}
-      >
+      <Button variant="secondary" size="sm" to={next} disabled={nextDisabled}>
         {"Next >"}
       </Button>
     </div>
