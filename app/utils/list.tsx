@@ -3,7 +3,7 @@ import { mergeSearchParams } from "./merge-search-params";
 
 export const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "0"),
-  perPage: Number(searchParams.get("per_page") || "2"),
+  perPage: Number(searchParams.get("per_page") || "8"),
   search: searchParams.get("s") || null,
   categoriesIds: searchParams.getAll("category") || [],
 });
