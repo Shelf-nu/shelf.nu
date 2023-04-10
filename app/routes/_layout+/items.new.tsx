@@ -12,8 +12,8 @@ import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import Header from "~/components/layout/header";
 
+import { MarkdownEditor } from "~/components/markdown";
 import { Button } from "~/components/shared/button";
-
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
 import { createItem, updateItemMainImage } from "~/modules/item";
@@ -104,6 +104,8 @@ export default function NewItemPage() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  // const [, markdownToHtml] = useAtom(markdownToHtmlAtom);
+
   const [fileError, setFileError] = useState<string | undefined>(undefined);
 
   const handleTitleChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -187,16 +189,10 @@ export default function NewItemPage() {
               rowLabel="Description"
               subHeading="This is the initial object description. It will be shown on the item’s overview page. You can always change it."
             >
-              <Input
-                label="Description"
-                hideLabel
-                inputType="textarea"
-                role="textbox"
+              <MarkdownEditor
+                label={zo.fields.description()}
                 name={zo.fields.description()}
-                rows={8}
-                className="w-full"
                 disabled={disabled}
-                error={zo.errors.description()?.message}
                 data-test-id="itemDescription"
               />
             </FormRow>
