@@ -1,20 +1,16 @@
 import { useRef, type ReactNode, useEffect } from "react";
-import {
-  Form,
-  useLoaderData,
-  // useSubmit
-} from "@remix-run/react";
+import { Form, useLoaderData, useSubmit } from "@remix-run/react";
+import { useAtom } from "jotai";
 
-// import { useAtom } from "jotai";
-// import { selectedCategoriesAtom } from "~/components/category/category-checkbox-dropdown";
+import { isFilteringCategoriesAtom } from "./atoms";
 import { SearchForm } from "./search-form";
 
 export const Filters = ({ children }: { children?: ReactNode }) => {
   const { search } = useLoaderData();
-  // const [selected] = useAtom(selectedCategoriesAtom);
-  // const submit = useSubmit();
+  const [isFiltering, toggleIsFiltering] = useAtom(isFilteringCategoriesAtom);
 
-  // const isProcessing = isFormProcessing(navigation.state);
+  const submit = useSubmit();
+
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
     /** If no search, clear the form and focus on the search field */
@@ -24,17 +20,21 @@ export const Filters = ({ children }: { children?: ReactNode }) => {
   }, [search]);
 
   /**
-   * @TODO this needs to be imporved. I dont like submitting in a useEffect with the delay
    * Submit the form when the selected array changes
-   * Delay the submit with 500ms to prevent the user spamming multiple requests
-   * This should be solved better with fetcher. There is a remix-single about this
-   * ERROR: This doesnt actually work as it run even on search and breaks the searching ux
+   * Doing fast checking will cancel the previous request triggered by submit().
+   * This is fine however, as we only want the data from the latest request.
    */
-  // useEffect(() => {
-  //   const t = setTimeout(() => submit(formRef.current), 300);
+  useEffect(() => {
+    /** check the flag and if its true, submit the form. */
+    if (isFiltering) {
+      submit(formRef.current);
 
-  //   return () => clearTimeout(t);
-  // }, [selected, submit]);
+      return () => {
+        /** Clean up the flag */
+        toggleIsFiltering(false);
+      };
+    }
+  }, [submit, isFiltering, toggleIsFiltering]);
 
   return (
     <div className="flex items-center justify-between rounded-[12px] border border-gray-200 bg-white px-6 py-5">

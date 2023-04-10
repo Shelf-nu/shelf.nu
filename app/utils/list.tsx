@@ -3,7 +3,7 @@ import { mergeSearchParams } from "./merge-search-params";
 
 export const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "0"),
-  perPage: Number(searchParams.get("per_page") || "8"),
+  perPage: Number(searchParams.get("per_page") || "2"),
   search: searchParams.get("s") || null,
   categoriesIds: searchParams.getAll("category") || [],
 });
@@ -12,16 +12,15 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
 export const generatePageMeta = (request: Request) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, search, categoriesIds } = getParamsValues(searchParams);
+  const isFiltering = search || categoriesIds;
 
-  let prev =
-    search || categoriesIds
-      ? mergeSearchParams(searchParams, { page: page - 1 })
-      : `?page=${page - 1}`;
+  let prev = isFiltering
+    ? mergeSearchParams(searchParams, { page: page - 1 })
+    : `?page=${page - 1}`;
 
-  let next =
-    search || categoriesIds
-      ? mergeSearchParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
-      : `?page=${page >= 1 ? page + 1 : 2}`;
+  let next = isFiltering
+    ? mergeSearchParams(searchParams, { page: page >= 1 ? page + 1 : 2 })
+    : `?page=${page >= 1 ? page + 1 : 2}`;
 
   return { prev, next };
 };

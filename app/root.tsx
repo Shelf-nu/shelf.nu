@@ -29,7 +29,7 @@ export interface RootData {
 
 export const handle = {
   breadcrumb: () => (
-    <Link to="/">
+    <Link to="/" title="Home">
       <HomeIcon className="inline" />
     </Link>
   ),

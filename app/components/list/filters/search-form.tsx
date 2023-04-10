@@ -26,6 +26,7 @@ export const SearchForm = () => {
         icon={"search"}
         type="submit"
         variant="secondary"
+        title="Search"
         disabled={isSearching}
         attachToInput
       />
@@ -37,6 +38,7 @@ export const SearchForm = () => {
           disabled={isSearching}
           name="intent"
           value="clearSearch"
+          title="Clear search"
           className=" absolute right-[63px] top-[50%] z-10 h-full translate-y-[-50%] border-0 p-0 text-center text-gray-400 hover:text-gray-900"
         />
       )}
