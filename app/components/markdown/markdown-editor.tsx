@@ -13,18 +13,15 @@ interface Props {
 
 const markdownAtom = atom("");
 
-export const MarkdownEditor = ({ label, name, disabled, ...rest }: Props) => {
+export const MarkdownEditor = ({ label, name, disabled }: Props) => {
   const fetcher = useFetcher();
   const content = fetcher?.data?.content;
   const [markdown, setMarkdown] = useAtom(markdownAtom);
 
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    const newMarkdown = e.currentTarget.value;
-    setMarkdown(newMarkdown);
-    fetcher.submit(
-      { content: newMarkdown },
-      { method: "post", action: "/api/utils/parse-markdown" }
-    );
+    const content = e.currentTarget.value;
+    setMarkdown(content);
+    fetcher.submit({ content }, { method: "post" });
   };
 
   return (
@@ -43,6 +40,7 @@ export const MarkdownEditor = ({ label, name, disabled, ...rest }: Props) => {
           inputType="textarea"
           placeholder="Add a description for your asset. Supports markdown."
           hideLabel
+          data-test-id="itemDescription"
         />
       </TabsContent>
       <TabsContent value="preview">
