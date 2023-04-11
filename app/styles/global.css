@@ -72,8 +72,10 @@ p {
   will-change: transform;
 }
 
-.markdown-viewer ul,
-.markdown-viwer li {
-  all: unset;
-  @apply list-inside;
+.markdown-viewer ul {
+  @apply list-inside list-disc;
+}
+
+.markdown-viewer ol {
+  @apply list-inside list-decimal;
 }
