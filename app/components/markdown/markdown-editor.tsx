@@ -1,9 +1,9 @@
-import { renderers } from "@markdoc/markdoc";
-import { ThemeProvider } from "@primer/react";
-import { MarkdownEditor as GhMarkdownEditor } from "@primer/react/drafts";
+import type { ChangeEvent } from "react";
 import { useFetcher } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
-import { ClientOnly } from "remix-utils";
+import { MarkdownViewer } from "./markdown-viewer";
+import Input from "../forms/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../shared/tabs";
 
 interface Props {
   label: string;
@@ -18,7 +18,8 @@ export const MarkdownEditor = ({ label, name, disabled, ...rest }: Props) => {
   const content = fetcher?.data?.content;
   const [markdown, setMarkdown] = useAtom(markdownAtom);
 
-  const handleChange = (newMarkdown: string) => {
+  const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    const newMarkdown = e.currentTarget.value;
     setMarkdown(newMarkdown);
     fetcher.submit(
       { content: newMarkdown },
@@ -26,30 +27,30 @@ export const MarkdownEditor = ({ label, name, disabled, ...rest }: Props) => {
     );
   };
 
-  // https://github.com/remarkjs/react-markdown maybe use this? Markdoc is awesome but it doesnt work with GFM and i cant find a proper editor except the GH one
-
   return (
-    <ClientOnly>
-      {() => (
-        <ThemeProvider>
-          <div className="w-full">
-            <GhMarkdownEditor
-              value={markdown}
-              onChange={handleChange}
-              onRenderPreview={async () => renderers.html(content)}
-              name={name}
-              disabled={disabled}
-              {...rest}
-            >
-              {label ? (
-                <GhMarkdownEditor.Label visuallyHidden>
-                  {label}
-                </GhMarkdownEditor.Label>
-              ) : null}
-            </GhMarkdownEditor>
-          </div>
-        </ThemeProvider>
-      )}
-    </ClientOnly>
+    <Tabs defaultValue="edit" className="w-full">
+      <TabsList>
+        <TabsTrigger value="edit">Edit</TabsTrigger>
+        <TabsTrigger value="preview">Preview</TabsTrigger>
+      </TabsList>
+      <TabsContent value="edit">
+        <Input
+          value={markdown}
+          onChange={handleChange}
+          name={name}
+          label={label}
+          disabled={disabled}
+          inputType="textarea"
+          placeholder="Add a description for your asset. Supports markdown."
+          hideLabel
+        />
+      </TabsContent>
+      <TabsContent value="preview">
+        <MarkdownViewer
+          content={content || ""}
+          className="min-h-[210px] rounded-lg border px-[14px] py-2"
+        />
+      </TabsContent>
+    </Tabs>
   );
 };

@@ -25,19 +25,19 @@ h1 {
   @apply text-display-sm font-semibold;
 }
 h2 {
-  @apply text-display-xl;
+  @apply text-display-xs;
 }
 h3 {
-  @apply text-display-lg;
+  @apply text-text-xl;
 }
 h4 {
-  @apply text-display-md;
+  @apply text-text-lg;
 }
 h5 {
-  @apply text-display-sm;
+  @apply text-text-md;
 }
 h5 {
-  @apply text-display-xs;
+  @apply text-text-sm;
 }
 
 label span {
@@ -70,4 +70,10 @@ p {
   transform: translate3d(-50%, -50%, 0);
   width: 25px;
   will-change: transform;
+}
+
+.markdown-viewer ul,
+.markdown-viwer li {
+  all: unset;
+  @apply list-inside;
 }

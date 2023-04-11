@@ -3,7 +3,7 @@ import type { ChangeEvent } from "react";
 
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useNavigation } from "@remix-run/react";
+import { Form, Link, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import { CategorySelect } from "~/components/category/category-select";
@@ -187,7 +187,22 @@ export default function NewItemPage() {
           <div>
             <FormRow
               rowLabel="Description"
-              subHeading="This is the initial object description. It will be shown on the item’s overview page. You can always change it."
+              subHeading={
+                <p>
+                  This is the initial object description. It will be shown on
+                  the item’s overview page. You can always change it. This field
+                  supports{" "}
+                  <Link
+                    to="https://www.markdownguide.org/cheat-sheet"
+                    target="_blank"
+                    className="text-gray-800 underline"
+                    rel="nofollow noopener noreferrer"
+                  >
+                    markdown
+                  </Link>
+                  .
+                </p>
+              }
             >
               <MarkdownEditor
                 label={zo.fields.description()}
