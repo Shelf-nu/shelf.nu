@@ -1,3 +1,4 @@
+import React from "react";
 import SubHeading from "../shared/sub-heading";
 
 interface Props {
@@ -5,7 +6,7 @@ interface Props {
   rowLabel: string;
   children: React.ReactNode;
   className?: string;
-  subHeading?: string;
+  subHeading?: string | JSX.Element;
 }
 
 export default function FormRow({

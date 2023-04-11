@@ -5,12 +5,14 @@ import { ItemImage } from "~/components/items/item-image";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { MarkdownViewer } from "~/components/markdown";
 import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
 import { assertIsDelete, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderArgs) {
@@ -22,13 +24,20 @@ export async function loader({ request, params }: LoaderArgs) {
   if (!item) {
     throw new Response("Not Found", { status: 404 });
   }
+  const markdownDescription = parseMarkdownToReact(item.description || "");
 
   const header: HeaderData = {
     title: item.title,
     subHeading: item.id,
   };
 
-  return json({ item, header });
+  return json({
+    item: {
+      ...item,
+      description: markdownDescription,
+    },
+    header,
+  });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -76,7 +85,7 @@ export default function ItemDetailsPage() {
           }}
           className=" h-[400px]"
         />
-        <p className="py-6">{item.description}</p>
+        <MarkdownViewer content={item.description} />
         <Form method="delete">
           {item.mainImage && (
             <input type="hidden" value={item.mainImage} name="mainImage" />
