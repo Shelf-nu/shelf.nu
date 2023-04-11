@@ -21,11 +21,23 @@ export const MarkdownEditor = ({ label, name, disabled }: Props) => {
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const content = e.currentTarget.value;
     setMarkdown(content);
-    fetcher.submit({ content }, { method: "post" });
+  };
+
+  const handlePreviewChange = (value: string) => {
+    if (value === "preview") {
+      fetcher.submit(
+        { content: markdown },
+        { method: "post", action: "/api/utils/parse-markdown" }
+      );
+    }
   };
 
   return (
-    <Tabs defaultValue="edit" className="w-full">
+    <Tabs
+      defaultValue="edit"
+      className="w-full"
+      onValueChange={handlePreviewChange}
+    >
       <TabsList>
         <TabsTrigger value="edit">Edit</TabsTrigger>
         <TabsTrigger value="preview">Preview</TabsTrigger>
