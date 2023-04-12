@@ -1,3 +1,4 @@
+import { useCallback, useEffect } from "react";
 import { Link, NavLink } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 import {
@@ -6,6 +7,7 @@ import {
   SettingsIcon,
   PrintTagIcon,
   SwitchIcon,
+  ActiveSwitchIcon,
 } from "~/components/icons/library";
 
 import type { User } from "~/database";
@@ -18,10 +20,14 @@ interface Props {
 }
 
 const sidebarCollapseStatus = atom(true);
+const isSidebarSwitchClicked = atom(false);
 
 export default function Sidebar({ user }: Props) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useAtom(
     sidebarCollapseStatus
+  );
+  const [sidebarSwitchIsClicked, setSidebarSwitchIsClicked] = useAtom(
+    isSidebarSwitchClicked
   );
   const menuItems = [
     {
@@ -47,6 +53,33 @@ export default function Sidebar({ user }: Props) {
     },
   ];
 
+  const collapseSidebar = useCallback(() => {
+    setIsSidebarCollapsed(true);
+  }, []);
+  const uncollapseSidebar = useCallback(() => {
+    setIsSidebarCollapsed(false);
+  }, []);
+
+  useEffect(() => {
+    if (sidebarSwitchIsClicked === false) {
+      const sidebar = document.getElementById("main-navigation") as HTMLElement;
+      sidebar.addEventListener("mouseenter", uncollapseSidebar);
+      sidebar.addEventListener("mouseleave", collapseSidebar);
+    }
+  });
+
+  function maintainUncollapsedState() {
+    const sidebar = document.getElementById("main-navigation") as HTMLElement;
+    if (sidebarSwitchIsClicked === false) {
+      sidebar.removeEventListener("mouseenter", uncollapseSidebar);
+      sidebar.removeEventListener("mouseleave", collapseSidebar);
+    } else {
+      sidebar.addEventListener("mouseenter", uncollapseSidebar);
+      sidebar.addEventListener("mouseleave", collapseSidebar);
+    }
+    setSidebarSwitchIsClicked(!sidebarSwitchIsClicked);
+  }
+
   return (
     <aside
       id="main-navigation"
@@ -54,8 +87,6 @@ export default function Sidebar({ user }: Props) {
         `sticky top-0 flex h-screen w-80 flex-col border-r border-gray-200 px-6 py-8 transition-all duration-200 ease-linear`,
         isSidebarCollapsed ? "collapsed" : ""
       )}
-      onMouseEnter={() => setIsSidebarCollapsed(false)}
-      onMouseLeave={() => setIsSidebarCollapsed(true)}
     >
       <div className="navigation-header flex items-center justify-between">
         <Link to="." title="Home" className="flex items-center">
@@ -97,12 +128,10 @@ export default function Sidebar({ user }: Props) {
         </Link>
         <button
           className="transition-all duration-200 ease-linear"
-          // onClick={() =>
-          //   setIsSidebarCollapsed((isSidebarCollapsed) => !isSidebarCollapsed)
-          // }
+          onClick={maintainUncollapsedState}
         >
           <i className="icon text-gray-500">
-            <SwitchIcon />
+            {sidebarSwitchIsClicked ? <ActiveSwitchIcon /> : <SwitchIcon />}
           </i>
         </button>
       </div>
