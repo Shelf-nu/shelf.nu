@@ -24,7 +24,9 @@ export const DeleteItem = ({
 }) => (
   <AlertDialog>
     <AlertDialogTrigger>
-      <Button variant="secondary">Delete</Button>
+      <Button variant="secondary" data-test-id="deleteItemButton">
+        Delete
+      </Button>
     </AlertDialogTrigger>
     <AlertDialogContent>
       <AlertDialogHeader>
@@ -47,6 +49,7 @@ export const DeleteItem = ({
           <Button
             className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
             type="submit"
+            data-test-id="confirmDeleteItemButton"
           >
             Delete
           </Button>

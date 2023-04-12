@@ -31,7 +31,7 @@ describe("smoke tests", () => {
     cy.findByTestId("login");
   });
 
-  it("should allow you to make a note", () => {
+  it("should allow you to make a item", () => {
     const testItem = {
       title: faker.lorem.words(2),
       description: faker.lorem.sentences(1),
@@ -61,7 +61,8 @@ describe("smoke tests", () => {
     cy.findByRole("button", { name: /save/i }).click();
     cy.wait(100);
 
-    cy.findByRole("button", { name: /delete/i }).click();
+    cy.findByTestId("deleteItemButton").click();
+    cy.findByTestId("confirmDeleteItemButton").click();
     cy.wait(100);
 
     cy.findByText("No items on database");
