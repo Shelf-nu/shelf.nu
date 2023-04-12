@@ -89,13 +89,13 @@ export default function NewItemPage() {
             error={zo.errors.name()?.message}
             hideErrorText
             autoFocus
-            tabIndex={-1}
           />
           <Input
             label="Description"
             placeholder="Description (optional)"
             name={zo.fields.description()}
             disabled={disabled}
+            data-test-id="categoryDescription"
           />
           <ColorInput
             name={zo.fields.color()}

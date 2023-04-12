@@ -1,4 +1,4 @@
-import type { Category, Item } from "@prisma/client";
+import type { Category } from "@prisma/client";
 import { Form, useFetcher } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
@@ -34,6 +34,7 @@ export const DeleteCategory = ({
           className="text-[12px]"
           icon={"trash"}
           title={"Delete"}
+          data-test-id="deleteCategoryButton"
         />
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -54,6 +55,7 @@ export const DeleteCategory = ({
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               type="submit"
+              data-test-id="confirmDeleteCategoryButton"
             >
               Delete
             </Button>
