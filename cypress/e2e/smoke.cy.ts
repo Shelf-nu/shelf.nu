@@ -92,7 +92,7 @@ describe("smoke tests", () => {
     cy.findByTestId("login").click();
     cy.wait(300);
     cy.visit("/categories");
-    cy.wait(300);
+    cy.wait(500);
     cy.findByTestId("createNewCategory").click();
     cy.wait(500);
 

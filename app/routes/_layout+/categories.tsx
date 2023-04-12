@@ -1,7 +1,7 @@
 import type { Category } from "@prisma/client";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, Outlet, useFetcher } from "@remix-run/react";
+import { Link, Outlet } from "@remix-run/react";
 import { DeleteCategory } from "~/components/category/delete-category";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -16,7 +16,6 @@ import {
   generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
-  isFormProcessing,
 } from "~/utils";
 
 export async function loader({ request }: LoaderArgs) {
