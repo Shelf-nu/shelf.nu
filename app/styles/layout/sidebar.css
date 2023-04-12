@@ -4,3 +4,31 @@
 .bottom {
   @apply flex justify-between border-t border-t-slate-400 pt-6;
 }
+
+#main-navigation {
+  width: 312px;
+}
+
+#main-navigation.collapsed {
+  width: 92px;
+}
+
+#main-navigation.collapsed .navigation-header .logo-text,
+#main-navigation.collapsed .navigation-header button,
+#main-navigation.collapsed .menu li a .text,
+#main-navigation.collapsed .user-credentials,
+#main-navigation.collapsed .logout-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.text1{
+  /* autoprefixer: off */
+            -webkit-box-orient: vertical;
+            /* autoprefixer: on */
+            display: block;
+            display: -webkit-box;
+            -webkit-line-clamp: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+}
