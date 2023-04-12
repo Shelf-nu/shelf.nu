@@ -7,6 +7,17 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { MarkdownViewer } from "~/components/markdown";
 import { Button } from "~/components/shared/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "~/components/shared/modal";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
@@ -86,14 +97,37 @@ export default function ItemDetailsPage() {
           className=" h-[400px]"
         />
         <MarkdownViewer content={item.description} />
-        <Form method="delete">
-          {item.mainImage && (
-            <input type="hidden" value={item.mainImage} name="mainImage" />
-          )}
-          <Button variant="secondary" type="submit">
-            Delete
-          </Button>
-        </Form>
+
+        <AlertDialog>
+          <AlertDialogTrigger>Open</AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you sure absolutely sure?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete your
+                account and remove your data from our servers.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              {/* <AlertDialogAction> */}
+              <Form method="delete">
+                {item.mainImage && (
+                  <input
+                    type="hidden"
+                    value={item.mainImage}
+                    name="mainImage"
+                  />
+                )}
+
+                <Button variant="secondary" type="submit">
+                  Delete
+                </Button>
+              </Form>
+              {/* </AlertDialogAction> */}
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </>
   );
