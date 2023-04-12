@@ -1,11 +1,15 @@
-import { useState } from "react";
-import type { ChangeEvent } from "react";
-
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, Link, useNavigation } from "@remix-run/react";
+import { useAtom, useAtomValue } from "jotai";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
+import {
+  fileErrorAtom,
+  titleAtom,
+  updateTitleAtom,
+  validateFileAtom,
+} from "~/atoms/items.new";
 import { CategorySelect } from "~/components/category/category-select";
 
 import FormRow from "~/components/forms/form-row";
@@ -17,7 +21,7 @@ import { Button } from "~/components/shared/button";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
 import { createItem, updateItemMainImage } from "~/modules/item";
-import { assertIsPost, isFormProcessing, verifyAccept } from "~/utils";
+import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const NewItemFormSchema = z.object({
@@ -99,42 +103,14 @@ export async function action({ request }: LoaderArgs) {
 }
 
 export default function NewItemPage() {
-  const [title, setTitle] = useState<string>("Untitled item");
   const zo = useZorm("NewQuestionWizardScreen", NewItemFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
-  // const [, markdownToHtml] = useAtom(markdownToHtmlAtom);
-
-  const [fileError, setFileError] = useState<string | undefined>(undefined);
-
-  const handleTitleChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setTitle(() => event.target.value);
-  };
-
-  const validateFile = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e?.target?.files?.[0];
-
-    if (file) {
-      const allowedType = verifyAccept(file.type, e.target.accept);
-      const allowedSize = file.size < 4_000_000;
-
-      if (!allowedType) {
-        e.target.value = "";
-        setFileError(`Allowed file types are: PNG, JPG or JPEG`);
-      }
-
-      if (!allowedSize) {
-        /** Clean the field */
-        e.target.value = "";
-        setFileError("Max file size is 4MB");
-      }
-
-      if (allowedSize && allowedType) {
-        setFileError(undefined);
-      }
-    }
-  };
+  const title = useAtomValue(titleAtom);
+  const fileError = useAtomValue(fileErrorAtom);
+  const [, validateFile] = useAtom(validateFileAtom);
+  const [, updateTitle] = useAtom(updateTitleAtom);
 
   return (
     <>
@@ -154,7 +130,7 @@ export default function NewItemPage() {
               disabled={disabled}
               error={zo.errors.title()?.message}
               autoFocus
-              onChange={handleTitleChange}
+              onChange={updateTitle}
               className="w-full"
             />
           </FormRow>
