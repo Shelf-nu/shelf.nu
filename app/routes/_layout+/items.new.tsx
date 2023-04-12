@@ -3,7 +3,7 @@ import type { ChangeEvent } from "react";
 
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useNavigation } from "@remix-run/react";
+import { Form, Link, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import { CategorySelect } from "~/components/category/category-select";
@@ -12,8 +12,8 @@ import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import Header from "~/components/layout/header";
 
+import { MarkdownEditor } from "~/components/markdown";
 import { Button } from "~/components/shared/button";
-
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
 import { createItem, updateItemMainImage } from "~/modules/item";
@@ -104,6 +104,8 @@ export default function NewItemPage() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  // const [, markdownToHtml] = useAtom(markdownToHtmlAtom);
+
   const [fileError, setFileError] = useState<string | undefined>(undefined);
 
   const handleTitleChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -185,18 +187,27 @@ export default function NewItemPage() {
           <div>
             <FormRow
               rowLabel="Description"
-              subHeading="This is the initial object description. It will be shown on the item’s overview page. You can always change it."
+              subHeading={
+                <p>
+                  This is the initial object description. It will be shown on
+                  the item’s overview page. You can always change it. This field
+                  supports{" "}
+                  <Link
+                    to="https://www.markdownguide.org/cheat-sheet"
+                    target="_blank"
+                    className="text-gray-800 underline"
+                    rel="nofollow noopener noreferrer"
+                  >
+                    markdown
+                  </Link>
+                  .
+                </p>
+              }
             >
-              <Input
-                label="Description"
-                hideLabel
-                inputType="textarea"
-                role="textbox"
+              <MarkdownEditor
+                label={zo.fields.description()}
                 name={zo.fields.description()}
-                rows={8}
-                className="w-full"
                 disabled={disabled}
-                error={zo.errors.description()?.message}
                 data-test-id="itemDescription"
               />
             </FormRow>
