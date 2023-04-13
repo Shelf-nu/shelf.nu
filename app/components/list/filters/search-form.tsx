@@ -23,7 +23,7 @@ export const SearchForm = () => {
         hasAttachedButton
       />
       <Button
-        icon={"search"}
+        icon={isSearching ? "spinner" : "search"}
         type="submit"
         variant="secondary"
         title="Search"
