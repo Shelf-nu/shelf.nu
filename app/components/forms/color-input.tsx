@@ -38,6 +38,7 @@ export const ColorInput = ({
         className="cursor-pointer p-2"
         style={{ backgroundColor: `${color}33` }}
         title="Generate random color"
+        data-test-id="generateRandomColor"
       />
       <Input
         label="Hex Color"

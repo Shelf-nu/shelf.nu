@@ -57,6 +57,7 @@ export default function Sidebar({ user }: Props) {
                   )
                 }
                 to={item.to}
+                data-test-id={`${item.label.toLowerCase()}SidebarMenuItem`}
               >
                 {item.icon}
                 {item.label}

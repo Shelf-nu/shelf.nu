@@ -1,12 +1,12 @@
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { Form, useCatch, useLoaderData } from "@remix-run/react";
+import { useCatch, useLoaderData } from "@remix-run/react";
+import { DeleteItem } from "~/components/items/delete-item";
 import { ItemImage } from "~/components/items/item-image";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { MarkdownViewer } from "~/components/markdown";
-import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
@@ -86,14 +86,7 @@ export default function ItemDetailsPage() {
           className=" h-[400px]"
         />
         <MarkdownViewer content={item.description} />
-        <Form method="delete">
-          {item.mainImage && (
-            <input type="hidden" value={item.mainImage} name="mainImage" />
-          )}
-          <Button variant="secondary" type="submit">
-            Delete
-          </Button>
-        </Form>
+        <DeleteItem item={item} />
       </div>
     </>
   );
