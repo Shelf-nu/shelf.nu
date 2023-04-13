@@ -1,12 +1,23 @@
-import { useState } from "react";
 import type { ChangeEvent } from "react";
+import { atom, useAtom } from "jotai";
+import { useHydrateAtoms } from "jotai/utils";
 import { getRandomColor } from "~/utils";
 import Input from "./input";
 
 import { Button } from "../shared/button";
 
-export const ColorInput = ({ ...rest }) => {
-  const [color, setColor] = useState<string>(`#6bd0e6`);
+const colorAtom = atom("");
+
+export const ColorInput = ({
+  colorFromServer,
+  ...rest
+}: {
+  colorFromServer: string;
+  [key: string]: any;
+}) => {
+  /** This is needed so the color can be hydrated. the Initial value is generated in the categories.new loader */
+  useHydrateAtoms([[colorAtom, colorFromServer]]);
+  const [color, setColor] = useAtom(colorAtom);
 
   const handleColorChange = (e: ChangeEvent<HTMLInputElement>) => {
     setColor(() => `${e.target.value}`);
@@ -27,6 +38,7 @@ export const ColorInput = ({ ...rest }) => {
         className="cursor-pointer p-2"
         style={{ backgroundColor: `${color}33` }}
         title="Generate random color"
+        data-test-id="generateRandomColor"
       />
       <Input
         label="Hex Color"

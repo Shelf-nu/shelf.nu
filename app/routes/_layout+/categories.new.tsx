@@ -1,6 +1,6 @@
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useNavigation } from "@remix-run/react";
+import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import { ColorInput } from "~/components/forms/color-input";
@@ -10,7 +10,7 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createCategory } from "~/modules/category";
-import { assertIsPost, isFormProcessing } from "~/utils";
+import { assertIsPost, getRandomColor, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const NewCategoryFormSchema = z.object({
@@ -24,11 +24,13 @@ const title = "New category";
 export async function loader({ request }: LoaderArgs) {
   await requireAuthSession(request);
 
+  const colorFromServer = getRandomColor();
+
   const header = {
     title,
   };
 
-  return json({ header });
+  return json({ header, colorFromServer });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -68,6 +70,7 @@ export default function NewItemPage() {
   const zo = useZorm("NewQuestionWizardScreen", NewCategoryFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+  const { colorFromServer } = useLoaderData();
 
   return (
     <>
@@ -86,19 +89,20 @@ export default function NewItemPage() {
             error={zo.errors.name()?.message}
             hideErrorText
             autoFocus
-            tabIndex={-1}
           />
           <Input
             label="Description"
             placeholder="Description (optional)"
             name={zo.fields.description()}
             disabled={disabled}
+            data-test-id="categoryDescription"
           />
           <ColorInput
             name={zo.fields.color()}
             disabled={disabled}
             error={zo.errors.color()?.message}
             hideErrorText
+            colorFromServer={colorFromServer}
           />
         </div>
 
