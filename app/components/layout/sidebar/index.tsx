@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { Link, NavLink } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
+import { atomWithStorage } from "jotai/utils";
 import {
   AssetsIcon,
   ItemsIcon,
@@ -19,10 +20,12 @@ interface Props {
   user: User;
 }
 
-const sidebarCollapseStatus = atom(true);
-const isSidebarSwitchClicked = atom(false);
+const componentMountedAtom = atom(false);
+const sidebarCollapseStatus = atomWithStorage("isSidebarCollapsed", true);
+const isSidebarSwitchClicked = atomWithStorage("sidebarSwitchIsClicked", false);
 
 export default function Sidebar({ user }: Props) {
+  const [hasMounted, setHasMounted] = useAtom(componentMountedAtom);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useAtom(
     sidebarCollapseStatus
   );
@@ -55,16 +58,29 @@ export default function Sidebar({ user }: Props) {
 
   const collapseSidebar = useCallback(() => {
     setIsSidebarCollapsed(true);
-  }, []);
+  }, [setIsSidebarCollapsed]);
   const uncollapseSidebar = useCallback(() => {
     setIsSidebarCollapsed(false);
-  }, []);
+  }, [setIsSidebarCollapsed]);
 
   useEffect(() => {
-    if (sidebarSwitchIsClicked === false) {
+    setHasMounted(true);
+    if (hasMounted) {
+      if (localStorage.getItem("sidebarSwitchIsClicked")) {
+        setSidebarSwitchIsClicked(
+          localStorage.getItem("sidebarSwitchIsClicked") === "true"
+        );
+      }
+      if (localStorage.getItem("isSidebarCollapsed")) {
+        setIsSidebarCollapsed(
+          localStorage.getItem("isSidebarCollapsed") === "true"
+        );
+      }
       const sidebar = document.getElementById("main-navigation") as HTMLElement;
-      sidebar.addEventListener("mouseenter", uncollapseSidebar);
-      sidebar.addEventListener("mouseleave", collapseSidebar);
+      if (sidebarSwitchIsClicked === false) {
+        sidebar.addEventListener("mouseenter", uncollapseSidebar);
+        sidebar.addEventListener("mouseleave", collapseSidebar);
+      }
     }
   });
 
@@ -78,6 +94,10 @@ export default function Sidebar({ user }: Props) {
       sidebar.addEventListener("mouseleave", collapseSidebar);
     }
     setSidebarSwitchIsClicked(!sidebarSwitchIsClicked);
+  }
+
+  if (!hasMounted) {
+    return null;
   }
 
   return (

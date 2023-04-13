@@ -11,6 +11,7 @@
 
 #main-navigation.collapsed {
   width: 92px;
+  overflow: hidden;
 }
 
 #main-navigation.collapsed .navigation-header .logo-text,
@@ -20,4 +21,8 @@
 #main-navigation.collapsed .logout-btn {
   opacity: 0;
   pointer-events: none;
+}
+
+#main-navigation.collapsed .logout-btn form{
+  pointer-events: all;
 }
