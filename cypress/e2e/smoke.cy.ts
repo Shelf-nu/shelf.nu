@@ -91,7 +91,7 @@ describe("smoke tests", () => {
     cy.findByTestId("password").type(credentials.password);
     cy.findByTestId("login").click();
     cy.wait(300);
-    cy.visit("/categories");
+    cy.findByTestId("categoriesSidebarMenuItem").click();
     cy.wait(500);
     cy.findByTestId("createNewCategory").click();
     cy.wait(500);
