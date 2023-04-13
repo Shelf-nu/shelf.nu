@@ -23,11 +23,14 @@ export const DeleteItem = ({
   };
 }) => (
   <AlertDialog>
-    <AlertDialogTrigger>
-      <Button variant="secondary" data-test-id="deleteItemButton">
-        Delete
-      </Button>
-    </AlertDialogTrigger>
+    <div>
+      <AlertDialogTrigger asChild>
+        <Button variant="secondary" data-test-id="deleteItemButton">
+          Delete
+        </Button>
+      </AlertDialogTrigger>
+    </div>
+
     <AlertDialogContent>
       <AlertDialogHeader>
         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
@@ -40,7 +43,10 @@ export const DeleteItem = ({
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel>Cancel</AlertDialogCancel>
+        <AlertDialogCancel asChild>
+          <Button variant="secondary">Cancel</Button>
+        </AlertDialogCancel>
+
         <Form method="delete">
           {item.mainImage && (
             <input type="hidden" value={item.mainImage} name="mainImage" />

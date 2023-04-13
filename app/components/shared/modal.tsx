@@ -119,10 +119,8 @@ AlertDialogAction.displayName = AlertDialogPrimitive.Action.displayName;
 const AlertDialogCancel = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Cancel>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Cancel>
->(({ className, children, ...props }, ref) => (
-  <AlertDialogPrimitive.Cancel ref={ref} className={tw(className)} {...props}>
-    <Button variant="secondary">{children}</Button>
-  </AlertDialogPrimitive.Cancel>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPrimitive.Cancel ref={ref} className={tw(className)} {...props} />
 ));
 AlertDialogCancel.displayName = AlertDialogPrimitive.Cancel.displayName;
 

@@ -1,3 +1,4 @@
+import React from "react";
 import { Link } from "@remix-run/react";
 import { tw } from "~/utils";
 import type { Icon } from "./icons-map";
@@ -17,19 +18,22 @@ export interface ButtonProps {
   [key: string]: any;
 }
 
-export function Button({
-  as = "button",
-  className = "",
-  variant = "primary",
-  width = "auto",
-  size = "md",
-  attachToInput = false,
-  icon,
-  disabled = undefined,
-  children,
-  title,
-  ...props
-}: ButtonProps) {
+export const Button = React.forwardRef(function Button(
+  {
+    as = "button",
+    className = "",
+    variant = "primary",
+    width = "auto",
+    size = "md",
+    attachToInput = false,
+    icon,
+    disabled = undefined,
+    children,
+    title,
+    ...props
+  }: ButtonProps,
+  ref
+) {
   const Component = props?.to ? Link : as;
 
   const baseButtonClasses = `inline-flex items-center justify-center rounded-lg font-semibold text-center  gap-2  max-w-xl border text-sm box-shadow-xs`;
@@ -82,8 +86,9 @@ export function Button({
       prefetch={props.to ? "intent" : "none"}
       {...props}
       title={title || children}
+      ref={ref}
     >
       {icon && iconsMap[icon]} {children ? <span>{children}</span> : null}
     </Component>
   );
-}
+});
