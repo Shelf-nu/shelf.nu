@@ -29,12 +29,9 @@ export default function App() {
   const { user } = useLoaderData<typeof loader>();
 
   return (
-    <div className="flex h-full min-h-screen flex-col ">
-      <main className="flex h-full ">
-        <div className="h-full w-80 border-r border-gray-200 p-8">
+    <div className="flex flex-col ">
+      <main className="flex">
           <Sidebar user={user} />
-        </div>
-
         <div className="h-full w-full bg-gray-25 py-3">
           <div className="flex h-full flex-1 flex-col p-8">
             <Breadcrumbs />

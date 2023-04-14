@@ -16,7 +16,7 @@ export default function ProfilePicture({
   className?: string;
 }) {
   let user = useUserData();
-  const styles = tw(width, height, "rounded-[10px]", className);
+  const styles = tw(width, height, "rounded-full", className);
 
   return user ? (
     <img
