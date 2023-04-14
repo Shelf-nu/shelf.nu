@@ -13,13 +13,12 @@ import {
 
 import { useFilter } from "../../category/useFilter";
 import Input from "../../forms/input";
-import { ChevronRight } from "../../icons";
+import { CheckIcon, ChevronRight } from "../../icons";
 
 import { Badge, Button } from "../../shared";
 
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "../../shared/dropdown";
@@ -36,20 +35,7 @@ export const CategoryCheckboxDropdown = () => {
   } = useFilter();
 
   const [selected] = useAtom(selectedCategoriesAtom);
-  const [, addOrRemoveSelectedId] = useAtom(addOrRemoveSelectedIdAtom);
   const [, setInitialSelect] = useAtom(addInitialSelectedCategoriesAtom);
-  const [, toggleIsFiltering] = useAtom(isFilteringCategoriesAtom);
-
-  const handleOnSelect = useCallback(
-    (e: Event) => {
-      /** Mark the cateogry filter as touched */
-      toggleIsFiltering(true);
-
-      /** Update the selected state. */
-      addOrRemoveSelectedId(e);
-    },
-    [addOrRemoveSelectedId, toggleIsFiltering]
-  );
 
   const hasCategories = useMemo(
     () => filteredCategories.length > 0,
@@ -86,7 +72,9 @@ export const CategoryCheckboxDropdown = () => {
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className=" w-[350px]">
-          {hasCategories ? (
+          {!hasCategories && !isFiltering ? (
+            <CategorySelectNoCategories />
+          ) : (
             <>
               <div className="relative">
                 <Input
@@ -96,6 +84,7 @@ export const CategoryCheckboxDropdown = () => {
                   hideLabel
                   className="mb-2 text-gray-500"
                   icon="coins"
+                  autoFocus
                   value={filter}
                   onChange={handleFilter}
                   ref={inputRef}
@@ -112,24 +101,59 @@ export const CategoryCheckboxDropdown = () => {
               </div>
               <div className="">
                 {filteredCategories.map((c: Category) => (
-                  <DropdownMenuCheckboxItem
-                    key={c.id}
-                    checked={selected.includes(c.id)}
-                    onSelect={handleOnSelect}
-                    data-category-id={c.id}
-                  >
-                    <Badge color={c.color} noBg>
-                      {c.name}
-                    </Badge>
-                  </DropdownMenuCheckboxItem>
+                  <CheckboxItem key={c.id} category={c} selected={selected} />
                 ))}
               </div>
             </>
-          ) : (
-            <CategorySelectNoCategories />
           )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+  );
+};
+
+const CheckboxItem = ({
+  category,
+  selected,
+}: {
+  category: Category;
+  selected: string[];
+}) => {
+  const [, toggleIsFiltering] = useAtom(isFilteringCategoriesAtom);
+  const [, addOrRemoveSelectedId] = useAtom(addOrRemoveSelectedIdAtom);
+
+  const handleOnSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      /** Mark the cateogry filter as touched */
+      toggleIsFiltering(true);
+      /** Update the selected state. */
+      addOrRemoveSelectedId(e);
+    },
+    [addOrRemoveSelectedId, toggleIsFiltering]
+  );
+
+  return (
+    <label
+      key={category.id}
+      htmlFor={category.name}
+      className="relative flex cursor-default select-none items-center rounded-lg px-2 py-1.5 text-sm font-medium outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 "
+    >
+      <Badge color={category.color} noBg>
+        {category.name}
+      </Badge>
+      <input
+        id={category.name}
+        type="checkbox"
+        value={category.id}
+        className="hidden"
+        checked={selected.includes(category.id)}
+        onChange={handleOnSelect}
+      />
+      {selected.includes(category.id) ? (
+        <span className="absolute right-2 flex  items-center justify-center text-primary">
+          <CheckIcon />
+        </span>
+      ) : null}
+    </label>
   );
 };
