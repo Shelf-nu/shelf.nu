@@ -1,6 +1,7 @@
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import type { Category } from "@prisma/client";
 import { CategorySelectNoCategories } from "./category-select-no-categories";
+import { FilterInput } from "./filter-input";
 import { useFilter } from "./useFilter";
 import {
   Select,
@@ -9,12 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../forms";
-import Input from "../forms/input";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 
 export const CategorySelect = () => {
-  const inputRef = useRef<HTMLInputElement>();
   const {
     filter,
     filteredCategories,
@@ -42,20 +41,12 @@ export const CategorySelect = () => {
             align="end"
             sideOffset={4}
           >
-            {hasCategories ? (
+            {!hasCategories && !isFiltering ? (
+              <CategorySelectNoCategories />
+            ) : (
               <>
                 <div className="relative">
-                  <Input
-                    type="text"
-                    label="Filter categories"
-                    placeholder="Filter categories"
-                    hideLabel
-                    className="mb-2 text-gray-500"
-                    icon="coins"
-                    value={filter}
-                    onChange={handleFilter}
-                    ref={inputRef}
-                  />
+                  <FilterInput filter={filter} handleFilter={handleFilter} />
                   {isFiltering && (
                     <Button
                       icon="x"
@@ -86,8 +77,6 @@ export const CategorySelect = () => {
                   Create new category
                 </Button>
               </>
-            ) : (
-              <CategorySelectNoCategories />
             )}
           </SelectContent>
         </div>

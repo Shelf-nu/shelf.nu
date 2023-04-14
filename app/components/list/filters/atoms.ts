@@ -1,3 +1,4 @@
+import type React from "react";
 import { atom } from "jotai";
 
 /** Controls the state for the selected categories for cateogry dropdown.
@@ -17,11 +18,11 @@ export const addInitialSelectedCategoriesAtom = atom(
 /** Updates the selected categories by merging the state */
 export const addOrRemoveSelectedIdAtom = atom(
   null,
-  (_get, set, event: Event) => {
+  (_get, set, event: React.ChangeEvent<HTMLInputElement>) => {
     set(selectedCategoriesAtom, (prev) => {
-      event.preventDefault();
-      const node = event.target as HTMLDivElement;
-      const id = node.dataset.categoryId as string;
+      // event.preventDefault();
+      const node = event.target as HTMLInputElement;
+      const id = node.value satisfies string;
       const newSelected = prev.includes(id)
         ? prev.filter((string) => string !== id)
         : [...prev, id];

@@ -25,7 +25,7 @@ export const DeleteCategory = ({
 
   return (
     <AlertDialog>
-      <AlertDialogTrigger>
+      <AlertDialogTrigger asChild>
         <Button
           disabled={disabled}
           variant="secondary"
@@ -49,7 +49,9 @@ export const DeleteCategory = ({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel asChild>
+            <Button variant="secondary">Cancel</Button>
+          </AlertDialogCancel>
           <Form method="delete" action="/categories">
             <input type="hidden" name="id" value={category.id} />
             <Button
