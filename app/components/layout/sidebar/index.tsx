@@ -92,6 +92,7 @@ export default function Sidebar({ user }: Props) {
                   )
                 }
                 to={item.to}
+                data-test-id={`${item.label.toLowerCase()}SidebarMenuItem`}
               >
                 <i className="icon text-gray-500">{item.icon}</i>
                 <span className="text whitespace-nowrap transition duration-200 ease-linear">

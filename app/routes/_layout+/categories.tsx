@@ -1,7 +1,8 @@
 import type { Category } from "@prisma/client";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, Outlet, useFetcher } from "@remix-run/react";
+import { Link, Outlet } from "@remix-run/react";
+import { DeleteCategory } from "~/components/category/delete-category";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
@@ -15,7 +16,6 @@ import {
   generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
-  isFormProcessing,
 } from "~/utils";
 
 export async function loader({ request }: LoaderArgs) {
@@ -96,34 +96,18 @@ const CategoryItem = ({
   item,
 }: {
   item: Pick<Category, "id" | "description" | "name" | "color">;
-}) => {
-  const fetcher = useFetcher();
-  const disabled = isFormProcessing(fetcher.state);
-
-  return (
-    <div className="flex items-center justify-between">
-      <div className="flex grow items-center gap-4">
-        <div title={`Category: ${item.name}`} className="w-1/3">
-          <Badge color={item.color}>{item.name}</Badge>
-        </div>
-        <div className="w-2/3 text-gray-500" title="Description">
-          {item.description}
-        </div>
+}) => (
+  <div className="flex items-center justify-between">
+    <div className="flex grow items-center gap-4">
+      <div title={`Category: ${item.name}`} className="w-1/3">
+        <Badge color={item.color}>{item.name}</Badge>
       </div>
-      <div>
-        <fetcher.Form method="delete" action="/categories">
-          <input type="hidden" name="id" value={item.id} />
-          <Button
-            disabled={disabled}
-            variant="secondary"
-            size="sm"
-            type="submit"
-            className="text-[12px]"
-            icon={"trash"}
-            title={"Delete"}
-          />
-        </fetcher.Form>
+      <div className="w-2/3 text-gray-500" title="Description">
+        {item.description}
       </div>
     </div>
-  );
-};
+    <div>
+      <DeleteCategory category={item} />
+    </div>
+  </div>
+);

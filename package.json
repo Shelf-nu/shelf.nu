@@ -31,6 +31,7 @@
   "dependencies": {
     "@markdoc/markdoc": "^0.2.2",
     "@prisma/client": "^4.12.0",
+    "@radix-ui/react-alert-dialog": "^1.0.3",
     "@radix-ui/react-dropdown-menu": "^2.0.4",
     "@radix-ui/react-select": "^1.2.1",
     "@radix-ui/react-tabs": "^1.0.3",
@@ -50,6 +51,7 @@
     "remix-utils": "^6.1.0",
     "sharp": "^0.32.0",
     "tailwind-merge": "^1.11.0",
+    "tailwindcss-animate": "^1.0.5",
     "zod": "^3.21.4"
   },
   "devDependencies": {

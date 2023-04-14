@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 
 import type { Fetcher } from "@remix-run/react";
+import { useAtom } from "jotai";
 import type { DropzoneOptions, FileRejection } from "react-dropzone";
 import { useDropzone } from "react-dropzone";
 
 import { FileUploadIcon } from "~/components/icons/library";
 import { formatBytes, tw } from "~/utils";
-import type { FileInfo } from "./profile-picture-upload";
+import { derivedFileInfoAtom } from "./atoms";
 
 import { StatusMessage } from "./status-message";
 
@@ -14,34 +15,22 @@ export function FileDropzone({
   fetcher,
   onDropAccepted,
   dropzoneOptions,
-  fileInfo,
   fileInputName,
   className,
-}: // onDropRejected,
-{
+}: {
   fetcher: Fetcher;
   onDropAccepted: DropzoneOptions["onDropAccepted"];
-  fileInfo: FileInfo;
   fileInputName: string;
   dropzoneOptions?: DropzoneOptions;
   className?: string;
 }) {
-  const [filename, setFilename] = useState<string>("");
-  const [message, setMessage] = useState<string>("");
-  const [dropzoneError, setDropzoneError] = useState<boolean>(false);
+  const [fileInfo, updateAllFileInfo] = useAtom(derivedFileInfoAtom);
+  const { filename, message, error } = fileInfo;
 
   const { type, data } = fetcher;
   const serverError = data?.error;
 
   const isPending = ["actionSubmission", "loaderSubmission"].includes(type);
-
-  useEffect(() => {
-    if (fileInfo) {
-      setFilename(() => fileInfo.name);
-      setMessage(() => fileInfo.message);
-      setDropzoneError(() => false);
-    }
-  }, [fileInfo]);
 
   /**
    * THis effect takes care of the transitions of the states to manage
@@ -50,30 +39,34 @@ export function FileDropzone({
   useEffect(() => {
     /** If there is a server error set is as the message */
     if (serverError) {
-      setMessage(() => serverError);
+      updateAllFileInfo({
+        filename,
+        message: serverError,
+        error: true,
+      });
     }
 
     return () => {
       /** Cleanup message */
-      setMessage(() => "");
+      updateAllFileInfo({
+        ...fileInfo,
+        message: "",
+      });
     };
-  }, [serverError]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverError, updateAllFileInfo]);
 
-  useEffect(() => {
-    /** when the state is pending, that means we are between submissions so we set the state back to original state */
-    if (type === "done") {
-      setFilename(() => "");
-      setMessage(() => "");
-      setDropzoneError(() => false);
-    }
-  }, [type]);
-
-  const onDropRejected = useCallback((fileRejections: FileRejection[]) => {
-    /** Set the status state needed to show the status message */
-    setFilename(() => fileRejections?.[0]?.file?.name);
-    setMessage(() => fileRejections?.[0]?.errors?.[0].message);
-    setDropzoneError(() => true);
-  }, []);
+  const onDropRejected = useCallback(
+    (fileRejections: FileRejection[]) => {
+      /** Set the status state needed to show the status message */
+      updateAllFileInfo({
+        filename: fileRejections?.[0]?.file?.name,
+        message: fileRejections?.[0]?.errors?.[0].message,
+        error: true,
+      });
+    },
+    [updateAllFileInfo]
+  );
 
   const mergedDropzoneOptions = {
     onDropAccepted,
@@ -111,7 +104,7 @@ export function FileDropzone({
   );
 
   return (
-    <div className={tw("flex grow flex-col gap-4", className)}>
+    <div className={tw("flex max-w-full grow flex-col gap-4", className)}>
       <div {...getRootProps({ className: style })}>
         <input {...getInputProps()} disabled={isPending} name={fileInputName} />
         <FileUploadIcon />
@@ -128,7 +121,7 @@ export function FileDropzone({
         fetcher={fetcher}
         filename={filename}
         message={message}
-        error={dropzoneError || serverError}
+        error={error || serverError}
       />
     </div>
   );

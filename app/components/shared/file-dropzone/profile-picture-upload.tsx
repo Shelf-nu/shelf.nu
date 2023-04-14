@@ -1,33 +1,26 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useFetcher } from "@remix-run/react";
-import { formatBytes } from "~/utils";
+import { useAtom } from "jotai";
+import { updateFileInfoFromFileAtom } from "./atoms";
 import { FileDropzone } from "./file-dropzone";
-
-export type FileInfo = {
-  name: string;
-  message: string;
-} | null;
 
 export function ProfilePictureUpload() {
   const fetcher = useFetcher();
-  const [fileInfo, setFileInfo] = useState<FileInfo>(null);
+  const [, setFileInfo] = useAtom(updateFileInfoFromFileAtom);
 
   const onDropAccepted = useCallback(
     async (acceptedFiles: File[]) => {
       // Do something with the files
       if (acceptedFiles) {
-        const { name, size } = acceptedFiles[0];
-        setFileInfo(() => ({
-          name,
-          message: formatBytes(size),
-        }));
+        const file = acceptedFiles[0];
+        setFileInfo(file);
 
         fetcher.submit(
           /**
            * For some reason even tho its multipart/form-data submit() is not
            *  happy with me passing a file as part of the POST body
            @ts-ignore */
-          { file: acceptedFiles[0] },
+          { file },
           {
             method: "post",
             action: "/api/user/upload-user-photo",
@@ -36,7 +29,7 @@ export function ProfilePictureUpload() {
         );
       }
     },
-    [fetcher]
+    [fetcher, setFileInfo]
   );
 
   return (
@@ -51,7 +44,6 @@ export function ProfilePictureUpload() {
         },
       }}
       fetcher={fetcher}
-      fileInfo={fileInfo}
       fileInputName="profile-picture"
     />
   );

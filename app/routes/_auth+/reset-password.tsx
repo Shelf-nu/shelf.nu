@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { atom, useAtom } from "jotai";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -106,9 +107,12 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data.title) },
 ];
 
+
+const userRefreshTokenAtom = atom("")
+
 export default function ResetPassword() {
   const zo = useZorm("ResetPasswordForm", ResetPasswordSchema);
-  const [userRefreshToken, setUserRefreshToken] = useState("");
+  const [userRefreshToken, setUserRefreshToken] = useAtom(userRefreshTokenAtom);
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -131,7 +135,7 @@ export default function ResetPassword() {
       // prevent memory leak. Listener stays alive 👨‍🎤
       subscription.unsubscribe();
     };
-  }, [supabase.auth]);
+  }, [setUserRefreshToken, supabase.auth]);
 
   return (
     <div className="flex min-h-full flex-col justify-center">
