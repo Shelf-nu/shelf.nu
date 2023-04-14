@@ -1,13 +1,19 @@
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  useLoaderData,
+  useNavigation,
+  useSearchParams,
+} from "@remix-run/react";
 
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
 export const SearchForm = () => {
+  const [params] = useSearchParams();
   const { search, modelName } = useLoaderData();
   const { singular } = modelName;
   const state = useNavigation().state;
-  const isSearching = state === "loading";
+  const isSearching =
+    state === "loading" && (params.has("s") || params.has("category"));
 
   return (
     <div className="relative flex">
