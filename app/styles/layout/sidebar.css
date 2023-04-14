@@ -4,3 +4,21 @@
 .bottom {
   @apply flex justify-between border-t border-t-slate-400 pt-6;
 }
+
+
+.collapsed-navigation .navigation-header .logo-text,
+.collapsed-navigation .navigation-header button,
+.collapsed-navigation .menu li a .text,
+.collapsed-navigation .user-credentials,
+.collapsed-navigation .logout-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.collapsed-navigation .logout-btn form{
+  pointer-events: all;
+}
+
+.collapsed-navigation .bottom{
+  @apply border-none;
+}

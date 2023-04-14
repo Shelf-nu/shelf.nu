@@ -15,15 +15,15 @@ export default function SidebarBottom({ user }: Props) {
     <div className="bottom">
       <Link to="settings" className="rounded-lg p-1 hover:bg-gray-100">
         <div className="flex items-center gap-3">
-          <ProfilePicture width="w-12" height="h-12" />
-          <div className="flex-1 text-[14px]">
+          <ProfilePicture width="w-10" height="h-10" />
+          <div className="user-credentials max-w-[120px] flex-1 text-[14px] transition-all duration-200 ease-linear">
             <div className="font-semibold">{user.username}</div>
-            <div>{user.email}</div>
+            <p className="line-clamp-1 block text-ellipsis">{user.email}</p>
           </div>
         </div>
       </Link>
 
-      <LogoutButton className="h-8 w-8" />
+      <LogoutButton className="logout-btn h-8 w-8 transition-all duration-200 ease-linear" />
     </div>
   );
 }
