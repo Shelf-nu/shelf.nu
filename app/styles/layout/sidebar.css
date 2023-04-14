@@ -5,24 +5,20 @@
   @apply flex justify-between border-t border-t-slate-400 pt-6;
 }
 
-#main-navigation {
-  width: 312px;
-}
 
-#main-navigation.collapsed {
-  width: 92px;
-  overflow: hidden;
-}
-
-#main-navigation.collapsed .navigation-header .logo-text,
-#main-navigation.collapsed .navigation-header button,
-#main-navigation.collapsed .menu li a .text,
-#main-navigation.collapsed .user-credentials,
-#main-navigation.collapsed .logout-btn {
+.collapsed-navigation .navigation-header .logo-text,
+.collapsed-navigation .navigation-header button,
+.collapsed-navigation .menu li a .text,
+.collapsed-navigation .user-credentials,
+.collapsed-navigation .logout-btn {
   opacity: 0;
   pointer-events: none;
 }
 
-#main-navigation.collapsed .logout-btn form{
+.collapsed-navigation .logout-btn form{
   pointer-events: all;
+}
+
+.collapsed-navigation .bottom{
+  @apply border-none;
 }
