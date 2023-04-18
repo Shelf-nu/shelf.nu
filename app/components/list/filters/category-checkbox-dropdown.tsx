@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Category } from "@prisma/client";
 import { useSearchParams } from "@remix-run/react";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 
 import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
 import {
   addInitialSelectedCategoriesAtom,
   addOrRemoveSelectedIdAtom,
-  isFilteringCategoriesAtom,
   selectedCategoriesAtom,
+  toggleIsFilteringAtom,
 } from "./atoms";
 
 import { useFilter } from "../../category/useFilter";
@@ -34,7 +34,7 @@ export const CategoryCheckboxDropdown = () => {
     handleFilter,
   } = useFilter();
 
-  const [selected] = useAtom(selectedCategoriesAtom);
+  const { items } = useAtomValue(selectedCategoriesAtom);
   const [, setInitialSelect] = useAtom(addInitialSelectedCategoriesAtom);
 
   const hasCategories = useMemo(
@@ -51,7 +51,7 @@ export const CategoryCheckboxDropdown = () => {
   return (
     <div className="relative w-full text-right">
       <div className="hidden">
-        {selected.map((cat) => (
+        {items.map((cat) => (
           <input
             type="checkbox"
             checked
@@ -65,9 +65,9 @@ export const CategoryCheckboxDropdown = () => {
       <DropdownMenu>
         <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
           Categories <ChevronRight className="rotate-90" />{" "}
-          {selected.length > 0 && (
+          {items.length > 0 && (
             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
-              {selected.length}
+              {items.length}
             </div>
           )}
         </DropdownMenuTrigger>
@@ -101,7 +101,7 @@ export const CategoryCheckboxDropdown = () => {
               </div>
               <div className="">
                 {filteredCategories.map((c: Category) => (
-                  <CheckboxItem key={c.id} category={c} selected={selected} />
+                  <CheckboxItem key={c.id} category={c} selected={items} />
                 ))}
               </div>
             </>
@@ -119,13 +119,13 @@ const CheckboxItem = ({
   category: Category;
   selected: string[];
 }) => {
-  const [, toggleIsFiltering] = useAtom(isFilteringCategoriesAtom);
+  const [, toggleIsFiltering] = useAtom(toggleIsFilteringAtom);
   const [, addOrRemoveSelectedId] = useAtom(addOrRemoveSelectedIdAtom);
 
   const handleOnSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       /** Mark the cateogry filter as touched */
-      toggleIsFiltering(true);
+      toggleIsFiltering();
       /** Update the selected state. */
       addOrRemoveSelectedId(e);
     },
