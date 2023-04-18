@@ -102,18 +102,18 @@ export default function ItemEditPage() {
   const title = useAtomValue(titleAtom);
   const hasTitle = title !== "Untitled item";
   const { item } = useLoaderData<typeof loader>();
-  const actionResponse = useActionData<typeof action>();
-  const [, showNotification] = useAtom(showNotificationAtom);
+  // const actionResponse = useActionData<typeof action>();
+  // const [, showNotification] = useAtom(showNotificationAtom);
 
-  useEffect(() => {
-    if (actionResponse?.success) {
-      showNotification({
-        title: "Item updated",
-        message: "Your item has been updated",
-        icon: "check",
-      });
-    }
-  }, [actionResponse?.success, showNotification]);
+  // useEffect(() => {
+  //   if (actionResponse?.success) {
+  //     showNotification({
+  //       title: "Item updated",
+  //       message: "Your item has been updated",
+  //       icon: "check",
+  //     });
+  //   }
+  // }, [actionResponse?.success, showNotification]);
 
   return (
     <>
