@@ -1,4 +1,4 @@
-import type { ChangeEvent } from "react";
+import { useEffect, type ChangeEvent } from "react";
 import { useFetcher } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 import { MarkdownViewer } from "./markdown-viewer";
@@ -9,11 +9,17 @@ interface Props {
   label: string;
   name: string;
   disabled: boolean;
+  defaultValue: string;
 }
 
 const markdownAtom = atom("");
 
-export const MarkdownEditor = ({ label, name, disabled }: Props) => {
+export const MarkdownEditor = ({
+  label,
+  name,
+  disabled,
+  defaultValue,
+}: Props) => {
   const fetcher = useFetcher();
   const content = fetcher?.data?.content;
   const [markdown, setMarkdown] = useAtom(markdownAtom);
@@ -31,6 +37,10 @@ export const MarkdownEditor = ({ label, name, disabled }: Props) => {
       );
     }
   };
+
+  useEffect(() => {
+    setMarkdown(defaultValue);
+  }, [defaultValue, setMarkdown]);
 
   return (
     <Tabs

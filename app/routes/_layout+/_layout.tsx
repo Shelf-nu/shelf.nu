@@ -7,6 +7,7 @@ import { json } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar";
+import { Toaster } from "~/components/shared/toast";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
 import styles from "~/styles/layout/index.css";
@@ -31,13 +32,14 @@ export default function App() {
   return (
     <div className="flex flex-col ">
       <main className="flex">
-          <Sidebar user={user} />
+        <Sidebar user={user} />
         <div className="h-full w-full bg-gray-25 py-3">
           <div className="flex h-full flex-1 flex-col p-8">
             <Breadcrumbs />
             <Outlet />
           </div>
         </div>
+        <Toaster />
       </main>
     </div>
   );

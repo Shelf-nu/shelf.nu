@@ -7,6 +7,7 @@ import { ItemImage } from "~/components/items/item-image";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { MarkdownViewer } from "~/components/markdown";
+import { Button } from "~/components/shared";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
@@ -86,7 +87,12 @@ export default function ItemDetailsPage() {
           className=" h-[400px]"
         />
         <MarkdownViewer content={item.description} />
-        <DeleteItem item={item} />
+        <div>
+          <Button variant="secondary" to="edit">
+            Edit
+          </Button>
+          <DeleteItem item={item} />
+        </div>
       </div>
     </>
   );
