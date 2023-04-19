@@ -115,11 +115,22 @@ interface UpdateItemPayload {
 }
 
 export async function updateItem(payload: UpdateItemPayload) {
+  const { id, title, description, categoryId } = payload;
+  const data: any = { title, description };
+
+  if (categoryId) {
+    Object.assign(data, {
+      category: {
+        connect: {
+          id: categoryId,
+        },
+      },
+    });
+  }
+
   return db.item.update({
-    where: { id: payload.id },
-    data: {
-      ...payload,
-    },
+    where: { id },
+    data,
   });
 }
 

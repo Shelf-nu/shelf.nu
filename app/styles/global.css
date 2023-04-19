@@ -78,3 +78,7 @@ p {
 .markdown-viewer ol {
   @apply list-inside list-decimal;
 }
+
+[aria-label="Notifications (F8)"] ol {
+  @apply bottom-auto top-0;
+}

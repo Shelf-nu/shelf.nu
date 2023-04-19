@@ -7,6 +7,7 @@ import {
   PlusIcon,
   RefreshIcon,
   SearchIcon,
+  SuccessIcon,
   TrashIcon,
   XIcon,
 } from "../icons/library";
@@ -21,13 +22,14 @@ export type Icon =
   | "spinner"
   | "x"
   | "refresh"
-  | "coins";
+  | "coins"
+  | "success";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
 };
 
-const iconsMap: IconsMap = {
+export const iconsMap: IconsMap = {
   plus: <PlusIcon />,
   trash: <TrashIcon />,
   archive: <ArchiveIcon />,
@@ -37,6 +39,7 @@ const iconsMap: IconsMap = {
   x: <XIcon />,
   refresh: <RefreshIcon />,
   coins: <CoinsIcon />,
+  success: <SuccessIcon />,
 };
 
 export default iconsMap;
