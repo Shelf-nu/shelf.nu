@@ -85,7 +85,7 @@ export async function action({ request, params }: ActionArgs) {
 
   const notification: Omit<NotificationType, "open"> = {
     title: "Item updated",
-    message: "Your item has been updated",
+    message: "Your item has been updated successfully",
     icon: { name: "success", variant: "success" },
   };
 
