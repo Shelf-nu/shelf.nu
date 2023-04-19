@@ -59,11 +59,13 @@ describe("smoke tests", () => {
     cy.focused().type(testItem.title);
     cy.findByTestId("itemDescription").type(testItem.description);
     cy.findByRole("button", { name: /save/i }).click();
-    cy.wait(100);
+    cy.wait(300);
+    cy.findByTestId("closeToast").click();
 
     cy.findByTestId("deleteItemButton").click();
     cy.findByTestId("confirmDeleteItemButton").click();
-    cy.wait(100);
+    cy.wait(300);
+    cy.findByTestId("closeToast").click();
 
     cy.findByText("No items on database");
     cy.findByTestId("logout").click();
@@ -102,13 +104,15 @@ describe("smoke tests", () => {
     cy.findByTestId("generateRandomColor").click();
 
     cy.findByRole("button", { name: /create/i }).click();
-    cy.wait(100);
+    cy.wait(500);
 
     cy.findByTestId("deleteCategoryButton").click();
     cy.findByTestId("confirmDeleteCategoryButton").click();
-    cy.wait(100);
+    cy.wait(500);
 
     cy.findByText("No categories on database");
+    cy.findByTestId("closeToast").click();
+
     cy.findByTestId("logout").click();
     cy.findByTestId("login");
   });

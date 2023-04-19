@@ -62,7 +62,13 @@ export async function action({ request, params }: ActionArgs) {
     bucketName: "items",
   });
 
-  return redirect("/items", {
+  const notification = new URLSearchParams({
+    notificationTitle: "Item deleted.",
+    notificationMessage: "Your item has been deleted successfully",
+    notificationIcon: "trash",
+    notificationVariant: "error",
+  });
+  return redirect(`/items?${notification}`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },

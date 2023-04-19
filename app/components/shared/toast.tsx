@@ -1,27 +1,17 @@
-import { useEffect } from "react";
 import * as Toast from "@radix-ui/react-toast";
-import { useActionData } from "@remix-run/react";
+
 import { useAtom } from "jotai";
-import {
-  clearNotificationAtom,
-  showNotificationAtom,
-} from "~/atoms/notifications";
+import { clearNotificationAtom } from "~/atoms/notifications";
+import { useToast } from "~/hooks";
 import { tw } from "~/utils";
 import { iconsMap } from "./icons-map";
 
-// eslint-disable-next-line react/display-name
 export const Toaster = () => {
-  const [notification, clearNotification] = useAtom(clearNotificationAtom);
-  const [, showNotification] = useAtom(showNotificationAtom);
+  const [, clearNotification] = useAtom(clearNotificationAtom);
+
+  const [notification, clearNotificationParams] = useToast();
+
   const { open, title, message, icon } = notification;
-
-  const actionData = useActionData();
-
-  useEffect(() => {
-    if (actionData?.notification) {
-      showNotification(actionData.notification);
-    }
-  }, [actionData, showNotification]);
 
   const variants = {
     primary: tw(`border-primary-50 bg-primary-100 text-primary`),
@@ -31,7 +21,7 @@ export const Toaster = () => {
   };
 
   return (
-    <Toast.Provider swipeDirection="right">
+    <Toast.Provider swipeDirection="right" duration={3000}>
       <Toast.Root
         className={tw(
           "top-0 flex gap-4 rounded-lg border border-gray-100 bg-white p-3 shadow-xl",
@@ -60,7 +50,11 @@ export const Toaster = () => {
           </Toast.Description>
         </div>
 
-        <Toast.Close className="flex" onClick={clearNotification}>
+        <Toast.Close
+          className="flex"
+          onClick={clearNotificationParams}
+          data-test-id="closeToast"
+        >
           {iconsMap["x"]}
         </Toast.Close>
       </Toast.Root>

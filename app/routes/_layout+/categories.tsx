@@ -2,6 +2,7 @@ import type { Category } from "@prisma/client";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
+import type { NotificationType } from "~/atoms/notifications";
 import { DeleteCategory } from "~/components/category/delete-category";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -66,8 +67,12 @@ export async function action({ request }: ActionArgs) {
   const id = formData.get("id") as string;
 
   await deleteCategory({ id, userId });
-
-  return true;
+  const notification: Omit<NotificationType, "open"> = {
+    title: "Category deleted",
+    message: "Your category has been deleted successfully",
+    icon: { name: "trash", variant: "error" },
+  };
+  return json({ notification });
 }
 
 export const handle = {

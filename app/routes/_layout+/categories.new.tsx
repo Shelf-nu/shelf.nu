@@ -58,8 +58,13 @@ export async function action({ request }: LoaderArgs) {
     ...result.data,
     userId: authSession.userId,
   });
-
-  return redirect("/categories", {
+  const notification = new URLSearchParams({
+    notificationTitle: "Category created.",
+    notificationMessage: "Your category has been created successfully",
+    notificationIcon: "success",
+    notificationVariant: "success",
+  });
+  return redirect(`/categories?${notification}`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },

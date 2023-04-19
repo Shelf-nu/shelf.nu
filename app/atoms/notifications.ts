@@ -1,13 +1,15 @@
 import { atom } from "jotai";
 import type { Icon } from "~/components/shared/icons-map";
 
+export type NotificationVariant = "primary" | "gray" | "success" | "error";
+
 export interface NotificationType {
   open: boolean;
   title: string;
   message: string;
   icon: {
     name: Icon;
-    variant: "primary" | "gray" | "success" | "error";
+    variant: NotificationVariant;
     className?: string;
   };
 }

@@ -78,7 +78,13 @@ export async function action({ request }: LoaderArgs) {
   // Not sure how to handle this failign as the item is already created
   await updateItemMainImage({ request, itemId: item.id });
 
-  return redirect(`/items/${item.id}`, {
+  const notification = new URLSearchParams({
+    notificationTitle: "Item created.",
+    notificationMessage: "Your item has been created successfully",
+    notificationIcon: "success",
+    notificationVariant: "success",
+  });
+  return redirect(`/items/${item.id}?${notification}`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },

@@ -4,6 +4,7 @@ import { json } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
+import type { NotificationType } from "~/atoms/notifications";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -86,6 +87,13 @@ export async function action({ request }: ActionArgs) {
       ...result?.data,
       id: userId,
     };
+
+    const notification: Omit<NotificationType, "open"> = {
+      title: "User updated",
+      message: "Your settings have been updated successfully",
+      icon: { name: "success", variant: "success" },
+    };
+
     /** Update the user */
     const updatedUser = await updateUser(updateUserPayload);
 
@@ -93,7 +101,7 @@ export async function action({ request }: ActionArgs) {
       return json({ errors: updatedUser.errors }, { status: 400 });
     }
 
-    return updatedUser;
+    return { updatedUser, notification };
   }
 }
 
@@ -114,9 +122,7 @@ export default function UserPage() {
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const data = useActionData<UpdateUserResponse>();
-
-  /** Get the data from the action,  */
-  let user = useUserData();
+  const user = useUserData();
   return (
     <div className=" flex flex-col">
       <div className=" mb-6">
