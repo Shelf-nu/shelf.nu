@@ -31,9 +31,9 @@ export default function App() {
   return (
     <div className="flex flex-col ">
       <main className="flex">
-          <Sidebar user={user} />
-        <div className="h-full w-full bg-gray-25 py-3">
-          <div className="flex h-full flex-1 flex-col p-8">
+        <Sidebar user={user} />
+        <div className="container bg-gray-25 py-8">
+          <div className="flex h-full flex-1 flex-col">
             <Breadcrumbs />
             <Outlet />
           </div>

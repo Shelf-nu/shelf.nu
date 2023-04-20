@@ -9,6 +9,8 @@ import {
   SearchIcon,
   TrashIcon,
   XIcon,
+  BarCodeIcon,
+  PenIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -21,7 +23,9 @@ export type Icon =
   | "spinner"
   | "x"
   | "refresh"
-  | "coins";
+  | "coins"
+  | "barcode"
+  | "pen";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -37,6 +41,8 @@ const iconsMap: IconsMap = {
   x: <XIcon />,
   refresh: <RefreshIcon />,
   coins: <CoinsIcon />,
+  barcode: <BarCodeIcon/>,
+  pen: <PenIcon />,
 };
 
 export default iconsMap;
