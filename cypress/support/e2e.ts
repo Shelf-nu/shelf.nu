@@ -10,7 +10,7 @@ Cypress.on("uncaught:exception", (err) => {
     /hydrat/i.test(err.message) ||
     /Minified React error #418/.test(err.message) ||
     /Minified React error #423/.test(err.message) ||
-    /AbortError/.test(err.message)
+    err.name === "AbortError"
   ) {
     return false;
   }
