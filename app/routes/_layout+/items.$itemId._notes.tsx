@@ -63,7 +63,7 @@ export async function loader({ request }: LoaderArgs) {
 //   });
 // }
 
-export default function ItemDetailsPage() {
+export default function NotesPage() {
   return (
     <>
       <Form action={"post"}>
