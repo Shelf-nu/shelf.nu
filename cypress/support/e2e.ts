@@ -10,6 +10,7 @@ Cypress.on("uncaught:exception", (err) => {
     /hydrat/i.test(err.message) ||
     /Minified React error #418/.test(err.message) ||
     /Minified React error #423/.test(err.message) ||
+    // @TODO this needs to be removed as soon as we can figure out why the emitter approach is not working
     err.name === "AbortError"
   ) {
     return false;
