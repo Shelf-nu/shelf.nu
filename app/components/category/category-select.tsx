@@ -13,7 +13,7 @@ import {
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 
-export const CategorySelect = () => {
+export const CategorySelect = ({ defaultValue }: { defaultValue?: string }) => {
   const {
     filter,
     filteredCategories,
@@ -29,7 +29,7 @@ export const CategorySelect = () => {
 
   return (
     <div className="relative w-full">
-      <Select name="category">
+      <Select name="category" defaultValue={defaultValue || undefined}>
         <SelectTrigger className="">
           <SelectValue placeholder="Select category" />
         </SelectTrigger>

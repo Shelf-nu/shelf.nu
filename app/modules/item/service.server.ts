@@ -109,6 +109,7 @@ interface UpdateItemPayload {
   id: Item["id"];
   title?: Item["title"];
   description?: Item["description"];
+  categoryId?: Item["categoryId"];
   mainImage?: Item["mainImage"];
   mainImageExpiration?: Item["mainImageExpiration"];
 }
