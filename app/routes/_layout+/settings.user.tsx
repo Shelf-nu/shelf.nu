@@ -4,7 +4,6 @@ import { json } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
-import type { NotificationType } from "~/atoms/notifications";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -14,6 +13,7 @@ import ProfilePicture from "~/components/user/profile-picture";
 
 import { useUserData } from "~/hooks";
 import {
+  commitAuthSession,
   destroyAuthSession,
   requireAuthSession,
   sendResetPasswordLink,
@@ -27,6 +27,7 @@ import type {
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { delay } from "~/utils/delay";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const UpdateFormSchema = z.object({
   email: z
@@ -41,7 +42,7 @@ export const UpdateFormSchema = z.object({
 });
 
 export async function action({ request }: ActionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
   assertIsPost(request);
 
   const formData = await request.formData();
@@ -85,13 +86,7 @@ export async function action({ request }: ActionArgs) {
     /** Create the payload if the client side validation works */
     const updateUserPayload: UpdateUserPayload = {
       ...result?.data,
-      id: userId,
-    };
-
-    const notification: Omit<NotificationType, "open"> = {
-      title: "User updated",
-      message: "Your settings have been updated successfully",
-      icon: { name: "success", variant: "success" },
+      id: authSession.userId,
     };
 
     /** Update the user */
@@ -101,7 +96,19 @@ export async function action({ request }: ActionArgs) {
       return json({ errors: updatedUser.errors }, { status: 400 });
     }
 
-    return { updatedUser, notification };
+    sendNotification({
+      title: "User updated",
+      message: "Your settings have been updated successfully",
+      icon: { name: "success", variant: "success" },
+    });
+    return json(
+      { success: true },
+      {
+        headers: {
+          "Set-Cookie": await commitAuthSession(request, { authSession }),
+        },
+      }
+    );
   }
 }
 

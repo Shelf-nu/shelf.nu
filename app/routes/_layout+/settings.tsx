@@ -26,6 +26,8 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data.header.title) },
 ];
 
+export const shouldRevalidate = () => false;
+
 export default function SettingsPage() {
   const items = [
     { to: "user", content: "My details" },

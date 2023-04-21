@@ -13,6 +13,8 @@ export const handle = {
   breadcrumb: () => <Link to="/items">Items</Link>,
 };
 
+export const shouldRevalidate = () => false;
+
 export default function ItemsPage() {
   return <Outlet />;
 }
