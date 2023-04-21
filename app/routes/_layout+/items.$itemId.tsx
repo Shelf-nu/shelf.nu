@@ -1,6 +1,6 @@
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useCatch, useLoaderData } from "@remix-run/react";
+import { Outlet, useCatch, useLoaderData } from "@remix-run/react";
 import { DeleteItem } from "~/components/items/delete-item";
 import { ItemImage } from "~/components/items/item-image";
 
@@ -101,6 +101,7 @@ export default function ItemDetailsPage() {
           <DeleteItem item={item} />
         </div>
       </div>
+      <Outlet />
     </>
   );
 }
