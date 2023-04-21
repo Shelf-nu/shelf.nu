@@ -1,6 +1,7 @@
 import * as Toast from "@radix-ui/react-toast";
 
 import { useAtom } from "jotai";
+import { useEventSource } from "remix-utils";
 import { clearNotificationAtom } from "~/atoms/notifications";
 import { useToast } from "~/hooks";
 import { tw } from "~/utils";
@@ -8,7 +9,6 @@ import { iconsMap } from "./icons-map";
 
 export const Toaster = () => {
   const [, clearNotification] = useAtom(clearNotificationAtom);
-
   const [notification, clearNotificationParams] = useToast();
 
   const { open, title, message, icon } = notification;
@@ -19,6 +19,10 @@ export const Toaster = () => {
     success: tw(`border-success-50 bg-success-100 text-success-600`),
     error: tw(`border-error-50 bg-error-100 text-error-600`),
   };
+
+  const notif = useEventSource("/api/sse/notification", {
+    event: "new-notification",
+  });
 
   return (
     <Toast.Provider swipeDirection="right" duration={3000}>
@@ -62,3 +66,19 @@ export const Toaster = () => {
     </Toast.Provider>
   );
 };
+
+function Counter() {
+  let time = useEventSource("/api/sse/time", { event: "time" });
+
+  if (!time) return null;
+
+  return (
+    <time dateTime={time}>
+      {new Date(time).toLocaleTimeString("en", {
+        minute: "2-digit",
+        second: "2-digit",
+        hour: "2-digit",
+      })}
+    </time>
+  );
+}
