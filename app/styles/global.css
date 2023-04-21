@@ -78,3 +78,7 @@ p {
 .markdown-viewer ol {
   @apply list-inside list-decimal;
 }
+
+.message p{
+  @apply text-[16px] text-gray-900 mb-3 last:mb-0;
+}

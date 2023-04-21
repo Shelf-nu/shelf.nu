@@ -184,6 +184,7 @@ export default function NewItemPage() {
                 label={zo.fields.description()}
                 name={zo.fields.description()}
                 disabled={disabled}
+                placeholder="Add a description for your asset. Supports markdown."
                 data-test-id="itemDescription"
               />
             </FormRow>

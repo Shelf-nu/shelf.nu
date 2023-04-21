@@ -9,11 +9,12 @@ interface Props {
   label: string;
   name: string;
   disabled: boolean;
+  placeholder?: string;
 }
 
 const markdownAtom = atom("");
 
-export const MarkdownEditor = ({ label, name, disabled }: Props) => {
+export const MarkdownEditor = ({ label, name, disabled, placeholder }: Props) => {
   const fetcher = useFetcher();
   const content = fetcher?.data?.content;
   const [markdown, setMarkdown] = useAtom(markdownAtom);
@@ -50,7 +51,7 @@ export const MarkdownEditor = ({ label, name, disabled }: Props) => {
           label={label}
           disabled={disabled}
           inputType="textarea"
-          placeholder="Add a description for your asset. Supports markdown."
+          placeholder={placeholder}
           hideLabel
           data-test-id="itemDescription"
         />
