@@ -8,6 +8,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { MarkdownViewer } from "~/components/markdown";
 
+import { Button } from "~/components/shared/button";
 import ProfilePicture from "~/components/user/profile-picture";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
