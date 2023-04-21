@@ -8,6 +8,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { MarkdownViewer, MarkdownEditor } from "~/components/markdown";
 
+import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
 import ProfilePicture from "~/components/user/profile-picture";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
@@ -103,10 +104,7 @@ export default function ItemDetailsPage() {
                 Category
               </span>
               <div className="max-w-[250px]">
-                <span className="inline-flex items-center gap-1 rounded-2xl bg-[#F4F3FF] py-[2px] pl-[6px] pr-2 text-[12px] font-medium">
-                  <div className="h-2 w-2 rounded-full bg-[#5925DC]"></div>
-                  <span className="text-[#5925DC]">Laptops</span>
-                </span>
+                <Badge color="#5925DC"> Laptops </Badge>
               </div>
             </li>
             <li className="mb-4 flex justify-between">
