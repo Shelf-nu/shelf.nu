@@ -12,6 +12,7 @@ export interface NotificationType {
     variant: NotificationVariant;
     className?: string;
   };
+  time?: number;
 }
 
 export const notificationAtom = atom<NotificationType>({
@@ -28,15 +29,10 @@ export const notificationAtom = atom<NotificationType>({
 /** Opens the Toast and shows the notification */
 export const showNotificationAtom = atom(
   (get) => get(notificationAtom),
-  (_get, set, { title, message, icon }: Omit<NotificationType, "open">) =>
-    set(notificationAtom, (prev) => ({
+  (_get, set, notification: Omit<NotificationType, "open">) =>
+    set(notificationAtom, () => ({
+      ...notification,
       open: true,
-      title,
-      message,
-      icon: {
-        ...prev.icon,
-        ...icon,
-      },
     }))
 );
 

@@ -1,14 +1,7 @@
-import { useEffect } from "react";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import {
-  Form,
-  useFetcher,
-  useLoaderData,
-  useNavigation,
-} from "@remix-run/react";
+import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
-import { useEventSource } from "remix-utils";
 import { z } from "zod";
 import { ColorInput } from "~/components/forms/color-input";
 import Input from "~/components/forms/input";
@@ -17,9 +10,9 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createCategory } from "~/modules/category";
-import { emitter } from "~/modules/emitter.server";
 import { assertIsPost, getRandomColor, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const NewCategoryFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
@@ -37,7 +30,6 @@ export async function loader({ request }: LoaderArgs) {
   const header = {
     title,
   };
-  emitter.emit("notification", "hello");
 
   return json({ header, colorFromServer });
 }
@@ -68,13 +60,11 @@ export async function action({ request }: LoaderArgs) {
     userId: authSession.userId,
   });
 
-  const notification = new URLSearchParams({
-    notificationTitle: "Category created.",
-    notificationMessage: "Your category has been created successfully",
-    notificationIcon: "success",
-    notificationVariant: "success",
+  sendNotification({
+    title: "Category created",
+    message: "Your category has been created successfully",
+    icon: { name: "success", variant: "success" },
   });
-  emitter.emit("new-notification", notification);
 
   return redirect(`/categories`, {
     headers: {
@@ -89,10 +79,6 @@ export default function NewCategory() {
   const disabled = isFormProcessing(navigation.state);
   const { colorFromServer } = useLoaderData();
 
-  const notif = useEventSource("/api/sse/notification", {
-    event: "new-notification",
-  });
-  console.log(notif);
   return (
     <>
       <Form

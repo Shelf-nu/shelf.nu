@@ -14,6 +14,8 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data.title) },
 ];
 
+export const shouldRevalidate = () => false;
+
 export default function ItemsSettings() {
   return <div>Silence is golden</div>;
 }

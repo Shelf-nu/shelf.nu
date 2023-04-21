@@ -12,6 +12,7 @@ import { getCategories } from "~/modules/category";
 import { createItem, updateItemMainImage } from "~/modules/item";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Item";
 
@@ -78,13 +79,13 @@ export async function action({ request }: LoaderArgs) {
   // Not sure how to handle this failign as the item is already created
   await updateItemMainImage({ request, itemId: item.id });
 
-  const notification = new URLSearchParams({
-    notificationTitle: "Item created.",
-    notificationMessage: "Your item has been created successfully",
-    notificationIcon: "success",
-    notificationVariant: "success",
+  sendNotification({
+    title: "Item created",
+    message: "Your item has been created successfully",
+    icon: { name: "success", variant: "success" },
   });
-  return redirect(`/items/${item.id}?${notification}`, {
+
+  return redirect(`/items/${item.id}`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },

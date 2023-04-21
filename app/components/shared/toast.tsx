@@ -1,15 +1,18 @@
+import { useEffect } from "react";
 import * as Toast from "@radix-ui/react-toast";
 
 import { useAtom } from "jotai";
 import { useEventSource } from "remix-utils";
-import { clearNotificationAtom } from "~/atoms/notifications";
-import { useToast } from "~/hooks";
+import {
+  clearNotificationAtom,
+  showNotificationAtom,
+} from "~/atoms/notifications";
 import { tw } from "~/utils";
 import { iconsMap } from "./icons-map";
 
 export const Toaster = () => {
   const [, clearNotification] = useAtom(clearNotificationAtom);
-  const [notification, clearNotificationParams] = useToast();
+  const [notification, showNotification] = useAtom(showNotificationAtom);
 
   const { open, title, message, icon } = notification;
 
@@ -20,9 +23,15 @@ export const Toaster = () => {
     error: tw(`border-error-50 bg-error-100 text-error-600`),
   };
 
-  const notif = useEventSource("/api/sse/notification", {
+  /** New notification coming from the server */
+  const newNotification = useEventSource("/api/sse/notification", {
     event: "new-notification",
   });
+  /** When the stream sends us a new notification update the state so it displays */
+  useEffect(() => {
+    if (!newNotification) return;
+    showNotification(JSON.parse(newNotification));
+  }, [newNotification, showNotification]);
 
   return (
     <Toast.Provider swipeDirection="right" duration={3000}>
@@ -56,7 +65,7 @@ export const Toaster = () => {
 
         <Toast.Close
           className="flex"
-          onClick={clearNotificationParams}
+          onClick={clearNotification}
           data-test-id="closeToast"
         >
           {iconsMap["x"]}
@@ -66,19 +75,3 @@ export const Toaster = () => {
     </Toast.Provider>
   );
 };
-
-function Counter() {
-  let time = useEventSource("/api/sse/time", { event: "time" });
-
-  if (!time) return null;
-
-  return (
-    <time dateTime={time}>
-      {new Date(time).toLocaleTimeString("en", {
-        minute: "2-digit",
-        second: "2-digit",
-        hour: "2-digit",
-      })}
-    </time>
-  );
-}
