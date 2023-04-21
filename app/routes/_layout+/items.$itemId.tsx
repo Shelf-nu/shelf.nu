@@ -13,6 +13,7 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
 import { assertIsDelete, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
 
@@ -62,13 +63,13 @@ export async function action({ request, params }: ActionArgs) {
     bucketName: "items",
   });
 
-  const notification = new URLSearchParams({
-    notificationTitle: "Item deleted.",
-    notificationMessage: "Your item has been deleted successfully",
-    notificationIcon: "trash",
-    notificationVariant: "error",
+  sendNotification({
+    title: "Item deleted",
+    message: "Your item has been deleted successfully",
+    icon: { name: "trash", variant: "error" },
   });
-  return redirect(`/items?${notification}`, {
+
+  return redirect(`/items`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },

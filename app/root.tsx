@@ -52,6 +52,8 @@ export const loader: LoaderFunction = async () =>
     env: getBrowserEnv(),
   });
 
+export const shouldRevalidate = () => false;
+
 export default function App() {
   const { env } = useLoaderData<typeof loader>();
   // @TODO need to add error & catch boundries here

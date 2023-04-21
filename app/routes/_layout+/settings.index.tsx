@@ -10,3 +10,5 @@ export async function loader({ request }: LoaderArgs) {
 
   return redirect("user");
 }
+
+export const shouldRevalidate = () => false;

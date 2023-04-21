@@ -4,7 +4,6 @@ import { useCatch, useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { titleAtom } from "~/atoms/items.new";
-import type { NotificationType } from "~/atoms/notifications";
 import { ItemForm, NewItemFormSchema } from "~/components/items/form";
 
 import Header from "~/components/layout/header";
@@ -15,6 +14,7 @@ import { getCategories } from "~/modules/category";
 import { getItem, updateItem, updateItemMainImage } from "~/modules/item";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -76,21 +76,21 @@ export async function action({ request, params }: ActionArgs) {
 
   const { title, description, category } = result.data;
 
-  const updatedItem = await updateItem({
+  await updateItem({
     id,
     title,
     description,
     categoryId: category,
   });
 
-  const notification: Omit<NotificationType, "open"> = {
+  sendNotification({
     title: "Item updated",
     message: "Your item has been updated successfully",
     icon: { name: "success", variant: "success" },
-  };
+  });
 
   return json(
-    { success: true, notification, updatedItem },
+    { success: true },
     {
       headers: {
         "Set-Cookie": await commitAuthSession(request, { authSession }),
