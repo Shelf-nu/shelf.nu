@@ -62,7 +62,7 @@ export async function getItems({
       take,
       where,
       include: { category: true },
-      orderBy: { updatedAt: "desc" },
+      orderBy: { createdAt: "desc" },
     }),
 
     /** Count them */
