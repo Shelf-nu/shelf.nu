@@ -9,7 +9,7 @@ interface Props {
   label: string;
   name: string;
   disabled: boolean;
-  placeholder?: string;
+  placeholder: string;
 }
 
 const markdownAtom = atom("");
