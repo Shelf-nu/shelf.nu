@@ -20,8 +20,9 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  items    Item[]
-  category Category[]
+  items      Item[]
+  categories Category[]
+  notes      Note[]
 
   @@unique([email, username])
 }
@@ -46,18 +47,19 @@ model Item {
 }
 
 model Note {
-  id                  String    @id @default(cuid())
-  content             String
-  
+  id      String @id @default(cuid())
+  content String
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relationships
-  item    Item @relation(fields: [itemId], references: [id])
-  itemId  String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+  item   Item   @relation(fields: [itemId], references: [id])
+  itemId String
 }
-
 
 model Category {
   id          String  @id @default(cuid())
@@ -74,6 +76,3 @@ model Category {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 }
-
-
-
