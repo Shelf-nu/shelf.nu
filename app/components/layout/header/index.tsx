@@ -17,7 +17,7 @@ export default function Header({
   const data = useLoaderData();
   const header = data?.header as HeaderData;
 
-  return (
+  return header ? (
     <header>
       <div className="flex items-center justify-between">
         <div>
@@ -30,5 +30,5 @@ export default function Header({
         <div className="flex gap-3">{children}</div>
       </div>
     </header>
-  );
+  ) : null;
 }

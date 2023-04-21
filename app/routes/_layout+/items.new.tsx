@@ -23,6 +23,7 @@ import { getCategories } from "~/modules/category";
 import { createItem, updateItemMainImage } from "~/modules/item";
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const NewItemFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
@@ -94,6 +95,12 @@ export async function action({ request }: LoaderArgs) {
 
   // Not sure how to handle this failign as the item is already created
   await updateItemMainImage({ request, itemId: item.id });
+
+  sendNotification({
+    title: "Item created",
+    message: "Your item has been created successfully",
+    icon: { name: "success", variant: "success" },
+  });
 
   return redirect(`/items/${item.id}`, {
     headers: {

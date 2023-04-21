@@ -25,6 +25,8 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   });
 };
 
+// @TODO here we need to adjust the shouldRevalidate to only validate when the user is being updated/changed
+
 export default function App() {
   const { user } = useLoaderData<typeof loader>();
 

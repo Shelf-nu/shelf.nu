@@ -13,6 +13,7 @@ import ProfilePicture from "~/components/user/profile-picture";
 
 import { useUserData } from "~/hooks";
 import {
+  commitAuthSession,
   destroyAuthSession,
   requireAuthSession,
   sendResetPasswordLink,
@@ -26,6 +27,7 @@ import type {
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { delay } from "~/utils/delay";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const UpdateFormSchema = z.object({
   email: z
@@ -40,7 +42,7 @@ export const UpdateFormSchema = z.object({
 });
 
 export async function action({ request }: ActionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
   assertIsPost(request);
 
   const formData = await request.formData();
@@ -84,8 +86,9 @@ export async function action({ request }: ActionArgs) {
     /** Create the payload if the client side validation works */
     const updateUserPayload: UpdateUserPayload = {
       ...result?.data,
-      id: userId,
+      id: authSession.userId,
     };
+
     /** Update the user */
     const updatedUser = await updateUser(updateUserPayload);
 
@@ -93,7 +96,19 @@ export async function action({ request }: ActionArgs) {
       return json({ errors: updatedUser.errors }, { status: 400 });
     }
 
-    return updatedUser;
+    sendNotification({
+      title: "User updated",
+      message: "Your settings have been updated successfully",
+      icon: { name: "success", variant: "success" },
+    });
+    return json(
+      { success: true },
+      {
+        headers: {
+          "Set-Cookie": await commitAuthSession(request, { authSession }),
+        },
+      }
+    );
   }
 }
 
@@ -114,9 +129,7 @@ export default function UserPage() {
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const data = useActionData<UpdateUserResponse>();
-
-  /** Get the data from the action,  */
-  let user = useUserData();
+  const user = useUserData();
   return (
     <div className=" flex flex-col">
       <div className=" mb-6">

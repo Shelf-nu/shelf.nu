@@ -1,5 +1,5 @@
 import type { Item } from "@prisma/client";
-import { Form, Link, useFetcher, useNavigation } from "@remix-run/react";
+import { Form, Link, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -14,6 +14,7 @@ import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { MarkdownEditor } from "../markdown";
 import { Button } from "../shared";
+import { Spinner } from "../shared/spinner";
 
 export const NewItemFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
@@ -29,9 +30,9 @@ interface Props {
 }
 
 export const ItemForm = ({ title, category, description }: Props) => {
-  const fetcher = useFetcher();
+  const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewItemFormSchema);
-  const disabled = isFormProcessing(fetcher.state);
+  const disabled = isFormProcessing(navigation.state);
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
@@ -115,7 +116,7 @@ export const ItemForm = ({ title, category, description }: Props) => {
 
       <div className="text-right">
         <Button type="submit" disabled={disabled}>
-          Save
+          {disabled ? <Spinner /> : "Save"}
         </Button>
       </div>
     </Form>

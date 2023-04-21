@@ -18,6 +18,7 @@ import {
   getParamsValues,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -66,8 +67,13 @@ export async function action({ request }: ActionArgs) {
   const id = formData.get("id") as string;
 
   await deleteCategory({ id, userId });
+  sendNotification({
+    title: "Category deleted",
+    message: "Your category has been deleted successfully",
+    icon: { name: "trash", variant: "error" },
+  });
 
-  return true;
+  return json({ success: true });
 }
 
 export const handle = {

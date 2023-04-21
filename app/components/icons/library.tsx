@@ -303,6 +303,26 @@ export function CheckIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function SuccessIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={20}
+      height={20}
+      fill="none"
+      {...props}
+    >
+      <path
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.667}
+        d="m7.5 10 1.667 1.667 3.75-3.75M6.11 3.182A3.193 3.193 0 0 0 7.93 2.43a3.193 3.193 0 0 1 4.142 0c.512.436 1.148.7 1.818.753a3.193 3.193 0 0 1 2.929 2.93c.053.67.317 1.305.752 1.817a3.193 3.193 0 0 1 0 4.142 3.194 3.194 0 0 0-.752 1.818 3.193 3.193 0 0 1-2.93 2.929 3.194 3.194 0 0 0-1.817.752 3.193 3.193 0 0 1-4.142 0 3.194 3.194 0 0 0-1.818-.752 3.193 3.193 0 0 1-2.929-2.93 3.194 3.194 0 0 0-.753-1.817 3.193 3.193 0 0 1 0-4.142c.436-.512.7-1.148.753-1.818a3.193 3.193 0 0 1 2.93-2.929Z"
+      />
+    </svg>
+  );
+}
+
 export function SearchIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg

@@ -12,6 +12,7 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createCategory } from "~/modules/category";
 import { assertIsPost, getRandomColor, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const NewCategoryFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
@@ -59,14 +60,20 @@ export async function action({ request }: LoaderArgs) {
     userId: authSession.userId,
   });
 
-  return redirect("/categories", {
+  sendNotification({
+    title: "Category created",
+    message: "Your category has been created successfully",
+    icon: { name: "success", variant: "success" },
+  });
+
+  return redirect(`/categories`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
   });
 }
 
-export default function NewItemPage() {
+export default function NewCategory() {
   const zo = useZorm("NewQuestionWizardScreen", NewCategoryFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);

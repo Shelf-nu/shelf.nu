@@ -7,6 +7,7 @@ import {
   PlusIcon,
   RefreshIcon,
   SearchIcon,
+  SuccessIcon,
   TrashIcon,
   XIcon,
   BarCodeIcon,
@@ -25,13 +26,15 @@ export type Icon =
   | "refresh"
   | "coins"
   | "barcode"
-  | "pen";
+  | "pen"
+  | "success";
+
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
 };
 
-const iconsMap: IconsMap = {
+export const iconsMap: IconsMap = {
   plus: <PlusIcon />,
   trash: <TrashIcon />,
   archive: <ArchiveIcon />,
@@ -43,6 +46,7 @@ const iconsMap: IconsMap = {
   coins: <CoinsIcon />,
   barcode: <BarCodeIcon/>,
   pen: <PenIcon />,
+  success: <SuccessIcon />,
 };
 
 export default iconsMap;

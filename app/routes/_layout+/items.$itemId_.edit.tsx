@@ -1,11 +1,9 @@
-import { useEffect } from "react";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useActionData, useCatch, useLoaderData } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
+import { json } from "@remix-run/node";
+import { useCatch, useLoaderData } from "@remix-run/react";
+import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { titleAtom } from "~/atoms/items.new";
-import { showNotificationAtom } from "~/atoms/notifications";
 import { ItemForm, NewItemFormSchema } from "~/components/items/form";
 
 import Header from "~/components/layout/header";
@@ -16,6 +14,7 @@ import { getCategories } from "~/modules/category";
 import { getItem, updateItem, updateItemMainImage } from "~/modules/item";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -75,45 +74,35 @@ export async function action({ request, params }: ActionArgs) {
 
   updateItemMainImage({ request: clonedRequest, itemId: id });
 
-  const updatedItem = await updateItem({
+  const { title, description, category } = result.data;
+
+  await updateItem({
     id,
-    title: formData.get("title") as string,
-    description: formData.get("description") as string,
-    categoryId: formData.get("category") as string,
+    title,
+    description,
+    categoryId: category,
   });
 
-  /** Here we have to return the udpated item */
-  return redirect(`/items/${id}`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+  sendNotification({
+    title: "Item updated",
+    message: "Your item has been updated successfully",
+    icon: { name: "success", variant: "success" },
   });
-  // return json(
-  //   { success: true, updatedItem },
-  //   {
-  //     headers: {
-  //       "Set-Cookie": await commitAuthSession(request, { authSession }),
-  //     },
-  //   }
-  // );
+
+  return json(
+    { success: true },
+    {
+      headers: {
+        "Set-Cookie": await commitAuthSession(request, { authSession }),
+      },
+    }
+  );
 }
 
 export default function ItemEditPage() {
   const title = useAtomValue(titleAtom);
   const hasTitle = title !== "Untitled item";
   const { item } = useLoaderData<typeof loader>();
-  // const actionResponse = useActionData<typeof action>();
-  // const [, showNotification] = useAtom(showNotificationAtom);
-
-  // useEffect(() => {
-  //   if (actionResponse?.success) {
-  //     showNotification({
-  //       title: "Item updated",
-  //       message: "Your item has been updated",
-  //       icon: "check",
-  //     });
-  //   }
-  // }, [actionResponse?.success, showNotification]);
 
   return (
     <>
