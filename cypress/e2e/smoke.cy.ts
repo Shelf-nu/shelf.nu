@@ -58,6 +58,7 @@ describe("smoke tests", () => {
     cy.findByText("No items on database");
     cy.findByTestId("closeToast").click();
     cy.findByTestId("logout").click();
+    cy.wait(300);
     cy.findByTestId("login");
   });
   it("should allow you to make a category", () => {
@@ -102,6 +103,7 @@ describe("smoke tests", () => {
     cy.wait(100);
 
     cy.findByTestId("logout").click();
+    cy.wait(300);
     cy.findByTestId("login");
   });
 });
