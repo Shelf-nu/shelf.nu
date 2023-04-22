@@ -6,7 +6,7 @@ import { isFormProcessing } from "~/utils";
 
 export const NewNoteSchema = z.object({
   content: z.string().min(3, "Content is required"),
-  itemId: z.string().cuid(),
+  // itemId: z.string().cuid(),
 });
 
 export const NewNote = () => {
@@ -17,8 +17,11 @@ export const NewNote = () => {
   const hasError = zo.errors.content()?.message;
 
   return (
-    <fetcher.Form action="/items/$itemId/note" method="post" ref={zo.ref}>
-      <input type="hidden" name={zo.fields.itemId()} value={params.itemId} />
+    <fetcher.Form
+      action={`/items/${params.itemId}/note`}
+      method="post"
+      ref={zo.ref}
+    >
       <MarkdownEditor
         label={"note"}
         disabled={disabled}

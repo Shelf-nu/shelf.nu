@@ -28,6 +28,10 @@ export async function loader({ request, params }: LoaderArgs) {
     throw new Response("Not Found", { status: 404 });
   }
   const markdownDescription = parseMarkdownToReact(item.description || "");
+  const notes = item.notes.map((note) => ({
+    ...note,
+    content: parseMarkdownToReact(note.content),
+  }));
 
   const header: HeaderData = {
     title: item.title,
@@ -38,6 +42,7 @@ export async function loader({ request, params }: LoaderArgs) {
     item: {
       ...item,
       description: markdownDescription,
+      notes,
     },
     header,
   });

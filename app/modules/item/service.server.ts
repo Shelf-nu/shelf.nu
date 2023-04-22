@@ -13,6 +13,7 @@ export async function getItem({
 }) {
   return db.item.findFirst({
     where: { id, userId },
+    include: { notes: true },
   });
 }
 
@@ -201,17 +202,16 @@ export async function createNote({
     },
   };
 
-  // if (categoryId) {
-  //   Object.assign(data, {
-  //     category: {
-  //       connect: {
-  //         id: categoryId,
-  //       },
-  //     },
-  //   });
-  // }
-
   return db.note.create({
     data,
+  });
+}
+
+export async function deleteNote({
+  id,
+  userId,
+}: Pick<Note, "id"> & { userId: User["id"] }) {
+  return db.note.deleteMany({
+    where: { id, userId },
   });
 }
