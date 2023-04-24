@@ -211,6 +211,7 @@ export default function ItemDetailsPage() {
               label="comment"
               name="comment"
               disabled={false}
+              defaultValue=""
               placeholder="Leave a comment"
             />
           </div>
