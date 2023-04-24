@@ -1,4 +1,5 @@
-import { useEffect, type ChangeEvent } from "react";
+import type { TextareaHTMLAttributes } from "react";
+import { useEffect, type ChangeEvent, forwardRef } from "react";
 import { useFetcher } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 import { MarkdownViewer } from "./markdown-viewer";
@@ -11,11 +12,18 @@ interface Props {
   disabled: boolean;
   placeholder: string;
   defaultValue: string;
+  rest?: TextareaHTMLAttributes<any>;
 }
 
-const markdownAtom = atom("");
+export const markdownAtom = atom("");
+export const clearMarkdownAtom = atom(null, (_get, set) =>
+  set(markdownAtom, "")
+);
 
-export const MarkdownEditor = ({ label, name, disabled, placeholder, defaultValue }: Props) => {
+export const MarkdownEditor = forwardRef(function MarkdownEditor(
+  { label, name, disabled, placeholder, defaultValue, ...rest }: Props,
+  ref
+) {
   const fetcher = useFetcher();
   const content = fetcher?.data?.content;
   const [markdown, setMarkdown] = useAtom(markdownAtom);
@@ -34,9 +42,10 @@ export const MarkdownEditor = ({ label, name, disabled, placeholder, defaultValu
     }
   };
 
-  useEffect(() => {	
-    setMarkdown(defaultValue);	
-  }, [defaultValue, setMarkdown]);
+  useEffect(() => {
+    setMarkdown(defaultValue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Tabs
@@ -59,14 +68,16 @@ export const MarkdownEditor = ({ label, name, disabled, placeholder, defaultValu
           placeholder={placeholder}
           hideLabel
           data-test-id="itemDescription"
+          ref={ref}
+          {...rest}
         />
       </TabsContent>
       <TabsContent value="preview">
         <MarkdownViewer
-          content={content || ""}
+          content={content}
           className="min-h-[210px] rounded-lg border px-[14px] py-2"
         />
       </TabsContent>
     </Tabs>
   );
-};
+});

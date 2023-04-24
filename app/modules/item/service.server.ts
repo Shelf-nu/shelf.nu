@@ -1,4 +1,4 @@
-import type { Category, Prisma } from "@prisma/client";
+import type { Category, Note, Prisma } from "@prisma/client";
 import type { Item, User } from "~/database";
 import { db } from "~/database";
 import { dateTimeInUnix, oneDayFromNow } from "~/utils";
@@ -13,6 +13,12 @@ export async function getItem({
 }) {
   return db.item.findFirst({
     where: { id, userId },
+    include: {
+      category: true,
+      notes: {
+        orderBy: { createdAt: "desc" },
+      },
+    },
   });
 }
 
@@ -62,7 +68,7 @@ export async function getItems({
       take,
       where,
       include: { category: true },
-      orderBy: { updatedAt: "desc" },
+      orderBy: { createdAt: "desc" },
     }),
 
     /** Count them */
@@ -176,5 +182,41 @@ export async function updateItemMainImage({
     id: itemId,
     mainImage: signedUrl,
     mainImageExpiration: oneDayFromNow(),
+  });
+}
+
+export async function createNote({
+  content,
+  userId,
+  itemId,
+}: Pick<Note, "content"> & {
+  userId: User["id"];
+  itemId: Item["id"];
+}) {
+  const data = {
+    content,
+    user: {
+      connect: {
+        id: userId,
+      },
+    },
+    item: {
+      connect: {
+        id: itemId,
+      },
+    },
+  };
+
+  return db.note.create({
+    data,
+  });
+}
+
+export async function deleteNote({
+  id,
+  userId,
+}: Pick<Note, "id"> & { userId: User["id"] }) {
+  return db.note.deleteMany({
+    where: { id, userId },
   });
 }

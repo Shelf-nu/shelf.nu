@@ -3,14 +3,15 @@ import { redirect, json } from "@remix-run/node";
 import { useCatch, useLoaderData } from "@remix-run/react";
 import { DeleteItem } from "~/components/items/delete-item";
 import { ItemImage } from "~/components/items/item-image";
+import { Notes } from "~/components/items/notes";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { MarkdownViewer, MarkdownEditor } from "~/components/markdown";
 
 import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
 import ProfilePicture from "~/components/user/profile-picture";
+import { useUserData } from "~/hooks";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
 import { assertIsDelete, getRequiredParam } from "~/utils";
@@ -28,7 +29,10 @@ export async function loader({ request, params }: LoaderArgs) {
   if (!item) {
     throw new Response("Not Found", { status: 404 });
   }
-  const markdownDescription = parseMarkdownToReact(item.description || "");
+  const notes = item.notes.map((note) => ({
+    ...note,
+    content: parseMarkdownToReact(note.content),
+  }));
 
   const header: HeaderData = {
     title: item.title,
@@ -38,7 +42,7 @@ export async function loader({ request, params }: LoaderArgs) {
   return json({
     item: {
       ...item,
-      description: markdownDescription,
+      notes,
     },
     header,
   });
@@ -80,6 +84,7 @@ export async function action({ request, params }: ActionArgs) {
 
 export default function ItemDetailsPage() {
   const { item } = useLoaderData<typeof loader>();
+  const user = useUserData();
 
   return (
     <>
@@ -98,41 +103,25 @@ export default function ItemDetailsPage() {
             item={{
               itemId: item.id,
               mainImage: item.mainImage,
-              // @ts-ignore
               mainImageExpiration: item.mainImageExpiration,
               alt: item.title,
             }}
-            className="mb-8 h-[400px] w-full"
+            className="mb-8 h-auto w-full"
           />
-          <MarkdownViewer content={item.description} className="mb-8" />
+          <p className="mb-8 text-gray-600">{item.description}</p>
           <ul className="item-information mb-8">
-            <li className="mb-4 flex justify-between">
-              <span className="text-[14px] font-medium text-gray-600">
-                Category
-              </span>
-              <div className="max-w-[250px]">
-                <Badge color="#5925DC"> Laptops </Badge>
-              </div>
-            </li>
-            <li className="mb-4 flex justify-between">
-              <span className="text-[14px] font-medium text-gray-600">
-                Tags
-              </span>
-              <div className="flex max-w-[250px] flex-wrap items-center justify-end">
-                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
-                  High Impact
+            {item?.category ? (
+              <li className="mb-4 flex justify-between">
+                <span className="text-[14px] font-medium text-gray-600">
+                  Category
                 </span>
-                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
-                  2021
-                </span>
-                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
-                  Serial number: C02XKPQEJHC8
-                </span>
-                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
-                  OK Condition
-                </span>
-              </div>
-            </li>
+                <div className="max-w-[250px]">
+                  <Badge color={item.category?.color}>
+                    {item.category?.name}
+                  </Badge>
+                </div>
+              </li>
+            ) : null}
             <li className="mb-4 flex justify-between">
               <span className="text-[14px] font-medium text-gray-600">
                 Owner
@@ -141,80 +130,16 @@ export default function ItemDetailsPage() {
                 <span className="mb-1 ml-1 inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
                   <ProfilePicture width="w-4" height="h-4" />
                   <span className="ml-1.5 text-[12px] font-medium text-gray-700">
-                    Sandra Perimirelli
+                    {user?.firstName} {user?.lastName}
                   </span>
                 </span>
               </div>
             </li>
           </ul>
-          <figure className="item-location">
-            <img src="/images/map-placeholder.jpg" alt="map" />
-          </figure>
         </div>
+
         <div className="ml-8 w-full">
-          <ul className="comments-list w-full">
-            <li className="comment mb-8 rounded-lg border">
-              <header className="border-b px-3.5 py-3">
-                <span className="commentator  font-medium text-gray-900">
-                  Carlos Virreria
-                </span>{" "}
-                <span className="text-gray-600">commented 2 weeks ago</span>
-              </header>
-              <div className="message px-3.5 py-3">
-                <p>Bing bong, testing.</p>
-              </div>
-            </li>
-            <li className="comment mb-8 rounded-lg border">
-              <header className="border-b px-3.5 py-3">
-                <span className="commentator  font-medium text-gray-900">
-                  Nikolay Bonev
-                </span>{" "}
-                <span className="text-gray-600">commented 1 week ago</span>
-              </header>
-              <div className="message px-3.5 py-3">
-                <p>Best performance experienced from this device</p>
-              </div>
-            </li>
-            <li className="comment mb-8 rounded-lg border">
-              <header className="border-b px-3.5 py-3">
-                <span className="commentator  font-medium text-gray-900">
-                  Nikolay Bonev
-                </span>{" "}
-                <span className="text-gray-600">commented 1 week ago</span>
-              </header>
-              <div className="message px-3.5 py-3">
-                <p>
-                  Lorem ipsum dolor sit amet consectetur adipisicing elit. Harum
-                  sapiente inventore est hic illo voluptates eveniet natus
-                  commodi voluptatum laboriosam minus sunt aperiam dicta
-                  accusamus quaerat, rem quod minima. Quasi consequatur ex
-                  dolores deleniti similique dolorum consectetur adipisci
-                  debitis earum nisi enim voluptate eum ducimus possimus fugiat,
-                  repellat at eius.
-                </p>
-              </div>
-            </li>
-            <li className="comment mb-8 rounded-lg border">
-              <header className="border-b px-3.5 py-3">
-                <span className="commentator  font-medium text-gray-900">
-                  Hunar Arora
-                </span>{" "}
-                <span className="text-gray-600">commented 1 week ago</span>
-              </header>
-              <div className="message px-3.5 py-3">
-                <p>It's in the best condition available</p>
-              </div>
-            </li>
-          </ul>
-          <div>
-            <MarkdownEditor
-              label="comment"
-              name="comment"
-              disabled={false}
-              defaultValue=""
-              placeholder="Leave a comment"
-            />
-          </div>
+          <Notes />
         </div>
       </div>
     </>

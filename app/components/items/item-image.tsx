@@ -12,7 +12,7 @@ export const ItemImage = ({
   item: {
     itemId: Item["id"];
     mainImage: Item["mainImage"];
-    mainImageExpiration: Date;
+    mainImageExpiration: Date | string | null;
     alt: string;
   };
   className?: string;
@@ -24,7 +24,7 @@ export const ItemImage = ({
     mainImage || fetcher?.data?.mainImage || "/images/item-placeholder.png";
 
   useEffect(() => {
-    if (mainImage) {
+    if (mainImage && mainImageExpiration) {
       const now = new Date();
       const expiration = new Date(mainImageExpiration);
 
