@@ -187,6 +187,10 @@ module.exports = {
         },
       },
     },
+    container: {
+      center: true,
+      padding: '2rem',
+    },
     animation: {
       "accordion-down": "accordion-down 0.2s ease-out",
       "accordion-up": "accordion-up 0.2s ease-out",

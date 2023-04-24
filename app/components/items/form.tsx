@@ -107,6 +107,7 @@ export const ItemForm = ({ title, category, description }: Props) => {
             label={zo.fields.description()}
             name={zo.fields.description()}
             defaultValue={description || ""}
+            placeholder="Add a description for your asset. Supports markdown."
             disabled={disabled}
             data-test-id="itemDescription"
           />
