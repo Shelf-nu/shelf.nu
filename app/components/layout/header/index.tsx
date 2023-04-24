@@ -19,7 +19,7 @@ export default function Header({
 
   return header ? (
     <header>
-      <div className="flex justify-between">
+      <div className="flex items-center justify-between">
         <div>
           <Heading as="h2" className="text-display-sm font-semibold">
             {title || header?.title}

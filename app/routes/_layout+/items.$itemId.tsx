@@ -7,9 +7,11 @@ import { Notes } from "~/components/items/notes";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { MarkdownViewer } from "~/components/markdown";
-import { Button } from "~/components/shared";
+import { MarkdownViewer, MarkdownEditor } from "~/components/markdown";
 
+import { Badge } from "~/components/shared";
+import { Button } from "~/components/shared/button";
+import ProfilePicture from "~/components/user/profile-picture";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
 import { assertIsDelete, getRequiredParam } from "~/utils";
@@ -87,24 +89,138 @@ export default function ItemDetailsPage() {
 
   return (
     <>
-      <Header />
-      <div className=" items-top flex justify-between">
-        <ItemImage
-          item={{
-            itemId: item.id,
-            mainImage: item.mainImage,
-            // @ts-ignore
-            mainImageExpiration: item.mainImageExpiration,
-            alt: item.title,
-          }}
-          className=" h-[400px]"
-        />
-        <MarkdownViewer content={item.description} />
-        <div>
-          <Button variant="secondary" to="edit">
-            Edit
-          </Button>
-          <DeleteItem item={item} />
+      <Header>
+        <Button icon="barcode" variant="secondary">
+          Download QR Tag
+        </Button>
+        <Button to="edit" icon="pen" role="link">
+          Edit
+        </Button>
+        <DeleteItem item={item} />
+      </Header>
+      <div className="mt-8 flex">
+        <div className="w-[400px] shrink-0">
+          <ItemImage
+            item={{
+              itemId: item.id,
+              mainImage: item.mainImage,
+              // @ts-ignore
+              mainImageExpiration: item.mainImageExpiration,
+              alt: item.title,
+            }}
+            className="mb-8 h-[400px] w-full"
+          />
+          <MarkdownViewer content={item.description} className="mb-8" />
+          <ul className="item-information mb-8">
+            <li className="mb-4 flex justify-between">
+              <span className="text-[14px] font-medium text-gray-600">
+                Category
+              </span>
+              <div className="max-w-[250px]">
+                <Badge color="#5925DC"> Laptops </Badge>
+              </div>
+            </li>
+            <li className="mb-4 flex justify-between">
+              <span className="text-[14px] font-medium text-gray-600">
+                Tags
+              </span>
+              <div className="flex max-w-[250px] flex-wrap items-center justify-end">
+                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
+                  High Impact
+                </span>
+                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
+                  2021
+                </span>
+                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
+                  Serial number: C02XKPQEJHC8
+                </span>
+                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
+                  OK Condition
+                </span>
+              </div>
+            </li>
+            <li className="mb-4 flex justify-between">
+              <span className="text-[14px] font-medium text-gray-600">
+                Owner
+              </span>
+              <div className="max-w-[250px]">
+                <span className="mb-1 ml-1 inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
+                  <ProfilePicture width="w-4" height="h-4" />
+                  <span className="ml-1.5 text-[12px] font-medium text-gray-700">
+                    Sandra Perimirelli
+                  </span>
+                </span>
+              </div>
+            </li>
+          </ul>
+          <figure className="item-location">
+            <img src="/images/map-placeholder.jpg" alt="map" />
+          </figure>
+        </div>
+        <div className="ml-8 w-full">
+          <ul className="comments-list w-full">
+            <li className="comment mb-8 rounded-lg border">
+              <header className="border-b px-3.5 py-3">
+                <span className="commentator  font-medium text-gray-900">
+                  Carlos Virreria
+                </span>{" "}
+                <span className="text-gray-600">commented 2 weeks ago</span>
+              </header>
+              <div className="message px-3.5 py-3">
+                <p>Bing bong, testing.</p>
+              </div>
+            </li>
+            <li className="comment mb-8 rounded-lg border">
+              <header className="border-b px-3.5 py-3">
+                <span className="commentator  font-medium text-gray-900">
+                  Nikolay Bonev
+                </span>{" "}
+                <span className="text-gray-600">commented 1 week ago</span>
+              </header>
+              <div className="message px-3.5 py-3">
+                <p>Best performance experienced from this device</p>
+              </div>
+            </li>
+            <li className="comment mb-8 rounded-lg border">
+              <header className="border-b px-3.5 py-3">
+                <span className="commentator  font-medium text-gray-900">
+                  Nikolay Bonev
+                </span>{" "}
+                <span className="text-gray-600">commented 1 week ago</span>
+              </header>
+              <div className="message px-3.5 py-3">
+                <p>
+                  Lorem ipsum dolor sit amet consectetur adipisicing elit. Harum
+                  sapiente inventore est hic illo voluptates eveniet natus
+                  commodi voluptatum laboriosam minus sunt aperiam dicta
+                  accusamus quaerat, rem quod minima. Quasi consequatur ex
+                  dolores deleniti similique dolorum consectetur adipisci
+                  debitis earum nisi enim voluptate eum ducimus possimus fugiat,
+                  repellat at eius.
+                </p>
+              </div>
+            </li>
+            <li className="comment mb-8 rounded-lg border">
+              <header className="border-b px-3.5 py-3">
+                <span className="commentator  font-medium text-gray-900">
+                  Hunar Arora
+                </span>{" "}
+                <span className="text-gray-600">commented 1 week ago</span>
+              </header>
+              <div className="message px-3.5 py-3">
+                <p>It's in the best condition available</p>
+              </div>
+            </li>
+          </ul>
+          <div>
+            <MarkdownEditor
+              label="comment"
+              name="comment"
+              disabled={false}
+              defaultValue=""
+              placeholder="Leave a comment"
+            />
+          </div>
         </div>
       </div>
       <Notes />

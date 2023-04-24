@@ -79,6 +79,11 @@ p {
   @apply list-inside list-decimal;
 }
 
+
+.message p{
+  @apply text-[16px] text-gray-900 mb-3 last:mb-0;
+}
+
 [aria-label="Notifications (F8)"] ol {
   @apply bottom-auto top-0;
 }

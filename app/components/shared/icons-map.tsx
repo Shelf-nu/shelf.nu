@@ -10,6 +10,8 @@ import {
   SuccessIcon,
   TrashIcon,
   XIcon,
+  BarCodeIcon,
+  PenIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -23,7 +25,10 @@ export type Icon =
   | "x"
   | "refresh"
   | "coins"
+  | "barcode"
+  | "pen"
   | "success";
+
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -39,6 +44,8 @@ export const iconsMap: IconsMap = {
   x: <XIcon />,
   refresh: <RefreshIcon />,
   coins: <CoinsIcon />,
+  barcode: <BarCodeIcon/>,
+  pen: <PenIcon />,
   success: <SuccessIcon />,
 };
 

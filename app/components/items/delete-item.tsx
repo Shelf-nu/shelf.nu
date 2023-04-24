@@ -23,13 +23,11 @@ export const DeleteItem = ({
   };
 }) => (
   <AlertDialog>
-    <div>
-      <AlertDialogTrigger asChild>
-        <Button variant="secondary" data-test-id="deleteItemButton">
-          Delete
-        </Button>
-      </AlertDialogTrigger>
-    </div>
+    <AlertDialogTrigger asChild>
+      <Button variant="secondary" data-test-id="deleteItemButton">
+        Delete
+      </Button>
+    </AlertDialogTrigger>
 
     <AlertDialogContent>
       <AlertDialogHeader>
