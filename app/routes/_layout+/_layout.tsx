@@ -7,6 +7,7 @@ import { json } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar";
+import { Toaster } from "~/components/shared/toast";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
 import styles from "~/styles/layout/index.css";
@@ -40,6 +41,7 @@ export default function App() {
             <Outlet />
           </div>
         </div>
+        <Toaster />
       </main>
     </div>
   );
