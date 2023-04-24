@@ -13,7 +13,12 @@ export async function getItem({
 }) {
   return db.item.findFirst({
     where: { id, userId },
-    include: { notes: true },
+    include: {
+      category: true,
+      notes: {
+        orderBy: { createdAt: "desc" },
+      },
+    },
   });
 }
 

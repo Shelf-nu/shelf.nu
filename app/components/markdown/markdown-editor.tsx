@@ -1,4 +1,5 @@
-import { useEffect, type ChangeEvent } from "react";
+import type { HTMLInputTypeAttribute, TextareaHTMLAttributes } from "react";
+import { useEffect, type ChangeEvent, forwardRef } from "react";
 import { useFetcher } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 import { MarkdownViewer } from "./markdown-viewer";
@@ -11,11 +12,15 @@ interface Props {
   disabled: boolean;
   placeholder: string;
   defaultValue: string;
+  rest: TextareaHTMLAttributes<any>;
 }
 
 const markdownAtom = atom("");
 
-export const MarkdownEditor = ({ label, name, disabled, placeholder, defaultValue }: Props) => {
+export const MarkdownEditor = forwardRef(function MarkdownEditor(
+  { label, name, disabled, placeholder, defaultValue, ...rest }: Props,
+  ref
+) {
   const fetcher = useFetcher();
   const content = fetcher?.data?.content;
   const [markdown, setMarkdown] = useAtom(markdownAtom);
@@ -34,8 +39,8 @@ export const MarkdownEditor = ({ label, name, disabled, placeholder, defaultValu
     }
   };
 
-  useEffect(() => {	
-    setMarkdown(defaultValue);	
+  useEffect(() => {
+    setMarkdown(defaultValue);
   }, [defaultValue, setMarkdown]);
 
   return (
@@ -59,6 +64,8 @@ export const MarkdownEditor = ({ label, name, disabled, placeholder, defaultValu
           placeholder={placeholder}
           hideLabel
           data-test-id="itemDescription"
+          ref={ref}
+          {...rest}
         />
       </TabsContent>
       <TabsContent value="preview">
@@ -69,4 +76,4 @@ export const MarkdownEditor = ({ label, name, disabled, placeholder, defaultValu
       </TabsContent>
     </Tabs>
   );
-};
+});

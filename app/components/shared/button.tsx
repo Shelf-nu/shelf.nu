@@ -58,6 +58,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     };
 
     const sizes = {
+      xs: tw("px-2 py-[6px] text-xs"),
       sm: tw("px-[14px] py-2"),
       md: tw("px-4 py-[10px]"),
     };
