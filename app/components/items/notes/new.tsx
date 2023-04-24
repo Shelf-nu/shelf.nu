@@ -5,7 +5,7 @@ import { atom, useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
-import { MarkdownEditor } from "~/components/markdown";
+import { MarkdownEditor, clearMarkdownAtom } from "~/components/markdown";
 import { Button } from "~/components/shared";
 import { Spinner } from "~/components/shared/spinner";
 import { isFormProcessing } from "~/utils";
@@ -24,6 +24,7 @@ export const NewNote = () => {
   const hasError = zo.errors.content()?.message;
   const [isEditing, setIsEditing] = useAtom(isEditingAtom);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const [, clearMarkdown] = useAtom(clearMarkdownAtom);
 
   const handelBlur = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const content = e.currentTarget.value;
@@ -43,6 +44,7 @@ export const NewNote = () => {
       action={`/items/${params.itemId}/note`}
       method="post"
       ref={zo.ref}
+      onSubmit={clearMarkdown}
     >
       {isEditing ? (
         <div className="flex flex-col">

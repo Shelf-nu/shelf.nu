@@ -3,7 +3,7 @@ import { useLoaderData } from "@remix-run/react";
 import { MarkdownViewer } from "~/components/markdown";
 import { useUserData } from "~/hooks";
 import { timeAgo } from "~/utils/time-ago";
-import { DeleteNote } from "./delete-note";
+import { ActionsDopdown } from "./actions-dropdown";
 import { NewNote } from "./new";
 
 export const Notes = () => {
@@ -18,16 +18,20 @@ export const Notes = () => {
         <ul className="notes-list mt-8 w-full">
           {item.notes.map((note: Note) => (
             <li key={note.id} className="note mb-8 rounded-lg border bg-white">
-              <header className="border-b px-3.5 py-3">
-                <span className="commentator  font-medium text-gray-900">
-                  {user?.firstName} {user?.lastName}
-                </span>{" "}
-                <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
+              <header className="flex justify-between border-b px-3.5 py-3">
+                <div>
+                  <span className="commentator  font-medium text-gray-900">
+                    {user?.firstName} {user?.lastName}
+                  </span>{" "}
+                  <span className="text-gray-600">
+                    {timeAgo(note.createdAt)}
+                  </span>
+                </div>
+                <ActionsDopdown note={note} />
               </header>
               <div className="message px-3.5 py-3">
                 <MarkdownViewer content={note.content} />
               </div>
-              <DeleteNote note={note} />
             </li>
           ))}
         </ul>

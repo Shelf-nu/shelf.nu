@@ -19,9 +19,15 @@ export const DeleteNote = ({ note }: { note: Note }) => {
   const params = useParams();
   return (
     <AlertDialog>
-      <div>
+      <div className="w-full">
         <AlertDialogTrigger asChild>
-          <Button variant="secondary" data-test-id="deleteNoteButton">
+          <Button
+            variant="link"
+            className="w-full text-gray-800 hover:text-gray-800"
+            data-test-id="deleteNoteButton"
+            width="full"
+            icon={"trash"}
+          >
             Delete
           </Button>
         </AlertDialogTrigger>

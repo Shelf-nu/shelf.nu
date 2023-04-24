@@ -7,7 +7,6 @@ import { Notes } from "~/components/items/notes";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { MarkdownViewer } from "~/components/markdown";
 
 import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
@@ -104,7 +103,6 @@ export default function ItemDetailsPage() {
             item={{
               itemId: item.id,
               mainImage: item.mainImage,
-              // @ts-ignore
               mainImageExpiration: item.mainImageExpiration,
               alt: item.title,
             }}
@@ -124,26 +122,6 @@ export default function ItemDetailsPage() {
                 </div>
               </li>
             ) : null}
-
-            {/* <li className="mb-4 flex justify-between">
-              <span className="text-[14px] font-medium text-gray-600">
-                Tags
-              </span>
-              <div className="flex max-w-[250px] flex-wrap items-center justify-end">
-                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
-                  High Impact
-                </span>
-                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
-                  2021
-                </span>
-                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
-                  Serial number: C02XKPQEJHC8
-                </span>
-                <span className="mb-1 ml-1 rounded-2xl bg-gray-100 px-2 py-0.5 text-[12px] font-medium text-gray-700">
-                  OK Condition
-                </span>
-              </div>
-            </li> */}
             <li className="mb-4 flex justify-between">
               <span className="text-[14px] font-medium text-gray-600">
                 Owner
@@ -158,9 +136,6 @@ export default function ItemDetailsPage() {
               </div>
             </li>
           </ul>
-          {/* <figure className="item-location">
-            <img src="/images/map-placeholder.jpg" alt="map" />
-          </figure> */}
         </div>
 
         <div className="ml-8 w-full">
