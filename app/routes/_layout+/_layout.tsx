@@ -35,14 +35,12 @@ export default function App() {
     <div className="flex flex-col ">
       <main className="flex">
         <Sidebar user={user} />
-        <div className="w-full bg-gray-25">
-          <div className="container bg-gray-25 py-8">
+          <div className="w-full bg-gray-25 p-8">
             <div className="flex h-full flex-1 flex-col">
               <Breadcrumbs />
               <Outlet />
             </div>
           </div>
-        </div>
         <Toaster />
       </main>
     </div>

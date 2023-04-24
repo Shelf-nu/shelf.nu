@@ -93,7 +93,7 @@ export default function ItemDetailsPage() {
         <DeleteItem item={item} />
       </Header>
       <div className="mt-8 flex">
-        <div className="w-[400px]">
+        <div className="w-[400px] shrink-0">
           <ItemImage
             item={{
               itemId: item.id,
@@ -151,7 +151,7 @@ export default function ItemDetailsPage() {
             <img src="/images/map-placeholder.jpg" alt="map" />
           </figure>
         </div>
-        <div className="ml-8 w-2/3">
+        <div className="ml-8 w-full">
           <ul className="comments-list w-full">
             <li className="comment mb-8 rounded-lg border">
               <header className="border-b px-3.5 py-3">
