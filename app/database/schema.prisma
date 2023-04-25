@@ -57,7 +57,7 @@ model Note {
   // Relationships
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
-  item   Item   @relation(fields: [itemId], references: [id])
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   itemId String
 }
 
