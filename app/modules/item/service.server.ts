@@ -3,7 +3,6 @@ import type { Item, User } from "~/database";
 import { db } from "~/database";
 import { dateTimeInUnix, oneDayFromNow } from "~/utils";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
-import { requireAuthSession } from "../auth";
 
 export async function getItem({
   userId,
@@ -121,11 +120,12 @@ interface UpdateItemPayload {
 }
 
 export async function updateItem(payload: UpdateItemPayload) {
-  const { id, title, description, categoryId } = payload;
-  const data: any = { title, description };
+  const { categoryId, id } = payload;
+  /** Delete the category id from the payload so we can use connect syntax from prisma */
+  delete payload.categoryId;
 
   if (categoryId) {
-    Object.assign(data, {
+    Object.assign(payload, {
       category: {
         connect: {
           id: categoryId,
@@ -136,7 +136,7 @@ export async function updateItem(payload: UpdateItemPayload) {
 
   return db.item.update({
     where: { id },
-    data,
+    data: payload,
   });
 }
 
@@ -152,25 +152,27 @@ export async function deleteItem({
 export async function updateItemMainImage({
   request,
   itemId,
+  userId,
 }: {
   request: Request;
   itemId: string;
+  userId: User["id"];
 }) {
-  const authSession = await requireAuthSession(request);
-
   const fileData = await parseFileFormData({
     request,
     bucketName: "items",
-    newFileName: `${authSession.userId}/${itemId}/main-image-${dateTimeInUnix(
-      Date.now()
-    )}`,
+    newFileName: `${userId}/${itemId}/main-image-${dateTimeInUnix(Date.now())}`,
     resizeOptions: {
       width: 800,
       withoutEnlargement: true,
     },
   });
 
+  console.log(fileData);
+
   const image = fileData.get("mainImage") as string;
+
+  console.log(image);
 
   if (!image) return { error: "Couldn't upload image" };
 

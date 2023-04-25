@@ -77,7 +77,11 @@ export async function action({ request }: LoaderArgs) {
   });
 
   // Not sure how to handle this failign as the item is already created
-  await updateItemMainImage({ request, itemId: item.id });
+  await updateItemMainImage({
+    request,
+    itemId: item.id,
+    userId: authSession.userId,
+  });
 
   sendNotification({
     title: "Item created",

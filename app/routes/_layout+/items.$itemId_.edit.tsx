@@ -52,10 +52,11 @@ export const handle = {
 
 export async function action({ request, params }: ActionArgs) {
   assertIsPost(request);
+  const authSession = await requireAuthSession(request);
+
   const id = getRequiredParam(params, "itemId");
   const clonedRequest = request.clone();
-  const authSession = await requireAuthSession(request);
-  const formData = await request.formData();
+  const formData = await clonedRequest.formData();
   const result = await NewItemFormSchema.safeParseAsync(parseFormAny(formData));
   if (!result.success) {
     return json(
@@ -72,7 +73,11 @@ export async function action({ request, params }: ActionArgs) {
     );
   }
 
-  updateItemMainImage({ request: clonedRequest, itemId: id });
+  updateItemMainImage({
+    request,
+    itemId: id,
+    userId: authSession.userId,
+  });
 
   const { title, description, category } = result.data;
 
