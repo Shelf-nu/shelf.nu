@@ -77,7 +77,7 @@ export const ItemForm = ({ title, category, description }: Props) => {
       </FormRow>
 
       <FormRow
-        rowLabel={"Cateogry"}
+        rowLabel={"Category"}
         subHeading="Make it unique. Each item can have 1 category. It will show on your index."
       >
         <CategorySelect defaultValue={category || undefined} />
