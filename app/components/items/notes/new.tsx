@@ -72,6 +72,7 @@ export const NewNote = () => {
             rows={4}
             onBlur={handelBlur}
             ref={editorRef}
+            className="rounded-b-none"
           />
         </div>
       ) : (

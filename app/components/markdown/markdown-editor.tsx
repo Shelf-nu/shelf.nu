@@ -1,7 +1,8 @@
 import type { TextareaHTMLAttributes } from "react";
 import { useEffect, type ChangeEvent, forwardRef } from "react";
-import { useFetcher } from "@remix-run/react";
+import { Link, useFetcher } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
+import { tw } from "~/utils";
 import { MarkdownViewer } from "./markdown-viewer";
 import Input from "../forms/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../shared/tabs";
@@ -12,6 +13,7 @@ interface Props {
   disabled: boolean;
   placeholder: string;
   defaultValue: string;
+  className?: string;
   rest?: TextareaHTMLAttributes<any>;
 }
 
@@ -21,7 +23,15 @@ export const clearMarkdownAtom = atom(null, (_get, set) =>
 );
 
 export const MarkdownEditor = forwardRef(function MarkdownEditor(
-  { label, name, disabled, placeholder, defaultValue, ...rest }: Props,
+  {
+    label,
+    name,
+    disabled,
+    placeholder,
+    defaultValue,
+    className,
+    ...rest
+  }: Props,
   ref
 ) {
   const fetcher = useFetcher();
@@ -68,9 +78,22 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
           placeholder={placeholder}
           hideLabel
           data-test-id="itemDescription"
+          inputClassName={tw("text-text-md", className)}
           ref={ref}
           {...rest}
         />
+        <div className=" rounded-b-lg border border-t-0 border-gray-300 bg-gray-50 px-2 py-1 text-text-xs">
+          {" "}
+          This field supports{" "}
+          <Link
+            to="https://www.markdownguide.org/cheat-sheet"
+            target="_blank"
+            className="text-gray-800 underline"
+            rel="nofollow noopener noreferrer"
+          >
+            markdown
+          </Link>{" "}
+        </div>
       </TabsContent>
       <TabsContent value="preview">
         <MarkdownViewer

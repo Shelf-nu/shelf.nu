@@ -158,16 +158,17 @@ const ListItemContent = ({
         <article className="flex gap-3">
           <div className="flex w-full items-center justify-between gap-3">
             <div className="flex gap-3">
-              <ItemImage
-                item={{
-                  itemId: item.id,
-                  mainImage: item.mainImage,
-                  // @ts-ignore
-                  mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
-                }}
-                className="h-10 w-10 rounded-[4px] object-cover"
-              />
+              <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
+                <ItemImage
+                  item={{
+                    itemId: item.id,
+                    mainImage: item.mainImage,
+                    mainImageExpiration: item.mainImageExpiration,
+                    alt: item.title,
+                  }}
+                  className="h-10 w-10 rounded-[4px] object-cover"
+                />
+              </div>
 
               <div className="flex flex-col">
                 <div className="font-medium">{item.title}</div>
