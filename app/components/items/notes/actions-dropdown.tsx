@@ -14,14 +14,14 @@ interface Props {
 
 export const ActionsDopdown = ({ note }: Props) => (
   <DropdownMenu>
-    <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
+    <DropdownMenuTrigger>
       <HorizontalDotsIcon />
     </DropdownMenuTrigger>
     <DropdownMenuContent
       align="end"
-      className="w-[180px] rounded-xl border bg-white text-right"
+      className="order w-[180px] rounded-md bg-white p-1.5 text-right"
     >
-      <div className="relative flex  items-center rounded-lg px-2 pb-1.5 pt-2.5 text-sm font-medium outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100">
+      <div className="relative flex h-[25px] select-none items-center rounded p-1.5 text-left text-[13px] leading-none outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-gradient-to-br hover:bg-gray-100">
         <DeleteNote note={note} />
       </div>
     </DropdownMenuContent>
