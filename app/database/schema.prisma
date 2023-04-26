@@ -76,3 +76,27 @@ model Category {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 }
+
+model QR {
+  id String @id @default(cuid())
+
+  // Data of the qr code. Can be a url, text, etc.
+  data String
+  
+  // Version of the QR code based on spec from Denso wave
+  version Int @default(0)
+
+  // Error correction level based on spec from Denso wave
+  errorCorrection ErrorCorrection @default(L)
+
+  // DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum ErrorCorrection {
+  L
+  M
+  Q
+  H
+}

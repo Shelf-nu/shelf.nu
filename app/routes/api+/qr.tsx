@@ -4,10 +4,10 @@ import QRCode from "qrcode-generator";
 
 export async function loader() {
   // Create a QR code with a URL
-  const qr = QRCode(0, "M");
+  const qr = QRCode(0, "L");
   qr.addData("https://app.shelf.nu/q?c=clgw8cbnu0004naor12fhetbq");
   qr.make();
-  const codeBase64 = qr.createDataURL(8);
+  const codeBase64 = qr.createDataURL(4);
 
   const qrInABuffer = Buffer.from(codeBase64.split(",")[1], "base64");
 
