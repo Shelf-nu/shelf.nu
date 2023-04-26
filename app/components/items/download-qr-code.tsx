@@ -26,7 +26,13 @@ const DownloadQrCode = () => {
       <Button icon="barcode" onClick={toggleSidebar} variant="secondary">
         Download QR Tag
       </Button>
-      <div onClick={toggleSidebar} className={tw("fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-25/70 backdrop-blur transition duration-300 ease-in-out", isSidebarOpen ? "visible" : "invisible opacity-0")}></div>
+      <div
+        onClick={toggleSidebar}
+        className={tw(
+          "fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-25/70 backdrop-blur transition duration-300 ease-in-out",
+          isSidebarOpen ? "visible" : "invisible opacity-0"
+        )}
+      ></div>
       <motion.div
         initial={{ x: "100%" }}
         animate={{ x: isSidebarOpen ? 0 : "100%" }}
@@ -41,26 +47,40 @@ const DownloadQrCode = () => {
         </header>
         <div className="borger-gray-200 mb-6 w-full rounded-xl border border-solid p-6">
           <figure className="qr-code mb-6 h-[296px] w-[296px]">
-            <img src="/images/qr-code-placeholder.jpg" className="w-full" alt="qr-code" />
+            <img
+              src="/images/qr-code-placeholder.jpg"
+              className="w-full"
+              alt="qr-code"
+            />
           </figure>
           <div className="text-center">
-          <h6 className="mb-1 font-semibold leading-5 text-gray-700">Macbook Pro M1 (2021)</h6>
-          <span className="block text-[12px] text-gray-600">S349a002e</span>
+            <h6 className="mb-1 font-semibold leading-5 text-gray-700">
+              Macbook Pro M1 (2021)
+            </h6>
+            <span className="block text-[12px] text-gray-600">S349a002e</span>
           </div>
         </div>
         <ul className="description-list">
           <li className="mb-4 flex justify-between text-gray-600">
-            <span className="key max-w-[120px] break-words font-medium">Size</span>
-            <span className="value max-w-[190px] break-words font-semibold">Small (2cm x 2cm)</span>
+            <span className="key max-w-[120px] break-words font-medium">
+              Size
+            </span>
+            <span className="value max-w-[190px] break-words font-semibold">
+              Small (2cm x 2cm)
+            </span>
           </li>
           <li className="mb-4 flex justify-between text-gray-600">
-            <span className="key max-w-[120px] break-words font-medium">File</span>
-            <span className="value max-w-[190px] break-words font-semibold">SVG</span>
+            <span className="key max-w-[120px] break-words font-medium">
+              File
+            </span>
+            <span className="value max-w-[190px] break-words font-semibold">
+              SVG
+            </span>
           </li>
         </ul>
         <Button icon="barcode" variant="secondary" className="w-full">
-        Download QR Tag
-      </Button>
+          Download QR Tag
+        </Button>
       </motion.div>
     </div>
   );
