@@ -36,7 +36,7 @@ const DownloadQrCode = () => {
       <motion.div
         initial={{ x: "100%" }}
         animate={{ x: isSidebarOpen ? 0 : "100%" }}
-        transition={{ duration: 0.5 }}
+        transition={{ duration: 0.1 }}
         className="download-qr-sidebar fixed right-0 top-0 z-50 box-border h-screen w-[392px] border border-solid border-gray-200 bg-white p-6"
       >
         <header className="mb-6 flex items-center justify-between leading-7">
