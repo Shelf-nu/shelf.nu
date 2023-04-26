@@ -1,8 +1,7 @@
-import { useEffect } from "react";
 import { motion } from "framer-motion";
 import { atom, useAtom } from "jotai";
 import { tw } from "~/utils";
-import { CrossIcon } from "../icons";
+import { XIcon } from "../icons";
 import { Button } from "../shared";
 
 const sidebarStatusAtom = atom(false);
@@ -14,20 +13,20 @@ const toggleSidebarAtom = atom(
 const DownloadQrCode = () => {
   const [isSidebarOpen, toggleSidebar] = useAtom(toggleSidebarAtom);
 
-  useEffect(()=>{
-    if(isSidebarOpen) {
-      document.body.classList.add("overflow-hidden")
-    } else{
-      document.body.classList.remove("overflow-hidden")
-    }
-  }, [isSidebarOpen]);
+  // useEffect(()=>{
+  //   if(isSidebarOpen) {
+  //     document.body.classList.add("overflow-hidden")
+  //   } else{
+  //     document.body.classList.remove("overflow-hidden")
+  //   }
+  // }, [isSidebarOpen]);
 
   return (
     <div>
       <Button icon="barcode" onClick={toggleSidebar} variant="secondary">
         Download QR Tag
       </Button>
-      <div className={tw("fixed right-0 top-0 z-10 h-screen w-screen bg-gray-25/70 backdrop-blur transition duration-300 ease-in-out", isSidebarOpen ? "visible" : "invisible opacity-0")}></div>
+      <div onClick={toggleSidebar} className={tw("fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-25/70 backdrop-blur transition duration-300 ease-in-out", isSidebarOpen ? "visible" : "invisible opacity-0")}></div>
       <motion.div
         initial={{ x: "100%" }}
         animate={{ x: isSidebarOpen ? 0 : "100%" }}
@@ -36,8 +35,8 @@ const DownloadQrCode = () => {
       >
         <header className="mb-6 flex items-center justify-between leading-7">
           <h3>Download QR Tag</h3>
-          <button onClick={toggleSidebar}>
-            <CrossIcon />
+          <button onClick={toggleSidebar} className="text-gray-400">
+            <XIcon />
           </button>
         </header>
         <div className="borger-gray-200 mb-6 w-full rounded-xl border border-solid p-6">
