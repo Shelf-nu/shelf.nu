@@ -82,7 +82,7 @@ model QR {
 
   // Data of the qr code. Can be a url, text, etc.
   data String
-  
+
   // Version of the QR code based on spec from Denso wave
   version Int @default(0)
 
