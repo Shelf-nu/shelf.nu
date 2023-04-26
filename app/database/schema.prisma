@@ -23,6 +23,7 @@ model User {
   items      Item[]
   categories Category[]
   notes      Note[]
+  qrCodes         QR[]
 
   @@unique([email, username])
 }
@@ -44,6 +45,7 @@ model Item {
   category   Category? @relation(fields: [categoryId], references: [id])
   categoryId String?
   notes      Note[]
+  qrCodes         QR[]
 }
 
 model Note {
@@ -88,6 +90,13 @@ model QR {
 
   // Error correction level based on spec from Denso wave
   errorCorrection ErrorCorrection @default(L)
+
+  // Relationships
+  item   Item   @relation(fields: [itemId], references: [id])
+  itemId String
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
 
   // DateTime
   createdAt DateTime @default(now())
