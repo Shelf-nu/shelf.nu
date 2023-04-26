@@ -2,6 +2,7 @@ import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { useCatch, useLoaderData } from "@remix-run/react";
 import { DeleteItem } from "~/components/items/delete-item";
+import DownloadQrCode from "~/components/items/download-qr-code";
 import { ItemImage } from "~/components/items/item-image";
 import { Notes } from "~/components/items/notes";
 
@@ -89,9 +90,7 @@ export default function ItemDetailsPage() {
   return (
     <>
       <Header>
-        <Button icon="barcode" variant="secondary">
-          Download QR Tag
-        </Button>
+        <DownloadQrCode />
         <Button to="edit" icon="pen" role="link">
           Edit
         </Button>

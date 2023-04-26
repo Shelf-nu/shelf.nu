@@ -168,11 +168,7 @@ export async function updateItemMainImage({
     },
   });
 
-  console.log(fileData);
-
   const image = fileData.get("mainImage") as string;
-
-  console.log(image);
 
   if (!image) return { error: "Couldn't upload image" };
 
