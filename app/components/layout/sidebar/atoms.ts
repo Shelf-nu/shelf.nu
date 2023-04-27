@@ -1,8 +1,8 @@
 import { atom } from "jotai";
 
-export const sidebarCollapseStatusAtom = atom(false);
+export const sidebarCollapseStatusAtom = atom(true);
 
-export const keepSidebarUncollapsedAtom = atom(true);
+export const keepSidebarUncollapsedAtom = atom(false);
 
 /* Controls the state for whether the sidebar is collapsed or not */
 export const toggleSidebarAtom = atom(
