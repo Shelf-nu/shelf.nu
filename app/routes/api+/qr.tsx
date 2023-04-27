@@ -1,36 +1,34 @@
 import { useRef } from "react";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, useFetcher, useLoaderData } from "@remix-run/react";
+import { Form, useLoaderData, useSubmit } from "@remix-run/react";
 import QRCode from "qrcode-generator";
-import { gifToPng } from "~/utils";
+import { requireAuthSession } from "~/modules/auth";
+import { getCurrentSearchParams, gifToPng } from "~/utils";
+
+type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ request }: LoaderArgs) {
-  // const formData = await request.formData();
-  // const size = formData ? formData?.get("size") : "medium";
+  const authSession = await requireAuthSession(request);
+  const searchParams = getCurrentSearchParams(request);
+  const size = (searchParams.get("size") || "medium") as SizeKeys;
   // Create a QR code with a URL
   const qr = QRCode(0, "M");
   qr.addData("https://app.shelf.nu/q?c=clgw8cbnu0004naor12fhetbq");
   qr.make();
 
-  const images = {
-    cable: await gifToPng(qr.createDataURL(1, 6)), // 45px => 1.2cm(1.19)
-    small: qr.createDataURL(2, 14), // 94px => 2.5cm(2.48)
-    medium: qr.createDataURL(4, 19), // 170px => 4.5cm(4.49)
-    large: qr.createDataURL(6), // 246px => 6.50cm
-  };
-
   const sizes = {
-    cable: 1.2,
-    small: 2.5,
-    medium: 4.5,
-    large: 6.5,
+    cable: [1, 6], // 45px => 1.2cm(1.19)
+    small: [2, 14], // 94px => 2.5cm(2.48)
+    medium: [4, 19], // 170px => 4.5cm(4.49)
+    large: [6], // 246px => 6.50cm
   };
+  const src = await gifToPng(qr.createDataURL(...sizes[size]));
 
   return json({
     qr: {
-      size: "medium",
-      src: images["medium"],
+      size: size,
+      src,
     },
     sizes,
   });
@@ -39,11 +37,10 @@ export async function loader({ request }: LoaderArgs) {
 export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
   const formRef = useRef<HTMLFormElement>(null);
-  const fetcher = useFetcher();
+  const submit = useSubmit();
 
-  const handleChange = (event) => {
-    console.log(event.target.value);
-    fetcher.submit(formRef.current);
+  const handleChange = () => {
+    submit(formRef.current);
   };
 
   return (
