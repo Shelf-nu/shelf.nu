@@ -1,5 +1,6 @@
 import { Link, Outlet, useMatches } from "@remix-run/react";
 import { motion, AnimatePresence } from "framer-motion";
+import { tw } from "~/utils";
 
 export default function ContextualSidebar() {
   const matches = useMatches();
@@ -14,30 +15,22 @@ export default function ContextualSidebar() {
     <AnimatePresence>
       {showSidebar && (
         <div className="absolute inset-0">
-          <motion.div
-            key="child"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.1 }}
-            className=" absolute inset-0 z-10 h-full w-full bg-black/60"
-          >
-            <Link to={prevRoute.pathname} className="block h-full w-full">
-              {" "}
-            </Link>
-          </motion.div>
+          <Link to={prevRoute.pathname} className="block h-full w-full">
+            <div
+              // onClick={toggleSidebar}
+              className={tw(
+                "fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-25/70 backdrop-blur transition duration-300 ease-in-out",
+                showSidebar ? "visible" : "invisible opacity-0"
+              )}
+            ></div>
+          </Link>
 
           <motion.div
-            className="absolute right-0 z-20 h-full w-3/4"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
-            transition={{
-              type: "spring",
-              stiffness: 200,
-              damping: 30,
-              duration: 0.2,
-            }}
+            transition={{ duration: 0.1 }}
+            className="download-qr-sidebar fixed right-0 top-0 z-50 box-border h-screen w-[392px] border border-solid border-gray-200 bg-white p-6"
           >
             <div className=" h-full w-full bg-white p-6">
               <Outlet />
