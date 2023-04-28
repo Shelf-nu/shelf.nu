@@ -1,4 +1,5 @@
 export async function gifToPng(dataUrl: string) {
+  // @ts-ignore
   const sharp = (await import("sharp")).default;
 
   const gifBuffer = Buffer.from(

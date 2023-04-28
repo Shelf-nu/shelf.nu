@@ -92,7 +92,7 @@ model Qr {
   item   Item?   @relation(fields: [itemId], references: [id], onDelete: SetNull)
   itemId String?
 
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 
   // DateTime

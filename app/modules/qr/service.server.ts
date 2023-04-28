@@ -12,7 +12,7 @@ export async function getQrByItemId({ itemId }: Pick<Qr, "itemId">) {
 export async function createQr({
   userId,
   itemId,
-}: Pick<Qr, "userId" | "itemId">) {
+}: Pick<Qr, "userId"> & { itemId: string }) {
   const data = {
     user: {
       connect: {
