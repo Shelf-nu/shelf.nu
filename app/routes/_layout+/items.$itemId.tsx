@@ -2,9 +2,9 @@ import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { useCatch, useLoaderData } from "@remix-run/react";
 import { DeleteItem } from "~/components/items/delete-item";
-import DownloadQrCode from "~/components/items/download-qr-code";
 import { ItemImage } from "~/components/items/item-image";
 import { Notes } from "~/components/items/notes";
+import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -23,7 +23,6 @@ import { deleteAssets } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-
   const id = getRequiredParam(params, "itemId");
 
   const item = await getItem({ userId, id });
@@ -90,7 +89,10 @@ export default function ItemDetailsPage() {
   return (
     <>
       <Header>
-        <DownloadQrCode />
+        <Button to="qr" variant="secondary" icon="barcode">
+          Download QR Tag
+        </Button>
+        {/* <DownloadQrCode /> */}
         <Button to="edit" icon="pen" role="link">
           Edit
         </Button>
@@ -141,6 +143,7 @@ export default function ItemDetailsPage() {
           <Notes />
         </div>
       </div>
+      <ContextualSidebar />
     </>
   );
 }

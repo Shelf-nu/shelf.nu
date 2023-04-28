@@ -1,0 +1,5 @@
+-- DropForeignKey
+ALTER TABLE "Qr" DROP CONSTRAINT "Qr_userId_fkey";
+
+-- AddForeignKey
+ALTER TABLE "Qr" ADD CONSTRAINT "Qr_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
