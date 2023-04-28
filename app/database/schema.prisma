@@ -23,7 +23,7 @@ model User {
   items      Item[]
   categories Category[]
   notes      Note[]
-  qrCodes         QR[]
+  qrCodes    Qr[]
 
   @@unique([email, username])
 }
@@ -44,8 +44,8 @@ model Item {
   userId     String
   category   Category? @relation(fields: [categoryId], references: [id])
   categoryId String?
-  notes      Note[]
-  qrCodes         QR[]
+  notes      Note[] 
+  qrCodes    Qr[]
 }
 
 model Note {
@@ -79,11 +79,8 @@ model Category {
   userId String
 }
 
-model QR {
+model Qr {
   id String @id @default(cuid())
-
-  // Data of the qr code. Can be a url, text, etc.
-  data String
 
   // Version of the QR code based on spec from Denso wave
   version Int @default(0)
@@ -92,8 +89,8 @@ model QR {
   errorCorrection ErrorCorrection @default(L)
 
   // Relationships
-  item   Item   @relation(fields: [itemId], references: [id])
-  itemId String
+  item   Item?   @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  itemId String?
 
   user   User   @relation(fields: [userId], references: [id])
   userId String

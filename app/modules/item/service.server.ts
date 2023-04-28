@@ -1,4 +1,5 @@
 import type { Category, Note, Prisma } from "@prisma/client";
+import { ErrorCorrection } from "@prisma/client";
 import type { Item, User } from "~/database";
 import { db } from "~/database";
 import { dateTimeInUnix, oneDayFromNow } from "~/utils";
@@ -85,13 +86,26 @@ export async function createItem({
 }: Pick<Item, "description" | "title" | "categoryId"> & {
   userId: User["id"];
 }) {
+  /** User connction data */
+  const user = {
+    connect: {
+      id: userId,
+    },
+  };
+
   const data = {
     title,
     description,
-    user: {
-      connect: {
-        id: userId,
-      },
+    user,
+    // Create a new qr code for the item and connect it to the user as well
+    qrCodes: {
+      create: [
+        {
+          version: 0,
+          errorCorrection: ErrorCorrection["L"],
+          user,
+        },
+      ],
     },
   };
 

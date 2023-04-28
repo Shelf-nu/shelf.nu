@@ -2,7 +2,6 @@ import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { Outlet, useCatch, useLoaderData } from "@remix-run/react";
 import { DeleteItem } from "~/components/items/delete-item";
-import DownloadQrCode from "~/components/items/download-qr-code";
 import { ItemImage } from "~/components/items/item-image";
 import { Notes } from "~/components/items/notes";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -24,7 +23,6 @@ import { deleteAssets } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-
   const id = getRequiredParam(params, "itemId");
 
   const item = await getItem({ userId, id });
@@ -145,7 +143,6 @@ export default function ItemDetailsPage() {
           <Notes />
         </div>
       </div>
-      <Outlet />
       <ContextualSidebar />
     </>
   );

@@ -3,37 +3,37 @@ import type { Item } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
-import QRCode from "qrcode-generator";
 import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
-import { getCurrentSearchParams, gifToPng } from "~/utils";
+import { createQr, generateCode, getQrByItemId } from "~/modules/qr";
+import { getCurrentSearchParams } from "~/utils";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
-export async function loader({ request }: LoaderArgs) {
-  await requireAuthSession(request);
+export async function loader({ request, params }: LoaderArgs) {
+  const { userId } = await requireAuthSession(request);
+  const { itemId } = params as { itemId: string };
   const searchParams = getCurrentSearchParams(request);
   const size = (searchParams.get("size") || "medium") as SizeKeys;
-  // Create a QR code with a URL
-  const qr = QRCode(0, "M");
-  qr.addData("https://app.shelf.nu/q?c=clgw8cbnu0004naor12fhetbq");
-  qr.make();
 
-  const sizes = {
-    cable: [1, 6], // 45px => 1.2cm(1.19)
-    small: [2, 14], // 94px => 2.5cm(2.48)
-    medium: [4, 19], // 170px => 4.5cm(4.49)
-    large: [6], // 246px => 6.50cm
-  };
-  const src = await gifToPng(qr.createDataURL(...sizes[size]));
+  let qr = await getQrByItemId({ itemId });
+  if (!qr) {
+    /** If for some reason there is no QR, we create one and return it */
+    qr = await createQr({ itemId, userId });
+  }
+
+  // Create a QR code with a URL
+  const { sizes, code } = await generateCode({
+    version: qr.version as TypeNumber,
+    errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
+    size,
+    qr,
+  });
 
   return json({
-    qr: {
-      size: size,
-      src,
-    },
+    qr: code,
     sizes,
     showSidebar: true,
   });
@@ -108,7 +108,7 @@ export default function QRPreview() {
       <Button
         icon="barcode"
         to={data.qr.src}
-        download={`${data.qr.size}-shelf-qr-code.png`}
+        download={`${data.qr.size}-shelf-qr-code-${data.qr.id}.png`}
         variant="secondary"
         className="w-full"
       >
