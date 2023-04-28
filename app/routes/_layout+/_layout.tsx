@@ -32,17 +32,17 @@ export default function App() {
   const { user } = useLoaderData<typeof loader>();
 
   return (
-    <div className="flex flex-col ">
-      <main className="flex">
+    <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
+      <div className="flex flex-col md:flex-row">
         <Sidebar user={user} />
-          <div className="w-full bg-gray-25 p-8">
-            <div className="flex h-full flex-1 flex-col">
-              <Breadcrumbs />
-              <Outlet />
-            </div>
+        <main className="w-full bg-gray-25 px-4 py-8 md:px-8">
+          <div className="flex h-full flex-1 flex-col">
+            <Breadcrumbs />
+            <Outlet />
           </div>
-        <Toaster />
-      </main>
+          <Toaster />
+        </main>
+      </div>
     </div>
   );
 }
