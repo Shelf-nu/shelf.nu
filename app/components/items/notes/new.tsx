@@ -47,20 +47,18 @@ export const NewNote = () => {
       onSubmit={clearMarkdown}
     >
       {isEditing ? (
-        <div className="flex flex-col">
-          <div className="relative h-0 overflow-visible text-right">
-            <div className="absolute right-0 flex gap-1">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setIsEditing(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" size="sm" className="" disabled={disabled}>
-                {disabled ? <Spinner /> : "Create note"}
-              </Button>
-            </div>
+        <div className="relative flex flex-col pb-12 xl:pb-0">
+          <div className="absolute bottom-0 right-0 flex gap-1 xl:bottom-auto">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsEditing(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" className="" disabled={disabled}>
+              {disabled ? <Spinner /> : "Create note"}
+            </Button>
           </div>
           <MarkdownEditor
             label={"note"}
