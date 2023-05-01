@@ -5,7 +5,9 @@ interface Props {
 
 export default function SubHeading({ children, className }: Props) {
   return (
-    <div className={`text-text-md font-normal text-gray-500 ${className}`}>
+    <div
+      className={`text-text-sm font-normal text-gray-500 md:text-text-md ${className}`}
+    >
       {children}
     </div>
   );

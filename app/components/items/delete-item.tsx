@@ -24,7 +24,7 @@ export const DeleteItem = ({
 }) => (
   <AlertDialog>
     <AlertDialogTrigger asChild>
-      <Button variant="secondary" data-test-id="deleteItemButton">
+      <Button variant="secondary" data-test-id="deleteItemButton" icon="trash" onlyIconOnMobile={true}>
         Delete
       </Button>
     </AlertDialogTrigger>

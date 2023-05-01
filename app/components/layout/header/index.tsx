@@ -19,9 +19,12 @@ export default function Header({
 
   return header ? (
     <header>
-      <div className="flex items-center justify-between">
-        <div>
-          <Heading as="h2" className="text-display-sm font-semibold">
+      <div className="block sm:flex sm:items-center sm:justify-between">
+        <div className="mb-4 sm:mb-0">
+          <Heading
+            as="h2"
+            className="text-display-xs font-semibold md:text-display-sm"
+          >
             {title || header?.title}
           </Heading>
           {header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>}

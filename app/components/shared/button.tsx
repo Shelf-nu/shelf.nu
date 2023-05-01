@@ -15,6 +15,7 @@ export interface ButtonProps {
   icon?: Icon;
   disabled?: boolean;
   attachToInput?: boolean;
+  onlyIconOnMobile?: boolean;
   [key: string]: any;
 }
 
@@ -31,6 +32,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       disabled = undefined,
       children,
       title,
+      onlyIconOnMobile,
       ...props
     }: ButtonProps,
     ref
@@ -90,7 +92,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
         title={title || children}
         ref={ref}
       >
-        {icon && iconsMap[icon]} {children ? <span>{children}</span> : null}
+        {icon && iconsMap[icon]} {children ? <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>{children}</span> : null}
       </Component>
     );
   }

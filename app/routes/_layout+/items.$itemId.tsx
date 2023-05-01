@@ -11,6 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 
 import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
+import TextualDivider from "~/components/shared/textual-divider";
 import ProfilePicture from "~/components/user/profile-picture";
 import { useUserData } from "~/hooks";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
@@ -88,18 +89,32 @@ export default function ItemDetailsPage() {
 
   return (
     <>
+      <ItemImage
+        item={{
+          itemId: item.id,
+          mainImage: item.mainImage,
+          mainImageExpiration: item.mainImageExpiration,
+          alt: item.title,
+        }}
+        className="mx-auto mb-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
+      />
       <Header>
-        <Button to="qr" variant="secondary" icon="barcode">
+        <Button
+          to="qr"
+          variant="secondary"
+          icon="barcode"
+          onlyIconOnMobile={true}
+        >
           Download QR Tag
         </Button>
         {/* <DownloadQrCode /> */}
-        <Button to="edit" icon="pen" role="link">
+        <Button to="edit" icon="pen" role="link" onlyIconOnMobile={true}>
           Edit
         </Button>
         <DeleteItem item={item} />
       </Header>
-      <div className="mt-8 flex">
-        <div className="w-[400px] shrink-0">
+      <div className="mt-8 block lg:flex">
+        <div className="shrink-0 lg:w-[343px] xl:w-[400px]">
           <ItemImage
             item={{
               itemId: item.id,
@@ -107,15 +122,14 @@ export default function ItemDetailsPage() {
               mainImageExpiration: item.mainImageExpiration,
               alt: item.title,
             }}
-            className="mb-8 h-auto w-full"
+            className="mx-auto mb-8 hidden h-auto w-[343px] rounded-lg object-cover md:block lg:w-full"
           />
           <p className="mb-8 text-gray-600">{item.description}</p>
+          <TextualDivider text="Details" className="mb-8 lg:hidden" />
           <ul className="item-information mb-8">
             {item?.category ? (
               <li className="mb-4 flex justify-between">
-                <span className="text-[14px] font-medium text-gray-600">
-                  Category
-                </span>
+                <span className="font-medium text-gray-600">Category</span>
                 <div className="max-w-[250px]">
                   <Badge color={item.category?.color}>
                     {item.category?.name}
@@ -124,9 +138,7 @@ export default function ItemDetailsPage() {
               </li>
             ) : null}
             <li className="mb-4 flex justify-between">
-              <span className="text-[14px] font-medium text-gray-600">
-                Owner
-              </span>
+              <span className="font-medium text-gray-600">Owner</span>
               <div className="max-w-[250px]">
                 <span className="mb-1 ml-1 inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
                   <ProfilePicture width="w-4" height="h-4" />
@@ -139,7 +151,8 @@ export default function ItemDetailsPage() {
           </ul>
         </div>
 
-        <div className="ml-8 w-full">
+        <div className="w-full lg:ml-8">
+          <TextualDivider text="Posts" className="mb-8 lg:hidden" />
           <Notes />
         </div>
       </div>

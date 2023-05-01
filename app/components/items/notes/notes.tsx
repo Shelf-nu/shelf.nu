@@ -17,10 +17,13 @@ export const Notes = () => {
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
           {item.notes.map((note: Note) => (
-            <li key={note.id} className="note mb-8 rounded-lg border bg-white">
-              <header className="flex justify-between border-b px-3.5 py-3">
+            <li
+              key={note.id}
+              className="note mb-6 rounded-lg border bg-white md:mb-8"
+            >
+              <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
                 <div>
-                  <span className="commentator  font-medium text-gray-900">
+                  <span className="commentator font-medium text-gray-900">
                     {user?.firstName} {user?.lastName}
                   </span>{" "}
                   <span className="text-gray-600">
