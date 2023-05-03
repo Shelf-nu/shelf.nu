@@ -1,3 +1,4 @@
-import type { Qr } from "@prisma/client";
+import type { Qr, User } from "@prisma/client";
 
-export const belongsToUser = (qr: Qr) => qr.userId !== null;
+export const belongsToCurrentUser = (qr: Qr, userId: User["id"]) =>
+  qr.userId === userId;

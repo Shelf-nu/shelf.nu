@@ -1,7 +1,9 @@
 import { json, redirect, type LoaderArgs } from "@remix-run/node";
-import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
+import { Outlet, isRouteErrorResponse, useRouteError } from "@remix-run/react";
+import { authSession } from "mocks/handlers";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
+import { belongsToCurrentUser } from "~/modules/qr/utils.server";
 import { notFound } from "~/utils";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
@@ -10,7 +12,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 
   /* Find the QR in the database */
   const qr = await getQr(id);
-
+  console.log(qr);
   /** If the QR doesn't exist, return a 404
    *
    * AFTER MVP: Here we have to consider a delted User which will
@@ -28,7 +30,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
    *  - If so, continue
    */
   await requireAuthSession(request, {
-    onFailRedirectTo: "../not-logged-in",
+    onFailRedirectTo: "not-logged-in",
     verify: false,
   });
 
@@ -41,11 +43,13 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 
   /**
    * Does the QR code belong to LOGGED IN user
+   * Redirect to page to report if found.
    */
+  // if (!belongsToCurrentUser(qr, authSession.userId)) {
+  //   return redirect(`../contact-owner?qrId=${qr.id}`);
+  // }
 
-  // ...logic comes here
-
-  return redirect(`/items/${qr.itemId}`);
+  return redirect(`/items/${qr.itemId}?ref=qr`);
 };
 
 /** 404 handling */
@@ -62,11 +66,21 @@ export function CatchBoundary() {
   ) : null;
 }
 
+/** 404 handling */
+export function ErrorBoundry() {
+  const error = useRouteError();
+  return isRouteErrorResponse(error) ? (
+    <div className="mx-auto max-w-[300px] text-center">
+      <h1>{error.status}</h1>
+      <p>{error.statusText}</p>
+    </div>
+  ) : null;
+}
+
 export default function Qr() {
   return (
     <div>
-      <h1>Thank you for scanning</h1>
-      <p>This is show page</p>
+      <Outlet />
     </div>
   );
 }
