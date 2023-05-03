@@ -12,7 +12,6 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 
   /* Find the QR in the database */
   const qr = await getQr(id);
-  console.log(qr);
   /** If the QR doesn't exist, return a 404
    *
    * AFTER MVP: Here we have to consider a delted User which will
@@ -45,9 +44,9 @@ export const loader = async ({ request, params }: LoaderArgs) => {
    * Does the QR code belong to LOGGED IN user
    * Redirect to page to report if found.
    */
-  // if (!belongsToCurrentUser(qr, authSession.userId)) {
-  //   return redirect(`../contact-owner?qrId=${qr.id}`);
-  // }
+  if (!belongsToCurrentUser(qr, authSession.userId)) {
+    return redirect(`contact-owner`);
+  }
 
   return redirect(`/items/${qr.itemId}?ref=qr`);
 };
@@ -66,7 +65,6 @@ export function CatchBoundary() {
   ) : null;
 }
 
-/** 404 handling */
 export function ErrorBoundry() {
   const error = useRouteError();
   return isRouteErrorResponse(error) ? (

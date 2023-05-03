@@ -1,10 +1,4 @@
-import { json, type LoaderArgs } from "@remix-run/node";
-import { Outlet } from "@remix-run/react";
+import { redirect } from "@remix-run/node";
 
-export default function QR() {
-  return (
-    <div>
-      <Outlet />
-    </div>
-  );
-}
+export const shouldRevalidate = () => false;
+export const loader = () => redirect("/");
