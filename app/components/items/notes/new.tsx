@@ -1,4 +1,4 @@
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, FocusEvent } from "react";
 import { useEffect, useRef } from "react";
 import { useFetcher, useParams } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
@@ -24,12 +24,37 @@ export const NewNote = () => {
   const hasError = zo.errors.content()?.message;
   const [isEditing, setIsEditing] = useAtom(isEditingAtom);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [, clearMarkdown] = useAtom(clearMarkdownAtom);
 
-  const handelBlur = (e: ChangeEvent<HTMLTextAreaElement>) => {
+  const handelBlur = (
+    e: ChangeEvent<HTMLTextAreaElement> & FocusEvent<HTMLTextAreaElement>
+  ) => {
     const content = e.currentTarget.value;
+
+    /** This handles that the related target(element clicked on that causes the blur) is not a link(markdown info) or a button(submit/cancel buttons) */
+    const clickedTargetILink =
+      e?.relatedTarget?.tagName === "A" ||
+      e?.relatedTarget?.tagName === "BUTTON";
+    if (clickedTargetILink) return;
+
     if (content === "") {
       setIsEditing(false);
+    }
+  };
+
+  const handleKeyDown = (event) => {
+    const content = event.currentTarget.value;
+
+    if (
+      content !== "" &&
+      event.keyCode === 13 &&
+      (event.metaKey || event.ctrlKey)
+    ) {
+      event.preventDefault();
+      // event.target.form.submit();
+      fetcher.submit(event.target.form);
+      // console.log(fetcher);
     }
   };
 
@@ -40,52 +65,55 @@ export const NewNote = () => {
   }, [isEditing]);
 
   return (
-    <fetcher.Form
-      action={`/items/${params.itemId}/note`}
-      method="post"
-      ref={zo.ref}
-      onSubmit={clearMarkdown}
-    >
-      {isEditing ? (
-        <div className="relative flex flex-col pb-12 xl:pb-0">
-          <div className="absolute bottom-0 right-0 flex gap-1 xl:bottom-auto">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsEditing(false)}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" size="sm" className="" disabled={disabled}>
-              {disabled ? <Spinner /> : "Create note"}
-            </Button>
+    <div ref={wrapperRef}>
+      <fetcher.Form
+        action={`/items/${params.itemId}/note`}
+        method="post"
+        ref={zo.ref}
+        onSubmit={clearMarkdown}
+      >
+        {isEditing ? (
+          <div className="relative flex flex-col pb-12 xl:pb-0">
+            <div className="absolute bottom-0 right-0 flex gap-1 xl:bottom-auto">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsEditing(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" className="" disabled={disabled}>
+                {disabled ? <Spinner /> : "Create note"}
+              </Button>
+            </div>
+            <MarkdownEditor
+              label={"note"}
+              disabled={disabled}
+              defaultValue={""}
+              name={zo.fields.content()}
+              placeholder={"Leave a note"}
+              // @ts-ignore
+              rows={4}
+              ref={editorRef}
+              className="rounded-b-none"
+              onBlur={handelBlur}
+              onKeyDown={handleKeyDown}
+            />
           </div>
-          <MarkdownEditor
-            label={"note"}
-            disabled={disabled}
-            defaultValue={""}
-            name={zo.fields.content()}
-            placeholder={"Leave a note"}
-            // @ts-ignore
-            rows={4}
-            onBlur={handelBlur}
-            ref={editorRef}
-            className="rounded-b-none"
+        ) : (
+          <Input
+            label=""
+            placeholder="Leave a note"
+            onFocus={() => setIsEditing(true)}
           />
-        </div>
-      ) : (
-        <Input
-          label=""
-          placeholder="Leave a note"
-          onFocus={() => setIsEditing(true)}
-        />
-      )}
+        )}
 
-      {hasError ? (
-        <div className="text-sm text-error-500">
-          {zo.errors.content()?.message}
-        </div>
-      ) : null}
-    </fetcher.Form>
+        {hasError ? (
+          <div className="text-sm text-error-500">
+            {zo.errors.content()?.message}
+          </div>
+        ) : null}
+      </fetcher.Form>
+    </div>
   );
 };
