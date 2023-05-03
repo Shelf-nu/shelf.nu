@@ -82,7 +82,9 @@ const Input = forwardRef(function Input(
         ? "rounded-[8px] pl-[42px]"
         : "rounded-l-none rounded-r-[8px]"
       : "rounded-[8px]",
-    hasAttachedButton ? tw("rounded-r-none rounded-l-none md:rounded-l-[8px]") : undefined,
+    hasAttachedButton
+      ? tw("rounded-none md:rounded-l-[8px]")
+      : undefined,
     inputClassName
   );
 

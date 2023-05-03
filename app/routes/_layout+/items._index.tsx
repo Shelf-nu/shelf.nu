@@ -135,7 +135,7 @@ export default function ItemIndexPage() {
           New Item
         </Button>
       </Header>
-      <div className="-mx-4 mt-8 flex flex-1 flex-col gap-2 md:mx-0">
+      <div className="-mx-4 mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         <Filters>
           <CategoryCheckboxDropdown />
         </Filters>
