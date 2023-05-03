@@ -3,6 +3,7 @@ import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import { redirect } from "react-router";
+import { ChevronRight } from "~/components/icons";
 import { ItemImage } from "~/components/items/item-image";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -134,7 +135,7 @@ export default function ItemIndexPage() {
           New Item
         </Button>
       </Header>
-      <div className="mt-8 flex flex-1 flex-col gap-2">
+      <div className="-mx-4 mt-8 flex flex-1 flex-col gap-2 md:mx-0">
         <Filters>
           <CategoryCheckboxDropdown />
         </Filters>
@@ -170,16 +171,24 @@ const ListItemContent = ({
                 />
               </div>
 
-              <div className="flex flex-col">
+              <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
                 <div className="font-medium">{item.title}</div>
-                <div className="text-gray-600">{item.id}</div>
+                <div className="hidden text-gray-600 md:block">{item.id}</div>
+                <div className="block md:hidden">
+                  {category ? (
+                    <Badge color={category.color}>{category.name}</Badge>
+                  ) : null}
+                </div>
               </div>
             </div>
-            <div>
+            <div className="hidden md:block">
               {category ? (
                 <Badge color={category.color}>{category.name}</Badge>
               ) : null}
             </div>
+            <button className="block md:hidden">
+              <ChevronRight />
+            </button>
           </div>
         </article>
       </Link>

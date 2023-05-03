@@ -16,7 +16,7 @@ export const SearchForm = () => {
     state === "loading" && (params.has("s") || params.has("category"));
 
   return (
-    <div className="relative flex">
+    <div className="relative flex w-full md:w-auto">
       <Input
         type="text"
         name="s"
@@ -27,6 +27,8 @@ export const SearchForm = () => {
         disabled={isSearching}
         hideLabel
         hasAttachedButton
+        className="w-full md:w-auto"
+        inputClassName="border-l-0 md:border"
       />
       <Button
         icon={isSearching ? "spinner" : "search"}
@@ -35,6 +37,7 @@ export const SearchForm = () => {
         title="Search"
         disabled={isSearching}
         attachToInput
+        className="rounded-none border-r-0 md:rounded-r-[8px] md:border"
       />
       {search && (
         <Button
