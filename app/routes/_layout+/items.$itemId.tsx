@@ -152,7 +152,7 @@ export default function ItemDetailsPage() {
         </div>
 
         <div className="w-full lg:ml-8">
-          <TextualDivider text="Posts" className="mb-8 lg:hidden" />
+          <TextualDivider text="Notes" className="mb-8 lg:hidden" />
           <Notes />
         </div>
       </div>
