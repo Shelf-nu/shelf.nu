@@ -1,4 +1,4 @@
-import { json, redirect, type LoaderArgs } from "@remix-run/node";
+import { redirect, type LoaderArgs } from "@remix-run/node";
 import { Outlet, isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { authSession } from "mocks/handlers";
 import { requireAuthSession } from "~/modules/auth";
