@@ -71,7 +71,7 @@ export const CategoryCheckboxDropdown = () => {
             </div>
           )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className=" w-[350px]">
+        <DropdownMenuContent align="end" className="w-[290px] md:w-[350px]">
           {!hasCategories && !isFiltering ? (
             <CategorySelectNoCategories />
           ) : (
