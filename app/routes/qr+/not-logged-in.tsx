@@ -19,12 +19,12 @@ export default function QrNotLoggedIn() {
             </p>
           </div>
           <div className="flex flex-col">
-          <Button variant="primary" className="mb-4" to={"/login"}>
-            Log In
-          </Button>
-          <Button variant="secondary" to={"."}>
-            Contact Owner
-          </Button>
+            <Button variant="primary" className="mb-4 max-w-full" to={"/login"}>
+              Log In
+            </Button>
+            <Button variant="secondary" className="max-w-full" to={"."}>
+              Contact Owner
+            </Button>
           </div>
         </div>
       </div>
