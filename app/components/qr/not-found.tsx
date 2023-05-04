@@ -47,13 +47,7 @@ export const QrNotFound = () => (
     </div>
     <div className="mt-6 text-center text-sm text-gray-500">
       Don't have an account?{" "}
-      <Button
-        variant="link"
-        data-test-id="signupButton"
-        to={{
-          pathname: "/join",
-        }}
-      >
+      <Button variant="link" data-test-id="signupButton" to={"/join"}>
         Sign up
       </Button>
     </div>

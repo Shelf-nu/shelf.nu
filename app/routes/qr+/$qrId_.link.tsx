@@ -1,7 +1,17 @@
+import { json, type LoaderArgs } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import { UnlinkIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
+import { requireAuthSession } from "~/modules/auth";
 
-export default function UnlinkedQrBelognsToUser() {
+export const loader = async ({ request, params }: LoaderArgs) => {
+  await requireAuthSession(request);
+  const { qrId } = params;
+  return json({ qrId });
+};
+
+export default function QrLink() {
+  const { qrId } = useLoaderData<typeof loader>();
   return (
     <>
       <div className="flex flex-1 justify-center py-8">
@@ -17,29 +27,18 @@ export default function UnlinkedQrBelognsToUser() {
             </p>
           </div>
           <div className="flex flex-col justify-center">
-            <Button variant="primary" className="mb-4 max-w-full" to={"."}>
+            <Button
+              variant="primary"
+              className="mb-4 max-w-full"
+              to={`/items/new?qrId=${qrId}`}
+            >
               Create a new item and link
             </Button>
-            <Button variant="secondary" className="mb-4 max-w-full" to={"."}>
-              Link with existing item
-            </Button>
-            <Button variant="secondary" className="max-w-full" to={"."}>
-              No, Take me back
+            <Button variant="secondary" className="max-w-full" to={"/"}>
+              Cancel
             </Button>
           </div>
         </div>
-      </div>
-      <div className="mt-6 text-center text-sm text-gray-500">
-        Don't have an account?{" "}
-        <Button
-          variant="link"
-          data-test-id="signupButton"
-          to={{
-            pathname: "/join",
-          }}
-        >
-          Sign up
-        </Button>
       </div>
     </>
   );

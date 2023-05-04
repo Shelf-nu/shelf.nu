@@ -12,6 +12,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 
   /* Find the QR in the database */
   const qr = await getQr(id);
+
   /** If the QR doesn't exist, return a 404
    *
    * AFTER MVP: Here we have to consider a delted User which will
@@ -48,6 +49,12 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     return redirect(`contact-owner`);
   }
 
+  /**
+   * When there is no itemId that means that the item was deleted so the QR code is orphaned.
+   * Here we redirect to a page where the user has the option to link to existing item or create a new one.
+   */
+  if (!qr.itemId) return redirect(`link`);
+
   return null;
   // return redirect(`/items/${qr.itemId}?ref=qr`);
 };
@@ -69,9 +76,5 @@ export function ErrorBoundry() {
 }
 
 export default function Qr() {
-  return (
-    <div>
-      <Outlet />
-    </div>
-  );
+  return <Outlet />;
 }
