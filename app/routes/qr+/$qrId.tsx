@@ -1,6 +1,6 @@
 import { redirect, type LoaderArgs } from "@remix-run/node";
 import { Outlet, isRouteErrorResponse, useRouteError } from "@remix-run/react";
-import { authSession } from "mocks/handlers";
+import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
 import { belongsToCurrentUser } from "~/modules/qr/utils.server";
@@ -28,7 +28,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
    *  - If not, redirect to the login page, which will automatically then redirect back to here so all checks are performed again
    *  - If so, continue
    */
-  await requireAuthSession(request, {
+  const authSession = await requireAuthSession(request, {
     onFailRedirectTo: "not-logged-in",
     verify: false,
   });
@@ -48,21 +48,14 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     return redirect(`contact-owner`);
   }
 
-  return redirect(`/items/${qr.itemId}?ref=qr`);
+  return null;
+  // return redirect(`/items/${qr.itemId}?ref=qr`);
 };
 
 /** 404 handling */
 export function CatchBoundary() {
   const error = useRouteError();
-  return isRouteErrorResponse(error) ? (
-    <div className="mx-auto max-w-[300px] text-center">
-      <h1>Code Not Found</h1>
-      <p>
-        This QR code is not found in our database. Make sure the code you are
-        scanning is registered by a Shelf user.
-      </p>
-    </div>
-  ) : null;
+  return isRouteErrorResponse(error) ? <QrNotFound /> : null;
 }
 
 export function ErrorBoundry() {
