@@ -118,14 +118,15 @@ export async function createItem({
           ],
         };
 
+  /** Data object we send via prisma to create Asset */
   const data = {
     title,
     description,
     user,
-
     qrCodes,
   };
 
+  /** If a categoryId is passed, link the category to the asset. */
   if (categoryId) {
     Object.assign(data, {
       category: {
