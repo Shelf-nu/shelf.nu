@@ -103,6 +103,6 @@ p {
   @apply mb-1;
 }
 
-.markdown-viewer p {
+.markdown-viewer p:not(:last-child) {
   @apply mb-4;
 }
