@@ -1,12 +1,18 @@
-import { Outlet } from "@remix-run/react";
+import { Link, Outlet } from "@remix-run/react";
 
 export default function QR() {
   return (
-    <div>
-      I am the layout that all other routes in the qr+ namespace will use. Use
-      me to make the general page layout. Outlet is where the child content is
-      rendered.
-      <Outlet />
+    <div className="container h-full min-h-screen px-4 py-12">
+      <div className="flex h-full flex-col justify-center text-center">
+        <Link to="./../" title="Home" className="mx-auto inline-block h-[32px]">
+          <img
+            src="/images/logo-full-color(x2).png"
+            alt="logo"
+            className="h-full"
+          />
+        </Link>
+        <Outlet />
+      </div>
     </div>
   );
 }
