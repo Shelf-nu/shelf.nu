@@ -12,7 +12,7 @@ export const ListItem = ({
 }) => (
   <article
     key={item.id}
-    className="border-b px-6 py-4 last:border-b-0 hover:bg-gray-50"
+    className="border-b p-4 last:border-b-0 hover:bg-gray-50 md:px-6"
   >
     {children}
   </article>
