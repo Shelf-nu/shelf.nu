@@ -71,6 +71,10 @@ p {
   animation: spinner 0.6s linear infinite;
 }
 
+[aria-label="Notifications (F8)"] ol {
+  @apply bottom-auto top-0;
+}
+
 .markdown-viewer ul {
   @apply list-inside list-disc;
 }
@@ -79,6 +83,26 @@ p {
   @apply list-inside list-decimal;
 }
 
-[aria-label="Notifications (F8)"] ol {
-  @apply bottom-auto top-0;
+.markdown-viewer a {
+  text-decoration: underline;
+}
+.markdown-viewer a:hover {
+  @apply text-primary;
+}
+
+.markdown-viewer blockquote {
+  @apply border-l-4 border-primary-500 pl-4;
+}
+
+.markdown-viewer h1,
+.markdown-viewer h2,
+.markdown-viewer h3,
+.markdown-viewer h4,
+.markdown-viewer h5,
+.markdown-viewer h6 {
+  @apply mb-1;
+}
+
+.markdown-viewer p {
+  @apply mb-4;
 }
