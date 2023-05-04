@@ -19,7 +19,7 @@ export const List = ({ ItemComponent }: { ItemComponent: any }) => {
   const hasItems = items?.length > 0;
 
   return (
-    <main className="rounded-[12px] border border-gray-200 bg-white">
+    <div className="-mx-4 border border-gray-200 bg-white  md:mx-0 md:rounded-[12px]">
       {!hasItems ? (
         <EmptyState />
       ) : (
@@ -37,6 +37,6 @@ export const List = ({ ItemComponent }: { ItemComponent: any }) => {
           <Pagination />
         </div>
       )}
-    </main>
+    </div>
   );
 };
