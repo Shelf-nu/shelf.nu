@@ -1,5 +1,5 @@
 import type { ChangeEvent, FocusEvent } from "react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useFetcher, useParams } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 import { useZorm } from "react-zorm";
@@ -26,6 +26,7 @@ export const NewNote = () => {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [, clearMarkdown] = useAtom(clearMarkdownAtom);
+  const isDone = fetcher.state === "idle" && fetcher.data != null;
 
   const handelBlur = (
     e: ChangeEvent<HTMLTextAreaElement> & FocusEvent<HTMLTextAreaElement>
@@ -43,26 +44,30 @@ export const NewNote = () => {
     }
   };
 
-  const handleKeyDown = (event) => {
-    const content = event.currentTarget.value;
-
-    if (
-      content !== "" &&
-      event.keyCode === 13 &&
-      (event.metaKey || event.ctrlKey)
-    ) {
-      event.preventDefault();
-      // event.target.form.submit();
-      fetcher.submit(event.target.form);
-      // console.log(fetcher);
-    }
-  };
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      const content = event.currentTarget.value;
+      if (
+        content !== "" &&
+        event.key === "Enter" &&
+        (event.metaKey || event.ctrlKey)
+      ) {
+        event.preventDefault();
+        fetcher.submit(event.currentTarget.form);
+      }
+    },
+    [fetcher]
+  );
 
   useEffect(() => {
     if (isEditing) {
       editorRef?.current?.focus();
     }
   }, [isEditing]);
+
+  useEffect(() => {
+    clearMarkdown();
+  }, [isDone, clearMarkdown]);
 
   return (
     <div ref={wrapperRef}>
@@ -97,7 +102,7 @@ export const NewNote = () => {
               ref={editorRef}
               className="rounded-b-none"
               onBlur={handelBlur}
-              onKeyDown={handleKeyDown}
+              onKeyUp={handleKeyDown}
             />
           </div>
         ) : (

@@ -92,7 +92,7 @@ export const ItemForm = ({ title, category, description }: Props) => {
               item’s overview page. You can always change it. This field
               supports{" "}
               <Link
-                to="https://www.markdownguide.org/cheat-sheet"
+                to="https://www.markdownguide.org/basic-syntax"
                 target="_blank"
                 className="text-gray-800 underline"
                 rel="nofollow noopener noreferrer"

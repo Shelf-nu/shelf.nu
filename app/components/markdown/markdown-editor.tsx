@@ -86,7 +86,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
           {" "}
           This field supports{" "}
           <Link
-            to="https://www.markdownguide.org/cheat-sheet"
+            to="https://www.markdownguide.org/basic-syntax"
             target="_blank"
             className="text-gray-800 underline"
             rel="nofollow noopener noreferrer"

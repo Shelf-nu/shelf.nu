@@ -46,13 +46,13 @@ export const Filters = ({ children }: { children?: ReactNode }) => {
   }, [submit, isFilteringCategories, toggleIsFiltering]);
 
   return (
-    <div className="flex items-center justify-between rounded-[12px] border border-gray-200 bg-white px-6 py-5">
+    <div className="flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
       <Form ref={formRef} className="w-full">
-        <div className="flex w-full items-center justify-between">
+        <div className="w-full items-center justify-between md:flex">
           <div className="flex items-center gap-5">
             <SearchForm />
           </div>
-          <div className="inline-flex w-1/4 justify-end gap-4">
+          <div className="inline-flex w-full shrink-0 justify-center gap-2 p-3 md:w-1/2 md:justify-end md:p-0 lg:gap-4 xl:w-1/4">
             {selectedCategories.items.length > 0 ? (
               <>
                 <Button
