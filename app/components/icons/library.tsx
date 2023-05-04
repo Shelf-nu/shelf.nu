@@ -676,3 +676,24 @@ export function CuboidIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function UnlinkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width="23"
+      height="22"
+      viewBox="0 0 23 22"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M8.5 3V1M14.5 19V21M3.5 8H1.5M19.5 14H21.5M4.41421 3.91421L3 2.5M18.5858 18.0858L20 19.5M11.5 16.6569L9.37868 18.7782C7.81658 20.3403 5.28392 20.3403 3.72183 18.7782C2.15973 17.2161 2.15973 14.6834 3.72183 13.1213L5.84315 11M17.1569 11L19.2782 8.87868C20.8403 7.31658 20.8403 4.78392 19.2782 3.22183C17.7161 1.65973 15.1834 1.65973 13.6213 3.22183L11.5 5.34315"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

@@ -31,14 +31,18 @@ export default function QrNotLoggedIn() {
           <div className="flex flex-col">
             <Button
               variant="primary"
-              className="mb-4"
+              className="mb-4 max-w-full"
               to={encodeURI(
                 `/login?redirectTo=${searchParams.get("redirectTo")}`
               )}
             >
               Log In
             </Button>
-            <Button variant="secondary" to={`/qr/${qrId}/contact-owner`}>
+            <Button
+              variant="secondary"
+              to={`/qr/${qrId}/contact-owner`}
+              className="max-w-full"
+            >
               Contact Owner
             </Button>
           </div>
