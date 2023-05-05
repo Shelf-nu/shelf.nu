@@ -1,5 +1,5 @@
 import type { Item, Qr } from "@prisma/client";
-import { Form, Link, useNavigation, useSearchParams } from "@remix-run/react";
+import { Form, Link, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
