@@ -11,7 +11,7 @@ export default function UnlinkedQrBelognsToUser() {
           </div>
           <div className="mb-8">
             <h1 className="mb-2 text-[24px] font-semibold">Unlinked QR Code</h1>
-            <p>
+            <p className="text-gray-600">
               This code is part of your Shelf environment but is not linked with
               an item. Would you like to link it?
             </p>
