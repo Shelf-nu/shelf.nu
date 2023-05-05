@@ -9,6 +9,12 @@ export async function getQrByItemId({ itemId }: Pick<Qr, "itemId">) {
   });
 }
 
+export async function getQr(id: Qr["id"]) {
+  return db.qr.findFirst({
+    where: { id },
+  });
+}
+
 export async function createQr({
   userId,
   itemId,
