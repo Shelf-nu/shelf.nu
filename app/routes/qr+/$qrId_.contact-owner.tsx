@@ -1,16 +1,16 @@
+import type { Item } from "@prisma/client";
 import { json, type ActionArgs } from "@remix-run/node";
-import { Form, useActionData } from "@remix-run/react";
-import { atom, useAtom } from "jotai";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
+import { getItem } from "~/modules/item";
 import { getQr } from "~/modules/qr";
-import { createReport } from "~/modules/report-found";
+import { createReport, sendReportEmails } from "~/modules/report-found";
 import { getUserByID } from "~/modules/user";
-import { assertIsPost, tw } from "~/utils";
-import { sendEmail } from "~/utils/mail.server";
+import { assertIsPost, isFormProcessing, tw } from "~/utils";
 
 export const NewReportSchema = z.object({
   email: z
@@ -30,6 +30,8 @@ export const action = async ({ request, params }: ActionArgs) => {
   }
 
   const owner = await getUserByID(qr.userId);
+  if (!owner) return new Response("Something went wrong", { status: 500 });
+  const item = await getItem({ userId: owner.id, id: qr.itemId });
 
   const formData = await request.formData();
   const result = await NewReportSchema.safeParseAsync(parseFormAny(formData));
@@ -48,16 +50,25 @@ export const action = async ({ request, params }: ActionArgs) => {
   });
   if (!report) return new Response("Something went wrong", { status: 500 });
 
-  // Here we send email
-  // sendEmail({
-  //   to: owner.email,
-  // });
+  /**
+   * Here we send 2 emails.
+   * 1. To the owner of the item
+   * 2. To the person who reported the item as found
+   */
+  sendReportEmails({
+    owner,
+    item: item as Item,
+    message: report.content,
+    reporterEmail: report.email,
+  });
   return json({ report });
 };
 
 export default function ContactOwner() {
   const zo = useZorm("NewQuestionWizardScreen", NewReportSchema);
   const data = useActionData();
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
   return (
     <>
       <div className="flex-1 py-8">
@@ -79,6 +90,7 @@ export default function ContactOwner() {
             autoComplete="email"
             name={zo.fields.email()}
             error={zo.errors.email()?.message}
+            disabled={disabled}
             required
           />
           <div className="mb-8">
@@ -87,13 +99,16 @@ export default function ContactOwner() {
               inputType="textarea"
               name={zo.fields.content()}
               error={zo.errors.content()?.message}
+              disabled={disabled}
             />
             <p className="mt-2.5 text-center text-gray-600">
               By leaving your contact information you agree that the owner of
               the asset can contact you.
             </p>
           </div>
-          <Button width="full">Send</Button>
+          <Button width="full" disabled={disabled}>
+            Send
+          </Button>
         </Form>
         <div
           className={tw(
