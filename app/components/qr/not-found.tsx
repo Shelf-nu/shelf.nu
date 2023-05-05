@@ -9,7 +9,7 @@ export const QrNotFound = () => (
         </div>
         <div className="mb-8">
           <h1 className="mb-2 text-[24px] font-semibold">Code Not Found</h1>
-          <p>
+          <p className="text-gray-600">
             This QR code is not found in our database. Make sure the code you
             are scanning is registered by a Shelf user.
           </p>
