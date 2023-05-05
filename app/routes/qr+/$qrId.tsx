@@ -1,10 +1,5 @@
 import { redirect, type LoaderArgs } from "@remix-run/node";
-import {
-  Link,
-  Outlet,
-  isRouteErrorResponse,
-  useRouteError,
-} from "@remix-run/react";
+import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
