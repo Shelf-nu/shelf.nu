@@ -1,5 +1,6 @@
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
+import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { titleAtom } from "~/atoms/items.new";
@@ -67,13 +68,14 @@ export async function action({ request }: LoaderArgs) {
     );
   }
 
-  const { title, description, category } = result.data;
+  const { title, description, category, qrId } = result.data;
 
   const item = await createItem({
     title,
     description,
     userId: authSession.userId,
     categoryId: category,
+    qrId,
   });
 
   // Not sure how to handle this failign as the item is already created
@@ -98,12 +100,14 @@ export async function action({ request }: LoaderArgs) {
 
 export default function NewItemPage() {
   const title = useAtomValue(titleAtom);
+  const [searchParams] = useSearchParams();
+  const qrId = searchParams.get("qrId");
 
   return (
     <>
       <Header title={title} />
       <div>
-        <ItemForm />
+        <ItemForm qrId={qrId} />
       </div>
     </>
   );

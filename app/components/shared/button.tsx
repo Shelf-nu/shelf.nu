@@ -67,7 +67,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
 
     const widths = {
       auto: "w-auto",
-      full: "w-full",
+      full: "w-full max-w-full",
     };
 
     const disabledStyles = disabled ? "pointer-events-none " : undefined;
@@ -92,7 +92,12 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
         title={title || children}
         ref={ref}
       >
-        {icon && iconsMap[icon]} {children ? <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>{children}</span> : null}
+        {icon && iconsMap[icon]}{" "}
+        {children ? (
+          <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>
+            {children}
+          </span>
+        ) : null}
       </Component>
     );
   }
