@@ -1,8 +1,13 @@
+import type { ActionArgs } from "@remix-run/node";
 import { atom, useAtom } from "jotai";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { tw } from "~/utils";
+
+export const action = async ({ request }: ActionArgs) => {
+  return null;
+};
 
 const successfulSubmissionAtom = atom(false);
 
@@ -16,7 +21,7 @@ export default function ContactOwner() {
         <div className="mb-8">
           <h1 className="mb-2 text-[24px] font-semibold">Contact Owner</h1>
           <p className="text-gray-600">
-            Assist the owner by sharing your contact info for communication.
+            Assist the owner by sharing your contact information.
           </p>
         </div>
         <form
@@ -33,13 +38,11 @@ export default function ContactOwner() {
           <div className="mb-8">
             <Input label="Message" inputType="textarea" />
             <p className="mt-2.5 text-center text-gray-600">
-              This is a hint text to help user.
+              By leaving your contact information you agree that the owner of
+              the asset can contact you.
             </p>
           </div>
-          <Button
-            className="w-full"
-            onClick={() => setSuccessfulSubmission(true)}
-          >
+          <Button width="full" onClick={() => setSuccessfulSubmission(true)}>
             Send
           </Button>
         </form>
