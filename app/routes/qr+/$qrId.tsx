@@ -1,5 +1,10 @@
 import { redirect, type LoaderArgs } from "@remix-run/node";
-import { Outlet, isRouteErrorResponse, useRouteError } from "@remix-run/react";
+import {
+  Link,
+  Outlet,
+  isRouteErrorResponse,
+  useRouteError,
+} from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
@@ -55,8 +60,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
    */
   if (!qr.itemId) return redirect(`link`);
 
-  return null;
-  // return redirect(`/items/${qr.itemId}?ref=qr`);
+  return redirect(`/items/${qr.itemId}?ref=qr`);
 };
 
 /** 404 handling */
@@ -75,6 +79,4 @@ export function ErrorBoundry() {
   ) : null;
 }
 
-export default function Qr() {
-  return <Outlet />;
-}
+export default function Qr() {}
