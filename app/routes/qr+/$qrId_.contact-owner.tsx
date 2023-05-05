@@ -1,20 +1,63 @@
-import type { ActionArgs } from "@remix-run/node";
+import { json, type ActionArgs } from "@remix-run/node";
+import { Form, useActionData } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
+import { parseFormAny, useZorm } from "react-zorm";
+import { z } from "zod";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
-import { tw } from "~/utils";
+import { getQr } from "~/modules/qr";
+import { createReport } from "~/modules/report-found";
+import { getUserByID } from "~/modules/user";
+import { assertIsPost, tw } from "~/utils";
+import { sendEmail } from "~/utils/mail.server";
 
-export const action = async ({ request }: ActionArgs) => {
-  return null;
+export const NewReportSchema = z.object({
+  email: z
+    .string()
+    .email("Please enter a valid Email address")
+    .transform((email) => email.toLowerCase()),
+  content: z.string().min(3, "Content is required"),
+});
+
+export const action = async ({ request, params }: ActionArgs) => {
+  assertIsPost(request);
+  const qrId = params.qrId as string;
+  const qr = await getQr(qrId);
+
+  if (!qr || !qr.itemId) {
+    return new Response("QR code doesnt exist.", { status: 400 });
+  }
+
+  const owner = await getUserByID(qr.userId);
+
+  const formData = await request.formData();
+  const result = await NewReportSchema.safeParseAsync(parseFormAny(formData));
+  if (!result.success) {
+    return json({
+      errors: result.error,
+    });
+  }
+
+  const { email, content } = result.data;
+
+  const report = await createReport({
+    email,
+    content,
+    itemId: qr.itemId,
+  });
+  if (!report) return new Response("Something went wrong", { status: 500 });
+
+  // Here we send email
+  // sendEmail({
+  //   to: owner.email,
+  // });
+  return json({ report });
 };
 
-const successfulSubmissionAtom = atom(false);
-
 export default function ContactOwner() {
-  const [successfulSubmission, setSuccessfulSubmission] = useAtom(
-    successfulSubmissionAtom
-  );
+  const zo = useZorm("NewQuestionWizardScreen", NewReportSchema);
+  const data = useActionData();
   return (
     <>
       <div className="flex-1 py-8">
@@ -24,32 +67,38 @@ export default function ContactOwner() {
             Assist the owner by sharing your contact information.
           </p>
         </div>
-        <form
-          action="#"
-          className={tw("text-left", successfulSubmission ? "hidden" : "")}
+        <Form
+          method="post"
+          ref={zo.ref}
+          className={tw("text-left", data?.report ? "hidden" : "")}
         >
           <Input
             label="Email"
             className="mb-3"
             type="email"
             autoComplete="email"
+            name={zo.fields.email()}
+            error={zo.errors.email()?.message}
             required
           />
           <div className="mb-8">
-            <Input label="Message" inputType="textarea" />
+            <Input
+              label="Message"
+              inputType="textarea"
+              name={zo.fields.content()}
+              error={zo.errors.content()?.message}
+            />
             <p className="mt-2.5 text-center text-gray-600">
               By leaving your contact information you agree that the owner of
               the asset can contact you.
             </p>
           </div>
-          <Button width="full" onClick={() => setSuccessfulSubmission(true)}>
-            Send
-          </Button>
-        </form>
+          <Button width="full">Send</Button>
+        </Form>
         <div
           className={tw(
             "rounded-xl border border-solid border-success-300 bg-success-25 p-4 text-center leading-[1]",
-            successfulSubmission ? "block" : "hidden"
+            data?.report ? "block" : "hidden"
           )}
         >
           <p className="inline-flex items-center gap-2 font-semibold leading-[1] text-success-700">
