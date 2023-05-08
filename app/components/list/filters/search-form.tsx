@@ -39,7 +39,7 @@ export const SearchForm = () => {
       />
       {search && (
         <Button
-          to="/"
+          to="#"
           icon="x"
           variant="tertiary"
           disabled={isSearching}

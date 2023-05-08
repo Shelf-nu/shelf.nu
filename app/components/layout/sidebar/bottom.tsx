@@ -1,16 +1,21 @@
 import { Link } from "@remix-run/react";
 
+import { useAtom } from "jotai";
+
 import ProfilePicture from "~/components/user/profile-picture";
 
 import type { User } from "~/database";
 
 import { LogoutButton } from "~/modules/auth";
 
+import { toggleMobileNavAtom } from "./atoms";
+
 interface Props {
   user: User;
 }
 
 export default function SidebarBottom({ user }: Props) {
+  const[, toggleMobileNav] = useAtom(toggleMobileNavAtom)
   return (
     <div className="bottom">
       <Link to="settings" className="rounded-lg p-1 hover:bg-gray-100">
@@ -25,7 +30,7 @@ export default function SidebarBottom({ user }: Props) {
         </div>
       </Link>
 
-      <LogoutButton className="logout-btn h-8 w-8 transition-all duration-200 ease-linear" />
+      <LogoutButton className="logout-btn h-8 w-8 transition-all duration-200 ease-linear" onClick={toggleMobileNav} />
     </div>
   );
 }

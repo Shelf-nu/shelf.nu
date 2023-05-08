@@ -39,17 +39,19 @@ export const Notes = () => {
           ))}
         </ul>
       ) : (
-        <div className="flex flex-col items-center justify-center p-[120px] text-center">
-          <img
-            src="/images/no-notes.svg"
-            alt="Graphic for no notes"
-            className="mb-6 w-[172px]"
-          />
-          <h4>No Notes</h4>
-          <p>
-            Your asset `{item.title}` has no notes <br />
-            attached to it.
-          </p>
+        <div className="flex h-[500px] items-center  justify-center">
+          <div className="flex flex-col items-center justify-center p-[16px] text-center md:p-[50px]">
+            <img
+              src="/images/no-notes.svg"
+              alt="Graphic for no notes"
+              className="mb-6 w-[172px]"
+            />
+            <h4>No Notes</h4>
+            <p>
+              Your asset `{item.title}` has no notes <br />
+              attached to it.
+            </p>
+          </div>
         </div>
       )}
     </div>

@@ -44,7 +44,7 @@ export const ColorInput = ({
         label="Hex Color"
         value={color}
         onChange={handleColorChange}
-        className="max-w-[100px]"
+        className="w-full lg:max-w-[100px]"
         {...rest}
       />
     </div>

@@ -52,7 +52,7 @@ export const Filters = ({ children }: { children?: ReactNode }) => {
           <div className="flex items-center gap-5">
             <SearchForm />
           </div>
-          <div className="inline-flex w-full shrink-0 justify-center gap-2 p-3 md:w-1/2 md:justify-end md:p-0 lg:gap-4 xl:w-1/4">
+          <div className="inline-flex w-full shrink-0 justify-end gap-2 p-3 md:w-1/2 md:p-0 lg:gap-4 xl:w-1/4">
             {selectedCategories.items.length > 0 ? (
               <>
                 <Button
