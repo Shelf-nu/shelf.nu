@@ -1,9 +1,10 @@
-import type { Category, Note, Prisma } from "@prisma/client";
+import type { Category, Note, Prisma, Qr } from "@prisma/client";
 import { ErrorCorrection } from "@prisma/client";
 import type { Item, User } from "~/database";
 import { db } from "~/database";
 import { dateTimeInUnix, oneDayFromNow } from "~/utils";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import { getQr } from "../qr";
 
 export async function getItem({
   userId,
@@ -83,8 +84,10 @@ export async function createItem({
   description,
   userId,
   categoryId,
+  qrId,
 }: Pick<Item, "description" | "title" | "categoryId"> & {
   userId: User["id"];
+  qrId?: Qr["id"];
 }) {
   /** User connction data */
   const user = {
@@ -93,22 +96,37 @@ export async function createItem({
     },
   };
 
+  /**
+   * If a qr code is passsed, link to that QR
+   * Otherwise, create a new one
+   * Here we also need to double check:
+   * 1. If the qr code exists
+   * 2. If the qr code belongs to the current user
+   * 3. If the qr code is not linked to an item
+   */
+  const qr = qrId ? await getQr(qrId) : null;
+  const qrCodes =
+    qr && qr.userId === userId && qr.itemId === null
+      ? { connect: { id: qrId } }
+      : {
+          create: [
+            {
+              version: 0,
+              errorCorrection: ErrorCorrection["L"],
+              user,
+            },
+          ],
+        };
+
+  /** Data object we send via prisma to create Asset */
   const data = {
     title,
     description,
     user,
-    // Create a new qr code for the item and connect it to the user as well
-    qrCodes: {
-      create: [
-        {
-          version: 0,
-          errorCorrection: ErrorCorrection["L"],
-          user,
-        },
-      ],
-    },
+    qrCodes,
   };
 
+  /** If a categoryId is passed, link the category to the asset. */
   if (categoryId) {
     Object.assign(data, {
       category: {

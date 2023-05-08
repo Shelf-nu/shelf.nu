@@ -1,4 +1,4 @@
-import type { Item } from "@prisma/client";
+import type { Item, Qr } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
@@ -19,6 +19,7 @@ export const NewItemFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
   description: z.string(),
   category: z.string(),
+  qrId: z.string().optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -26,9 +27,10 @@ interface Props {
   title?: Item["title"];
   category?: Item["categoryId"];
   description?: Item["description"];
+  qrId?: Qr["id"] | null;
 }
 
-export const ItemForm = ({ title, category, description }: Props) => {
+export const ItemForm = ({ title, category, description, qrId }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewItemFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -36,6 +38,7 @@ export const ItemForm = ({ title, category, description }: Props) => {
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   const [, updateTitle] = useAtom(updateTitleAtom);
+
   return (
     <Form
       ref={zo.ref}
@@ -43,6 +46,9 @@ export const ItemForm = ({ title, category, description }: Props) => {
       className="flex w-full flex-col gap-2"
       encType="multipart/form-data"
     >
+      {qrId ? (
+        <input type="hidden" name={zo.fields.qrId()} value={qrId} />
+      ) : null}
       <FormRow rowLabel={"Name"} className="border-b-0">
         <Input
           label="Name"
