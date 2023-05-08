@@ -24,16 +24,23 @@ export const DeleteItem = ({
 }) => (
   <AlertDialog>
     <AlertDialogTrigger asChild>
-      <Button variant="secondary" data-test-id="deleteItemButton" icon="trash" onlyIconOnMobile={true}>
+      <Button
+        variant="secondary"
+        data-test-id="deleteItemButton"
+        icon="trash"
+        onlyIconOnMobile={true}
+      >
         Delete
       </Button>
     </AlertDialogTrigger>
 
     <AlertDialogContent>
       <AlertDialogHeader>
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
-          <TrashIcon />
-        </span>
+        <div className="mx-auto md:m-0">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
+            <TrashIcon />
+          </span>
+        </div>
         <AlertDialogTitle>Delete {item.title}</AlertDialogTitle>
         <AlertDialogDescription>
           Are you sure you want to delete this asset? This action cannot be
@@ -41,23 +48,25 @@ export const DeleteItem = ({
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel asChild>
-          <Button variant="secondary">Cancel</Button>
-        </AlertDialogCancel>
+        <div className="flex justify-center gap-2">
+          <AlertDialogCancel asChild>
+            <Button variant="secondary">Cancel</Button>
+          </AlertDialogCancel>
 
-        <Form method="delete">
-          {item.mainImage && (
-            <input type="hidden" value={item.mainImage} name="mainImage" />
-          )}
+          <Form method="delete">
+            {item.mainImage && (
+              <input type="hidden" value={item.mainImage} name="mainImage" />
+            )}
 
-          <Button
-            className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
-            type="submit"
-            data-test-id="confirmDeleteItemButton"
-          >
-            Delete
-          </Button>
-        </Form>
+            <Button
+              className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
+              type="submit"
+              data-test-id="confirmDeleteItemButton"
+            >
+              Delete
+            </Button>
+          </Form>
+        </div>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>

@@ -1,5 +1,5 @@
 import type { Item } from "@prisma/client";
-import { Form, Link, useNavigation } from "@remix-run/react";
+import { Form, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -12,7 +12,6 @@ import { isFormProcessing } from "~/utils";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
-import { MarkdownEditor } from "../markdown";
 import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
 
@@ -89,27 +88,19 @@ export const ItemForm = ({ title, category, description }: Props) => {
           subHeading={
             <p>
               This is the initial object description. It will be shown on the
-              item’s overview page. You can always change it. This field
-              supports{" "}
-              <Link
-                to="https://www.markdownguide.org/basic-syntax"
-                target="_blank"
-                className="text-gray-800 underline"
-                rel="nofollow noopener noreferrer"
-              >
-                markdown
-              </Link>
-              .
+              item’s overview page. You can always change it.
             </p>
           }
         >
-          <MarkdownEditor
+          <Input
+            inputType="textarea"
             label={zo.fields.description()}
             name={zo.fields.description()}
             defaultValue={description || ""}
-            placeholder="Add a description for your asset. Supports markdown."
+            placeholder="Add a description for your asset."
             disabled={disabled}
             data-test-id="itemDescription"
+            className="w-full"
           />
         </FormRow>
       </div>

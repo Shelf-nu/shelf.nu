@@ -83,14 +83,14 @@ export default function NewCategory() {
     <>
       <Form
         method="post"
-        className="flex items-end justify-between gap-3 rounded-[12px] border border-gray-200 bg-white px-6 py-5"
+        className="block rounded-[12px] border border-gray-200 bg-white px-6 py-5 lg:flex lg:items-end lg:justify-between lg:gap-3"
         ref={zo.ref}
       >
-        <div className="flex items-end gap-3">
+        <div className="gap-3 lg:flex lg:items-end">
           <Input
             label="Name"
             placeholder="Category name"
-            className="max-w-[180px]"
+            className="mb-4 lg:mb-0 lg:max-w-[180px]"
             name={zo.fields.name()}
             disabled={disabled}
             error={zo.errors.name()?.message}
@@ -103,14 +103,17 @@ export default function NewCategory() {
             name={zo.fields.description()}
             disabled={disabled}
             data-test-id="categoryDescription"
+            className="mb-4 lg:mb-0"
           />
-          <ColorInput
-            name={zo.fields.color()}
-            disabled={disabled}
-            error={zo.errors.color()?.message}
-            hideErrorText
-            colorFromServer={colorFromServer}
-          />
+          <div className="mb-6 lg:mb-0">
+            <ColorInput
+              name={zo.fields.color()}
+              disabled={disabled}
+              error={zo.errors.color()?.message}
+              hideErrorText
+              colorFromServer={colorFromServer}
+            />
+          </div>
         </div>
 
         <div className="flex gap-1">
