@@ -7,6 +7,8 @@ import { belongsToCurrentUser } from "~/modules/qr/utils.server";
 import { notFound } from "~/utils";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
+  console.log(request.headers.get("user-agent"));
+
   /* Get the ID of the QR from the params */
   const id = params.qrId as string;
 
