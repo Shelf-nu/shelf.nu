@@ -1,19 +1,30 @@
+import type { ActionArgs } from "@remix-run/node";
 import { redirect, type LoaderArgs } from "@remix-run/node";
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
 import { belongsToCurrentUser } from "~/modules/qr/utils.server";
+import { createScan, updateScan } from "~/modules/scan";
 import { notFound } from "~/utils";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
-  console.log(request.headers.get("user-agent"));
-
   /* Get the ID of the QR from the params */
   const id = params.qrId as string;
 
   /* Find the QR in the database */
   const qr = await getQr(id);
+
+  /** Record the scan in the DB using the QR id
+   * if the QR doesn't exist, we still record the scan
+   * and we still save the id in a field specifically for deleted QRs
+   */
+
+  const scan = await createScan({
+    userAgent: request.headers.get("user-agent") as string,
+    qrId: id,
+    deleted: !qr,
+  });
 
   /** If the QR doesn't exist, return a 404
    *
@@ -35,6 +46,13 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     onFailRedirectTo: "not-logged-in",
     verify: false,
   });
+
+  if (authSession) {
+    updateScan({
+      id: scan.id,
+      userId: authSession.userId,
+    });
+  }
 
   /**
    * Does the QR code belong to any user.
@@ -60,6 +78,13 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   return redirect(`/items/${qr.itemId}?ref=qr`);
 };
 
+export const action = async ({ request, params }: ActionArgs) => {
+  console.log(request);
+  console.log(params);
+};
+
+export const shouldRevalidate = () => false;
+
 /** 404 handling */
 export function CatchBoundary() {
   const error = useRouteError();
@@ -76,4 +101,6 @@ export function ErrorBoundry() {
   ) : null;
 }
 
-export default function Qr() {}
+export default function Qr() {
+  return null;
+}

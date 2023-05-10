@@ -137,8 +137,11 @@ model Scan {
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId String?
 
-  qr   Qr?     @relation(fields: [qrId], references: [id])
+  qr   Qr?     @relation(fields: [qrId], references: [id], onDelete: SetNull)
   qrId String?
+
+  // We also store the qrId as a raw string for reference is fhte qr is deleted
+  rawQrId String
 
   // DateTime
   createdAt DateTime @default(now())
