@@ -4,7 +4,7 @@ import { useCatch, useLoaderData } from "@remix-run/react";
 
 import { DeleteItem } from "~/components/items/delete-item";
 import { ItemImage } from "~/components/items/item-image";
-import { ShelfMap } from "~/components/items/location/map";
+import LocationDetails from "~/components/items/location";
 import { Notes } from "~/components/items/notes";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
@@ -116,7 +116,7 @@ export default function ItemDetailsPage() {
         <DeleteItem item={item} />
       </Header>
       <div className="mt-8 block lg:flex">
-        <div className="shrink-0 lg:w-[343px] xl:w-[400px]">
+        <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
           <ItemImage
             item={{
               itemId: item.id,
@@ -152,7 +152,7 @@ export default function ItemDetailsPage() {
             </li>
           </ul>
 
-          <ShelfMap />
+          <LocationDetails longitude={16.62662018} latitude={49.2125578} />
         </div>
 
         <div className="w-full lg:ml-8">
