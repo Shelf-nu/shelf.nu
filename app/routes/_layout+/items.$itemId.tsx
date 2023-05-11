@@ -3,6 +3,7 @@ import { redirect, json } from "@remix-run/node";
 import { useCatch, useLoaderData } from "@remix-run/react";
 import { DeleteItem } from "~/components/items/delete-item";
 import { ItemImage } from "~/components/items/item-image";
+import LocationDetails from "~/components/items/location";
 import { Notes } from "~/components/items/notes";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
@@ -149,6 +150,7 @@ export default function ItemDetailsPage() {
               </div>
             </li>
           </ul>
+          <LocationDetails />
         </div>
 
         <div className="w-full lg:ml-8">

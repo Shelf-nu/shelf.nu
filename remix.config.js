@@ -5,6 +5,7 @@ const { flatRoutes } = require("remix-flat-routes");
 
 module.exports = {
   ignoredRouteFiles: ["**/.*"],
+  serverDependenciesToBundle: ["react-leaflet", "@react-leaflet/core"],
   routes: async (defineRoutes) => {
     return flatRoutes("routes", defineRoutes);
   },
