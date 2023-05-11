@@ -1,24 +1,25 @@
-import {  Marker, Popup, TileLayer} from "react-leaflet";
+import maplibregl from "maplibre-gl";
+import Map, { Marker } from "react-map-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import { ClientOnly } from "remix-utils";
 
-const Map = () => {
-  const MapContainer = require("react-leaflet").MapContainer;
-  return (
-    <MapContainer
-      center={{ lat: 51.505, lng: -0.09 }}
-      zoom={13}
-      scrollWheelZoom={false}
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      <Marker position={{ lat: 51.505, lng: -0.09 }}>
-        <Popup>
-          A pretty CSS3 popup. <br /> Easily customizable.
-        </Popup>
-      </Marker>
-    </MapContainer>
-  );
-};
-
-export default Map;
+export const ShelfMap = () => (
+  <ClientOnly>
+    {() => (
+      <Map
+        mapLib={maplibregl}
+        initialViewState={{
+          longitude: 16.62662018,
+          latitude: 49.2125578,
+          zoom: 14,
+        }}
+        style={{ width: "100%", height: "240px" }}
+        mapStyle={`https://api.maptiler.com/maps/streets-v2/style.json?key=${window.env.MAPTILER_TOKEN}`}
+      >
+        <Marker longitude={16.62662018} latitude={49.2125578} anchor="bottom">
+          <img src="/images/map-marker.png" width={40} />
+        </Marker>
+      </Map>
+    )}
+  </ClientOnly>
+);

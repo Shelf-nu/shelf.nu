@@ -1,10 +1,12 @@
 import { ClientOnly } from "remix-utils";
-import Map from "./map";
+import { ShelfMap } from "./map";
 
 function ErrorBoundary() {
   return <div>Map not available</div>;
 }
 
 export default function LocationDetails() {
-  return <ClientOnly fallback={<ErrorBoundary />}>{() => <Map />}</ClientOnly>;
+  return (
+    <ClientOnly fallback={<ErrorBoundary />}>{() => <ShelfMap />}</ClientOnly>
+  );
 }
