@@ -1,10 +1,12 @@
-import { redirect, type LoaderArgs } from "@remix-run/node";
+import type { ActionArgs } from "@remix-run/node";
+import { redirect, type LoaderArgs, json } from "@remix-run/node";
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
 import { belongsToCurrentUser } from "~/modules/qr/utils.server";
-import { notFound } from "~/utils";
+import { createScan, updateScan } from "~/modules/scan";
+import { assertIsPost, notFound } from "~/utils";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   /* Get the ID of the QR from the params */
@@ -12,6 +14,19 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 
   /* Find the QR in the database */
   const qr = await getQr(id);
+
+  /** Record the scan in the DB using the QR id
+   * if the QR doesn't exist, we still record the scan
+   * and we still save the id in a field specifically for deleted QRs
+   */
+
+  const scan = await createScan({
+    userAgent: request.headers.get("user-agent") as string,
+    qrId: id,
+    deleted: !qr,
+  });
+
+  // registerScan(scan.id);
 
   /** If the QR doesn't exist, return a 404
    *
@@ -30,9 +45,16 @@ export const loader = async ({ request, params }: LoaderArgs) => {
    *  - If so, continue
    */
   const authSession = await requireAuthSession(request, {
-    onFailRedirectTo: "not-logged-in",
+    onFailRedirectTo: `not-logged-in?scanId=${scan.id}`,
     verify: false,
   });
+
+  if (authSession) {
+    updateScan({
+      id: scan.id,
+      userId: authSession.userId,
+    });
+  }
 
   /**
    * Does the QR code belong to any user.
@@ -46,21 +68,38 @@ export const loader = async ({ request, params }: LoaderArgs) => {
    * Redirect to page to report if found.
    */
   if (!belongsToCurrentUser(qr, authSession.userId)) {
-    return redirect(`contact-owner`);
+    return redirect(`contact-owner?scanId=${scan.id}`);
   }
 
   /**
    * When there is no itemId that means that the item was deleted so the QR code is orphaned.
    * Here we redirect to a page where the user has the option to link to existing item or create a new one.
    */
-  if (!qr.itemId) return redirect(`link`);
+  if (!qr.itemId) return redirect(`link?scanId=${scan.id}`);
 
-  return redirect(`/items/${qr.itemId}?ref=qr`);
+  return redirect(`/items/${qr.itemId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`);
+};
+
+export const action = async ({ request }: ActionArgs) => {
+  assertIsPost(request);
+  const formData = await request.formData();
+  const latitude = formData.get("latitude") as string;
+  const longitude = formData.get("longitude") as string;
+  const scanId = formData.get("scanId") as string;
+
+  await updateScan({
+    id: scanId,
+    latitude,
+    longitude,
+  });
+
+  return json({ ok: true });
 };
 
 /** 404 handling */
 export function CatchBoundary() {
   const error = useRouteError();
+
   return isRouteErrorResponse(error) ? <QrNotFound /> : null;
 }
 
@@ -74,4 +113,6 @@ export function ErrorBoundry() {
   ) : null;
 }
 
-export default function Qr() {}
+export default function Qr() {
+  return null;
+}
