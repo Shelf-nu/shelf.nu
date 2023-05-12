@@ -1,4 +1,3 @@
-import type { Qr } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 
 import { NODE_ENV } from "../utils/env";

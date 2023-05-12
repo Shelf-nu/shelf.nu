@@ -1,13 +1,20 @@
 import { useEffect } from "react";
-import { useFetcher, useParams } from "@remix-run/react";
+import { useFetcher, useParams, useSearchParams } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 
 const positionAtom = atom<GeolocationCoordinates | null>(null);
 
 export const usePosition = () => {
-  const { qrId } = useParams();
+  let { qrId } = useParams();
+  const [searchParams] = useSearchParams();
   const [position, setPosition] = useAtom(positionAtom);
   const fetcher = useFetcher();
+  const scanId = searchParams.get("scanId") as string;
+
+  if (!qrId) {
+    // If we don't have a qrId, we get it from the search params
+    qrId = searchParams.get("qrId") as string;
+  }
 
   useEffect(() => {
     if (navigator && navigator.geolocation) {
@@ -24,20 +31,22 @@ export const usePosition = () => {
         }
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (position) {
+    if (position && scanId) {
       // Here we update the position
-      console.log(position);
       fetcher.submit(
         {
           latitude: position.latitude.toString(),
           longitude: position.longitude.toString(),
+          scanId: scanId,
         },
         { method: "post", action: `/qr/${qrId}` }
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [position]);
 
   return [position, setPosition];
