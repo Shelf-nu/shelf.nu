@@ -5,6 +5,7 @@ declare global {
     env: {
       SUPABASE_URL: string;
       SUPABASE_ANON_PUBLIC: string;
+      MAPTILER_TOKEN: string;
     };
   }
 }
@@ -17,6 +18,7 @@ declare global {
       SERVER_URL: string;
       SUPABASE_ANON_PUBLIC: string;
       SESSION_SECRET: string;
+      MAPTILER_TOKEN: string;
     }
   }
 }
@@ -60,10 +62,14 @@ export const SUPABASE_URL = getEnv("SUPABASE_URL", { isSecret: false });
 export const SUPABASE_ANON_PUBLIC = getEnv("SUPABASE_ANON_PUBLIC", {
   isSecret: false,
 });
+export const MAPTILER_TOKEN = getEnv("MAPTILER_TOKEN", {
+  isSecret: false,
+});
 
 export function getBrowserEnv() {
   return {
     SUPABASE_URL,
     SUPABASE_ANON_PUBLIC,
+    MAPTILER_TOKEN,
   };
 }

@@ -80,3 +80,11 @@ export async function updateScan({
     data,
   });
 }
+
+export async function getScanByQrId({ qrId }: { qrId: string }) {
+  return db.scan.findFirst({
+    where: { rawQrId: qrId },
+    orderBy: { createdAt: "desc" },
+    take: 1,
+  });
+}

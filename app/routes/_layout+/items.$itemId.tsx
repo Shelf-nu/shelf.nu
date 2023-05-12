@@ -1,8 +1,16 @@
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionArgs,
+  LinksFunction,
+  LoaderArgs,
+  V2_MetaFunction,
+} from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { useCatch, useLoaderData } from "@remix-run/react";
+
+import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { DeleteItem } from "~/components/items/delete-item";
 import { ItemImage } from "~/components/items/item-image";
+import { LocationDetails } from "~/components/items/location";
 import { Notes } from "~/components/items/notes";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
@@ -16,6 +24,8 @@ import ProfilePicture from "~/components/user/profile-picture";
 import { usePosition, useUserData } from "~/hooks";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
+import { getScanByQrId } from "~/modules/scan";
+import { parseScanData } from "~/modules/scan/utils.server";
 import { assertIsDelete, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -30,6 +40,14 @@ export async function loader({ request, params }: LoaderArgs) {
   if (!item) {
     throw new Response("Not Found", { status: 404 });
   }
+  /** We get the first QR code(for now we can only have 1)
+   * And using the ID of tha qr code, we find the latest scan
+   */
+  const lastScan = parseScanData({
+    scan: (await getScanByQrId({ qrId: item.qrCodes[0].id })) || null,
+    userId,
+  });
+
   const notes = item.notes.map((note) => ({
     ...note,
     content: parseMarkdownToReact(note.content),
@@ -45,18 +63,10 @@ export async function loader({ request, params }: LoaderArgs) {
       ...item,
       notes,
     },
+    lastScan,
     header,
   });
 }
-
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.header.title) },
-];
-
-export const handle = {
-  breadcrumb: () => "single",
-};
-
 export async function action({ request, params }: ActionArgs) {
   assertIsDelete(request);
   const id = getRequiredParam(params, "itemId");
@@ -83,6 +93,16 @@ export async function action({ request, params }: ActionArgs) {
   });
 }
 
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.header.title) },
+];
+
+export const handle = {
+  breadcrumb: () => "single",
+};
+
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: mapCss }];
+
 export default function ItemDetailsPage() {
   const { item } = useLoaderData<typeof loader>();
   const user = useUserData();
@@ -107,14 +127,13 @@ export default function ItemDetailsPage() {
         >
           Download QR Tag
         </Button>
-        {/* <DownloadQrCode /> */}
         <Button to="edit" icon="pen" role="link" onlyIconOnMobile={true}>
           Edit
         </Button>
         <DeleteItem item={item} />
       </Header>
       <div className="mt-8 block lg:flex">
-        <div className="shrink-0 lg:w-[343px] xl:w-[400px]">
+        <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
           <ItemImage
             item={{
               itemId: item.id,
@@ -149,6 +168,8 @@ export default function ItemDetailsPage() {
               </div>
             </li>
           </ul>
+
+          <LocationDetails />
         </div>
 
         <div className="w-full lg:ml-8">

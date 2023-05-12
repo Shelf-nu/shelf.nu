@@ -19,6 +19,7 @@ export async function getItem({
       notes: {
         orderBy: { createdAt: "desc" },
       },
+      qrCodes: true,
     },
   });
 }
