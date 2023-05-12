@@ -13,7 +13,7 @@ import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
 import TextualDivider from "~/components/shared/textual-divider";
 import ProfilePicture from "~/components/user/profile-picture";
-import { useUserData } from "~/hooks";
+import { usePosition, useUserData } from "~/hooks";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { deleteItem, getItem } from "~/modules/item";
 import { assertIsDelete, getRequiredParam } from "~/utils";
@@ -86,7 +86,7 @@ export async function action({ request, params }: ActionArgs) {
 export default function ItemDetailsPage() {
   const { item } = useLoaderData<typeof loader>();
   const user = useUserData();
-
+  usePosition();
   return (
     <>
       <ItemImage

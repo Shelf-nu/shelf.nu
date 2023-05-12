@@ -24,6 +24,7 @@ model User {
   categories Category[]
   notes      Note[]
   qrCodes    Qr[]
+  scans      Scan[]
 
   @@unique([email, username])
 }
@@ -40,13 +41,13 @@ model Item {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId      String
-  category    Category?     @relation(fields: [categoryId], references: [id])
-  categoryId  String?
-  notes       Note[]
-  qrCodes     Qr[]
-  reports     ReportFound[]
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId     String
+  category   Category?     @relation(fields: [categoryId], references: [id])
+  categoryId String?
+  notes      Note[]
+  qrCodes    Qr[]
+  reports    ReportFound[]
 }
 
 model Note {
@@ -99,6 +100,7 @@ model Qr {
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  scans     Scan[]
 }
 
 // Stores a report for when a an asset is reported as found
@@ -121,4 +123,27 @@ enum ErrorCorrection {
   M
   Q
   H
+}
+
+model Scan {
+  id String @id @default(cuid())
+
+  latitude  String?
+  longitude String?
+
+  userAgent String?
+
+  // When a logged in user scanned the QR code, we store it here
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId String?
+
+  qr   Qr?     @relation(fields: [qrId], references: [id], onDelete: SetNull)
+  qrId String?
+
+  // We also store the qrId as a raw string for reference is fhte qr is deleted
+  rawQrId String
+
+  // DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

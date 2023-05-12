@@ -1,5 +1,5 @@
 import type { NotificationType } from "~/atoms/notifications";
-import emitter from "./emitter.server";
+import { emitter } from "./emitter.server";
 
 export function sendNotification(
   notification: Omit<NotificationType, "open">
