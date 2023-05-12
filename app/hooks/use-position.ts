@@ -17,7 +17,7 @@ export const usePosition = () => {
   }
 
   useEffect(() => {
-    if (navigator && navigator.geolocation) {
+    if (navigator && navigator.geolocation && scanId) {
       navigator.geolocation.getCurrentPosition(
         // Success function
         (position) => setPosition(position.coords),

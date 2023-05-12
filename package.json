@@ -57,6 +57,7 @@
     "sharp": "^0.32.0",
     "tailwind-merge": "^1.11.0",
     "tailwindcss-animate": "^1.0.5",
+    "ua-parser-js": "^1.0.35",
     "zod": "^3.21.4"
   },
   "devDependencies": {
@@ -70,7 +71,6 @@
     "@testing-library/jest-dom": "^5.16.5",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^14.4.3",
-    "@types/leaflet": "^1.9.3",
     "@types/nodemailer": "^6.4.7",
     "@types/react": "^18.0.31",
     "@types/react-dom": "^18.0.11",
