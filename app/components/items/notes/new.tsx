@@ -102,7 +102,7 @@ export const NewNote = () => {
               ref={editorRef}
               className="rounded-b-none"
               onBlur={handelBlur}
-              onKeyUp={handleKeyDown}
+              onKeyDown={handleKeyDown}
             />
           </div>
         ) : (
