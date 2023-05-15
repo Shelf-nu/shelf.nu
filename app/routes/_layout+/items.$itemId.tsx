@@ -43,10 +43,12 @@ export async function loader({ request, params }: LoaderArgs) {
   /** We get the first QR code(for now we can only have 1)
    * And using the ID of tha qr code, we find the latest scan
    */
-  const lastScan = parseScanData({
-    scan: (await getScanByQrId({ qrId: item.qrCodes[0].id })) || null,
-    userId,
-  });
+  const lastScan = item.qrCodes[0]?.id
+    ? parseScanData({
+        scan: (await getScanByQrId({ qrId: item.qrCodes[0].id })) || null,
+        userId,
+      })
+    : null;
 
   const notes = item.notes.map((note) => ({
     ...note,
