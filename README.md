@@ -95,6 +95,9 @@ SUPABASE_URL="https://{STAGING_YOUR_INSTANCE_NAME}.supabase.co"
 SESSION_SECRET="super-duper-s3cret"
 SERVER_URL="http://localhost:3000"
 MAPTILER_TOKEN="someToken"
+SMTP_HOST="smtp.yourhost.com"
+SMTP_USER="you@example.com"
+SMTP_PWD="yourSMTPpassword"
 ```
 
 - This step only applies if you've opted out of having the CLI install dependencies for you:
@@ -187,6 +190,10 @@ Prior to your first deployment, you'll need to do a few things:
   fly secrets set DATABASE_URL="postgres://postgres:{POSTGRES_PASSWORD}@db.{YOUR_INSTANCE_NAME}.supabase.co:5432/postgres"
   fly secrets set SERVER_URL="https://{YOUR_STAGING_SERVEUR_URL}"
   fly secrets set MAPTILER_TOKEN="{YOUR_MAPTILER_TOKEN}"
+
+  fly secrets set SMTP_HOST="smtp.yourhost.com"
+  fly secrets set SMTP_USER="you@example.com"
+  fly secrets set SMTP_PWD="yourSMTPpassword"
 
 
   # staging (specify --app name) ** not mandatory if you don't want a staging environnement **
