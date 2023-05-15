@@ -84,7 +84,7 @@ Not a fan of bits of the stack? Fork it, change it, and use `npx create-remix --
 
 - Go to https://app.supabase.io/project/{PROJECT}/settings/api to find your secrets
 - "Project API keys"
-- Add your `SUPABASE_URL`, `SERVER_URL`, `SUPABASE_SERVICE_ROLE` (aka `service_role` `secret`), `SUPABASE_ANON_PUBLIC` (aka `anon` `public`) and `DATABASE_URL` in the `.env` file
+- Add your `MAPTILER_TOKEN`, `SUPABASE_URL`, `SERVER_URL`, `SUPABASE_SERVICE_ROLE` (aka `service_role` `secret`), `SUPABASE_ANON_PUBLIC` (aka `anon` `public`) and `DATABASE_URL` in the `.env` file
   > **Note:** `SERVER_URL` is your localhost on dev. It'll work for magic link login
 
 ```en
@@ -94,6 +94,7 @@ SUPABASE_SERVICE_ROLE="{SERVICE_ROLE}"
 SUPABASE_URL="https://{STAGING_YOUR_INSTANCE_NAME}.supabase.co"
 SESSION_SECRET="super-duper-s3cret"
 SERVER_URL="http://localhost:3000"
+MAPTILER_TOKEN="someToken"
 ```
 
 - This step only applies if you've opted out of having the CLI install dependencies for you:
@@ -167,6 +168,8 @@ Prior to your first deployment, you'll need to do a few things:
   git remote add origin <ORIGIN_URL>
   ```
 
+- Add `MAPTILER_TOKEN` which is needed for rendering the map which shows the last scanned location. For more info and to get an account and token: https://www.maptiler.com/
+
 - Add a `FLY_API_TOKEN` to your GitHub repo. To do this, go to your user settings on Fly and create a new [token](https://web.fly.io/user/personal_access_tokens/new), then add it to [your repo secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets) with the name `FLY_API_TOKEN`.
 
 - Add a `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`,`SUPABASE_ANON_PUBLIC`, `SERVER_URL` and `DATABASE_URL` to your fly app secrets
@@ -183,6 +186,8 @@ Prior to your first deployment, you'll need to do a few things:
   fly secrets set SUPABASE_ANON_PUBLIC="{SUPABASE_ANON_PUBLIC}"
   fly secrets set DATABASE_URL="postgres://postgres:{POSTGRES_PASSWORD}@db.{YOUR_INSTANCE_NAME}.supabase.co:5432/postgres"
   fly secrets set SERVER_URL="https://{YOUR_STAGING_SERVEUR_URL}"
+  fly secrets set MAPTILER_TOKEN="{YOUR_MAPTILER_TOKEN}"
+
 
   # staging (specify --app name) ** not mandatory if you don't want a staging environnement **
   fly secrets set SESSION_SECRET=$(openssl rand -hex 32) --app supa-fly-stack-template-staging
@@ -199,6 +204,21 @@ Prior to your first deployment, you'll need to do a few things:
 Now that everything is set up you can commit and push your changes to your repo. Every commit to your `main` branch will trigger a deployment to your production environment, and every commit to your `dev` branch will trigger a deployment to your staging environment.
 
 > **Note:** To deploy manually, just run `fly deploy` (It'll deploy app defined in fly.toml)
+
+## File Storage
+
+For File storage we use the S3 buckets service provided by supabase. We do this as it makes it easier to manage permissions in relation to our users which are also stored on supabase. To set it up you need to do the following steps:
+
+### Profile pictures
+
+1. Create a bucket called `profile-pictures`
+2. Make it a public bucket
+3. Implement a policy for `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'profile-pictures'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
+
+### Items
+
+1. Create a bucket called `items`
+2. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'items'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
 
 ## GitHub Actions
 
