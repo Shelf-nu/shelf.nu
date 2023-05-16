@@ -12,13 +12,13 @@ export const MapPlaceholder = ({
     <img
       src="/images/no-location-image.jpg"
       alt="No scanned location"
-      className="rounded-none"
+      className="w-full rounded-none"
     />
-    <div className="absolute top-0 z-10 flex h-full w-full flex-col items-center justify-center px-[45px] text-center">
+    <div className="absolute top-0 z-10 flex h-full w-full flex-col items-center justify-center px-[15px] text-center md:px-[45px]">
       <div
         className={tw(
           "border-error-50 bg-error-100 text-error-600",
-          " flex h-14 w-14 items-center justify-center rounded-full border-[6px] "
+          " flex h-14 w-14 items-center justify-center rounded-full"
         )}
       >
         <MapIcon />

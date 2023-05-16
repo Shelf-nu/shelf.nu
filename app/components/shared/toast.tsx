@@ -37,7 +37,7 @@ export const Toaster = () => {
     <Toast.Provider swipeDirection="right" duration={3000}>
       <Toast.Root
         className={tw(
-          "top-0 flex gap-4 rounded-lg border border-gray-100 bg-white p-3 shadow-xl",
+          "flex gap-4 rounded-lg border border-gray-100 bg-white p-3 shadow-xl",
           "data-[swipe=cancel]:translate-x-0 data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[state=closed]:animate-hide data-[state=open]:animate-slideIn data-[swipe=end]:animate-swipeOut data-[swipe=cancel]:transition-[transform_200ms_ease-out]"
         )}
         open={open}
@@ -71,7 +71,7 @@ export const Toaster = () => {
           {iconsMap["x"]}
         </Toast.Close>
       </Toast.Root>
-      <Toast.Viewport className="fixed bottom-0 right-0 z-[2147483647] m-0 flex w-[390px] max-w-[100vw] list-none flex-col gap-[10px] p-[var(--viewport-padding)] outline-none [--viewport-padding:_25px]" />
+      <Toast.Viewport className="fixed bottom-0 right-0 z-[2147483647] m-0 flex w-full max-w-[100vw] list-none flex-col gap-[10px] p-[var(--viewport-padding)] outline-none [--viewport-padding:_25px] md:w-[390px]" />
     </Toast.Provider>
   );
 };
