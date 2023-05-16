@@ -72,8 +72,9 @@ p {
 }
 
 [aria-label="Notifications (F8)"] ol {
-  @apply bottom-auto top-0;
+  @apply top-auto bottom-0 md:bottom-auto md:top-0;
 }
+
 
 .markdown-viewer ul {
   @apply list-inside list-disc;
