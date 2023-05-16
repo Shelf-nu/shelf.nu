@@ -72,9 +72,8 @@ p {
 }
 
 [aria-label="Notifications (F8)"] ol {
-  @apply top-auto bottom-0 md:bottom-auto md:top-0;
+  @apply bottom-0 top-auto md:bottom-auto md:top-0;
 }
-
 
 .markdown-viewer ul {
   @apply list-inside list-disc;
@@ -108,6 +107,22 @@ p {
   @apply mb-4;
 }
 
-.maplibregl-ctrl-bottom-right{
+.maplibregl-ctrl-bottom-right {
   display: none;
+}
+
+.markdown-viewer table {
+  @apply w-full border-collapse rounded-lg text-xs;
+}
+.markdown-viewer table td,
+.markdown-viewer table th {
+  @apply border border-gray-200 px-6 py-3 text-gray-600;
+}
+
+.markdown-viewer table th {
+  @apply bg-gray-50 font-medium text-gray-600;
+}
+
+.markdown-viewer table th {
+  @apply font-regular;
 }
