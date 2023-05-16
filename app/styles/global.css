@@ -124,5 +124,5 @@ p {
 }
 
 .markdown-viewer table th {
-  @apply font-regular;
+  @apply font-normal;
 }
