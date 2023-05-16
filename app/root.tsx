@@ -1,3 +1,4 @@
+import type { PropsWithChildren } from "react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -13,7 +14,9 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  isRouteErrorResponse,
   useLoaderData,
+  useRouteError,
 } from "@remix-run/react";
 
 import { HomeIcon } from "./components/icons/library";
@@ -54,19 +57,19 @@ export const loader: LoaderFunction = async () =>
 
 export const shouldRevalidate = () => false;
 
-export default function App() {
+function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
   const { env } = useLoaderData<typeof loader>();
-  // @TODO need to add error & catch boundries here
   return (
     <html lang="en" className="h-full">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <Meta />
+        {title ? <title>{title}</title> : null}
         <Links />
       </head>
       <body className="h-full">
-        <Outlet />
+        {children}
         <ScrollRestoration />
         <script
           dangerouslySetInnerHTML={{
@@ -77,5 +80,40 @@ export default function App() {
         <LiveReload />
       </body>
     </html>
+  );
+}
+
+export default function App() {
+  return (
+    <Document>
+      <Outlet />
+    </Document>
+  );
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+  console.error(error);
+
+  if (isRouteErrorResponse(error)) {
+    return (
+      <Document title={`${error.status} ${error.statusText}`}>
+        <div className="error-container">
+          <h1>
+            {error.status} {error.statusText}
+          </h1>
+        </div>
+      </Document>
+    );
+  }
+
+  const errorMessage = error instanceof Error ? error.message : "Unknown error";
+  return (
+    <Document title="Uh-oh!">
+      <div className="error-container">
+        <h1>App Error</h1>
+        <pre>{errorMessage}</pre>
+      </div>
+    </Document>
   );
 }
