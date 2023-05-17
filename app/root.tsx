@@ -59,7 +59,6 @@ export const shouldRevalidate = () => false;
 
 function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
   const { env } = useLoaderData<typeof loader>();
-  console.log(NODE_ENV);
   return (
     <html lang="en" className="h-full">
       <head>
