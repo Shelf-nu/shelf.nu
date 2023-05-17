@@ -1,3 +1,4 @@
+import type { PropsWithChildren } from "react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -16,11 +17,13 @@ import {
   useLoaderData,
 } from "@remix-run/react";
 
+import { ErrorBoundryComponent } from "./components/errors";
+
 import { HomeIcon } from "./components/icons/library";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
-import { getBrowserEnv } from "./utils/env";
+import { NODE_ENV, getBrowserEnv } from "./utils/env";
 
 export interface RootData {
   env: typeof getBrowserEnv;
@@ -54,19 +57,19 @@ export const loader: LoaderFunction = async () =>
 
 export const shouldRevalidate = () => false;
 
-export default function App() {
+function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
   const { env } = useLoaderData<typeof loader>();
-  // @TODO need to add error & catch boundries here
   return (
     <html lang="en" className="h-full">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <Meta />
+        {title ? <title>{title}</title> : null}
         <Links />
       </head>
       <body className="h-full">
-        <Outlet />
+        {children}
         <ScrollRestoration />
         <script
           dangerouslySetInnerHTML={{
@@ -79,3 +82,13 @@ export default function App() {
     </html>
   );
 }
+
+export default function App() {
+  return (
+    <Document>
+      <Outlet />
+    </Document>
+  );
+}
+
+export const ErrorBoundary = () => <ErrorBoundryComponent />;

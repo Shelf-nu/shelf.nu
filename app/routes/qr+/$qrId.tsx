@@ -96,21 +96,13 @@ export const action = async ({ request }: ActionArgs) => {
   return json({ ok: true });
 };
 
-/** 404 handling */
-export function CatchBoundary() {
+export function ErrorBoundary() {
   const error = useRouteError();
 
-  return isRouteErrorResponse(error) ? <QrNotFound /> : null;
-}
-
-export function ErrorBoundry() {
-  const error = useRouteError();
-  return isRouteErrorResponse(error) ? (
-    <div className="mx-auto max-w-[300px] text-center">
-      <h1>{error.status}</h1>
-      <p>{error.statusText}</p>
-    </div>
-  ) : null;
+  /** 404 error */
+  if (isRouteErrorResponse(error)) {
+    return <QrNotFound />;
+  }
 }
 
 export default function Qr() {
