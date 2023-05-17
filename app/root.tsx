@@ -14,16 +14,16 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
-  isRouteErrorResponse,
   useLoaderData,
-  useRouteError,
 } from "@remix-run/react";
+
+import { ErrorBoundryComponent } from "./components/errors";
 
 import { HomeIcon } from "./components/icons/library";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
-import { getBrowserEnv } from "./utils/env";
+import { NODE_ENV, getBrowserEnv } from "./utils/env";
 
 export interface RootData {
   env: typeof getBrowserEnv;
@@ -59,6 +59,7 @@ export const shouldRevalidate = () => false;
 
 function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
   const { env } = useLoaderData<typeof loader>();
+  console.log(NODE_ENV);
   return (
     <html lang="en" className="h-full">
       <head>
@@ -91,29 +92,4 @@ export default function App() {
   );
 }
 
-export function ErrorBoundary() {
-  const error = useRouteError();
-  console.error(error);
-
-  if (isRouteErrorResponse(error)) {
-    return (
-      <Document title={`${error.status} ${error.statusText}`}>
-        <div className="error-container">
-          <h1>
-            {error.status} {error.statusText}
-          </h1>
-        </div>
-      </Document>
-    );
-  }
-
-  const errorMessage = error instanceof Error ? error.message : "Unknown error";
-  return (
-    <Document title="Uh-oh!">
-      <div className="error-container">
-        <h1>App Error</h1>
-        <pre>{errorMessage}</pre>
-      </div>
-    </Document>
-  );
-}
+export const ErrorBoundary = () => <ErrorBoundryComponent />;
