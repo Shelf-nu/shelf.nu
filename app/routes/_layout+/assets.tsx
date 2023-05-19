@@ -11,12 +11,12 @@ export async function loader({ request }: LoaderArgs) {
 }
 
 export const handle = {
-  breadcrumb: () => <Link to="/items">Items</Link>,
+  breadcrumb: () => <Link to="/assets">Assets</Link>,
 };
 
 export const shouldRevalidate = () => false;
 
-export default function ItemsPage() {
+export default function AssetsPage() {
   return <Outlet />;
 }
 

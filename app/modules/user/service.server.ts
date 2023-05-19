@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { User } from "~/database";
+import type { User } from "@prisma/client";
 import { db } from "~/database";
 
 import type { AuthSession } from "~/modules/auth";

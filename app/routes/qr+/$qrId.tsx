@@ -70,12 +70,14 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   }
 
   /**
-   * When there is no itemId that means that the item was deleted so the QR code is orphaned.
-   * Here we redirect to a page where the user has the option to link to existing item or create a new one.
+   * When there is no assetId that means that the asset was deleted so the QR code is orphaned.
+   * Here we redirect to a page where the user has the option to link to existing asset or create a new one.
    */
-  if (!qr.itemId) return redirect(`link?scanId=${scan.id}`);
+  if (!qr.assetId) return redirect(`link?scanId=${scan.id}`);
 
-  return redirect(`/items/${qr.itemId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`);
+  return redirect(
+    `/assets/${qr.assetId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`
+  );
 };
 
 export const action = async ({ request }: ActionArgs) => {

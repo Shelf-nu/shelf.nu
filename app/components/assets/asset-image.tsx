@@ -1,17 +1,17 @@
 import { useEffect } from "react";
-import type { Item } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 
 import { useFetcher } from "@remix-run/react";
 import { tw } from "~/utils";
 
-export const ItemImage = ({
-  item,
+export const AssetImage = ({
+  asset,
   className,
   ...rest
 }: {
-  item: {
-    itemId: Item["id"];
-    mainImage: Item["mainImage"];
+  asset: {
+    assetId: Asset["id"];
+    mainImage: Asset["mainImage"];
     mainImageExpiration: Date | string | null;
     alt: string;
   };
@@ -19,9 +19,9 @@ export const ItemImage = ({
   rest?: HTMLImageElement;
 }) => {
   const fetcher = useFetcher();
-  const { itemId, mainImage, mainImageExpiration, alt } = item;
+  const { assetId, mainImage, mainImageExpiration, alt } = asset;
   const url =
-    mainImage || fetcher?.data?.mainImage || "/images/item-placeholder.png";
+    mainImage || fetcher?.data?.mainImage || "/images/asset-placeholder.png";
 
   useEffect(() => {
     if (mainImage && mainImageExpiration) {
@@ -30,10 +30,10 @@ export const ItemImage = ({
 
       if (now > expiration) {
         fetcher.submit(
-          { itemId, mainImage: mainImage || "" },
+          { assetId, mainImage: mainImage || "" },
           {
             method: "post",
-            action: "/api/item/refresh-main-image",
+            action: "/api/asset/refresh-main-image",
           }
         );
       }

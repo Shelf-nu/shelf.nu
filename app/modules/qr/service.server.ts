@@ -3,9 +3,9 @@ import QRCode from "qrcode-generator";
 import { db } from "~/database";
 import { gifToPng } from "~/utils";
 
-export async function getQrByItemId({ itemId }: Pick<Qr, "itemId">) {
+export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
   return db.qr.findFirst({
-    where: { itemId },
+    where: { assetId },
   });
 }
 
@@ -17,17 +17,17 @@ export async function getQr(id: Qr["id"]) {
 
 export async function createQr({
   userId,
-  itemId,
-}: Pick<Qr, "userId"> & { itemId: string }) {
+  assetId,
+}: Pick<Qr, "userId"> & { assetId: string }) {
   const data = {
     user: {
       connect: {
         id: userId,
       },
     },
-    item: {
+    asset: {
       connect: {
-        id: itemId,
+        id: assetId,
       },
     },
   };

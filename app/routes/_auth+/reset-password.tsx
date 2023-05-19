@@ -26,7 +26,7 @@ export async function loader({ request }: LoaderArgs) {
   const subHeading =
     "Your new password must be different to previously used passwords.";
 
-  if (authSession) return redirect("/items");
+  if (authSession) return redirect("/assets");
 
   return json({ title, subHeading });
 }
@@ -94,7 +94,7 @@ export async function action({ request }: ActionArgs) {
     );
   }
 
-  return redirect("/items", {
+  return redirect("/assets", {
     headers: {
       "Set-Cookie": await commitAuthSession(request, {
         authSession,
@@ -107,8 +107,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data.title) },
 ];
 
-
-const userRefreshTokenAtom = atom("")
+const userRefreshTokenAtom = atom("");
 
 export default function ResetPassword() {
   const zo = useZorm("ResetPasswordForm", ResetPasswordSchema);

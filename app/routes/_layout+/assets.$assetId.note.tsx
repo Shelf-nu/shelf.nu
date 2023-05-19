@@ -1,15 +1,15 @@
 import type { LoaderArgs } from "@remix-run/node";
 import { json, type ActionArgs, redirect } from "@remix-run/node";
 import { parseFormAny } from "react-zorm";
-import { NewNoteSchema } from "~/components/items/notes/new";
+import { NewNoteSchema } from "~/components/assets/notes/new";
+import { createNote, deleteNote } from "~/modules/asset";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { createNote, deleteNote } from "~/modules/item";
 import { assertIsDelete, assertIsPost, isDelete, isPost } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ params }: LoaderArgs) =>
-  /** makes sure that if the user navigates to that url, it redirects back to item */
-  redirect(`/items/${params.itemId}`);
+  /** makes sure that if the user navigates to that url, it redirects back to asset */
+  redirect(`/assets/${params.assetId}`);
 
 export const action = async ({ request, params }: ActionArgs) => {
   const authSession = await requireAuthSession(request);
@@ -34,8 +34,8 @@ export const action = async ({ request, params }: ActionArgs) => {
       );
     }
 
-    if (!params.itemId)
-      return json({ errors: "itemId is required" }, { status: 400 });
+    if (!params.assetId)
+      return json({ errors: "assetId is required" }, { status: 400 });
 
     sendNotification({
       title: "Note created",
@@ -44,7 +44,7 @@ export const action = async ({ request, params }: ActionArgs) => {
     });
     const note = await createNote({
       ...result.data,
-      itemId: params.itemId,
+      assetId: params.assetId,
       userId: authSession.userId,
     });
 

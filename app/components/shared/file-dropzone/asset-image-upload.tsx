@@ -9,8 +9,8 @@ export type FileInfo = {
 } | null;
 
 /** This is temporary not used */
-export function ItemImageUpload() {
-  return null
+export function AssetImageUpload() {
+  return null;
   // const fetcher = useFetcher();
   // const [fileMeta, setFileMeta] = useState<FileInfo>(null);
   // const [temp, setTemp] = useState<string | ArrayBuffer | null>(null);

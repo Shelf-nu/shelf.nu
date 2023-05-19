@@ -1,5 +1,5 @@
 import { useLoaderData } from "@remix-run/react";
-import type { IndexResponse } from "~/routes/_layout+/items._index";
+import type { IndexResponse } from "~/routes/_layout+/assets._index";
 
 export const ListHeader = () => {
   const { items, totalItems, perPage, modelName } =

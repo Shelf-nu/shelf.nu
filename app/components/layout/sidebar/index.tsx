@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import type { User } from "@prisma/client";
 import { Link } from "@remix-run/react";
 import { useAtom } from "jotai";
 import {
@@ -7,7 +8,6 @@ import {
   ShelfTypography,
 } from "~/components/icons/library";
 
-import type { User } from "~/database";
 import { tw } from "~/utils";
 
 import {
@@ -31,7 +31,6 @@ export default function Sidebar({ user }: Props) {
   );
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);
-  
 
   return (
     <>
@@ -40,7 +39,7 @@ export default function Sidebar({ user }: Props) {
         id="header"
         className="flex items-center justify-between border-b bg-white p-4 md:hidden"
       >
-          <Link to="." title="Home" className="block h-[32px]">
+        <Link to="." title="Home" className="block h-[32px]">
           <img
             src="/images/logo-full-color(x2).png"
             alt="logo"
@@ -66,7 +65,12 @@ export default function Sidebar({ user }: Props) {
         )}
       >
         <div className="navigation-header flex items-center justify-between">
-          <Link to="." title="Home" className="flex items-center" onClick={toggleMobileNav}>
+          <Link
+            to="."
+            title="Home"
+            className="flex items-center"
+            onClick={toggleMobileNav}
+          >
             <img
               src="/images/shelf-symbol.png"
               alt="Shelf Logo"
@@ -89,8 +93,8 @@ export default function Sidebar({ user }: Props) {
             </i>
           </button>
         </div>
-        <div className="flex-1">       
-            <MenuItems />
+        <div className="flex-1">
+          <MenuItems />
         </div>
         <div className="mt-auto">
           <SidebarBottom

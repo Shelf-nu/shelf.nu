@@ -72,7 +72,7 @@ export const NewNote = () => {
   return (
     <div ref={wrapperRef}>
       <fetcher.Form
-        action={`/items/${params.itemId}/note`}
+        action={`/assets/${params.assetId}/note`}
         method="post"
         ref={zo.ref}
         onSubmit={clearMarkdown}

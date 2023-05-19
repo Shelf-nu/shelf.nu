@@ -48,7 +48,10 @@ export const DeleteNote = ({ note }: { note: Note }) => {
             <Button variant="secondary">Cancel</Button>
           </AlertDialogCancel>
 
-          <fetcher.Form method="delete" action={`/items/${params.itemId}/note`}>
+          <fetcher.Form
+            method="delete"
+            action={`/assets/${params.assetId}/note`}
+          >
             <input type="hidden" name="noteId" value={note.id} />
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"

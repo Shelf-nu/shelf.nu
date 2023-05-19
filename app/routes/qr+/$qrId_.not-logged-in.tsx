@@ -24,7 +24,7 @@ export default function QrNotLoggedIn() {
               Thank you for Scanning
             </h1>
             <p className="text-gray-600">
-              Log in if you own this item. Contact the owner to report it found
+              Log in if you own this asset. Contact the owner to report it found
               if it's lost.
             </p>
           </div>

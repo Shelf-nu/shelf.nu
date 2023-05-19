@@ -1,13 +1,8 @@
+import type { User } from "@prisma/client";
 import { Link } from "@remix-run/react";
-
 import { useAtom } from "jotai";
-
 import ProfilePicture from "~/components/user/profile-picture";
-
-import type { User } from "~/database";
-
 import { LogoutButton } from "~/modules/auth";
-
 import { toggleMobileNavAtom } from "./atoms";
 
 interface Props {

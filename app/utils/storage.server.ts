@@ -26,7 +26,7 @@ export function getPublicFileURL({
 
 export async function createSignedUrl({
   filename,
-  bucketName = "items",
+  bucketName = "assets",
 }: {
   filename: string;
   bucketName?: string;

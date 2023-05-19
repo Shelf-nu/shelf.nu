@@ -12,9 +12,9 @@ export function Breadcrumb({
   /**
    * If the value is "single" that means we have to
    * take the page title and render it.
-   * This takes care of showing the correct title in item show page*/
+   * This takes care of showing the correct title in asset show page*/
   if (typeof breadcrumb === "string" && breadcrumb === "single") {
-    breadcrumb = match?.data?.item?.title || "Not found";
+    breadcrumb = match?.data?.asset?.title || "Not found";
   }
 
   return breadcrumb ? (
