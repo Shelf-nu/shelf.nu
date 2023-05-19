@@ -14,10 +14,10 @@ export function Breadcrumb({
    * take the page title and render it.
    * This takes care of showing the correct title in item show page*/
   if (typeof breadcrumb === "string" && breadcrumb === "single") {
-    breadcrumb = match.data.item.title;
+    breadcrumb = match?.data?.item?.title || "Not found";
   }
 
-  return (
+  return breadcrumb ? (
     <div className="breadcrumb">
       {breadcrumb}{" "}
       {!isLastItem && (
@@ -26,5 +26,5 @@ export function Breadcrumb({
         </span>
       )}
     </div>
-  );
+  ) : null;
 }

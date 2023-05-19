@@ -4,21 +4,17 @@ import {
   Meta,
   Scripts,
   ScrollRestoration,
-  isRouteErrorResponse,
   useLocation,
 } from "@remix-run/react";
 import { NODE_ENV } from "~/utils/env";
+import type { ErrorContentProps } from ".";
 import { Button } from "../shared";
 
 export const ErrorContent = ({
   title,
   message,
-  error,
-}: {
-  title: string;
-  message: string;
-  error?: unknown;
-}) => (
+  showReload = true,
+}: ErrorContentProps) => (
   <html lang="en" className="h-full">
     <head>
       <meta charSet="utf-8" />
@@ -28,7 +24,7 @@ export const ErrorContent = ({
       <Links />
     </head>
     <body className="h-full">
-      <InnerContent title={title} message={message} error={error} />
+      <InnerContent title={title} message={message} showReload={showReload} />
       <ScrollRestoration />
       <Scripts />
       <LiveReload />
@@ -36,15 +32,7 @@ export const ErrorContent = ({
   </html>
 );
 
-const InnerContent = ({
-  title,
-  message,
-  error,
-}: {
-  title: string;
-  message: string;
-  error?: unknown;
-}) => {
+const InnerContent = ({ title, message, showReload }: ErrorContentProps) => {
   const location = useLocation();
   return (
     <div className="flex h-full w-full items-center justify-center">
@@ -58,7 +46,7 @@ const InnerContent = ({
           <Button to="/" variant="secondary" icon="home">
             Back to home
           </Button>
-          {isRouteErrorResponse(error) ? (
+          {showReload ? (
             <Button to={location.pathname} reloadDocument>
               Reload page
             </Button>

@@ -23,7 +23,7 @@ import { HomeIcon } from "./components/icons/library";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
-import { NODE_ENV, getBrowserEnv } from "./utils/env";
+import { getBrowserEnv } from "./utils/env";
 
 export interface RootData {
   env: typeof getBrowserEnv;

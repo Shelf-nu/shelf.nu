@@ -1,5 +1,6 @@
 import type { LoaderArgs } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
+import { ErrorBoundryComponent } from "~/components/errors";
 
 import { requireAuthSession } from "~/modules/auth";
 
@@ -18,3 +19,5 @@ export const shouldRevalidate = () => false;
 export default function ItemsPage() {
   return <Outlet />;
 }
+
+export const ErrorBoundary = () => <ErrorBoundryComponent />;

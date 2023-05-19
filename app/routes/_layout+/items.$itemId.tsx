@@ -5,9 +5,10 @@ import type {
   V2_MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useCatch, useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import { ErrorBoundryComponent } from "~/components/errors";
 import { DeleteItem } from "~/components/items/delete-item";
 import { ItemImage } from "~/components/items/item-image";
 import { LocationDetails } from "~/components/items/location";
@@ -96,7 +97,7 @@ export async function action({ request, params }: ActionArgs) {
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.header.title) },
+  { title: appendToMetaTitle(data?.header?.title) },
 ];
 
 export const handle = {
@@ -184,16 +185,6 @@ export default function ItemDetailsPage() {
   );
 }
 
-export function ErrorBoundary({ error }: { error: Error }) {
-  return <div>An unexpected error occurred: {error.message}</div>;
-}
-
-export function CatchBoundary() {
-  const caught = useCatch();
-
-  if (caught.status === 404) {
-    return <div>Item not found</div>;
-  }
-
-  throw new Error(`Unexpected caught response with status: ${caught.status}`);
-}
+export const ErrorBoundary = () => (
+  <ErrorBoundryComponent title="Sorry, asset you are looking for doesn't exist" />
+);

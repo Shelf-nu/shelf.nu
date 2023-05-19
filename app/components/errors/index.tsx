@@ -1,15 +1,30 @@
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
+import { NODE_ENV } from "~/utils/env";
 import { ErrorContent } from "./content";
 
-export const ErrorBoundryComponent = () => {
+export interface ErrorContentProps {
+  title?: string;
+  message?: string | JSX.Element;
+  showReload?: boolean;
+}
+
+export const ErrorBoundryComponent = ({
+  title,
+  message,
+}: ErrorContentProps) => {
   const error = useRouteError();
 
   /** 404 ERROR */
   if (isRouteErrorResponse(error))
     return (
       <ErrorContent
-        title="Sorry, this page doesnt exist"
-        message="It may have been (re)moved or the URL you’ve entered is incorrect."
+        title={title ? title : "Sorry, this page doesnt exist"}
+        message={
+          message
+            ? message
+            : "It may have been (re)moved or the URL you’ve entered is incorrect."
+        }
+        showReload={false}
       />
     );
 
@@ -17,9 +32,16 @@ export const ErrorBoundryComponent = () => {
   const errorMessage = error instanceof Error ? error.message : "Unknown error";
   return (
     <ErrorContent
-      title="Oops, something went wrong"
-      message={errorMessage}
-      error={error}
+      title={title ? title : "Oops, something went wrong"}
+      message={
+        NODE_ENV === "development" ? (
+          <pre>{errorMessage}</pre>
+        ) : message ? (
+          message
+        ) : (
+          "Please try again and if the issue persists, contact support"
+        )
+      }
     />
   );
 };
