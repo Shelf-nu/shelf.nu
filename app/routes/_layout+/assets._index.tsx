@@ -146,34 +146,34 @@ export default function AssetIndexPage() {
 }
 
 const ListAssetContent = ({
-  asset,
+  item,
 }: {
-  asset: Asset & {
+  item: Asset & {
     category?: Category;
   };
 }) => {
-  const category = asset?.category;
+  const category = item?.category;
   return (
     <>
-      <Link className={`block `} to={asset.id}>
+      <Link className={`block `} to={item.id}>
         <article className="flex gap-3">
           <div className="flex w-full items-center justify-between gap-3">
             <div className="flex gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
                 <AssetImage
                   asset={{
-                    assetId: asset.id,
-                    mainImage: asset.mainImage,
-                    mainImageExpiration: asset.mainImageExpiration,
-                    alt: asset.title,
+                    assetId: item.id,
+                    mainImage: item.mainImage,
+                    mainImageExpiration: item.mainImageExpiration,
+                    alt: item.title,
                   }}
                   className="h-10 w-10 rounded-[4px] object-cover"
                 />
               </div>
 
               <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-                <div className="font-medium">{asset.title}</div>
-                <div className="hidden text-gray-600 md:block">{asset.id}</div>
+                <div className="font-medium">{item.title}</div>
+                <div className="hidden text-gray-600 md:block">{item.id}</div>
                 <div className="block md:hidden">
                   {category ? (
                     <Badge color={category.color}>{category.name}</Badge>
