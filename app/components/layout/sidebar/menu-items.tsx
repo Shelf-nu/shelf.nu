@@ -4,6 +4,7 @@ import {
   AssetsIcon,
   ItemsIcon,
   SettingsIcon,
+  CheckboxIcon
 } from "~/components/icons/library";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
@@ -19,6 +20,11 @@ const MenuItems = () => {
       icon: <ItemsIcon />,
       to: "categories",
       label: "Categories",
+    },
+    {
+      icon: <CheckboxIcon />,
+      to: "checklists",
+      label: "Checklists",
     },
     {
       icon: <SettingsIcon />,

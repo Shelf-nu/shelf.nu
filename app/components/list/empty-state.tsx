@@ -1,10 +1,16 @@
-import { useLoaderData } from "@remix-run/react";
-
 import { ClearSearch } from "./filters/clear-search";
 import { Button } from "../shared/button";
 
-export const EmptyState = () => {
-  const { search, modelName } = useLoaderData();
+export const EmptyState = ({
+  modelName,
+  search
+}: {
+  modelName: {
+    singular: string;
+    plural: string;
+  },
+  search: string | null,
+}) => {
   const { singular, plural } = modelName;
 
   const texts = {

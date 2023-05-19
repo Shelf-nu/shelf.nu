@@ -1,7 +1,7 @@
 import type { Category, Item } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { redirect } from "react-router";
 import { ChevronRight } from "~/components/icons";
 import { ItemImage } from "~/components/items/item-image";
@@ -16,6 +16,7 @@ import { requireAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
 import { getItems } from "~/modules/item";
 import { getUserByID } from "~/modules/user";
+
 import {
   generatePageMeta,
   getCurrentSearchParams,
@@ -122,6 +123,17 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function ItemIndexPage() {
+  const {
+    items,
+    totalItems,
+    perPage,
+    modelName,
+    search,
+    page,
+    totalPages,
+    next,
+    prev,
+  } = useLoaderData<IndexResponse>();
   return (
     <>
       <Header>
@@ -139,7 +151,18 @@ export default function ItemIndexPage() {
         <Filters>
           <CategoryCheckboxDropdown />
         </Filters>
-        <List ItemComponent={ListItemContent} />
+        <List
+          ItemComponent={ListItemContent}
+          items={items}
+          totalItems={totalItems}
+          perPage={perPage}
+          modelName={modelName}
+          search={search}
+          page={page}
+          totalPages={totalPages}
+          next={next}
+          prev={prev}
+        />
       </div>
     </>
   );

@@ -1,9 +1,18 @@
-import { useLoaderData } from "@remix-run/react";
-import type { IndexResponse } from "~/routes/_layout+/items._index";
+import type { ListItemData } from "./list-item";
 
-export const ListHeader = () => {
-  const { items, totalItems, perPage, modelName } =
-    useLoaderData<IndexResponse>();
+interface ListHeaderProps {
+  items: ListItemData[];
+  totalItems: number;
+  modelName: {
+    singular: string;
+    plural: string;
+  };
+  perPage: number;
+}
+
+export const ListHeader = ({ items, totalItems, perPage, modelName }: ListHeaderProps) => {
+  // const { items, totalItems, perPage, modelName } =
+  //   useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
 
   return (
@@ -20,6 +29,7 @@ export const ListHeader = () => {
           </span>
         )}
       </div>
+      {singular === "checklist" ? <div><span>Last Check</span></div> : ""}
     </div>
   );
 };
