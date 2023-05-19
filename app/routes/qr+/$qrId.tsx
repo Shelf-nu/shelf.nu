@@ -26,8 +26,6 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     deleted: !qr,
   });
 
-  // registerScan(scan.id);
-
   /** If the QR doesn't exist, return a 404
    *
    * AFTER MVP: Here we have to consider a delted User which will
