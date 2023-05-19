@@ -10,21 +10,14 @@
  * In a real app, you would probably want to use one of those because your app
  * will probably be running on multiple servers.
  */
-import { EventEmitter } from "events";
-
-let emitter: EventEmitter;
+import { EventEmitter } from "node:events";
 
 declare global {
-  var __emitter: EventEmitter | undefined;
+  var emitter: EventEmitter;
 }
 
-if (process.env.NODE_ENV === "production") {
-  emitter = new EventEmitter();
-} else {
-  if (!global.__emitter) {
-    global.__emitter = new EventEmitter();
-  }
-  emitter = global.__emitter;
+if (!global.emitter) {
+  global.emitter = new EventEmitter();
 }
 
-export { emitter };
+export const emitter = global.emitter;
