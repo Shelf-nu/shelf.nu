@@ -77,7 +77,6 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
           inputType="textarea"
           placeholder={placeholder}
           hideLabel
-          data-test-id="itemDescription"
           inputClassName={tw("text-text-md", className)}
           ref={ref}
           {...rest}

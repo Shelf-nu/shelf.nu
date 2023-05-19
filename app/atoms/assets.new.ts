@@ -2,7 +2,7 @@ import type { ChangeEvent } from "react";
 import { atom } from "jotai";
 import { verifyAccept } from "~/utils";
 
-export const titleAtom = atom("Untitled item");
+export const titleAtom = atom("Untitled asset");
 export const updateTitleAtom = atom(
   null,
   (_get, set, event: ChangeEvent<HTMLInputElement>) =>

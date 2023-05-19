@@ -3,19 +3,19 @@ import { json, redirect } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/items.new";
+import { titleAtom } from "~/atoms/assets.new";
 
-import { ItemForm, NewItemFormSchema } from "~/components/items/form";
+import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
 
+import { createAsset, updateAssetMainImage } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
-import { createItem, updateItemMainImage } from "~/modules/item";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-const title = "New Item";
+const title = "New Asset";
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -44,7 +44,7 @@ export async function action({ request }: LoaderArgs) {
   assertIsPost(request);
 
   /** Here we need to clone the request as we need 2 different streams:
-   * 1. Access form data for creating item
+   * 1. Access form data for creating asset
    * 2. Access form data via upload handler to be able to upload the file
    *
    * This solution is based on : https://github.com/remix-run/remix/issues/3971#issuecomment-1222127635
@@ -52,7 +52,9 @@ export async function action({ request }: LoaderArgs) {
   const clonedRequest = request.clone();
 
   const formData = await clonedRequest.formData();
-  const result = await NewItemFormSchema.safeParseAsync(parseFormAny(formData));
+  const result = await NewAssetFormSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
 
   if (!result.success) {
     return json(
@@ -70,7 +72,7 @@ export async function action({ request }: LoaderArgs) {
 
   const { title, description, category, qrId } = result.data;
 
-  const item = await createItem({
+  const asset = await createAsset({
     title,
     description,
     userId: authSession.userId,
@@ -78,27 +80,27 @@ export async function action({ request }: LoaderArgs) {
     qrId,
   });
 
-  // Not sure how to handle this failign as the item is already created
-  await updateItemMainImage({
+  // Not sure how to handle this failign as the asset is already created
+  await updateAssetMainImage({
     request,
-    itemId: item.id,
+    assetId: asset.id,
     userId: authSession.userId,
   });
 
   sendNotification({
-    title: "Item created",
-    message: "Your item has been created successfully",
+    title: "Asset created",
+    message: "Your asset has been created successfully",
     icon: { name: "success", variant: "success" },
   });
 
-  return redirect(`/items/${item.id}`, {
+  return redirect(`/assets/${asset.id}`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
   });
 }
 
-export default function NewItemPage() {
+export default function NewAssetPage() {
   const title = useAtomValue(titleAtom);
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
@@ -107,7 +109,7 @@ export default function NewItemPage() {
     <>
       <Header title={title} />
       <div>
-        <ItemForm qrId={qrId} />
+        <AssetForm qrId={qrId} />
       </div>
     </>
   );

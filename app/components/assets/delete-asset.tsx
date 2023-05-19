@@ -1,4 +1,4 @@
-import type { Item } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 import { Form } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
@@ -14,19 +14,19 @@ import {
 } from "~/components/shared/modal";
 import { TrashIcon } from "../icons";
 
-export const DeleteItem = ({
-  item,
+export const DeleteAsset = ({
+  asset,
 }: {
-  item: {
-    title: Item["title"];
-    mainImage: Item["mainImage"];
+  asset: {
+    title: Asset["title"];
+    mainImage: Asset["mainImage"];
   };
 }) => (
   <AlertDialog>
     <AlertDialogTrigger asChild>
       <Button
         variant="secondary"
-        data-test-id="deleteItemButton"
+        data-test-id="deleteAssetButton"
         icon="trash"
         onlyIconOnMobile={true}
       >
@@ -41,7 +41,7 @@ export const DeleteItem = ({
             <TrashIcon />
           </span>
         </div>
-        <AlertDialogTitle>Delete {item.title}</AlertDialogTitle>
+        <AlertDialogTitle>Delete {asset.title}</AlertDialogTitle>
         <AlertDialogDescription>
           Are you sure you want to delete this asset? This action cannot be
           undone.
@@ -54,14 +54,14 @@ export const DeleteItem = ({
           </AlertDialogCancel>
 
           <Form method="delete">
-            {item.mainImage && (
-              <input type="hidden" value={item.mainImage} name="mainImage" />
+            {asset.mainImage && (
+              <input type="hidden" value={asset.mainImage} name="mainImage" />
             )}
 
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               type="submit"
-              data-test-id="confirmDeleteItemButton"
+              data-test-id="confirmdeleteAssetButton"
             >
               Delete
             </Button>

@@ -7,16 +7,16 @@ import { ActionsDopdown } from "./actions-dropdown";
 import { NewNote } from "./new";
 
 export const Notes = () => {
-  const { item } = useLoaderData();
+  const { asset } = useLoaderData();
   const user = useUserData();
-  const hasNotes = item?.notes.length > 0;
+  const hasNotes = asset?.notes.length > 0;
 
   return (
     <div>
       <NewNote />
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
-          {item.notes.map((note: Note) => (
+          {asset.notes.map((note: Note) => (
             <li
               key={note.id}
               className="note mb-6 rounded-lg border bg-white md:mb-8"
@@ -48,7 +48,7 @@ export const Notes = () => {
             />
             <h4>No Notes</h4>
             <p>
-              Your asset `{item.title}` has no notes <br />
+              Your asset `{asset.title}` has no notes <br />
               attached to it.
             </p>
           </div>

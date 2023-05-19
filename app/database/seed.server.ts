@@ -59,7 +59,7 @@ async function seed() {
       },
     });
 
-    await prisma.item.create({
+    await prisma.asset.create({
       data: {
         title: "My first item",
         description: "Hello, world!",
@@ -67,7 +67,7 @@ async function seed() {
       },
     });
 
-    await prisma.item.create({
+    await prisma.asset.create({
       data: {
         title: "My second item",
         description: "Hello, world!",

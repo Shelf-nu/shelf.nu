@@ -1,18 +1,17 @@
-import type { Category, Note, Prisma, Qr } from "@prisma/client";
+import type { Category, Note, Prisma, Qr, Asset, User } from "@prisma/client";
 import { ErrorCorrection } from "@prisma/client";
-import type { Item, User } from "~/database";
 import { db } from "~/database";
 import { dateTimeInUnix, oneDayFromNow } from "~/utils";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import { getQr } from "../qr";
 
-export async function getItem({
+export async function getAsset({
   userId,
   id,
-}: Pick<Item, "id"> & {
+}: Pick<Asset, "id"> & {
   userId: User["id"];
 }) {
-  return db.item.findFirst({
+  return db.asset.findFirst({
     where: { id, userId },
     include: {
       category: true,
@@ -24,7 +23,7 @@ export async function getItem({
   });
 }
 
-export async function getItems({
+export async function getAssets({
   userId,
   page = 1,
   perPage = 8,
@@ -36,7 +35,7 @@ export async function getItems({
   /** Page number. Starts at 1 */
   page: number;
 
-  /** Items to be loaded per page */
+  /** Assets to be loaded per page */
   perPage?: number;
 
   search?: string | null;
@@ -46,8 +45,8 @@ export async function getItems({
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
-  /** Default value of where. Takes the items belonging to current user */
-  let where: Prisma.ItemWhereInput = { userId };
+  /** Default value of where. Takes the assetss belonging to current user */
+  let where: Prisma.AssetWhereInput = { userId };
 
   /** If the search string exists, add it to the where object */
   if (search) {
@@ -63,9 +62,9 @@ export async function getItems({
     };
   }
 
-  const [items, totalItems] = await db.$transaction([
-    /** Get the items */
-    db.item.findMany({
+  const [assets, totalAssets] = await db.$transaction([
+    /** Get the assets */
+    db.asset.findMany({
       skip,
       take,
       where,
@@ -74,19 +73,19 @@ export async function getItems({
     }),
 
     /** Count them */
-    db.item.count({ where }),
+    db.asset.count({ where }),
   ]);
 
-  return { items, totalItems };
+  return { assets, totalAssets };
 }
 
-export async function createItem({
+export async function createAsset({
   title,
   description,
   userId,
   categoryId,
   qrId,
-}: Pick<Item, "description" | "title" | "categoryId"> & {
+}: Pick<Asset, "description" | "title" | "categoryId"> & {
   userId: User["id"];
   qrId?: Qr["id"];
 }) {
@@ -103,11 +102,11 @@ export async function createItem({
    * Here we also need to double check:
    * 1. If the qr code exists
    * 2. If the qr code belongs to the current user
-   * 3. If the qr code is not linked to an item
+   * 3. If the qr code is not linked to an asset
    */
   const qr = qrId ? await getQr(qrId) : null;
   const qrCodes =
-    qr && qr.userId === userId && qr.itemId === null
+    qr && qr.userId === userId && qr.assetId === null
       ? { connect: { id: qrId } }
       : {
           create: [
@@ -138,21 +137,21 @@ export async function createItem({
     });
   }
 
-  return db.item.create({
+  return db.asset.create({
     data,
   });
 }
 
-interface UpdateItemPayload {
-  id: Item["id"];
-  title?: Item["title"];
-  description?: Item["description"];
-  categoryId?: Item["categoryId"];
-  mainImage?: Item["mainImage"];
-  mainImageExpiration?: Item["mainImageExpiration"];
+interface UpdateAssetPayload {
+  id: Asset["id"];
+  title?: Asset["title"];
+  description?: Asset["description"];
+  categoryId?: Asset["categoryId"];
+  mainImage?: Asset["mainImage"];
+  mainImageExpiration?: Asset["mainImageExpiration"];
 }
 
-export async function updateItem(payload: UpdateItemPayload) {
+export async function updateAsset(payload: UpdateAssetPayload) {
   const { categoryId, id } = payload;
   /** Delete the category id from the payload so we can use connect syntax from prisma */
   delete payload.categoryId;
@@ -167,34 +166,36 @@ export async function updateItem(payload: UpdateItemPayload) {
     });
   }
 
-  return db.item.update({
+  return db.asset.update({
     where: { id },
     data: payload,
   });
 }
 
-export async function deleteItem({
+export async function deleteAsset({
   id,
   userId,
-}: Pick<Item, "id"> & { userId: User["id"] }) {
-  return db.item.deleteMany({
+}: Pick<Asset, "id"> & { userId: User["id"] }) {
+  return db.asset.deleteMany({
     where: { id, userId },
   });
 }
 
-export async function updateItemMainImage({
+export async function updateAssetMainImage({
   request,
-  itemId,
+  assetId,
   userId,
 }: {
   request: Request;
-  itemId: string;
+  assetId: string;
   userId: User["id"];
 }) {
   const fileData = await parseFileFormData({
     request,
-    bucketName: "items",
-    newFileName: `${userId}/${itemId}/main-image-${dateTimeInUnix(Date.now())}`,
+    bucketName: "assets",
+    newFileName: `${userId}/${assetId}/main-image-${dateTimeInUnix(
+      Date.now()
+    )}`,
     resizeOptions: {
       width: 800,
       withoutEnlargement: true,
@@ -209,8 +210,8 @@ export async function updateItemMainImage({
 
   if (typeof signedUrl !== "string") return signedUrl;
 
-  return await updateItem({
-    id: itemId,
+  return await updateAsset({
+    id: assetId,
     mainImage: signedUrl,
     mainImageExpiration: oneDayFromNow(),
   });
@@ -219,10 +220,10 @@ export async function updateItemMainImage({
 export async function createNote({
   content,
   userId,
-  itemId,
+  assetId,
 }: Pick<Note, "content"> & {
   userId: User["id"];
-  itemId: Item["id"];
+  assetId: Asset["id"];
 }) {
   const data = {
     content,
@@ -231,9 +232,9 @@ export async function createNote({
         id: userId,
       },
     },
-    item: {
+    asset: {
       connect: {
-        id: itemId,
+        id: assetId,
       },
     },
   };

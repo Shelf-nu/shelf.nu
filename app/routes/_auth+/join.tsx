@@ -94,7 +94,7 @@ export async function action({ request }: ActionArgs) {
   return createAuthSession({
     request,
     authSession,
-    redirectTo: redirectTo || "/items",
+    redirectTo: redirectTo || "/assets",
   });
 }
 

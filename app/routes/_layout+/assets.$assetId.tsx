@@ -8,11 +8,11 @@ import { redirect, json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import { AssetImage } from "~/components/assets/asset-image";
+import { DeleteAsset } from "~/components/assets/delete-asset";
+import { LocationDetails } from "~/components/assets/location";
+import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
-import { DeleteItem } from "~/components/items/delete-item";
-import { ItemImage } from "~/components/items/item-image";
-import { LocationDetails } from "~/components/items/location";
-import { Notes } from "~/components/items/notes";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
 import Header from "~/components/layout/header";
@@ -23,8 +23,8 @@ import { Button } from "~/components/shared/button";
 import TextualDivider from "~/components/shared/textual-divider";
 import ProfilePicture from "~/components/user/profile-picture";
 import { usePosition, useUserData } from "~/hooks";
+import { deleteAsset, getAsset } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { deleteItem, getItem } from "~/modules/item";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import { assertIsDelete, getRequiredParam } from "~/utils";
@@ -35,35 +35,35 @@ import { deleteAssets } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-  const id = getRequiredParam(params, "itemId");
+  const id = getRequiredParam(params, "assetId");
 
-  const item = await getItem({ userId, id });
-  if (!item) {
+  const asset = await getAsset({ userId, id });
+  if (!asset) {
     throw new Response("Not Found", { status: 404 });
   }
   /** We get the first QR code(for now we can only have 1)
    * And using the ID of tha qr code, we find the latest scan
    */
-  const lastScan = item.qrCodes[0]?.id
+  const lastScan = asset.qrCodes[0]?.id
     ? parseScanData({
-        scan: (await getScanByQrId({ qrId: item.qrCodes[0].id })) || null,
+        scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
         userId,
       })
     : null;
 
-  const notes = item.notes.map((note) => ({
+  const notes = asset.notes.map((note) => ({
     ...note,
     content: parseMarkdownToReact(note.content),
   }));
 
   const header: HeaderData = {
-    title: item.title,
-    subHeading: item.id,
+    title: asset.title,
+    subHeading: asset.id,
   };
 
   return json({
-    item: {
-      ...item,
+    asset: {
+      ...asset,
       notes,
     },
     lastScan,
@@ -72,24 +72,24 @@ export async function loader({ request, params }: LoaderArgs) {
 }
 export async function action({ request, params }: ActionArgs) {
   assertIsDelete(request);
-  const id = getRequiredParam(params, "itemId");
+  const id = getRequiredParam(params, "assetId");
   const authSession = await requireAuthSession(request);
   const formData = await request.formData();
   const mainImageUrl = formData.get("mainImage") as string;
 
-  await deleteItem({ userId: authSession.userId, id });
+  await deleteAsset({ userId: authSession.userId, id });
   await deleteAssets({
     url: mainImageUrl,
-    bucketName: "items",
+    bucketName: "assets",
   });
 
   sendNotification({
-    title: "Item deleted",
-    message: "Your item has been deleted successfully",
+    title: "Asset deleted",
+    message: "Your asset has been deleted successfully",
     icon: { name: "trash", variant: "error" },
   });
 
-  return redirect(`/items`, {
+  return redirect(`/assets`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
@@ -106,18 +106,18 @@ export const handle = {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: mapCss }];
 
-export default function ItemDetailsPage() {
-  const { item } = useLoaderData<typeof loader>();
+export default function AssetDetailsPage() {
+  const { asset } = useLoaderData<typeof loader>();
   const user = useUserData();
   usePosition();
   return (
     <>
-      <ItemImage
-        item={{
-          itemId: item.id,
-          mainImage: item.mainImage,
-          mainImageExpiration: item.mainImageExpiration,
-          alt: item.title,
+      <AssetImage
+        asset={{
+          assetId: asset.id,
+          mainImage: asset.mainImage,
+          mainImageExpiration: asset.mainImageExpiration,
+          alt: asset.title,
         }}
         className="mx-auto mb-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
       />
@@ -133,28 +133,28 @@ export default function ItemDetailsPage() {
         <Button to="edit" icon="pen" role="link" onlyIconOnMobile={true}>
           Edit
         </Button>
-        <DeleteItem item={item} />
+        <DeleteAsset asset={asset} />
       </Header>
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
-          <ItemImage
-            item={{
-              itemId: item.id,
-              mainImage: item.mainImage,
-              mainImageExpiration: item.mainImageExpiration,
-              alt: item.title,
+          <AssetImage
+            asset={{
+              assetId: asset.id,
+              mainImage: asset.mainImage,
+              mainImageExpiration: asset.mainImageExpiration,
+              alt: asset.title,
             }}
             className="mx-auto mb-8 hidden h-auto w-[343px] rounded-lg object-cover md:block lg:w-full"
           />
-          <p className="mb-8 text-gray-600">{item.description}</p>
+          <p className="mb-8 text-gray-600">{asset.description}</p>
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
           <ul className="item-information mb-8">
-            {item?.category ? (
+            {asset?.category ? (
               <li className="mb-4 flex justify-between">
                 <span className="font-medium text-gray-600">Category</span>
                 <div className="max-w-[250px]">
-                  <Badge color={item.category?.color}>
-                    {item.category?.name}
+                  <Badge color={asset.category?.color}>
+                    {asset.category?.name}
                   </Badge>
                 </div>
               </li>

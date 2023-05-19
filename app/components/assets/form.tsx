@@ -1,4 +1,4 @@
-import type { Item, Qr } from "@prisma/client";
+import type { Asset, Qr } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
@@ -7,7 +7,7 @@ import {
   fileErrorAtom,
   updateTitleAtom,
   validateFileAtom,
-} from "~/atoms/items.new";
+} from "~/atoms/assets.new";
 import { isFormProcessing } from "~/utils";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
@@ -15,7 +15,7 @@ import Input from "../forms/input";
 import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
 
-export const NewItemFormSchema = z.object({
+export const NewAssetFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
   description: z.string(),
   category: z.string(),
@@ -24,15 +24,15 @@ export const NewItemFormSchema = z.object({
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
-  title?: Item["title"];
-  category?: Item["categoryId"];
-  description?: Item["description"];
+  title?: Asset["title"];
+  category?: Asset["categoryId"];
+  description?: Asset["description"];
   qrId?: Qr["id"] | null;
 }
 
-export const ItemForm = ({ title, category, description, qrId }: Props) => {
+export const AssetForm = ({ title, category, description, qrId }: Props) => {
   const navigation = useNavigation();
-  const zo = useZorm("NewQuestionWizardScreen", NewItemFormSchema);
+  const zo = useZorm("NewQuestionWizardScreen", NewAssetFormSchema);
   const disabled = isFormProcessing(navigation.state);
 
   const fileError = useAtomValue(fileErrorAtom);
@@ -85,7 +85,7 @@ export const ItemForm = ({ title, category, description, qrId }: Props) => {
         rowLabel={"Category"}
         subHeading={
           <p>
-            Make it unique. Each item can have 1 category. It will show on your
+            Make it unique. Each asset can have 1 category. It will show on your
             index.
           </p>
         }
@@ -99,7 +99,7 @@ export const ItemForm = ({ title, category, description, qrId }: Props) => {
           subHeading={
             <p>
               This is the initial object description. It will be shown on the
-              item’s overview page. You can always change it.
+              asset’s overview page. You can always change it.
             </p>
           }
         >
@@ -110,7 +110,7 @@ export const ItemForm = ({ title, category, description, qrId }: Props) => {
             defaultValue={description || ""}
             placeholder="Add a description for your asset."
             disabled={disabled}
-            data-test-id="itemDescription"
+            data-test-id="assetDescription"
             className="w-full"
           />
         </FormRow>

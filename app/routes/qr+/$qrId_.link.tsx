@@ -23,16 +23,16 @@ export default function QrLink() {
             <h1 className="mb-2 text-[24px] font-semibold">Unlinked QR Code</h1>
             <p className="text-gray-600">
               This code is part of your Shelf environment but is not linked with
-              an item. Would you like to link it?
+              an asset. Would you like to link it?
             </p>
           </div>
           <div className="flex flex-col justify-center">
             <Button
               variant="primary"
               className="mb-4 max-w-full"
-              to={`/items/new?qrId=${qrId}`}
+              to={`/assets/new?qrId=${qrId}`}
             >
-              Create a new item and link
+              Create a new asset and link
             </Button>
             <Button variant="secondary" className="max-w-full" to={"/"}>
               Cancel

@@ -38,7 +38,7 @@ export const EmptyState = () => {
             Clear Search
           </ClearSearch>
         )}
-        <Button to="new" aria-label="new item" icon="plus">
+        <Button to="new" aria-label={`new ${singular}`} icon="plus">
           New {singular}
         </Button>
       </div>

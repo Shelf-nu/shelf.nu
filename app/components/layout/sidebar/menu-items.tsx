@@ -12,8 +12,8 @@ const MenuItems = () => {
   const menuItems = [
     {
       icon: <AssetsIcon />,
-      to: "items",
-      label: "Items",
+      to: "assets",
+      label: "Assets",
     },
     {
       icon: <ItemsIcon />,

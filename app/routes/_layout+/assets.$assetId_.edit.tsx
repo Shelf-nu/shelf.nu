@@ -1,17 +1,18 @@
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useCatch, useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/items.new";
-import { ItemForm, NewItemFormSchema } from "~/components/items/form";
+import { titleAtom } from "~/atoms/assets.new";
+import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
+import { ErrorBoundryComponent } from "~/components/errors";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { getAsset, updateAsset, updateAssetMainImage } from "~/modules/asset";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
-import { getItem, updateItem, updateItemMainImage } from "~/modules/item";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -23,20 +24,20 @@ export async function loader({ request, params }: LoaderArgs) {
     perPage: 100,
   });
 
-  const id = getRequiredParam(params, "itemId");
+  const id = getRequiredParam(params, "assetId");
 
-  const item = await getItem({ userId, id });
-  if (!item) {
+  const asset = await getAsset({ userId, id });
+  if (!asset) {
     throw new Response("Not Found", { status: 404 });
   }
 
   const header: HeaderData = {
-    title: `Edit | ${item.title}`,
-    subHeading: item.id,
+    title: `Edit | ${asset.title}`,
+    subHeading: asset.id,
   };
 
   return json({
-    item,
+    asset,
     header,
     categories,
   });
@@ -54,10 +55,12 @@ export async function action({ request, params }: ActionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
 
-  const id = getRequiredParam(params, "itemId");
+  const id = getRequiredParam(params, "assetId");
   const clonedRequest = request.clone();
   const formData = await clonedRequest.formData();
-  const result = await NewItemFormSchema.safeParseAsync(parseFormAny(formData));
+  const result = await NewAssetFormSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
   if (!result.success) {
     return json(
       {
@@ -73,15 +76,15 @@ export async function action({ request, params }: ActionArgs) {
     );
   }
 
-  updateItemMainImage({
+  updateAssetMainImage({
     request,
-    itemId: id,
+    assetId: id,
     userId: authSession.userId,
   });
 
   const { title, description, category } = result.data;
 
-  await updateItem({
+  await updateAsset({
     id,
     title,
     description,
@@ -89,8 +92,8 @@ export async function action({ request, params }: ActionArgs) {
   });
 
   sendNotification({
-    title: "Item updated",
-    message: "Your item has been updated successfully",
+    title: "Asset updated",
+    message: "Your asset has been updated successfully",
     icon: { name: "success", variant: "success" },
   });
 
@@ -104,39 +107,23 @@ export async function action({ request, params }: ActionArgs) {
   );
 }
 
-export default function ItemEditPage() {
+export default function AssetEditPage() {
   const title = useAtomValue(titleAtom);
-  const hasTitle = title !== "Untitled item";
-  const { item } = useLoaderData<typeof loader>();
+  const hasTitle = title !== "Untitled asset";
+  const { asset } = useLoaderData<typeof loader>();
 
   return (
     <>
-      <Header title={hasTitle ? title : item.title} />
+      <Header title={hasTitle ? title : asset.title} />
       <div className=" items-top flex justify-between">
-        <ItemForm
-          title={item.title}
-          category={item.categoryId}
-          description={item.description}
+        <AssetForm
+          title={asset.title}
+          category={asset.categoryId}
+          description={asset.description}
         />
       </div>
     </>
   );
 }
 
-export function ErrorBoundary({ error }: { error: Error }) {
-  return (
-    <>
-      <div>An unexpected error occurred: {error.message}</div>
-    </>
-  );
-}
-
-export function CatchBoundary() {
-  const caught = useCatch();
-
-  if (caught.status === 404) {
-    return <div>Item not found</div>;
-  }
-
-  throw new Error(`Unexpected caught response with status: ${caught.status}`);
-}
+export const ErrorBoundary = () => <ErrorBoundryComponent />;

@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import type { Item } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
@@ -7,21 +7,21 @@ import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
-import { createQr, generateCode, getQrByItemId } from "~/modules/qr";
+import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
 import { getCurrentSearchParams } from "~/utils";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-  const { itemId } = params as { itemId: string };
+  const { assetId } = params as { assetId: string };
   const searchParams = getCurrentSearchParams(request);
   const size = (searchParams.get("size") || "medium") as SizeKeys;
 
-  let qr = await getQrByItemId({ itemId });
+  let qr = await getQrByAssetId({ assetId });
   if (!qr) {
     /** If for some reason there is no QR, we create one and return it */
-    qr = await createQr({ itemId, userId });
+    qr = await createQr({ assetId, userId });
   }
 
   // Create a QR code with a URL
@@ -43,15 +43,15 @@ export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
   const formRef = useRef<HTMLFormElement>(null);
   const submit = useSubmit();
-  const item = useMatchesData<{ item: Item }>(
-    "routes/_layout+/items.$itemId"
-  )?.item;
+  const asset = useMatchesData<{ asset: Asset }>(
+    "routes/_layout+/assets.$assetId"
+  )?.asset;
 
   const handleChange = () => {
     submit(formRef.current);
   };
 
-  return item ? (
+  return asset ? (
     <div className="">
       <header className="mb-6 flex items-center justify-between leading-7">
         <h3>Download QR Tag</h3>
@@ -65,9 +65,9 @@ export default function QRPreview() {
         </figure>
         <div className="text-center">
           <h6 className="mb-1 font-semibold leading-5 text-gray-700">
-            {item.title}
+            {asset.title}
           </h6>
-          <span className="block text-[12px] text-gray-600">{item.id}</span>
+          <span className="block text-[12px] text-gray-600">{asset.id}</span>
         </div>
       </div>
       <ul className="description-list">
