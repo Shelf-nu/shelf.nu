@@ -225,3 +225,9 @@ jobs:
           args: "deploy --image registry.fly.io/${{ steps.app_name.outputs.value }}:${{ github.ref_name }}-${{ github.sha }}"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy production DB migrations
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: npm run db:deploy-migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
