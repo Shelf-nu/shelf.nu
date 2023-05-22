@@ -1,4 +1,4 @@
-app = "shelf-webapp"
+app = "shelf-production"
 
 kill_signal = "SIGINT"
 kill_timeout = 5
