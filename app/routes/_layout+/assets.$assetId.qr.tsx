@@ -8,7 +8,7 @@ import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
 import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
-import { getCurrentSearchParams } from "~/utils";
+import { getCurrentSearchParams, slugify } from "~/utils";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
@@ -60,14 +60,16 @@ export default function QRPreview() {
         </Link>
       </header>
       <div className="mb-4 w-full rounded-xl border border-solid p-6">
-        <figure className="qr-code mb-6 flex  justify-center">
-          <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
-        </figure>
         <div className="text-center">
           <h6 className="mb-1 font-semibold leading-5 text-gray-700">
             {asset.title}
           </h6>
-          <span className="block text-[12px] text-gray-600">{asset.id}</span>
+        </div>
+        <figure className="qr-code flex  justify-center">
+          <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
+        </figure>
+        <div className="text-center">
+          <span className="block text-[12px] text-gray-600">{data.qr.id}</span>
         </div>
       </div>
       <ul className="description-list">
@@ -108,7 +110,9 @@ export default function QRPreview() {
       <Button
         icon="barcode"
         to={data.qr.src}
-        download={`${data.qr.size}-shelf-qr-code-${data.qr.id}.png`}
+        download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
+          data.qr.id
+        }.png`}
         variant="secondary"
         className="w-full"
       >
