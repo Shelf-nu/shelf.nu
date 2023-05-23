@@ -1,0 +1,197 @@
+import { useEffect, useMemo } from "react";
+
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { atom, useAtom } from "jotai";
+import { parseFormAny, useZorm } from "react-zorm";
+import { z } from "zod";
+import Input from "~/components/forms/input";
+
+import { Button } from "~/components/shared/button";
+import { getSupabase } from "~/integrations/supabase";
+
+import {
+  commitAuthSession,
+  getAuthSession,
+  refreshAccessToken,
+  updateAccountPassword,
+} from "~/modules/auth";
+import { assertIsPost, isFormProcessing, tw } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+
+export async function loader({ request }: LoaderArgs) {
+  const authSession = await getAuthSession(request);
+  const title = "Set new password";
+  const subHeading =
+    "Your new password must be different to previously used passwords.";
+
+  if (authSession) return redirect("/assets");
+
+  return json({ title, subHeading });
+}
+
+const ResetPasswordSchema = z
+  .object({
+    password: z.string().min(8, "Password is too short. Minimum 8 characters."),
+    confirmPassword: z
+      .string()
+      .min(8, "Password is too short. Minimum 8 characters."),
+    refreshToken: z.string(),
+  })
+  .superRefine(({ password, confirmPassword, refreshToken }, ctx) => {
+    if (password !== confirmPassword) {
+      return ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Password and confirm password must match",
+        path: ["confirmPassword"],
+      });
+    }
+
+    return { password, confirmPassword, refreshToken };
+  });
+
+export async function action({ request }: ActionArgs) {
+  assertIsPost(request);
+
+  const formData = await request.formData();
+  const result = await ResetPasswordSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
+
+  if (!result.success) {
+    return json(
+      {
+        message:
+          "Invalid request. Please try again. If the issue persists, contact support.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const { password, refreshToken } = result.data;
+
+  const authSession = await refreshAccessToken(refreshToken);
+
+  if (!authSession) {
+    return json(
+      {
+        message:
+          "Invalid refresh token. Please try again. If the issue persists, contact support",
+      },
+      { status: 401 }
+    );
+  }
+
+  const user = await updateAccountPassword(authSession.userId, password);
+
+  if (!user) {
+    return json(
+      {
+        message: "Issue updating passowrd",
+      },
+      { status: 500 }
+    );
+  }
+
+  return redirect("/assets", {
+    headers: {
+      "Set-Cookie": await commitAuthSession(request, {
+        authSession,
+      }),
+    },
+  });
+}
+
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.title) },
+];
+
+const userRefreshTokenAtom = atom("");
+
+export default function ResetPassword() {
+  const zo = useZorm("ResetPasswordForm", ResetPasswordSchema);
+  const [userRefreshToken, setUserRefreshToken] = useAtom(userRefreshTokenAtom);
+  const actionData = useActionData<typeof action>();
+  const transition = useNavigation();
+  const disabled = isFormProcessing(transition.state);
+  const supabase = useMemo(() => getSupabase(), []);
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
+      if (event === "SIGNED_IN") {
+        const refreshToken = supabaseSession?.refresh_token;
+
+        if (!refreshToken) return;
+
+        setUserRefreshToken(refreshToken);
+      }
+    });
+
+    return () => {
+      // prevent memory leak. Listener stays alive 👨‍🎤
+      subscription.unsubscribe();
+    };
+  }, [setUserRefreshToken, supabase.auth]);
+
+  return (
+    <div className="flex min-h-full flex-col justify-center">
+      <div className="mx-auto w-full max-w-md px-8">
+        <Form ref={zo.ref} method="post" className="space-y-6" replace>
+          <div>
+            <Input
+              label="Password"
+              data-test-id="password"
+              name={zo.fields.password()}
+              type="password"
+              autoComplete="new-password"
+              disabled={disabled}
+              error={zo.errors.password()?.message}
+            />
+          </div>
+          <div>
+            <Input
+              label="Confirm password"
+              data-test-id="confirmPassword"
+              name={zo.fields.confirmPassword()}
+              type="password"
+              autoComplete="new-password"
+              disabled={disabled}
+              error={zo.errors.confirmPassword()?.message}
+            />
+          </div>
+
+          <input
+            type="hidden"
+            name={zo.fields.refreshToken()}
+            value={userRefreshToken}
+          />
+          <Button
+            data-test-id="change-password"
+            type="submit"
+            className="w-full "
+            disabled={disabled}
+          >
+            Change password
+          </Button>
+        </Form>
+        {actionData?.message ? (
+          <div className="flex flex-col items-center">
+            <div className={tw(`mb-2 h-6 text-center text-red-600`)}>
+              {actionData.message}
+            </div>
+            <Button
+              variant="link"
+              className="text-blue-500 underline"
+              to="/forgot-password"
+            >
+              Resend link
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

@@ -10,6 +10,7 @@ import {
 import { USER_EMAIL, USER_ID, USER_PASSWORD } from "mocks/user";
 import { db } from "~/database";
 
+import { randomUsernameFromEmail } from "~/utils";
 import { createUserAccount } from "./service.server";
 
 // mock db
@@ -50,7 +51,7 @@ describe(createUserAccount.name, () => {
       )
     );
 
-    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD);
+    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, "");
 
     server.events.removeAllListeners();
 
@@ -103,7 +104,7 @@ describe(createUserAccount.name, () => {
       )
     );
 
-    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD);
+    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, "");
 
     server.events.removeAllListeners();
 
@@ -113,7 +114,6 @@ describe(createUserAccount.name, () => {
     expect(signInRequest.body).toEqual({
       email: USER_EMAIL,
       password: USER_PASSWORD,
-      data: {},
       gotrue_meta_security: {},
     });
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
@@ -155,7 +155,7 @@ describe(createUserAccount.name, () => {
     //@ts-expect-error missing vitest type
     db.user.create.mockResolvedValue(null);
 
-    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD);
+    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, "");
 
     server.events.removeAllListeners();
 
@@ -200,8 +200,8 @@ describe(createUserAccount.name, () => {
 
     //@ts-expect-error missing vitest type
     db.user.create.mockResolvedValue({ id: USER_ID, email: USER_EMAIL });
-
-    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD);
+    const username = randomUsernameFromEmail(USER_EMAIL);
+    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, username);
 
     // we don't want to test the implementation of the function
     result!.expiresAt = -1;
@@ -209,7 +209,7 @@ describe(createUserAccount.name, () => {
     server.events.removeAllListeners();
 
     expect(db.user.create).toBeCalledWith({
-      data: { email: USER_EMAIL, id: USER_ID },
+      data: { email: USER_EMAIL, id: USER_ID, username: username },
     });
 
     expect(result).toEqual(authSession);

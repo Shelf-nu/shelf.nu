@@ -19,6 +19,7 @@
     }
   },
   "rules": {
+    "tailwindcss/no-custom-classname": "off",
     "no-console": "warn",
     "arrow-body-style": ["warn", "as-needed"],
     // @typescript-eslint
@@ -37,7 +38,7 @@
     //import
     "import/no-cycle": "error",
     "import/no-unresolved": "error",
-    "import/no-default-export": "warn",
+    "import/no-default-export": "off",
     "import/order": [
       "error",
       {
@@ -50,7 +51,6 @@
           }
         ],
         "pathGroupsExcludedImportTypes": ["react"],
-        "newlines-between": "always",
         "alphabetize": {
           "order": "asc",
           "caseInsensitive": true

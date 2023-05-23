@@ -2,6 +2,10 @@ export function getCurrentPath(request: Request) {
   return new URL(request.url).pathname;
 }
 
+export function getCurrentSearchParams(request: Request) {
+  return new URL(request.url).searchParams;
+}
+
 export function makeRedirectToFromHere(request: Request) {
   return new URLSearchParams([["redirectTo", getCurrentPath(request)]]);
 }

@@ -3,7 +3,7 @@
 // npx ts-node --require tsconfig-paths/register ./cypress/support/delete-user.ts username@example.com
 // and that user will get deleted
 
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { installGlobals } from "@remix-run/node";
 
 import { db } from "~/database";
@@ -29,6 +29,7 @@ async function deleteUser(email: string) {
       error instanceof PrismaClientKnownRequestError &&
       error.code === "P2025"
     ) {
+      // eslint-disable-next-line no-console
       console.log("User not found, so no need to delete");
     } else {
       throw error;

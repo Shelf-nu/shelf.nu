@@ -4,6 +4,7 @@ import {
   getCurrentPath,
   isGet,
   makeRedirectToFromHere,
+  mergeSearchParams,
   NODE_ENV,
   safeRedirect,
   SESSION_SECRET,
@@ -89,7 +90,6 @@ export async function commitAuthSession(
 
 export async function destroyAuthSession(request: Request) {
   const session = await getSession(request);
-
   return redirect("/", {
     headers: {
       "Set-Cookie": await sessionStorage.destroySession(session),
@@ -102,11 +102,17 @@ async function assertAuthSession(
   { onFailRedirectTo }: { onFailRedirectTo?: string } = {}
 ) {
   const authSession = await getAuthSession(request);
+  const existingSearchParams = new URLSearchParams(
+    onFailRedirectTo?.split("?")[1]
+  );
 
   // If there is no user session, Fly, You Fools! 🧙‍♂️
   if (!authSession?.accessToken || !authSession?.refreshToken) {
     throw redirect(
-      `${onFailRedirectTo || LOGIN_URL}?${makeRedirectToFromHere(request)}`,
+      `${onFailRedirectTo?.split("?")[0] || LOGIN_URL}${mergeSearchParams(
+        existingSearchParams,
+        { redirectTo: getCurrentPath(request) }
+      )}`,
       {
         headers: {
           "Set-Cookie": await commitAuthSession(request, {

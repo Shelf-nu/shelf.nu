@@ -4,6 +4,8 @@ export {
   signInWithEmail,
   sendMagicLink,
   refreshAccessToken,
+  updateAccountPassword,
+  sendResetPasswordLink,
 } from "./service.server";
 export {
   commitAuthSession,

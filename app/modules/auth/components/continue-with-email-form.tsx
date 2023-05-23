@@ -1,7 +1,9 @@
 import React from "react";
+import Input from "~/components/forms/input";
+import { Button } from "~/components/shared/button";
 
 import { useTypedFetcher } from "~/hooks/use-fetcher";
-import type { action } from "~/routes/send-magic-link";
+import type { action } from "~/routes/_auth+/send-magic-link";
 
 export function ContinueWithEmailForm() {
   const ref = React.useRef<HTMLFormElement>(null);
@@ -11,7 +13,7 @@ export function ContinueWithEmailForm() {
   const isLoading = state === "submitting" || state === "loading";
   const buttonLabel = isLoading
     ? "Sending you a link..."
-    : "Continue with email";
+    : "Continue with Magic Link";
 
   React.useEffect(() => {
     if (isSuccessFull) {
@@ -26,27 +28,33 @@ export function ContinueWithEmailForm() {
       replace={false}
       ref={ref}
     >
-      <input
+      <Input
+        label="Magic link"
+        hideLabel={true}
         type="email"
         name="email"
         id="magic-link"
-        className="mb-1 w-full rounded border border-gray-500 px-2 py-1 text-lg"
+        inputClassName="w-full"
+        placeholder="zaans@huisje.com"
         disabled={isLoading}
+        error={data?.error || ""}
       />
-      <div
-        className={`mb-2 h-6 text-center ${data?.error ? "text-red-600" : ""} ${
-          isSuccessFull ? "text-green-600" : ""
-        }`}
-      >
-        {!isSuccessFull ? data?.error : "Check your emails ✌️"}
-      </div>
-      <button
+
+      <Button
         type="submit"
         disabled={isLoading}
-        className="flex w-full items-center justify-center rounded-md bg-green-500 px-4 py-3 font-medium text-white hover:bg-green-600  "
+        width="full"
+        variant="secondary"
+        className="mt-3"
       >
         {buttonLabel}
-      </button>
+      </Button>
+
+      {isSuccessFull && (
+        <div className={`mb-2 h-6 text-center text-green-600`}>
+          Check your emails
+        </div>
+      )}
     </sendMagicLink.Form>
   );
 }

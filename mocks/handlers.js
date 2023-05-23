@@ -60,11 +60,11 @@ const handlers = [
   ),
   rest.post(
     `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}`,
-    async (req, res, ctx) => res(ctx.status(200), ctx.json(authAccount))
+    async (_req, res, ctx) => res(ctx.status(200), ctx.json(authAccount))
   ),
   rest.delete(
     `${SUPABASE_URL}${SUPABASE_AUTH_ADMIN_USER_API}/*`,
-    async (req, res, ctx) => res(ctx.status(200), ctx.json({}))
+    async (_req, res, ctx) => res(ctx.status(200), ctx.json({}))
   ),
 ];
 

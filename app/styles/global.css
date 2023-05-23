@@ -1,16 +1,128 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
 :root {
-  --font-size-h1: 2.5rem;
-  --font-size-h2: 2.25rem;
-  --font-size-h3: 1.5rem;
-  --font-size-h4: 1.25rem;
-  --font-size-h5: 1rem;
+  --tw-ring-color: #eaf2ff;
+}
+
+html {
+  @apply font-inter;
+  /** this is neede because tailwind adds just the property for webkit and tailwind adds just the webkit version*/
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-white text-text-sm text-gray-900;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5 {
+  @apply font-semibold text-gray-900;
 }
 
 h1 {
-  font-size: var(--font-size-h1);
-  @apply font-bold;
+  @apply text-display-sm font-semibold;
+}
+h2 {
+  @apply text-display-xs;
+}
+h3 {
+  @apply text-text-xl;
+}
+h4 {
+  @apply text-text-lg;
+}
+h5 {
+  @apply text-text-md;
+}
+h5 {
+  @apply text-text-sm;
+}
+
+label span {
+  @apply capitalize;
+}
+
+p {
+  @apply text-text-sm font-normal text-gray-900;
+}
+
+@keyframes spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner:before {
+  content: "";
+  box-sizing: border-box;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin-top: -10px;
+  margin-left: -10px;
+  border-radius: 50%;
+  border: 2px solid #ccc;
+  /* border-top-color: #000; */
+  @apply border-t-primary-500;
+  animation: spinner 0.6s linear infinite;
+}
+
+[aria-label="Notifications (F8)"] ol {
+  @apply bottom-0 top-auto md:bottom-auto md:top-0;
+}
+
+.markdown-viewer ul {
+  @apply list-inside list-disc;
+}
+
+.markdown-viewer ol {
+  @apply list-inside list-decimal;
+}
+
+.markdown-viewer a {
+  text-decoration: underline;
+}
+.markdown-viewer a:hover {
+  @apply text-primary;
+}
+
+.markdown-viewer blockquote {
+  @apply border-l-4 border-primary-500 pl-4;
+}
+
+.markdown-viewer h1,
+.markdown-viewer h2,
+.markdown-viewer h3,
+.markdown-viewer h4,
+.markdown-viewer h5,
+.markdown-viewer h6 {
+  @apply mb-1;
+}
+
+.markdown-viewer p:not(:last-child) {
+  @apply mb-4;
+}
+
+.maplibregl-ctrl-bottom-right {
+  display: none;
+}
+
+.markdown-viewer table {
+  @apply w-full border-collapse rounded-lg text-xs;
+}
+.markdown-viewer table td,
+.markdown-viewer table th {
+  @apply border border-gray-200 px-6 py-3 text-gray-600;
+}
+
+.markdown-viewer table th {
+  @apply bg-gray-50 font-medium text-gray-600;
+}
+
+.markdown-viewer table th {
+  @apply font-normal;
 }

@@ -36,6 +36,23 @@ export async function sendMagicLink(email: string) {
   });
 }
 
+export async function sendResetPasswordLink(email: string) {
+  return getSupabaseAdmin().auth.resetPasswordForEmail(email, {
+    redirectTo: `${SERVER_URL}/reset-password`,
+  });
+}
+
+export async function updateAccountPassword(id: string, password: string) {
+  const { data, error } = await getSupabaseAdmin().auth.admin.updateUserById(
+    id,
+    { password }
+  );
+
+  if (!data.user || error) return null;
+
+  return data.user;
+}
+
 export async function deleteAuthAccount(userId: string) {
   const { error } = await getSupabaseAdmin().auth.admin.deleteUser(userId);
 
