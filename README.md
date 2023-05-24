@@ -159,7 +159,7 @@ Prior to your first deployment, you'll need to do a few things:
 
   > **Note:** For production app, make sure this name matches the `app` set in your `fly.toml` file. Otherwise, you will not be able to deploy.
 
-  - Initialize Git.
+  - Initialize Empty Git repository.
 
   ```sh
   git init
