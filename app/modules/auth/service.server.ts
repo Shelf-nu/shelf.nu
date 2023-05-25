@@ -21,8 +21,6 @@ export async function signInWithEmail(email: string, password: string) {
     email,
     password,
   });
-  console.log("data", data);
-  console.log("error", error);
 
   if (!data.session || error) return null;
 
