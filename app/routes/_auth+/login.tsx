@@ -59,6 +59,7 @@ export async function action({ request }: ActionArgs) {
   const { email, password, redirectTo } = result.data;
 
   const authSession = await signInWithEmail(email, password);
+  console.log(authSession);
 
   if (!authSession) {
     return json(
