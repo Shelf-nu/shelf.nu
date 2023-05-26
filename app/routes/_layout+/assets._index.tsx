@@ -62,6 +62,9 @@ export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
   const user = await getUserByID(userId);
 
+  console.log("userId", userId);
+  console.log("user", user);
+
   if (!user) {
     return redirect("/login");
   }
@@ -83,6 +86,11 @@ export async function loader({ request }: LoaderArgs) {
     search,
     categoriesIds,
   });
+
+  console.log("categories", categories);
+  console.log("assets", assets);
+  console.log("totalAssets", totalAssets);
+
   const totalPages = Math.ceil(totalAssets / perPage);
 
   if (page > totalPages) {
