@@ -5,7 +5,8 @@
 
 Shelf 🏷️ Asset Management infrastructure for absolutely everyone (open source).
 
-![shelfcovergithub](https://user-images.githubusercontent.com/12449255/220158652-8069a993-0251-470e-bd92-29326c899fe8.jpg)
+![Frame 101](https://github.com/Shelf-nu/shelf.nu/assets/12449255/feeaf99e-8e11-4325-b1ee-f1d9eca3364b)
+
 
 Shelf is a simple and visual asset management and location tracking system that allows people to track their physical assets with ease.
 
