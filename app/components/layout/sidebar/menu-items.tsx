@@ -5,6 +5,7 @@ import {
   ItemsIcon,
   SettingsIcon,
 } from "~/components/icons/library";
+import { CrispButton } from "~/components/marketing/crisp";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 
@@ -51,6 +52,19 @@ const MenuItems = () => {
             </NavLink>
           </li>
         ))}
+        <li key={"support"}>
+          <CrispButton
+            className={tw(
+              "my-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900"
+            )}
+            variant="link"
+            icon="question"
+          >
+            <span className="text whitespace-nowrap transition duration-200 ease-linear">
+              Questions/Feedback
+            </span>
+          </CrispButton>
+        </li>
       </ul>
     </>
   );

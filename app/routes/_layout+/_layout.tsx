@@ -7,6 +7,7 @@ import { json } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar";
+import { useCrisp } from "~/components/marketing/crisp";
 import { Toaster } from "~/components/shared/toast";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
@@ -30,6 +31,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
 
 export default function App() {
   const { user } = useLoaderData<typeof loader>();
+  useCrisp();
 
   return (
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">

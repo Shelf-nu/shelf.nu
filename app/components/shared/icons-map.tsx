@@ -13,6 +13,7 @@ import {
   BarCodeIcon,
   PenIcon,
   HomeIcon,
+  QuestionsIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -29,7 +30,8 @@ export type Icon =
   | "barcode"
   | "pen"
   | "success"
-  | "home";
+  | "home"
+  | "question";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -49,6 +51,7 @@ export const iconsMap: IconsMap = {
   pen: <PenIcon />,
   success: <SuccessIcon />,
   home: <HomeIcon />,
+  question: <QuestionsIcon />,
 };
 
 export default iconsMap;
