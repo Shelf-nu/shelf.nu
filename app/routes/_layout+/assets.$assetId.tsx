@@ -128,8 +128,9 @@ export default function AssetDetailsPage() {
           icon="barcode"
           onlyIconOnMobile={true}
         >
-          Download QR Tag
+          View QR code
         </Button>
+
         <Button to="edit" icon="pen" role="link" onlyIconOnMobile={true}>
           Edit
         </Button>

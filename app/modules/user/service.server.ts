@@ -11,7 +11,7 @@ import {
 } from "~/modules/auth";
 import type { UpdateUserPayload, UpdateUserResponse } from "./types";
 
-const defaultUserCategories: Pick<
+export const defaultUserCategories: Pick<
   Category,
   "name" | "description" | "color"
 >[] = [
