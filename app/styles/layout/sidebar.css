@@ -8,7 +8,7 @@
 @media (min-width: 768px) {
   .collapsed-navigation .navigation-header .logo-text,
   .collapsed-navigation .navigation-header button,
-  .collapsed-navigation .menu li a .text,
+  .collapsed-navigation .menu li .text,
   .collapsed-navigation .user-credentials,
   .collapsed-navigation .logout-btn {
     opacity: 0;
