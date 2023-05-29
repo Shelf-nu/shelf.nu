@@ -36,7 +36,9 @@ export const NewNote = () => {
     /** This handles that the related target(element clicked on that causes the blur) is not a link(markdown info) or a button(submit/cancel buttons) */
     const clickedTargetILink =
       e?.relatedTarget?.tagName === "A" ||
-      e?.relatedTarget?.tagName === "BUTTON";
+      e?.relatedTarget?.tagName === "BUTTON" ||
+      e?.relatedTarget?.role === "tabpanel";
+
     if (clickedTargetILink) return;
 
     if (content === "") {
