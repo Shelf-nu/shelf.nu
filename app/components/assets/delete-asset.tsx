@@ -25,10 +25,11 @@ export const DeleteAsset = ({
   <AlertDialog>
     <AlertDialogTrigger asChild>
       <Button
-        variant="secondary"
+        variant="link"
         data-test-id="deleteAssetButton"
         icon="trash"
-        onlyIconOnMobile={true}
+        className="justify-start text-gray-700 hover:text-gray-700"
+        width="full"
       >
         Delete
       </Button>

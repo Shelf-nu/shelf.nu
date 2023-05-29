@@ -82,10 +82,11 @@ const MenuItems = () => {
           <li key={"support"}>
             <CrispButton
               className={tw(
-                "my-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900"
+                "my-1 flex items-center justify-start gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900"
               )}
               variant="link"
               icon="question"
+              width="full"
             >
               <span className="text whitespace-nowrap transition duration-200 ease-linear">
                 Questions/Feedback
