@@ -81,7 +81,7 @@ export async function action({ request }: ActionArgs) {
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.title) },
+  { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
 export default function IndexLoginForm() {

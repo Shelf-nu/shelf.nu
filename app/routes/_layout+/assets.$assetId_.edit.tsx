@@ -44,7 +44,7 @@ export async function loader({ request, params }: LoaderArgs) {
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.header.title) },
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export const handle = {

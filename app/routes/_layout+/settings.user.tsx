@@ -121,7 +121,7 @@ export async function loader({ request }: LoaderArgs) {
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.title) },
+  { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
 export default function UserPage() {
