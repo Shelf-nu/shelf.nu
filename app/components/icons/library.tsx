@@ -717,3 +717,23 @@ export function MapIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function QuestionsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={20}
+      height={21}
+      fill="none"
+      {...props}
+    >
+      <path
+        stroke="#667085"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M5 6.5h5M5 10h8m-5.316 6H14.2c1.68 0 2.52 0 3.162-.327a3 3 0 0 0 1.311-1.311C19 13.72 19 12.88 19 11.2V5.8c0-1.68 0-2.52-.327-3.162a3 3 0 0 0-1.311-1.311C16.72 1 15.88 1 14.2 1H5.8c-1.68 0-2.52 0-3.162.327a3 3 0 0 0-1.311 1.311C1 3.28 1 4.12 1 5.8v12.535c0 .533 0 .8.11.937a.5.5 0 0 0 .39.188c.176 0 .384-.167.8-.5l2.385-1.908c.488-.39.731-.585 1.002-.724.241-.122.497-.212.762-.267C6.748 16 7.06 16 7.684 16Z"
+      />
+    </svg>
+  );
+}
