@@ -52,6 +52,8 @@ describe("smoke tests", () => {
     cy.wait(1000);
     cy.get("h2").contains(testAsset.title);
     cy.findByTestId("closeToast").click();
+
+    cy.findByTestId("assetActionsButton").click();
     cy.findByTestId("deleteAssetButton").click();
     cy.findByTestId("confirmdeleteAssetButton").click();
     cy.wait(300);
