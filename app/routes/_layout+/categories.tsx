@@ -108,11 +108,11 @@ const CategoryItem = ({
 }: {
   item: Pick<Category, "id" | "description" | "name" | "color">;
 }) => (
-  <div className="flex items-center justify-between">
+  <div className="flex items-center justify-between gap-4">
     <div className="flex grow items-center gap-4">
       <div
         title={`Category: ${item.name}`}
-        className="w-auto shrink-0 md:w-1/3"
+        className="w-auto shrink-0 md:w-1/4"
       >
         <Badge color={item.color}>{item.name}</Badge>
       </div>

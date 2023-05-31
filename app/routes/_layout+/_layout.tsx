@@ -6,9 +6,10 @@ import type {
 import { json } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
-import Sidebar from "~/components/layout/sidebar";
+import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { Toaster } from "~/components/shared/toast";
+import { userPrefs } from "~/cookies";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
 import styles from "~/styles/layout/index.css";
@@ -21,9 +22,12 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   const user = authSession
     ? await getUserByEmail(authSession?.email)
     : undefined;
+  const cookieHeader = request.headers.get("Cookie");
+  const cookie = (await userPrefs.parse(cookieHeader)) || {};
 
   return json({
     user,
+    hideSupportBanner: cookie.hideSupportBanner,
   });
 };
 
@@ -37,7 +41,7 @@ export default function App() {
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
       <div className="flex flex-col md:flex-row">
         <Sidebar user={user} />
-        <main className="w-full bg-gray-25 px-4 py-8 md:px-8">
+        <main className=" flex-1 bg-gray-25 px-4 py-8 md:px-8">
           <div className="flex h-full flex-1 flex-col">
             <Breadcrumbs />
             <Outlet />

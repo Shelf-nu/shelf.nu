@@ -8,8 +8,8 @@ import { redirect, json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
-import { DeleteAsset } from "~/components/assets/delete-asset";
 import { LocationDetails } from "~/components/assets/location";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
@@ -27,6 +27,7 @@ import { deleteAsset, getAsset } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
+import assetCss from "~/styles/asset.css";
 import { assertIsDelete, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -104,7 +105,10 @@ export const handle = {
   breadcrumb: () => "single",
 };
 
-export const links: LinksFunction = () => [{ rel: "stylesheet", href: mapCss }];
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: assetCss },
+  { rel: "stylesheet", href: mapCss },
+];
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
@@ -128,12 +132,10 @@ export default function AssetDetailsPage() {
           icon="barcode"
           onlyIconOnMobile={true}
         >
-          Download QR Tag
+          View QR code
         </Button>
-        <Button to="edit" icon="pen" role="link" onlyIconOnMobile={true}>
-          Edit
-        </Button>
-        <DeleteAsset asset={asset} />
+
+        <ActionsDopdown asset={asset} />
       </Header>
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">

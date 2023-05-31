@@ -27,5 +27,5 @@ export const isMobileNavOpenAtom = atom(false);
 
 export const toggleMobileNavAtom = atom(
   (get) => get(isMobileNavOpenAtom),
-  (get,set) => set(isMobileNavOpenAtom, !get(isMobileNavOpenAtom))
+  (get, set) => set(isMobileNavOpenAtom, !get(isMobileNavOpenAtom))
 );

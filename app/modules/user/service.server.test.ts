@@ -11,7 +11,7 @@ import { USER_EMAIL, USER_ID, USER_PASSWORD } from "mocks/user";
 import { db } from "~/database";
 
 import { randomUsernameFromEmail } from "~/utils";
-import { createUserAccount } from "./service.server";
+import { createUserAccount, defaultUserCategories } from "./service.server";
 
 // mock db
 vitest.mock("~/database", () => ({
@@ -209,7 +209,12 @@ describe(createUserAccount.name, () => {
     server.events.removeAllListeners();
 
     expect(db.user.create).toBeCalledWith({
-      data: { email: USER_EMAIL, id: USER_ID, username: username },
+      data: {
+        email: USER_EMAIL,
+        id: USER_ID,
+        username: username,
+        categories: { create: defaultUserCategories },
+      },
     });
 
     expect(result).toEqual(authSession);
