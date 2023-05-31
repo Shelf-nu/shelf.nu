@@ -7,7 +7,7 @@ export const ChatWithAnExpert = () => {
 
   const fetcher = useFetcher();
   return hideSupportBanner ? null : (
-    <div className="mb-6 hidden rounded-lg bg-gray-50 px-4 py-5 md:block">
+    <div className="support-banner mb-6 hidden rounded-lg bg-gray-50 px-4 py-5  md:block">
       <div className="flex justify-between align-middle">
         <h5 className="mb-1 font-semibold text-gray-900">
           Got feedback or need help?
