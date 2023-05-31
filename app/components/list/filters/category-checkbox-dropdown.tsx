@@ -11,7 +11,7 @@ import {
   toggleIsFilteringAtom,
 } from "./atoms";
 
-import { useFilter } from "../../category/useFilter";
+import { useCategorySearch } from "../../category/useCategorySearch";
 import Input from "../../forms/input";
 import { CheckIcon, ChevronRight } from "../../icons";
 
@@ -27,19 +27,19 @@ export const CategoryCheckboxDropdown = () => {
   const [params] = useSearchParams();
   const inputRef = useRef<HTMLInputElement>();
   const {
-    filter,
-    filteredCategories,
-    isFiltering,
-    clearFilters,
-    handleFilter,
-  } = useFilter();
+    categorySearch,
+    refinedCategories,
+    isSearchingCategories,
+    handleCategorySearch,
+    clearCategorySearch,
+  } = useCategorySearch();
 
   const { items } = useAtomValue(selectedCategoriesAtom);
   const [, setInitialSelect] = useAtom(addInitialSelectedCategoriesAtom);
 
   const hasCategories = useMemo(
-    () => filteredCategories.length > 0,
-    [filteredCategories]
+    () => refinedCategories.length > 0,
+    [refinedCategories]
   );
 
   /** Sets the initial selected categories based on the url params. Runs on first load only */
@@ -72,35 +72,35 @@ export const CategoryCheckboxDropdown = () => {
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[290px] md:w-[350px]">
-          {!hasCategories && !isFiltering ? (
+          {!hasCategories && !isSearchingCategories ? (
             <CategorySelectNoCategories />
           ) : (
             <>
               <div className="relative">
                 <Input
                   type="text"
-                  label="Filter categories"
-                  placeholder="Filter categories"
+                  label="Search categories"
+                  placeholder="Search categories"
                   hideLabel
                   className="mb-2 text-gray-500"
                   icon="coins"
                   autoFocus
-                  value={filter}
-                  onChange={handleFilter}
+                  value={categorySearch}
+                  onChange={handleCategorySearch}
                   ref={inputRef}
                 />
-                {isFiltering && (
+                {isSearchingCategories && (
                   <Button
                     icon="x"
                     variant="tertiary"
-                    disabled={isFiltering}
-                    onClick={clearFilters}
+                    disabled={isSearchingCategories}
+                    onClick={clearCategorySearch}
                     className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                   />
                 )}
               </div>
               <div className="">
-                {filteredCategories.map((c: Category) => (
+                {refinedCategories.map((c: Category) => (
                   <CheckboxItem key={c.id} category={c} selected={items} />
                 ))}
               </div>

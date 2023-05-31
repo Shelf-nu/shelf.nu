@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { Category } from "@prisma/client";
 import { CategorySelectNoCategories } from "./category-select-no-categories";
 import { FilterInput } from "./filter-input";
-import { useFilter } from "./useFilter";
+import { useCategorySearch } from "./useCategorySearch";
 import {
   Select,
   SelectContent,
@@ -14,17 +14,18 @@ import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 
 export const CategorySelect = ({ defaultValue }: { defaultValue?: string }) => {
+  /** This takes care of the search bar inside the dropdown */
   const {
-    filter,
-    filteredCategories,
-    isFiltering,
-    clearFilters,
-    handleFilter,
-  } = useFilter();
+    categorySearch,
+    refinedCategories,
+    isSearchingCategories,
+    handleCategorySearch,
+    clearCategorySearch,
+  } = useCategorySearch();
 
   const hasCategories = useMemo(
-    () => filteredCategories.length > 0,
-    [filteredCategories]
+    () => refinedCategories.length > 0,
+    [refinedCategories]
   );
 
   return (
@@ -41,25 +42,28 @@ export const CategorySelect = ({ defaultValue }: { defaultValue?: string }) => {
             align="end"
             sideOffset={4}
           >
-            {!hasCategories && !isFiltering ? (
+            {!hasCategories && !isSearchingCategories ? (
               <CategorySelectNoCategories />
             ) : (
               <>
                 <div className="relative">
-                  <FilterInput filter={filter} handleFilter={handleFilter} />
-                  {isFiltering && (
+                  <FilterInput
+                    filter={categorySearch}
+                    handleFilter={handleCategorySearch}
+                  />
+                  {isSearchingCategories && (
                     <Button
                       icon="x"
                       variant="tertiary"
-                      disabled={isFiltering}
-                      onClick={clearFilters}
+                      disabled={isSearchingCategories}
+                      onClick={clearCategorySearch}
                       className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                     />
                   )}
                 </div>
 
                 <div className="border-b border-b-gray-300 py-2 ">
-                  {filteredCategories.map((c: Category) => (
+                  {refinedCategories.map((c: Category) => (
                     <SelectItem value={c.id} key={c.id}>
                       <Badge color={c.color} noBg>
                         {c.name}

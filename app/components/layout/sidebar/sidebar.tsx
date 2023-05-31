@@ -2,20 +2,11 @@ import { useRef } from "react";
 import type { User } from "@prisma/client";
 import { Link } from "@remix-run/react";
 import { useAtom } from "jotai";
-import {
-  SwitchIcon,
-  ActiveSwitchIcon,
-  ShelfTypography,
-  ChevronRight,
-} from "~/components/icons/library";
+import { ShelfTypography } from "~/components/icons/library";
 
 import { tw } from "~/utils";
 
-import {
-  toggleSidebarAtom,
-  maintainUncollapsedAtom,
-  toggleMobileNavAtom,
-} from "./atoms";
+import { toggleSidebarAtom, toggleMobileNavAtom } from "./atoms";
 import SidebarBottom from "./bottom";
 import MenuButton from "./menu-button";
 import MenuItems from "./menu-items";
@@ -26,10 +17,7 @@ interface Props {
 }
 
 export default function Sidebar({ user }: Props) {
-  const [isSidebarCollapsed, toggleSidebar] = useAtom(toggleSidebarAtom);
-  const [maintainUncollapsedSidebar, manageUncollapsedSidebar] = useAtom(
-    maintainUncollapsedAtom
-  );
+  const [isSidebarCollapsed] = useAtom(toggleSidebarAtom);
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);
 
