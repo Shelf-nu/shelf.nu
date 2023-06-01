@@ -1,4 +1,5 @@
 import type { PropsWithChildren } from "react";
+import { MetronomeLinks } from "@metronome-sh/react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -25,7 +26,6 @@ import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
 import { getBrowserEnv } from "./utils/env";
-
 export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
@@ -68,6 +68,7 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
         <Meta />
         {title ? <title>{title}</title> : null}
         <Links />
+        <MetronomeLinks />
         <Clarity />
       </head>
       <body className="h-full">
