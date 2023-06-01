@@ -20,6 +20,7 @@ import {
 import { ErrorBoundryComponent } from "./components/errors";
 
 import { HomeIcon } from "./components/icons/library";
+import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import tailwindStylesheetUrl from "./styles/tailwind.css";
@@ -67,6 +68,7 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
         <Meta />
         {title ? <title>{title}</title> : null}
         <Links />
+        <Clarity />
       </head>
       <body className="h-full">
         {children}
