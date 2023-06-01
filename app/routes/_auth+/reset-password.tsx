@@ -126,9 +126,9 @@ export default function ResetPassword() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
+      console.log("supabaseSession", supabaseSession);
       if (event === "SIGNED_IN") {
         const refreshToken = supabaseSession?.refresh_token;
-        console.log("refreshToken", refreshToken);
 
         if (!refreshToken) return;
 
