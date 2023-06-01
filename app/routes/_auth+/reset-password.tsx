@@ -1,9 +1,8 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
-import { atom, useAtom } from "jotai";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -107,11 +106,9 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
-const userRefreshTokenAtom = atom("");
-
 export default function ResetPassword() {
   const zo = useZorm("ResetPasswordForm", ResetPasswordSchema);
-  const [userRefreshToken, setUserRefreshToken] = useAtom(userRefreshTokenAtom);
+  const [userRefreshToken, setUserRefreshToken] = useState("");
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -120,14 +117,12 @@ export default function ResetPassword() {
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
-      if (event === "SIGNED_IN") {
-        const refreshToken = supabaseSession?.refresh_token;
+    } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
+      const refreshToken = supabaseSession?.refresh_token;
 
-        if (!refreshToken) return;
+      if (!refreshToken) return;
 
-        setUserRefreshToken(refreshToken);
-      }
+      setUserRefreshToken(refreshToken);
     });
 
     return () => {
