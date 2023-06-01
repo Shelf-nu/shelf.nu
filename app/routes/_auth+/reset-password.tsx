@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
-import { atom, useAtom } from "jotai";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -71,10 +70,7 @@ export async function action({ request }: ActionArgs) {
 
   const { password, refreshToken } = result.data;
 
-  console.log("refreshToken", refreshToken);
-
   const authSession = await refreshAccessToken(refreshToken);
-  console.log("authSession", authSession);
 
   if (!authSession) {
     return json(
@@ -118,14 +114,10 @@ export default function ResetPassword() {
   const disabled = isFormProcessing(transition.state);
   const supabase = useMemo(() => getSupabase(), []);
 
-  console.log("userRefreshToken", userRefreshToken);
-
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
-      console.log("supabaseSession", supabaseSession);
-      console.log("event", event);
+    } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
       const refreshToken = supabaseSession?.refresh_token;
 
       if (!refreshToken) return;
