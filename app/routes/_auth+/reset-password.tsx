@@ -71,7 +71,10 @@ export async function action({ request }: ActionArgs) {
 
   const { password, refreshToken } = result.data;
 
+  console.log("refreshToken", refreshToken);
+
   const authSession = await refreshAccessToken(refreshToken);
+  console.log("authSession", authSession);
 
   if (!authSession) {
     return json(
