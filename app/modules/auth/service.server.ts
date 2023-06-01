@@ -77,6 +77,8 @@ export async function refreshAccessToken(
   const { data, error } = await getSupabaseAdmin().auth.refreshSession({
     refresh_token: refreshToken,
   });
+  console.log("data", data);
+  console.log("error", error);
 
   if (!data.session || error) return null;
 
