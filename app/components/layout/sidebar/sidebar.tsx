@@ -49,7 +49,7 @@ export default function Sidebar({ user }: Props) {
           isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "left-[-100%]"
         )}
       >
-        <div className="flex flex-1 flex-col overflow-y-scroll overflow-x-hidden">
+        <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
           <div className="navigation-header flex items-center justify-between">
             <Link
               to="."
