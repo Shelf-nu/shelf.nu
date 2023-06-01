@@ -117,12 +117,16 @@ export default function ResetPassword() {
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
-      const refreshToken = supabaseSession?.refresh_token;
+    } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
+      // In local development, we doesn't see "PASSWORD_RECOVERY" event because:
+      // Effect run twice and break listener chain
+      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+        const refreshToken = supabaseSession?.refresh_token;
 
-      if (!refreshToken) return;
+        if (!refreshToken) return;
 
-      setUserRefreshToken(refreshToken);
+        setUserRefreshToken(refreshToken);
+      }
     });
 
     return () => {
