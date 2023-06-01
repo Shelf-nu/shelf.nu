@@ -126,13 +126,11 @@ export default function ResetPassword() {
     } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
       console.log("supabaseSession", supabaseSession);
       console.log("event", event);
-      if (event === "SIGNED_IN") {
-        const refreshToken = supabaseSession?.refresh_token;
+      const refreshToken = supabaseSession?.refresh_token;
 
-        if (!refreshToken) return;
+      if (!refreshToken) return;
 
-        setUserRefreshToken(refreshToken);
-      }
+      setUserRefreshToken(refreshToken);
     });
 
     return () => {
