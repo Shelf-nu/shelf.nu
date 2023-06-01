@@ -120,12 +120,15 @@ export default function ResetPassword() {
   const disabled = isFormProcessing(transition.state);
   const supabase = useMemo(() => getSupabase(), []);
 
+  console.log("userRefreshToken", userRefreshToken);
+
   useEffect(() => {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
       if (event === "SIGNED_IN") {
         const refreshToken = supabaseSession?.refresh_token;
+        console.log("refreshToken", refreshToken);
 
         if (!refreshToken) return;
 
