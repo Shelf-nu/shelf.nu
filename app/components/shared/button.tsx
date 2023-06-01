@@ -16,6 +16,7 @@ export interface ButtonProps {
   disabled?: boolean;
   attachToInput?: boolean;
   onlyIconOnMobile?: boolean;
+  title?: string;
   [key: string]: any;
 }
 

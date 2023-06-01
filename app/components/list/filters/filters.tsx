@@ -37,11 +37,7 @@ export const Filters = ({ children }: { children?: ReactNode }) => {
     /** check the flag and if its true, submit the form. */
     if (isFilteringCategories) {
       submit(formRef.current);
-
-      return () => {
-        /** Clean up the flag */
-        toggleIsFiltering();
-      };
+      toggleIsFiltering();
     }
   }, [submit, isFilteringCategories, toggleIsFiltering]);
 

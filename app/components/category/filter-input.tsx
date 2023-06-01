@@ -17,8 +17,8 @@ export const FilterInput = ({
   return (
     <Input
       type="text"
-      label="Filter categories"
-      placeholder="Filter categories"
+      label="Search categories"
+      placeholder="Search categories"
       hideLabel
       className="mb-2 text-gray-500"
       icon="coins"

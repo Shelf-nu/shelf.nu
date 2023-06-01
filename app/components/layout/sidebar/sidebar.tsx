@@ -2,19 +2,11 @@ import { useRef } from "react";
 import type { User } from "@prisma/client";
 import { Link } from "@remix-run/react";
 import { useAtom } from "jotai";
-import {
-  SwitchIcon,
-  ActiveSwitchIcon,
-  ShelfTypography,
-} from "~/components/icons/library";
+import { ShelfTypography } from "~/components/icons/library";
 
 import { tw } from "~/utils";
 
-import {
-  toggleSidebarAtom,
-  maintainUncollapsedAtom,
-  toggleMobileNavAtom,
-} from "./atoms";
+import { toggleSidebarAtom, toggleMobileNavAtom } from "./atoms";
 import SidebarBottom from "./bottom";
 import MenuButton from "./menu-button";
 import MenuItems from "./menu-items";
@@ -25,10 +17,7 @@ interface Props {
 }
 
 export default function Sidebar({ user }: Props) {
-  const [isSidebarCollapsed, toggleSidebar] = useAtom(toggleSidebarAtom);
-  const [maintainUncollapsedSidebar, manageUncollapsedSidebar] = useAtom(
-    maintainUncollapsedAtom
-  );
+  const [isSidebarCollapsed] = useAtom(toggleSidebarAtom);
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);
 
@@ -52,8 +41,6 @@ export default function Sidebar({ user }: Props) {
       <aside
         id="main-navigation"
         ref={mainNavigationRef}
-        onMouseEnter={toggleSidebar}
-        onMouseLeave={toggleSidebar}
         className={tw(
           `fixed top-0 z-30 flex h-screen max-h-screen flex-col border-r border-gray-200 bg-white p-4 shadow-[0px_20px_24px_-4px_rgba(16,24,40,0.08),_0px_8px_8px_-4px_rgba(16,24,40,0.03)] transition-all duration-300 ease-linear md:sticky md:left-0 md:px-6 md:py-8 md:shadow-none md:duration-200`,
           isSidebarCollapsed
@@ -62,7 +49,7 @@ export default function Sidebar({ user }: Props) {
           isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "left-[-100%]"
         )}
       >
-        <div className="flex flex-1 flex-col overflow-scroll">
+        <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
           <div className="navigation-header flex items-center justify-between">
             <Link
               to="."
@@ -79,18 +66,19 @@ export default function Sidebar({ user }: Props) {
                 <ShelfTypography />
               </span>
             </Link>
-            <button
-              className="hidden transition-all duration-200 ease-linear md:block"
+            {/* <button
+              className={tw(
+                " hide-show-sidebar bg-gray-100 px-3 py-[10px] transition-all duration-200 ease-linear hover:bg-gray-200 md:block",
+                maintainUncollapsedSidebar
+                  ? "rotate-180"
+                  : " fixed left-[93px] md:hidden"
+              )}
               onClick={manageUncollapsedSidebar}
             >
               <i className="icon text-gray-500">
-                {maintainUncollapsedSidebar ? (
-                  <ActiveSwitchIcon />
-                ) : (
-                  <SwitchIcon />
-                )}
+                <ChevronRight />
               </i>
-            </button>
+            </button> */}
           </div>
           <div className="h-full flex-1">
             <MenuItems />

@@ -5,11 +5,7 @@ import { Button } from "../shared";
 
 export function useCrisp() {
   useEffect(() => {
-    if (
-      // process.env.NODE_ENV === "production" &&
-      window &&
-      window.env.CRISP_WEBSITE_ID
-    ) {
+    if (window && window.env.CRISP_WEBSITE_ID) {
       Crisp.configure(window.env.CRISP_WEBSITE_ID, { autoload: false });
     }
   }, []);
