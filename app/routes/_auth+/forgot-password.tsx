@@ -15,7 +15,7 @@ export async function loader({ request }: LoaderArgs) {
   const title = "Forgot password?";
   const subHeading = "No worries, we’ll send you reset instructions.";
 
-  if (authSession) return redirect("/assets");
+  if (authSession) return redirect("/");
 
   return json({ title, subHeading });
 }

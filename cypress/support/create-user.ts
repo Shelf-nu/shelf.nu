@@ -29,6 +29,7 @@ async function createAccount(email: string, password: string) {
     data: {
       email: email.toLowerCase(),
       id: authAccount.id,
+      onboarded: true,
     },
   });
 

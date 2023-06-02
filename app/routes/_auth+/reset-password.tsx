@@ -25,7 +25,7 @@ export async function loader({ request }: LoaderArgs) {
   const subHeading =
     "Your new password must be different to previously used passwords.";
 
-  if (authSession) return redirect("/assets");
+  if (authSession) return redirect("/");
 
   return json({ title, subHeading });
 }
@@ -93,7 +93,7 @@ export async function action({ request }: ActionArgs) {
     );
   }
 
-  return redirect("/assets", {
+  return redirect("/", {
     headers: {
       "Set-Cookie": await commitAuthSession(request, {
         authSession,

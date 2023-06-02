@@ -6,6 +6,9 @@ export interface UpdateUserPayload {
   firstName?: User["firstName"];
   lastName?: User["lastName"];
   profilePicture?: User["profilePicture"];
+  onboarded?: User["onboarded"];
+  password?: string;
+  confirmPassword?: string;
 }
 
 export interface UpdateUserResponse {
