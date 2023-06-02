@@ -27,7 +27,7 @@ export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
-  if (authSession) return redirect("/assets");
+  if (authSession) return redirect("/");
   return json({ title, subHeading });
 }
 
@@ -76,7 +76,7 @@ export async function action({ request }: ActionArgs) {
   return createAuthSession({
     request,
     authSession,
-    redirectTo: redirectTo || "/assets",
+    redirectTo: redirectTo || "/",
   });
 }
 

@@ -3,7 +3,7 @@ import type {
   LoaderArgs,
   LoaderFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar/sidebar";
@@ -24,6 +24,9 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
     : undefined;
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
+  if (!user?.onboarded) {
+    return redirect("onboarding");
+  }
 
   return json({
     user,

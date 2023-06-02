@@ -8,6 +8,7 @@ import {
   createEmailAuthAccount,
   signInWithEmail,
   deleteAuthAccount,
+  updateAccountPassword,
 } from "~/modules/auth";
 import type { UpdateUserPayload, UpdateUserResponse } from "./types";
 
@@ -136,12 +137,23 @@ export async function updateUser(
   updateUserPayload: UpdateUserPayload
 ): Promise<UpdateUserResponse> {
   try {
+    /** Remove password from object so we can pass it to prisma user update */
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const cleanClone = (({ password, confirmPassword, ...o }) => o)(
+      updateUserPayload
+    );
+
     const updatedUser = await db.user.update({
       where: { id: updateUserPayload.id },
       data: {
-        ...updateUserPayload,
+        ...cleanClone,
       },
     });
+
+    if (updateUserPayload.password) {
+      updateAccountPassword(updateUserPayload.id, updateUserPayload.password);
+    }
+
     return { user: updatedUser, errors: null };
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError) {

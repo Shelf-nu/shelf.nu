@@ -14,7 +14,7 @@ export const handle = {
   breadcrumb: () => <Link to="/assets">Assets</Link>,
 };
 
-export const shouldRevalidate = () => false;
+// export const shouldRevalidate = () => false;
 
 export default function AssetsPage() {
   return <Outlet />;

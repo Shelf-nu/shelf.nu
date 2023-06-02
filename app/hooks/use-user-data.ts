@@ -9,6 +9,5 @@ import { useMatchesData } from "./use-matches-data";
  */
 export function useUserData(): User | undefined {
   let user = useMatchesData<{ user: User }>("routes/_layout+/_layout")?.user;
-
   return user;
 }
