@@ -21,9 +21,11 @@
     "start:ci": "dotenv -- remix-serve build",
     "test": "vitest",
     "test:cov": "vitest --coverage",
-    "test:e2e:dev": "start-server-and-test dev http://localhost:3000 'npx cypress open'",
+    "test:e2e": "npm run test:e2e:dev --silent",
+    "test:e2e:dev": "playwright test --ui",
     "pretest:e2e:run": "npm run build",
-    "test:e2e:run": "dotenv -- cross-env PORT=8811 start-server-and-test http://localhost:8811 'npx cypress run'",
+    "test:e2e:run": "cross-env CI=true playwright test",
+    "test:e2e:install": "npx playwright install chromium --with-deps",
     "typecheck": "tsc -b && tsc -b cypress",
     "validate": "run-p \"test -- --run\" lint typecheck test:e2e:run",
     "postinstall": "metronome patch @remix-run/serve"
@@ -67,6 +69,7 @@
   },
   "devDependencies": {
     "@faker-js/faker": "^7.6.0",
+    "@playwright/test": "^1.34.3",
     "@remix-run/dev": "1.13.0",
     "@remix-run/eslint-config": "^1.14.3",
     "@tailwindcss/aspect-ratio": "^0.4.2",
