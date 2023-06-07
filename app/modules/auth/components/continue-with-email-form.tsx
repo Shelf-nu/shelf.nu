@@ -46,12 +46,16 @@ export function ContinueWithEmailForm() {
         width="full"
         variant="secondary"
         className="mt-3"
+        data-test-id="continueWithMagicLink"
       >
         {buttonLabel}
       </Button>
 
       {isSuccessFull && (
-        <div className={`mb-2 h-6 text-center text-green-600`}>
+        <div
+          className={`mb-2 h-6 text-center text-green-600`}
+          data-test-id="magicLinkSuccessMessage"
+        >
           Check your emails
         </div>
       )}
