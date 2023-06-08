@@ -12,7 +12,7 @@ export default defineConfig({
     environment: "happy-dom",
     setupFiles: ["./test/setup-test-env.ts"],
     includeSource: ["app/**/*.{js,ts}"],
-    exclude: ["node_modules", "mocks/**/*.{js,ts}", "tests/**/*.{js,ts}"],
+    exclude: ["node_modules", "mocks/**/*.{js,ts}", "test/**/*.{js,ts}"],
     coverage: {
       reporter: ["text", "json", "html"],
       include: ["app/**/*.{js,ts}"],
