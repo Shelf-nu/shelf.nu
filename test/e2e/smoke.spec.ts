@@ -42,7 +42,7 @@ test.beforeEach(async ({ page }) => {
   }
 
   await page.goto(confirmUrl);
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(2000);
 
   /** Fill in onboarding form */
   await page.fill('[data-test-id="firstName"]', onboardingForm.firstName);
