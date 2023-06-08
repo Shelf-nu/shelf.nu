@@ -82,54 +82,26 @@ jobs:
       - name: ⚡ Run vitest
         run: npm run test -- --coverage
 
-  # cypress:
-  #   name: ⚫️ Cypress
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: 🛑 Cancel Previous Runs
-  #       uses: styfle/cancel-workflow-action@0.11.0
-
-  #     - name: ⬇️ Checkout repo
-  #       uses: actions/checkout@v3
-
-  #     - name: 🔑 Make envfile
-  #       uses: SpicyPizza/create-envfile@v1.3
-  #       with:
-  #         envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-  #         envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
-  #         envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-  #         envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  #         envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
-  #         envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
-  #         file_name: .env
-
-  #     - name: ⎔ Setup node
-  #       uses: actions/setup-node@v3
-  #       with:
-  #         node-version: 16
-
-  #     - name: 📥 Download deps
-  #       uses: bahmutov/npm-install@v1
-  #       with:
-  #         useLockFile: false
-
-  #     # uncomment if you really want to reset your testing database
-  #     # - name: 🛠 Setup Database
-  #     #   run: npx prisma migrate reset --force
-
-  #     - name: ⚙️ Build
-  #       run: npm run build
-
-  #     - name: 🌳 Cypress run
-  #       uses: cypress-io/github-action@v4
-  #       with:
-  #         start: npm run start:ci
-  #         wait-on: "http://localhost:8811"
-  #         browser: chrome
-  #         headed: true
-  #       env:
-  #         PORT: "8811"
-
+  playwright:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+      - name: Run Playwright tests
+        run: npx playwright test
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
   build:
     name: 🐳 Build
     # only build/deploy main branch on pushes
@@ -192,7 +164,7 @@ jobs:
   deploy:
     name: 🚀 Deploy
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, vitest, build]
+    needs: [lint, typecheck, vitest, playwright, build]
     # only build/deploy main branch on pushes
     if: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.event_name == 'push' }}
 

@@ -19,8 +19,6 @@ export async function action({ request }: ActionArgs) {
     })
     .safeParseAsync(parseFormAny(formData));
 
-  console.log(result);
-
   if (!result.success) {
     return json(
       {
@@ -31,8 +29,6 @@ export async function action({ request }: ActionArgs) {
   }
 
   const { error } = await sendMagicLink(result.data.email);
-
-  console.log(error);
 
   if (error) {
     return json(

@@ -21,9 +21,9 @@
     "start:ci": "dotenv -- remix-serve build",
     "test": "vitest",
     "test:cov": "vitest --coverage",
-    "test:e2e:dev": "start-server-and-test dev http://localhost:3000 'npx cypress open'",
+    "test:e2e:dev": "start-server-and-test dev http://localhost:3000 'npx playwright test --ui'",
+    "test:e2e:run": "start-server-and-test dev http://localhost:3000 'npx playwright test'",
     "pretest:e2e:run": "npm run build",
-    "test:e2e:run": "dotenv -- cross-env PORT=8811 start-server-and-test http://localhost:8811 'npx cypress run'",
     "typecheck": "tsc -b && tsc -b cypress",
     "validate": "run-p \"test -- --run\" lint typecheck test:e2e:run",
     "postinstall": "metronome patch @remix-run/serve"

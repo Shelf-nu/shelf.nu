@@ -150,7 +150,7 @@ export async function updateUser(
       },
     });
 
-    if (updateUserPayload.password) {
+    if (updateUserPayload?.password) {
       updateAccountPassword(updateUserPayload.id, updateUserPayload.password);
     }
 
