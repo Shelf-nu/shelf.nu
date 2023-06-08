@@ -86,24 +86,49 @@ jobs:
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - name: 🛑 Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v3
+
+      - name: 🔑 Make envfile
+        uses: SpicyPizza/create-envfile@v1.3
         with:
-          node-version: 18
-      - name: Build app
-        run: npm run build
-      - name: Install dependencies
-        run: npm ci
-      - name: Install Playwright Browsers
+          envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
+          envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
+          envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          file_name: .env
+
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: 📥 Download deps
+        uses: bahmutov/npm-install@v1
+        with:
+          useLockFile: false
+
+      - name: 🖥️ Install Playwright Browsers
         run: npx playwright install --with-deps
+
+      - name: ⚙️ Build
+        run: npm run build
+
       - name: Run Playwright tests
         run: npx playwright test
+
       - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: playwright-report
           path: playwright-report/
           retention-days: 30
+
   build:
     name: 🐳 Build
     # only build/deploy main branch on pushes
