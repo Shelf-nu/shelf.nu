@@ -5,6 +5,7 @@ import {
   ItemsIcon,
   QuestionsIcon,
   SettingsIcon,
+  TagsIcon,
 } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
 import { tw } from "~/utils";
@@ -21,6 +22,11 @@ const menuItemsTop = [
     icon: <ItemsIcon />,
     to: "categories",
     label: "Categories",
+  },
+  {
+    icon: <TagsIcon />,
+    to: "tags",
+    label: "Tags",
   },
 ];
 const menuItemsBottom = [
