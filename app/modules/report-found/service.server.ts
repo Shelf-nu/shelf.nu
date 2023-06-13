@@ -32,7 +32,7 @@ export async function sendReportEmails({
   asset: Asset | null;
 }) {
   /** Send email to owner */
-  sendEmail({
+  await sendEmail({
     to: owner.email,
     subject: "Reported asset",
     text: asset
@@ -41,7 +41,7 @@ export async function sendReportEmails({
   });
 
   /** Send email to reporter */
-  sendEmail({
+  await sendEmail({
     to: reporterEmail,
     subject: "Reported asset",
     text: `Thank you for contacting the owner of the asset you found. They have been notified of your message and will contact you if they are interested.\n\nEmail sent via shelf.nu`,

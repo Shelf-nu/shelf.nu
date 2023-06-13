@@ -20,6 +20,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 
 import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
+import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import ProfilePicture from "~/components/user/profile-picture";
 import { usePosition, useUserData } from "~/hooks";
@@ -59,7 +60,6 @@ export async function loader({ request, params }: LoaderArgs) {
 
   const header: HeaderData = {
     title: asset.title,
-    subHeading: asset.id,
   };
 
   return json({
@@ -146,33 +146,48 @@ export default function AssetDetailsPage() {
               mainImageExpiration: asset.mainImageExpiration,
               alt: asset.title,
             }}
-            className="mx-auto mb-8 hidden h-auto w-[343px] rounded-lg object-cover md:block lg:w-full"
+            className="hidden h-auto w-[343px] rounded-lg rounded-b-none object-cover md:block lg:w-full"
           />
-          <p className="mb-8 text-gray-600">{asset.description}</p>
+          <Card className="mt-0 rounded-t-none">
+            <p className=" text-gray-600">{asset.description}</p>
+          </Card>
+
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
-          <ul className="item-information mb-8">
-            {asset?.category ? (
+          <Card>
+            <ul className="item-information">
               <li className="mb-4 flex justify-between">
-                <span className="font-medium text-gray-600">Category</span>
+                <span className="text-[12px] font-medium text-gray-600">
+                  ID
+                </span>
+                <div className="max-w-[250px]">{asset.id}</div>
+              </li>
+              {asset?.category ? (
+                <li className="mb-4 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Category
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Badge color={asset.category?.color}>
+                      {asset.category?.name}
+                    </Badge>
+                  </div>
+                </li>
+              ) : null}
+              <li className="flex justify-between">
+                <span className="text-[12px] font-medium text-gray-600">
+                  Owner
+                </span>
                 <div className="max-w-[250px]">
-                  <Badge color={asset.category?.color}>
-                    {asset.category?.name}
-                  </Badge>
+                  <span className="mb-1 ml-1 inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
+                    <ProfilePicture width="w-4" height="h-4" />
+                    <span className="ml-1.5 text-[12px] font-medium text-gray-700">
+                      {user?.firstName} {user?.lastName}
+                    </span>
+                  </span>
                 </div>
               </li>
-            ) : null}
-            <li className="mb-4 flex justify-between">
-              <span className="font-medium text-gray-600">Owner</span>
-              <div className="max-w-[250px]">
-                <span className="mb-1 ml-1 inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
-                  <ProfilePicture width="w-4" height="h-4" />
-                  <span className="ml-1.5 text-[12px] font-medium text-gray-700">
-                    {user?.firstName} {user?.lastName}
-                  </span>
-                </span>
-              </div>
-            </li>
-          </ul>
+            </ul>
+          </Card>
 
           <LocationDetails />
         </div>
