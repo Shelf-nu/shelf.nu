@@ -14,6 +14,7 @@ import {
   PenIcon,
   HomeIcon,
   QuestionsIcon,
+  WriteIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -31,7 +32,8 @@ export type Icon =
   | "pen"
   | "success"
   | "home"
-  | "question";
+  | "question"
+  | "write";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -52,6 +54,7 @@ export const iconsMap: IconsMap = {
   success: <SuccessIcon />,
   home: <HomeIcon />,
   question: <QuestionsIcon />,
+  write: <WriteIcon />,
 };
 
 export default iconsMap;
