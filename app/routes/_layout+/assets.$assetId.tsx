@@ -29,7 +29,7 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
-import { assertIsDelete, getRequiredParam } from "~/utils";
+import { assertIsDelete, getRequiredParam, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
@@ -146,11 +146,16 @@ export default function AssetDetailsPage() {
               mainImageExpiration: asset.mainImageExpiration,
               alt: asset.title,
             }}
-            className="hidden h-auto w-[343px] rounded-lg rounded-b-none object-cover md:block lg:w-full"
+            className={tw(
+              "hidden h-auto w-[343px] rounded-lg object-cover md:block lg:w-full",
+              asset.description ? "rounded-b-none" : ""
+            )}
           />
-          <Card className="mt-0 rounded-t-none">
-            <p className=" text-gray-600">{asset.description}</p>
-          </Card>
+          {asset.description ? (
+            <Card className="mt-0 rounded-t-none">
+              <p className=" text-gray-600">{asset.description}</p>
+            </Card>
+          ) : null}
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
           <Card>
