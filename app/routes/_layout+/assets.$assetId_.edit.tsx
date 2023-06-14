@@ -13,6 +13,7 @@ import { getAsset, updateAsset, updateAssetMainImage } from "~/modules/asset";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
+import { getTags } from "~/modules/tag";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -20,6 +21,10 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
   const { categories } = await getCategories({
+    userId,
+    perPage: 100,
+  });
+  const { tags } = await getTags({
     userId,
     perPage: 100,
   });
@@ -40,6 +45,7 @@ export async function loader({ request, params }: LoaderArgs) {
     asset,
     header,
     categories,
+    tags,
   });
 }
 
@@ -61,6 +67,10 @@ export async function action({ request, params }: ActionArgs) {
   const result = await NewAssetFormSchema.safeParseAsync(
     parseFormAny(formData)
   );
+
+  console.log(formData.getAll("tag"));
+
+  console.log(result);
   if (!result.success) {
     return json(
       {

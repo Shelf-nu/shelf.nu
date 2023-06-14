@@ -1,5 +1,5 @@
 import type { Asset, Qr } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { Form, Link, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -14,12 +14,14 @@ import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
+import { TagsAutocomplete } from "../tag/tags-autocomplete";
 
 export const NewAssetFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
   description: z.string(),
   category: z.string(),
   qrId: z.string().optional(),
+  tag: z.array(z.string()).optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -91,6 +93,20 @@ export const AssetForm = ({ title, category, description, qrId }: Props) => {
         }
       >
         <CategorySelect defaultValue={category || undefined} />
+      </FormRow>
+
+      <FormRow
+        rowLabel={"Tags"}
+        subHeading={
+          <p>
+            Tags can help you organise your database. They can be combined.{" "}
+            <Link to="/tags/new" className="text-gray-600 underline">
+              Create tags
+            </Link>
+          </p>
+        }
+      >
+        <TagsAutocomplete />
       </FormRow>
 
       <div>
