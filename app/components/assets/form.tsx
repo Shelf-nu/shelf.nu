@@ -1,6 +1,7 @@
 import type { Asset, Qr } from "@prisma/client";
 import { Form, Link, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import {
@@ -21,7 +22,7 @@ export const NewAssetFormSchema = z.object({
   description: z.string(),
   category: z.string(),
   qrId: z.string().optional(),
-  tag: z.array(z.string()).optional(),
+  tags: z.string().optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -30,9 +31,16 @@ interface Props {
   category?: Asset["categoryId"];
   description?: Asset["description"];
   qrId?: Qr["id"] | null;
+  tags?: Tag[];
 }
 
-export const AssetForm = ({ title, category, description, qrId }: Props) => {
+export const AssetForm = ({
+  title,
+  category,
+  description,
+  qrId,
+  tags,
+}: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewAssetFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -106,7 +114,7 @@ export const AssetForm = ({ title, category, description, qrId }: Props) => {
           </p>
         }
       >
-        <TagsAutocomplete />
+        <TagsAutocomplete existingTags={tags || []} />
       </FormRow>
 
       <div>

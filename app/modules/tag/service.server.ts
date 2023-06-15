@@ -75,3 +75,11 @@ export async function deleteTag({
     where: { id, userId },
   });
 }
+
+export const buildTagsSet = (tags: string | undefined) =>
+  /** This checks if tags are passed and build the object needed to set tags to an asset  */
+  tags && tags !== ""
+    ? {
+        set: tags?.split(",").map((t) => ({ id: t })) || [],
+      }
+    : { set: [] };

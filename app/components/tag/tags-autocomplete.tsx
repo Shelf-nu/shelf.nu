@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Tag as ShelfTag } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { Tag } from "react-tag-autocomplete";
@@ -9,7 +9,7 @@ export interface Suggestion {
   value: string;
 }
 
-export const TagsAutocomplete = () => {
+export const TagsAutocomplete = ({ existingTags }: { existingTags: Tag[] }) => {
   /** Get the tags from the loader */
   const suggestions = useLoaderData().tags.map((tag: ShelfTag) => ({
     label: tag.name,
@@ -17,6 +17,10 @@ export const TagsAutocomplete = () => {
   }));
 
   const [selected, setSelected] = useState<Tag[]>([]);
+
+  useEffect(() => {
+    setSelected(() => [...existingTags]);
+  }, [existingTags]);
 
   const onAdd = useCallback(
     (newTag: Tag) => {
@@ -34,14 +38,11 @@ export const TagsAutocomplete = () => {
 
   return (
     <>
-      {selected.map((tag) => (
-        <input
-          type="hidden"
-          name="tag"
-          value={tag.value as string}
-          key={tag.value as string}
-        />
-      ))}
+      <input
+        type="hidden"
+        name="tags"
+        value={selected.map((tag) => tag.value).join(",")}
+      />
       <ReactTags
         labelText="Select tags"
         selected={selected}

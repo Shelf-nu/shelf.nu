@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -13,7 +14,7 @@ import { getAsset, updateAsset, updateAssetMainImage } from "~/modules/asset";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
-import { getTags } from "~/modules/tag";
+import { buildTagsSet, getTags } from "~/modules/tag";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -68,9 +69,6 @@ export async function action({ request, params }: ActionArgs) {
     parseFormAny(formData)
   );
 
-  console.log(formData.getAll("tag"));
-
-  console.log(result);
   if (!result.success) {
     return json(
       {
@@ -94,11 +92,15 @@ export async function action({ request, params }: ActionArgs) {
 
   const { title, description, category } = result.data;
 
+  /** This checks if tags are passed and build the  */
+  const tags = buildTagsSet(result.data.tags);
+
   await updateAsset({
     id,
     title,
     description,
     categoryId: category,
+    tags,
   });
 
   sendNotification({
@@ -121,6 +123,10 @@ export default function AssetEditPage() {
   const title = useAtomValue(titleAtom);
   const hasTitle = title !== "Untitled asset";
   const { asset } = useLoaderData<typeof loader>();
+  const tags = useMemo(
+    () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],
+    [asset.tags]
+  );
 
   return (
     <>
@@ -130,6 +136,7 @@ export default function AssetEditPage() {
           title={asset.title}
           category={asset.categoryId}
           description={asset.description}
+          tags={tags}
         />
       </div>
     </>
