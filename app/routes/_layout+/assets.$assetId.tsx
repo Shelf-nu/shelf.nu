@@ -178,6 +178,23 @@ export default function AssetDetailsPage() {
                   </div>
                 </li>
               ) : null}
+              {asset?.tags ? (
+                <li className="mb-4 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Tags
+                  </span>
+                  <div className="text-right ">
+                    {asset.tags.map((tag) => (
+                      <span
+                        className="mb-2 ml-2 inline-flex items-center gap-1 rounded-2xl bg-gray-100 py-[2px] pl-[6px] pr-2 text-[12px] font-medium text-gray-700"
+                        key={tag.id}
+                      >
+                        {tag.name}
+                      </span>
+                    ))}
+                  </div>
+                </li>
+              ) : null}
               <li className="flex justify-between">
                 <span className="text-[12px] font-medium text-gray-600">
                   Owner

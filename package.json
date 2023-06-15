@@ -57,6 +57,7 @@
     "react-dropzone": "^14.2.3",
     "react-map-gl": "^7.0.23",
     "react-microsoft-clarity": "^1.2.0",
+    "react-tag-autocomplete": "^7.0.0-rc.7",
     "react-zorm": "^0.6.2",
     "remix-utils": "^6.1.0",
     "sharp": "^0.32.0",

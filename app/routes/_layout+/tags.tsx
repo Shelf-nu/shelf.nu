@@ -1,0 +1,126 @@
+import type { Tag } from "@prisma/client";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { Link, Outlet } from "@remix-run/react";
+import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
+import { Filters, List } from "~/components/list";
+import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
+import { DeleteTag } from "~/components/tag/delete-tag";
+
+import { requireAuthSession } from "~/modules/auth";
+import { deleteTag, getTags } from "~/modules/tag";
+import {
+  assertIsDelete,
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+} from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+
+export async function loader({ request }: LoaderArgs) {
+  const { userId } = await requireAuthSession(request);
+
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search } = getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
+
+  const { tags, totalTags } = await getTags({
+    userId,
+    page,
+    perPage,
+    search,
+  });
+  const totalPages = Math.ceil(totalTags / perPage);
+
+  const header: HeaderData = {
+    title: "Tags",
+  };
+  const modelName = {
+    singular: "tag",
+    plural: "tags",
+  };
+  return json({
+    header,
+    items: tags,
+    search,
+    page,
+    totalItems: totalTags,
+    totalPages,
+    perPage,
+    prev,
+    next,
+    modelName,
+  });
+}
+
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
+
+export async function action({ request }: ActionArgs) {
+  const { userId } = await requireAuthSession(request);
+  assertIsDelete(request);
+  const formData = await request.formData();
+  const id = formData.get("id") as string;
+
+  await deleteTag({ id, userId });
+  sendNotification({
+    title: "Tag deleted",
+    message: "Your tag has been deleted successfully",
+    icon: { name: "trash", variant: "error" },
+  });
+
+  return json({ success: true });
+}
+
+export const handle = {
+  breadcrumb: () => <Link to="/tags">Tags</Link>,
+};
+
+export default function CategoriesPage() {
+  return (
+    <>
+      <Header>
+        <Button
+          to="new"
+          role="link"
+          aria-label={`new tag`}
+          icon="plus"
+          data-test-id="createNewTag"
+        >
+          New tag
+        </Button>
+      </Header>
+      <div className="mt-8 flex flex-1 flex-col gap-2">
+        <Filters />
+        <Outlet />
+        <List ItemComponent={TagItem} />
+      </div>
+    </>
+  );
+}
+
+const TagItem = ({
+  item,
+}: {
+  item: Pick<Tag, "id" | "description" | "name">;
+}) => (
+  <div className="flex items-center justify-between gap-4">
+    <div className="flex grow items-center gap-4">
+      <div title={`Tag: ${item.name}`} className="w-auto shrink-0 md:w-1/4">
+        <Badge color={"#344054"} withDot={false}>
+          {item.name}
+        </Badge>
+      </div>
+      <div className="w-2/3 text-gray-500" title="Description">
+        {item.description}
+      </div>
+    </div>
+    <div>
+      <DeleteTag tag={item} />
+    </div>
+  </div>
+);

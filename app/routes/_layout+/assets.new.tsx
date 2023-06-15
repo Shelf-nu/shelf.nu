@@ -11,6 +11,7 @@ import Header from "~/components/layout/header";
 import { createAsset, updateAssetMainImage } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategories } from "~/modules/category";
+import { getTags } from "~/modules/tag";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -23,12 +24,16 @@ export async function loader({ request }: LoaderArgs) {
     userId,
     perPage: 100,
   });
+  const { tags } = await getTags({
+    userId,
+    perPage: 100,
+  });
 
   const header = {
     title,
   };
 
-  return json({ header, categories });
+  return json({ header, categories, tags });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [

@@ -19,6 +19,7 @@ export async function getAsset({
         orderBy: { createdAt: "desc" },
       },
       qrCodes: true,
+      tags: true,
     },
   });
 }
@@ -149,6 +150,7 @@ interface UpdateAssetPayload {
   categoryId?: Asset["categoryId"];
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
+  tags?: { set: { id: string }[] };
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
