@@ -13,21 +13,19 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { getAsset, updateAsset, updateAssetMainImage } from "~/modules/asset";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { getCategories } from "~/modules/category";
-import { buildTagsSet, getTags } from "~/modules/tag";
+import { getAllCategories } from "~/modules/category";
+import { buildTagsSet, getAllTags } from "~/modules/tag";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-  const { categories } = await getCategories({
+  const categories = await getAllCategories({
     userId,
-    perPage: 100,
   });
-  const { tags } = await getTags({
+  const tags = await getAllTags({
     userId,
-    perPage: 100,
   });
 
   const id = getRequiredParam(params, "assetId");

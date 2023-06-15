@@ -18,7 +18,7 @@ export async function getTags({
   search?: string | null;
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+  const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
   /** Default value of where. Takes the items belonging to current user */
   let where: Prisma.CategoryWhereInput = { userId };
@@ -45,6 +45,10 @@ export async function getTags({
   ]);
 
   return { tags, totalTags };
+}
+
+export async function getAllTags({ userId }: { userId: User["id"] }) {
+  return await db.tag.findMany({ where: { userId } });
 }
 
 export async function createTag({

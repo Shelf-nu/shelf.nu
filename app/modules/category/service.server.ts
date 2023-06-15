@@ -40,7 +40,7 @@ export async function getCategories({
   search?: string | null;
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+  const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
   /** Default value of where. Takes the items belonging to current user */
   let where: Prisma.CategoryWhereInput = { userId };
@@ -76,4 +76,8 @@ export async function deleteCategory({
   return db.category.deleteMany({
     where: { id, userId },
   });
+}
+
+export async function getAllCategories({ userId }: { userId: User["id"] }) {
+  return await db.category.findMany({ where: { userId } });
 }
