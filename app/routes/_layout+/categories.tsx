@@ -108,20 +108,15 @@ const CategoryItem = ({
 }: {
   item: Pick<Category, "id" | "description" | "name" | "color">;
 }) => (
-  <div className="flex items-center justify-between gap-4">
-    <div className="flex grow items-center gap-4">
-      <div
-        title={`Category: ${item.name}`}
-        className="w-auto shrink-0 md:w-1/4"
-      >
-        <Badge color={item.color}>{item.name}</Badge>
-      </div>
-      <div className="w-2/3 text-gray-500" title="Description">
-        {item.description}
-      </div>
-    </div>
-    <div>
+  <>
+    <td title={`Category: ${item.name}`} className="p-4 md:px-6">
+      <Badge color={item.color}>{item.name}</Badge>
+    </td>
+    <td className=" p-4 text-gray-500 md:px-6" title="Description">
+      {item.description}
+    </td>
+    <td className="p-4 md:px-6">
       <DeleteCategory category={item} />
-    </div>
-  </div>
+    </td>
+  </>
 );

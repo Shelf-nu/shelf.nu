@@ -23,19 +23,26 @@ export const List = ({ ItemComponent }: { ItemComponent: any }) => {
       {!hasItems ? (
         <EmptyState />
       ) : (
-        <div>
-          <ListHeader />
-
-          <div>
-            {items.map((item) => (
-              <ListItem item={item} key={item.id}>
-                <ItemComponent item={item} />
-              </ListItem>
-            ))}
-          </div>
-
+        <>
+          <table className=" w-full table-auto border-collapse">
+            <ListHeader>
+              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+                Category
+              </th>
+              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+                Tags
+              </th>
+            </ListHeader>
+            <tbody>
+              {items.map((item) => (
+                <ListItem item={item} key={item.id}>
+                  <ItemComponent item={item} />
+                </ListItem>
+              ))}
+            </tbody>
+          </table>
           <Pagination />
-        </div>
+        </>
       )}
     </div>
   );

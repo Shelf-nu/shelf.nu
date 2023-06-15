@@ -69,7 +69,7 @@ export async function getAssets({
       skip,
       take,
       where,
-      include: { category: true },
+      include: { category: true, tags: true },
       orderBy: { createdAt: "desc" },
     }),
 

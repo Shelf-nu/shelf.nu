@@ -1,3 +1,5 @@
+import { useNavigate } from "@remix-run/react";
+
 export interface ListItemData {
   id: string;
   title: string;
@@ -9,11 +11,15 @@ export const ListItem = ({
 }: {
   item: ListItemData;
   children: React.ReactNode;
-}) => (
-  <article
-    key={item.id}
-    className="border-b p-4 last:border-b-0 hover:bg-gray-50 md:px-6"
-  >
-    {children}
-  </article>
-);
+}) => {
+  const navigate = useNavigate();
+  return (
+    <tr
+      key={item.id}
+      onClick={() => navigate(item.id)}
+      className="cursor-pointer hover:bg-gray-50"
+    >
+      {children}
+    </tr>
+  );
+};

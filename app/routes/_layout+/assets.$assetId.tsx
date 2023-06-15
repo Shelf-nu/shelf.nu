@@ -21,6 +21,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import ProfilePicture from "~/components/user/profile-picture";
 import { usePosition, useUserData } from "~/hooks";
@@ -185,12 +186,9 @@ export default function AssetDetailsPage() {
                   </span>
                   <div className="text-right ">
                     {asset.tags.map((tag) => (
-                      <span
-                        className="mb-2 ml-2 inline-flex items-center gap-1 rounded-2xl bg-gray-100 py-[2px] pl-[6px] pr-2 text-[12px] font-medium text-gray-700"
-                        key={tag.id}
-                      >
+                      <Tag key={tag.id} className="mb-2 ml-2">
                         {tag.name}
-                      </span>
+                      </Tag>
                     ))}
                   </div>
                 </li>
