@@ -97,7 +97,19 @@ export default function CategoriesPage() {
       <div className="mt-8 flex flex-1 flex-col gap-2">
         <Filters />
         <Outlet />
-        <List ItemComponent={CategoryItem} />
+        <List
+          ItemComponent={CategoryItem}
+          headerChildren={
+            <>
+              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+                Description
+              </th>
+              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+                Actions
+              </th>
+            </>
+          }
+        />
       </div>
     </>
   );
@@ -109,13 +121,16 @@ const CategoryItem = ({
   item: Pick<Category, "id" | "description" | "name" | "color">;
 }) => (
   <>
-    <td title={`Category: ${item.name}`} className="p-4 md:px-6">
+    <td title={`Category: ${item.name}`} className="w-1/4 border-b p-4 md:px-6">
       <Badge color={item.color}>{item.name}</Badge>
     </td>
-    <td className=" p-4 text-gray-500 md:px-6" title="Description">
+    <td
+      className="w-3/4 border-b p-4 text-gray-500 md:px-6"
+      title="Description"
+    >
       {item.description}
     </td>
-    <td className="p-4 md:px-6">
+    <td className="whitespace-nowrap border-b p-4 md:px-6">
       <DeleteCategory category={item} />
     </td>
   </>

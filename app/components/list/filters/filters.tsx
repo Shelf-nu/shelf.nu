@@ -2,14 +2,20 @@ import { useRef, type ReactNode, useEffect } from "react";
 import { Form, useLoaderData, useSubmit } from "@remix-run/react";
 import { useAtom } from "jotai";
 
-import { toggleIsFilteringCategoriesAtom } from "./atoms";
+import {
+  toggleIsFilteringCategoriesAtom,
+  toggleIsFilteringTagsAtom,
+} from "./atoms";
 import { SearchForm } from "./search-form";
 
 export const Filters = ({ children }: { children?: ReactNode }) => {
   const { search } = useLoaderData();
 
-  const [isFilteringCategories, toggleIsFiltering] = useAtom(
+  const [isFilteringCategories, toggleIsFilteringCategories] = useAtom(
     toggleIsFilteringCategoriesAtom
+  );
+  const [isFilteringTags, toggleIsFilteringTags] = useAtom(
+    toggleIsFilteringTagsAtom
   );
 
   const submit = useSubmit();
@@ -29,9 +35,17 @@ export const Filters = ({ children }: { children?: ReactNode }) => {
     /** check the flag and if its true, submit the form. */
     if (isFilteringCategories) {
       submit(formRef.current);
-      toggleIsFiltering();
+      toggleIsFilteringCategories();
     }
-  }, [submit, isFilteringCategories, toggleIsFiltering]);
+  }, [submit, isFilteringCategories, toggleIsFilteringCategories]);
+
+  useEffect(() => {
+    /** check the flag and if its true, submit the form. */
+    if (isFilteringTags) {
+      submit(formRef.current);
+      toggleIsFilteringTags();
+    }
+  }, [submit, isFilteringTags, toggleIsFilteringTags]);
 
   return (
     <div className="flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">

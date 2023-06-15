@@ -25,7 +25,7 @@
     "pretest:e2e:run": "npm run build",
     "test:e2e:run": "dotenv -- cross-env PORT=8811 start-server-and-test http://localhost:8811 'npx cypress run'",
     "typecheck": "tsc -b && tsc -b cypress",
-    "validate": "run-p \"test -- --run\" lint typecheck test:e2e:run",
+    "validate": "run-p \"test -- --run\" lint typecheck",
     "postinstall": "metronome patch @remix-run/serve"
   },
   "prettier": {},

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useLoaderData } from "@remix-run/react";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
 
@@ -13,7 +14,16 @@ import { Pagination } from "./pagination";
  *
  * The route is required to export {@link IndexResponse}
  */
-export const List = ({ ItemComponent }: { ItemComponent: any }) => {
+export const List = ({
+  ItemComponent,
+  headerChildren,
+  navigate,
+}: {
+  ItemComponent: any;
+  headerChildren: ReactNode;
+  /** Function to be passed if the rows of the table should navigate */
+  navigate?: (id: string) => void;
+}) => {
   const { items } = useLoaderData<IndexResponse>();
 
   const hasItems = items?.length > 0;
@@ -25,17 +35,10 @@ export const List = ({ ItemComponent }: { ItemComponent: any }) => {
       ) : (
         <>
           <table className=" w-full table-auto border-collapse">
-            <ListHeader>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Category
-              </th>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Tags
-              </th>
-            </ListHeader>
+            <ListHeader>{headerChildren}</ListHeader>
             <tbody>
               {items.map((item) => (
-                <ListItem item={item} key={item.id}>
+                <ListItem item={item} key={item.id} navigate={navigate}>
                   <ItemComponent item={item} />
                 </ListItem>
               ))}

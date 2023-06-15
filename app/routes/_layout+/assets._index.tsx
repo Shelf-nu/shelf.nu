@@ -1,6 +1,7 @@
 import type { Category, Asset, Tag } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { useNavigate } from "@remix-run/react";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ChevronRight } from "~/components/icons";
@@ -16,6 +17,7 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { getAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { getAllCategories } from "~/modules/category";
+import { getAllTags } from "~/modules/tag";
 import { getUserByID } from "~/modules/user";
 import {
   generatePageMeta,
@@ -68,11 +70,15 @@ export async function loader({ request }: LoaderArgs) {
   }
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search, categoriesIds } =
+  const { page, perPage, search, categoriesIds, tagsIds } =
     getParamsValues(searchParams);
   const { prev, next } = generatePageMeta(request);
 
   const categories = await getAllCategories({
+    userId,
+  });
+
+  const tags = await getAllTags({
     userId,
   });
 
@@ -82,6 +88,7 @@ export async function loader({ request }: LoaderArgs) {
     perPage,
     search,
     categoriesIds,
+    tagsIds,
   });
   const totalPages = Math.ceil(totalAssets / perPage);
 
@@ -106,6 +113,7 @@ export async function loader({ request }: LoaderArgs) {
     header,
     items: assets,
     categories,
+    tags,
     search,
     page,
     totalItems: totalAssets,
@@ -122,6 +130,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetIndexPage() {
+  const navigate = useNavigate();
   return (
     <>
       <Header>
@@ -137,12 +146,25 @@ export default function AssetIndexPage() {
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         <Filters>
-          <div className="flex justify-end gap-3">
+          <div className="flex justify-end gap-8">
             <CategoryFilters />
             <TagFilters />
           </div>
         </Filters>
-        <List ItemComponent={ListAssetContent} />
+        <List
+          ItemComponent={ListAssetContent}
+          navigate={(itemId) => navigate(itemId)}
+          headerChildren={
+            <>
+              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+                Category
+              </th>
+              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+                Tags
+              </th>
+            </>
+          }
+        />
       </div>
     </>
   );
@@ -203,17 +225,23 @@ const ListAssetContent = ({
 
 const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   const visibleTags = tags?.slice(0, 2);
+  const remainingTags = tags?.slice(2);
 
   return tags && tags?.length > 0 ? (
     <div className="">
       {visibleTags?.map((tag) => (
-        <TagBadge key={tag.name} className="ml-2">
+        <TagBadge key={tag.name} className="mr-2">
           {tag.name}
         </TagBadge>
       ))}
-      <TagBadge className="ml-2 w-6 text-center">
-        {String(tags.length - 2)}
-      </TagBadge>
+      {remainingTags && remainingTags?.length > 0 ? (
+        <TagBadge
+          className="mr-2 w-6 text-center"
+          title={`${remainingTags?.map((t) => t.name).join(", ")}`}
+        >
+          {`+${tags.length - 2}`}
+        </TagBadge>
+      ) : null}
     </div>
   ) : null;
 };

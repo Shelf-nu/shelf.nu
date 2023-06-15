@@ -11,7 +11,6 @@ export const useCategorySearch = () => {
   const [categorySearch, setCategorySearch] = useAtom(searchAtom);
   const isSearchingCategories = useAtomValue(isSearchingAtom);
 
-  // console.log("this run");
   /** Get the categories from the loader */
   const categories = useLoaderData().categories;
 

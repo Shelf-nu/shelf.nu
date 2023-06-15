@@ -5,8 +5,8 @@ import { Link, Outlet } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
-import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { Tag as TagBadge } from "~/components/shared/tag";
 import { DeleteTag } from "~/components/tag/delete-tag";
 
 import { requireAuthSession } from "~/modules/auth";
@@ -97,7 +97,16 @@ export default function CategoriesPage() {
       <div className="mt-8 flex flex-1 flex-col gap-2">
         <Filters />
         <Outlet />
-        <List ItemComponent={TagItem} />
+        <List
+          ItemComponent={TagItem}
+          headerChildren={
+            <>
+              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+                Actions
+              </th>
+            </>
+          }
+        />
       </div>
     </>
   );
@@ -108,19 +117,15 @@ const TagItem = ({
 }: {
   item: Pick<Tag, "id" | "description" | "name">;
 }) => (
-  <div className="flex items-center justify-between gap-4">
-    <div className="flex grow items-center gap-4">
-      <div title={`Tag: ${item.name}`} className="w-auto shrink-0 md:w-1/4">
-        <Badge color={"#344054"} withDot={false}>
-          {item.name}
-        </Badge>
-      </div>
-      <div className="w-2/3 text-gray-500" title="Description">
-        {item.description}
-      </div>
-    </div>
-    <div>
+  <>
+    <td
+      title={`Tag: ${item.name}`}
+      className="hidden w-full border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6"
+    >
+      <TagBadge>{item.name}</TagBadge>
+    </td>
+    <td className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
       <DeleteTag tag={item} />
-    </div>
-  </div>
+    </td>
+  </>
 );

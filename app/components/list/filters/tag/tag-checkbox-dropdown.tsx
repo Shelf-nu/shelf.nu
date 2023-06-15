@@ -5,7 +5,7 @@ import { useAtom, useAtomValue } from "jotai";
 
 import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
 
-import { useCategorySearch } from "../../../category/useCategorySearch";
+import { useTagSearch } from "~/components/category/useTagSearch";
 import Input from "../../../forms/input";
 import { CheckIcon, ChevronRight } from "../../../icons";
 
@@ -27,24 +27,21 @@ export const TagCheckboxDropdown = () => {
   const [params] = useSearchParams();
   const inputRef = useRef<HTMLInputElement>();
   const {
-    categorySearch,
-    refinedCategories,
-    isSearchingCategories,
-    handleCategorySearch,
-    clearCategorySearch,
-  } = useCategorySearch();
+    tagSearch,
+    refinedTags,
+    isSearchingTags,
+    handleTagSearch,
+    clearTagSearch,
+  } = useTagSearch();
 
   const { items } = useAtomValue(selectedTagsAtom);
   const [, setInitialSelect] = useAtom(addInitialSelectedTagsAtom);
 
-  const hasCategories = useMemo(
-    () => refinedCategories.length > 0,
-    [refinedCategories]
-  );
+  const hasCategories = useMemo(() => refinedTags.length > 0, [refinedTags]);
 
   /** Sets the initial selected categories based on the url params. Runs on first load only */
   useEffect(() => {
-    setInitialSelect(params.getAll("category"));
+    setInitialSelect(params.getAll("tag"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -57,7 +54,7 @@ export const TagCheckboxDropdown = () => {
             checked
             value={cat}
             key={cat}
-            name="category"
+            name="tag"
             readOnly
           />
         ))}
@@ -72,7 +69,7 @@ export const TagCheckboxDropdown = () => {
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[290px] md:w-[350px]">
-          {!hasCategories && !isSearchingCategories ? (
+          {!hasCategories && !isSearchingTags ? (
             <CategorySelectNoCategories />
           ) : (
             <>
@@ -85,22 +82,22 @@ export const TagCheckboxDropdown = () => {
                   className="mb-2 text-gray-500"
                   icon="coins"
                   autoFocus
-                  value={categorySearch}
-                  onChange={handleCategorySearch}
+                  value={tagSearch}
+                  onChange={handleTagSearch}
                   ref={inputRef}
                 />
-                {isSearchingCategories && (
+                {isSearchingTags && (
                   <Button
                     icon="x"
                     variant="tertiary"
-                    disabled={isSearchingCategories}
-                    onClick={clearCategorySearch}
+                    disabled={isSearchingTags}
+                    onClick={clearTagSearch}
                     className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                   />
                 )}
               </div>
               <div className="">
-                {refinedCategories.map((c: Category) => (
+                {refinedTags.map((c: Category) => (
                   <CheckboxItem key={c.id} category={c} selected={items} />
                 ))}
               </div>

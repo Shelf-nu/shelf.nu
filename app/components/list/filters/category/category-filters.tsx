@@ -8,7 +8,7 @@ export const CategoryFilters = () => {
   const [, clearFilters] = useAtom(clearCategoryFiltersAtom);
 
   return (
-    <div className="inline-flex w-full shrink-0 justify-end gap-2 p-3 md:w-1/2 md:p-0 lg:gap-4 xl:w-1/4">
+    <div className="inline-flex w-full shrink-0 justify-end gap-2 p-3 md:p-0 lg:gap-4">
       {selectedCategories.items.length > 0 ? (
         <>
           <Button
