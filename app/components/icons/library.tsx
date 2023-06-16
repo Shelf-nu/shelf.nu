@@ -422,7 +422,7 @@ export const CoinsIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export function PrintTagIcon(props: SVGProps<SVGSVGElement>) {
+export function CategoriesIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       width="22"

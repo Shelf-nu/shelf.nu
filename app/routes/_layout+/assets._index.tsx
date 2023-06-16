@@ -169,7 +169,7 @@ export default function AssetIndexPage() {
         <Filters>
           <div className="flex items-center justify-between gap-6 md:justify-end">
             {hasFiltersToClear ? (
-              <div className="hidden md:block">
+              <div className="hidden gap-6 md:flex">
                 <Button
                   as="button"
                   onClick={handleClearFilters}

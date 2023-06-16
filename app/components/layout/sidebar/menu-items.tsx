@@ -2,7 +2,7 @@ import { NavLink } from "@remix-run/react";
 import { useAtom } from "jotai";
 import {
   AssetsIcon,
-  ItemsIcon,
+  CategoriesIcon,
   QuestionsIcon,
   SettingsIcon,
   TagsIcon,
@@ -19,7 +19,7 @@ const menuItemsTop = [
     label: "Assets",
   },
   {
-    icon: <ItemsIcon />,
+    icon: <CategoriesIcon />,
     to: "categories",
     label: "Categories",
   },

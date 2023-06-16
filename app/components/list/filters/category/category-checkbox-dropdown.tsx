@@ -100,7 +100,7 @@ export const CategoryCheckboxDropdown = () => {
                   placeholder="Search categories"
                   hideLabel
                   className="mb-2 text-gray-500"
-                  icon="coins"
+                  icon="category"
                   autoFocus
                   value={categorySearch}
                   onChange={handleCategorySearch}

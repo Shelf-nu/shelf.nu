@@ -98,7 +98,7 @@ export const TagCheckboxDropdown = () => {
                   placeholder="Search tags"
                   hideLabel
                   className="mb-2 text-gray-500"
-                  icon="coins"
+                  icon="tag"
                   autoFocus
                   value={tagSearch}
                   onChange={handleTagSearch}
@@ -110,7 +110,7 @@ export const TagCheckboxDropdown = () => {
                     variant="tertiary"
                     disabled={isSearchingTags}
                     onClick={clearTagSearch}
-                    className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
+                    className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                   />
                 )}
               </div>
