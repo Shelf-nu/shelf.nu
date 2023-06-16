@@ -245,7 +245,7 @@ const ListAssetContent = ({
           </button>
         </div>
       </td>
-      <td className="hidden border-b p-4 md:table-cell md:px-6">
+      <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
         {category ? (
           <Badge color={category.color}>{category.name}</Badge>
         ) : null}
