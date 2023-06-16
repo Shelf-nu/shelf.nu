@@ -167,9 +167,9 @@ export default function AssetIndexPage() {
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         <Filters>
-          <div className="flex items-center justify-end gap-6">
+          <div className="flex items-center justify-between gap-6 md:justify-end">
             {hasFiltersToClear ? (
-              <>
+              <div className="hidden md:block">
                 <Button
                   as="button"
                   onClick={handleClearFilters}
@@ -179,7 +179,7 @@ export default function AssetIndexPage() {
                   Clear all filters
                 </Button>
                 <div className="text-gray-500"> | </div>
-              </>
+              </div>
             ) : null}
             <CategoryFilters />
             <TagFilters />
@@ -216,28 +216,33 @@ const ListAssetContent = ({
   return (
     <>
       <td className="w-full  border-b">
-        <div className="flex gap-3 p-4 md:px-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
-            <AssetImage
-              asset={{
-                assetId: item.id,
-                mainImage: item.mainImage,
-                mainImageExpiration: item.mainImageExpiration,
-                alt: item.title,
-              }}
-              className="h-10 w-10 rounded-[4px] object-cover"
-            />
-          </div>
-
-          <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-            <div className="font-medium">{item.title}</div>
-            <div className="hidden text-gray-600 md:block">{item.id}</div>
-            <div className="block md:hidden">
-              {category ? (
-                <Badge color={category.color}>{category.name}</Badge>
-              ) : null}
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
+              <AssetImage
+                asset={{
+                  assetId: item.id,
+                  mainImage: item.mainImage,
+                  mainImageExpiration: item.mainImageExpiration,
+                  alt: item.title,
+                }}
+                className="h-10 w-10 rounded-[4px] object-cover"
+              />
+            </div>
+            <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
+              <div className="font-medium">{item.title}</div>
+              <div className="hidden text-gray-600 md:block">{item.id}</div>
+              <div className="block md:hidden">
+                {category ? (
+                  <Badge color={category.color}>{category.name}</Badge>
+                ) : null}
+              </div>
             </div>
           </div>
+
+          <button className="block md:hidden">
+            <ChevronRight />
+          </button>
         </div>
       </td>
       <td className="hidden border-b p-4 md:table-cell md:px-6">
@@ -247,11 +252,6 @@ const ListAssetContent = ({
       </td>
       <td className="hidden whitespace-nowrap border-b p-4 text-left md:table-cell md:px-6">
         <ListItemTagsColumn tags={tags} />
-      </td>
-      <td className="md:hidden">
-        <button className="block">
-          <ChevronRight />
-        </button>
       </td>
     </>
   );
