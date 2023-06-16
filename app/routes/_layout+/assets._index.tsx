@@ -2,12 +2,19 @@ import type { Category, Asset, Tag } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
+import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
+import {
+  clearCategoryFiltersAtom,
+  clearTagFiltersAtom,
+  selectedCategoriesAtom,
+  selectedTagsAtom,
+} from "~/components/list/filters/atoms";
 import { CategoryFilters } from "~/components/list/filters/category";
 import { TagFilters } from "~/components/list/filters/tag";
 import type { ListItemData } from "~/components/list/list-item";
@@ -131,6 +138,20 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
+  const selectedCategories = useAtomValue(selectedCategoriesAtom);
+  const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
+
+  const selectedTags = useAtomValue(selectedTagsAtom);
+  const [, clearTagFilters] = useAtom(clearTagFiltersAtom);
+
+  const hasFiltersToClear =
+    selectedCategories.items.length > 0 || selectedTags.items.length > 0;
+
+  const handleClearFilters = () => {
+    clearCategoryFilters();
+    clearTagFilters();
+  };
+
   return (
     <>
       <Header>
@@ -146,7 +167,20 @@ export default function AssetIndexPage() {
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         <Filters>
-          <div className="flex justify-end gap-8">
+          <div className="flex items-center justify-end gap-6">
+            {hasFiltersToClear ? (
+              <>
+                <Button
+                  as="button"
+                  onClick={handleClearFilters}
+                  variant="link"
+                  className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+                >
+                  Clear all filters
+                </Button>
+                <div className="text-gray-500"> | </div>
+              </>
+            ) : null}
             <CategoryFilters />
             <TagFilters />
           </div>
