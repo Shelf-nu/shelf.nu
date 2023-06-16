@@ -64,7 +64,7 @@ export const TagCheckboxDropdown = () => {
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
-          Tags <ChevronRight className="rotate-90" />{" "}
+          Tags <ChevronRight className="hidden rotate-90 md:inline" />{" "}
           {items.length > 0 && (
             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
               {items.length}
@@ -94,11 +94,11 @@ export const TagCheckboxDropdown = () => {
                 </div>
                 <Input
                   type="text"
-                  label="Search categories"
-                  placeholder="Search categories"
+                  label="Search tags"
+                  placeholder="Search tags"
                   hideLabel
                   className="mb-2 text-gray-500"
-                  icon="coins"
+                  icon="tag"
                   autoFocus
                   value={tagSearch}
                   onChange={handleTagSearch}
@@ -110,7 +110,7 @@ export const TagCheckboxDropdown = () => {
                     variant="tertiary"
                     disabled={isSearchingTags}
                     onClick={clearTagSearch}
-                    className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
+                    className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                   />
                 )}
               </div>

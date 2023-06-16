@@ -179,8 +179,8 @@ export default function AssetDetailsPage() {
                   </div>
                 </li>
               ) : null}
-              {asset?.tags ? (
-                <li className="mb-4 flex justify-between">
+              {asset?.tags?.length > 0 ? (
+                <li className="mb-2 flex justify-between">
                   <span className="text-[12px] font-medium text-gray-600">
                     Tags
                   </span>
