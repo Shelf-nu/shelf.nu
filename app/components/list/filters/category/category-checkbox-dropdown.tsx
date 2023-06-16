@@ -4,24 +4,24 @@ import { useSearchParams } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 
 import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
-import {
-  addInitialSelectedCategoriesAtom,
-  addOrRemoveSelectedIdAtom,
-  selectedCategoriesAtom,
-  toggleIsFilteringAtom,
-} from "./atoms";
 
-import { useCategorySearch } from "../../category/useCategorySearch";
-import Input from "../../forms/input";
-import { CheckIcon, ChevronRight } from "../../icons";
+import { useCategorySearch } from "../../../category/useCategorySearch";
+import Input from "../../../forms/input";
+import { CheckIcon, ChevronRight } from "../../../icons";
 
-import { Badge, Button } from "../../shared";
+import { Badge, Button } from "../../../shared";
 
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
-} from "../../shared/dropdown";
+} from "../../../shared/dropdown";
+import {
+  addInitialSelectedCategoriesAtom,
+  addOrRemoveSelectedCategoryIdAtom,
+  selectedCategoriesAtom,
+  toggleIsFilteringCategoriesAtom,
+} from "../atoms";
 
 export const CategoryCheckboxDropdown = () => {
   const [params] = useSearchParams();
@@ -119,8 +119,8 @@ const CheckboxItem = ({
   category: Category;
   selected: string[];
 }) => {
-  const [, toggleIsFiltering] = useAtom(toggleIsFilteringAtom);
-  const [, addOrRemoveSelectedId] = useAtom(addOrRemoveSelectedIdAtom);
+  const [, toggleIsFiltering] = useAtom(toggleIsFilteringCategoriesAtom);
+  const [, addOrRemoveSelectedId] = useAtom(addOrRemoveSelectedCategoryIdAtom);
 
   const handleOnSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {

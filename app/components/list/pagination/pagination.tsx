@@ -25,7 +25,7 @@ export const Pagination = () => {
   );
 
   return (
-    <div className="flex items-center justify-between border-t px-6 py-[18px]">
+    <div className="flex items-center justify-between  px-6 py-[18px]">
       <Button variant="secondary" size="sm" to={prev} disabled={prevDisabled}>
         {"< Previous"}
       </Button>

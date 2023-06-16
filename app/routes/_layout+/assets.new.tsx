@@ -10,8 +10,8 @@ import Header from "~/components/layout/header";
 
 import { createAsset, updateAssetMainImage } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { getCategories } from "~/modules/category";
-import { getTags } from "~/modules/tag";
+import { getAllCategories } from "~/modules/category";
+import { buildTagsSet, getAllTags } from "~/modules/tag";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -20,13 +20,11 @@ const title = "New Asset";
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-  const { categories } = await getCategories({
+  const categories = await getAllCategories({
     userId,
-    perPage: 100,
   });
-  const { tags } = await getTags({
+  const tags = await getAllTags({
     userId,
-    perPage: 100,
   });
 
   const header = {
@@ -76,6 +74,8 @@ export async function action({ request }: LoaderArgs) {
   }
 
   const { title, description, category, qrId } = result.data;
+  /** This checks if tags are passed and build the  */
+  const tags = buildTagsSet(result.data.tags);
 
   const asset = await createAsset({
     title,
@@ -83,6 +83,7 @@ export async function action({ request }: LoaderArgs) {
     userId: authSession.userId,
     categoryId: category,
     qrId,
+    tags,
   });
 
   // Not sure how to handle this failign as the asset is already created

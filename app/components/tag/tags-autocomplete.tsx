@@ -11,6 +11,7 @@ export interface Suggestion {
 
 export const TagsAutocomplete = ({ existingTags }: { existingTags: Tag[] }) => {
   /** Get the tags from the loader */
+
   const suggestions = useLoaderData().tags.map((tag: ShelfTag) => ({
     label: tag.name,
     value: tag.id,

@@ -6,13 +6,15 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
   perPage: Number(searchParams.get("per_page") || "8"),
   search: searchParams.get("s") || null,
   categoriesIds: searchParams.getAll("category") || [],
+  tagsIds: searchParams.getAll("tag") || [],
 });
 
 /** Generates prev & next links  */
 export const generatePageMeta = (request: Request) => {
   const searchParams = getCurrentSearchParams(request);
-  const { page, search, categoriesIds } = getParamsValues(searchParams);
-  const isFiltering = search || categoriesIds;
+  const { page, search, categoriesIds, tagsIds } =
+    getParamsValues(searchParams);
+  const isFiltering = search || categoriesIds || tagsIds;
 
   let prev = isFiltering
     ? mergeSearchParams(searchParams, { page: page - 1 })

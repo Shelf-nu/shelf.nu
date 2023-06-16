@@ -1,9 +1,9 @@
 import type React from "react";
 import { atom } from "jotai";
 
-/** Controls the state for the selected categories for cateogry dropdown.
+/** Controls the state for the selected tags for tag dropdown.
  * The dropdown is used when filtering index */
-export const selectedCategoriesAtom = atom<{
+export const selectedTagsAtom = atom<{
   isFiltering: boolean;
   items: string[];
 }>({
@@ -14,21 +14,21 @@ export const selectedCategoriesAtom = atom<{
 /** Called to set the initial state.
  * We need this atom because the inital state gets loaded from the url params
  */
-export const addInitialSelectedCategoriesAtom = atom(
+export const addInitialSelectedTagsAtom = atom(
   null,
   (_get, set, selected: string[]) => {
-    set(selectedCategoriesAtom, (prev) => ({
+    set(selectedTagsAtom, (prev) => ({
       ...prev,
       items: selected
     }));
   }
 );
 
-/** Updates the selected categories by merging the state */
-export const addOrRemoveSelectedIdAtom = atom(
+/** Updates the selected tags by merging the state */
+export const addOrRemoveSelectedTagIdAtom = atom(
   null,
   (_get, set, event: React.ChangeEvent<HTMLInputElement>) => {
-    set(selectedCategoriesAtom, (prev) => {
+    set(selectedTagsAtom, (prev) => {
 
       const node = event.target as HTMLInputElement;
       const id = node.value satisfies string;
@@ -44,17 +44,17 @@ export const addOrRemoveSelectedIdAtom = atom(
  * Gets set to true when the category is clicked
  * Gets set to false as a callback of the form submit
  * */
-export const toggleIsFilteringAtom = atom(
-  (get) => get(selectedCategoriesAtom).isFiltering, 
+export const toggleIsFilteringTagsAtom = atom(
+  (get) => get(selectedTagsAtom).isFiltering, 
   (get, set) => {
-    set(selectedCategoriesAtom, (prev) => ({
+    set(selectedTagsAtom, (prev) => ({
       ...prev,
-      isFiltering: !get(selectedCategoriesAtom)
+      isFiltering: !get(selectedTagsAtom)
     }))
 })
 
 
 /** Clears the items. */
-export const clearFiltersAtom = atom(null, 
-  (_get, set) => set(selectedCategoriesAtom, { isFiltering: true, items: [] })
+export const clearTagFiltersAtom = atom(null, 
+  (_get, set) => set(selectedTagsAtom, { isFiltering: true, items: [] })
 )

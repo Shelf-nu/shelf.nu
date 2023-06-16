@@ -1,4 +1,12 @@
-import type { Category, Note, Prisma, Qr, Asset, User } from "@prisma/client";
+import type {
+  Category,
+  Note,
+  Prisma,
+  Qr,
+  Asset,
+  User,
+  Tag,
+} from "@prisma/client";
 import { ErrorCorrection } from "@prisma/client";
 import { db } from "~/database";
 import { dateTimeInUnix, oneDayFromNow } from "~/utils";
@@ -30,6 +38,7 @@ export async function getAssets({
   perPage = 8,
   search,
   categoriesIds,
+  tagsIds,
 }: {
   userId: User["id"];
 
@@ -42,6 +51,7 @@ export async function getAssets({
   search?: string | null;
 
   categoriesIds?: Category["id"][] | null;
+  tagsIds?: Tag["id"][] | null;
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
@@ -63,13 +73,23 @@ export async function getAssets({
     };
   }
 
+  if (tagsIds && tagsIds.length > 0) {
+    where.tags = {
+      some: {
+        id: {
+          in: tagsIds,
+        },
+      },
+    };
+  }
+
   const [assets, totalAssets] = await db.$transaction([
     /** Get the assets */
     db.asset.findMany({
       skip,
       take,
       where,
-      include: { category: true },
+      include: { category: true, tags: true },
       orderBy: { createdAt: "desc" },
     }),
 
@@ -86,9 +106,11 @@ export async function createAsset({
   userId,
   categoryId,
   qrId,
+  tags,
 }: Pick<Asset, "description" | "title" | "categoryId"> & {
   userId: User["id"];
   qrId?: Qr["id"];
+  tags?: { set: { id: string }[] };
 }) {
   /** User connction data */
   const user = {
@@ -134,6 +156,15 @@ export async function createAsset({
         connect: {
           id: categoryId,
         },
+      },
+    });
+  }
+
+  /** If a categoryId is passed, link the category to the asset. */
+  if (tags && tags?.set?.length > 0) {
+    Object.assign(data, {
+      tags: {
+        connect: tags?.set,
       },
     });
   }
