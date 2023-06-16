@@ -21,6 +21,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import ProfilePicture from "~/components/user/profile-picture";
 import { usePosition, useUserData } from "~/hooks";
@@ -175,6 +176,20 @@ export default function AssetDetailsPage() {
                     <Badge color={asset.category?.color}>
                       {asset.category?.name}
                     </Badge>
+                  </div>
+                </li>
+              ) : null}
+              {asset?.tags?.length > 0 ? (
+                <li className="mb-2 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Tags
+                  </span>
+                  <div className="text-right ">
+                    {asset.tags.map((tag) => (
+                      <Tag key={tag.id} className="mb-2 ml-2">
+                        {tag.name}
+                      </Tag>
+                    ))}
                   </div>
                 </li>
               ) : null}

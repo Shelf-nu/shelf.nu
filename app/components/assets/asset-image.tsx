@@ -21,7 +21,7 @@ export const AssetImage = ({
   const fetcher = useFetcher();
   const { assetId, mainImage, mainImageExpiration, alt } = asset;
   const url =
-    mainImage || fetcher?.data?.mainImage || "/images/asset-placeholder.png";
+    mainImage || fetcher?.data?.mainImage || "/images/asset-placeholder.jpg";
 
   useEffect(() => {
     if (mainImage && mainImageExpiration) {

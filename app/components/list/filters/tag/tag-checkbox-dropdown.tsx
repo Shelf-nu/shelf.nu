@@ -4,47 +4,47 @@ import { useSearchParams } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 
 import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
-import {
-  addInitialSelectedCategoriesAtom,
-  addOrRemoveSelectedIdAtom,
-  selectedCategoriesAtom,
-  toggleIsFilteringAtom,
-} from "./atoms";
 
-import { useCategorySearch } from "../../category/useCategorySearch";
-import Input from "../../forms/input";
-import { CheckIcon, ChevronRight } from "../../icons";
+import { useTagSearch } from "~/components/category/useTagSearch";
+import Input from "../../../forms/input";
+import { CheckIcon, ChevronRight } from "../../../icons";
 
-import { Badge, Button } from "../../shared";
+import { Badge, Button } from "../../../shared";
 
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
-} from "../../shared/dropdown";
+} from "../../../shared/dropdown";
+import {
+  addInitialSelectedTagsAtom,
+  addOrRemoveSelectedTagIdAtom,
+  clearTagFiltersAtom,
+  selectedTagsAtom,
+  toggleIsFilteringTagsAtom,
+} from "../atoms";
 
-export const CategoryCheckboxDropdown = () => {
+export const TagCheckboxDropdown = () => {
   const [params] = useSearchParams();
   const inputRef = useRef<HTMLInputElement>();
   const {
-    categorySearch,
-    refinedCategories,
-    isSearchingCategories,
-    handleCategorySearch,
-    clearCategorySearch,
-  } = useCategorySearch();
+    tagSearch,
+    refinedTags,
+    isSearchingTags,
+    handleTagSearch,
+    clearTagSearch,
+  } = useTagSearch();
 
-  const { items } = useAtomValue(selectedCategoriesAtom);
-  const [, setInitialSelect] = useAtom(addInitialSelectedCategoriesAtom);
+  const { items } = useAtomValue(selectedTagsAtom);
+  const [, setInitialSelect] = useAtom(addInitialSelectedTagsAtom);
 
-  const hasCategories = useMemo(
-    () => refinedCategories.length > 0,
-    [refinedCategories]
-  );
+  const [, clearFilters] = useAtom(clearTagFiltersAtom);
+
+  const hasCategories = useMemo(() => refinedTags.length > 0, [refinedTags]);
 
   /** Sets the initial selected categories based on the url params. Runs on first load only */
   useEffect(() => {
-    setInitialSelect(params.getAll("category"));
+    setInitialSelect(params.getAll("tag"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -57,14 +57,14 @@ export const CategoryCheckboxDropdown = () => {
             checked
             value={cat}
             key={cat}
-            name="category"
+            name="tag"
             readOnly
           />
         ))}
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
-          Categories <ChevronRight className="rotate-90" />{" "}
+          Tags <ChevronRight className="hidden rotate-90 md:inline" />{" "}
           {items.length > 0 && (
             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
               {items.length}
@@ -72,35 +72,50 @@ export const CategoryCheckboxDropdown = () => {
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[290px] md:w-[350px]">
-          {!hasCategories && !isSearchingCategories ? (
+          {!hasCategories && !isSearchingTags ? (
             <CategorySelectNoCategories />
           ) : (
             <>
               <div className="relative">
+                <div className="mb-[6px] flex w-full justify-between text-xs text-gray-500">
+                  <div>Filter by tag</div>
+                  {items.length > 0 ? (
+                    <>
+                      <Button
+                        as="button"
+                        onClick={clearFilters}
+                        variant="link"
+                        className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
+                      >
+                        Clear filters
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
                 <Input
                   type="text"
-                  label="Search categories"
-                  placeholder="Search categories"
+                  label="Search tags"
+                  placeholder="Search tags"
                   hideLabel
                   className="mb-2 text-gray-500"
-                  icon="coins"
+                  icon="tag"
                   autoFocus
-                  value={categorySearch}
-                  onChange={handleCategorySearch}
+                  value={tagSearch}
+                  onChange={handleTagSearch}
                   ref={inputRef}
                 />
-                {isSearchingCategories && (
+                {isSearchingTags && (
                   <Button
                     icon="x"
                     variant="tertiary"
-                    disabled={isSearchingCategories}
-                    onClick={clearCategorySearch}
-                    className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
+                    disabled={isSearchingTags}
+                    onClick={clearTagSearch}
+                    className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                   />
                 )}
               </div>
               <div className="">
-                {refinedCategories.map((c: Category) => (
+                {refinedTags.map((c: Category) => (
                   <CheckboxItem key={c.id} category={c} selected={items} />
                 ))}
               </div>
@@ -119,8 +134,8 @@ const CheckboxItem = ({
   category: Category;
   selected: string[];
 }) => {
-  const [, toggleIsFiltering] = useAtom(toggleIsFilteringAtom);
-  const [, addOrRemoveSelectedId] = useAtom(addOrRemoveSelectedIdAtom);
+  const [, toggleIsFiltering] = useAtom(toggleIsFilteringTagsAtom);
+  const [, addOrRemoveSelectedId] = useAtom(addOrRemoveSelectedTagIdAtom);
 
   const handleOnSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {

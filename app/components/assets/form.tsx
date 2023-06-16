@@ -1,6 +1,7 @@
 import type { Asset, Qr } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { Form, Link, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import {
@@ -14,12 +15,14 @@ import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
+import { TagsAutocomplete } from "../tag/tags-autocomplete";
 
 export const NewAssetFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
   description: z.string(),
   category: z.string(),
   qrId: z.string().optional(),
+  tags: z.string().optional(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -28,9 +31,16 @@ interface Props {
   category?: Asset["categoryId"];
   description?: Asset["description"];
   qrId?: Qr["id"] | null;
+  tags?: Tag[];
 }
 
-export const AssetForm = ({ title, category, description, qrId }: Props) => {
+export const AssetForm = ({
+  title,
+  category,
+  description,
+  qrId,
+  tags,
+}: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewAssetFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -91,6 +101,20 @@ export const AssetForm = ({ title, category, description, qrId }: Props) => {
         }
       >
         <CategorySelect defaultValue={category || undefined} />
+      </FormRow>
+
+      <FormRow
+        rowLabel={"Tags"}
+        subHeading={
+          <p>
+            Tags can help you organise your database. They can be combined.{" "}
+            <Link to="/tags/new" className="text-gray-600 underline">
+              Create tags
+            </Link>
+          </p>
+        }
+      >
+        <TagsAutocomplete existingTags={tags || []} />
       </FormRow>
 
       <div>

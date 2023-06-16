@@ -2,9 +2,10 @@ import { NavLink } from "@remix-run/react";
 import { useAtom } from "jotai";
 import {
   AssetsIcon,
-  ItemsIcon,
+  CategoriesIcon,
   QuestionsIcon,
   SettingsIcon,
+  TagsIcon,
 } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
 import { tw } from "~/utils";
@@ -18,9 +19,14 @@ const menuItemsTop = [
     label: "Assets",
   },
   {
-    icon: <ItemsIcon />,
+    icon: <CategoriesIcon />,
     to: "categories",
     label: "Categories",
+  },
+  {
+    icon: <TagsIcon />,
+    to: "tags",
+    label: "Tags",
   },
 ];
 const menuItemsBottom = [
