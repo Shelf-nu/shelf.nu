@@ -19,6 +19,7 @@ import {
 import {
   addInitialSelectedTagsAtom,
   addOrRemoveSelectedTagIdAtom,
+  clearTagFiltersAtom,
   selectedTagsAtom,
   toggleIsFilteringTagsAtom,
 } from "../atoms";
@@ -36,6 +37,8 @@ export const TagCheckboxDropdown = () => {
 
   const { items } = useAtomValue(selectedTagsAtom);
   const [, setInitialSelect] = useAtom(addInitialSelectedTagsAtom);
+
+  const [, clearFilters] = useAtom(clearTagFiltersAtom);
 
   const hasCategories = useMemo(() => refinedTags.length > 0, [refinedTags]);
 
@@ -74,6 +77,21 @@ export const TagCheckboxDropdown = () => {
           ) : (
             <>
               <div className="relative">
+                <div className="mb-[6px] flex w-full justify-between text-xs text-gray-500">
+                  <div>Filter by tag</div>
+                  {items.length > 0 ? (
+                    <>
+                      <Button
+                        as="button"
+                        onClick={clearFilters}
+                        variant="link"
+                        className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
+                      >
+                        Clear filters
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
                 <Input
                   type="text"
                   label="Search categories"

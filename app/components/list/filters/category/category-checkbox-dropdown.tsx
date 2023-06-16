@@ -19,6 +19,7 @@ import {
 import {
   addInitialSelectedCategoriesAtom,
   addOrRemoveSelectedCategoryIdAtom,
+  clearCategoryFiltersAtom,
   selectedCategoriesAtom,
   toggleIsFilteringCategoriesAtom,
 } from "../atoms";
@@ -36,6 +37,7 @@ export const CategoryCheckboxDropdown = () => {
 
   const { items } = useAtomValue(selectedCategoriesAtom);
   const [, setInitialSelect] = useAtom(addInitialSelectedCategoriesAtom);
+  const [, clearFilters] = useAtom(clearCategoryFiltersAtom);
 
   const hasCategories = useMemo(
     () => refinedCategories.length > 0,
@@ -63,7 +65,7 @@ export const CategoryCheckboxDropdown = () => {
         ))}
       </div>
       <DropdownMenu>
-        <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
+        <DropdownMenuTrigger className="inline-flex items-center gap-2 font-normal text-gray-500">
           Categories <ChevronRight className="rotate-90" />{" "}
           {items.length > 0 && (
             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
@@ -77,6 +79,21 @@ export const CategoryCheckboxDropdown = () => {
           ) : (
             <>
               <div className="relative">
+                <div className="mb-[6px] flex w-full justify-between text-xs text-gray-500">
+                  <div>Filter by category</div>
+                  {items.length > 0 ? (
+                    <>
+                      <Button
+                        as="button"
+                        onClick={clearFilters}
+                        variant="link"
+                        className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
+                      >
+                        Clear filters
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
                 <Input
                   type="text"
                   label="Search categories"
