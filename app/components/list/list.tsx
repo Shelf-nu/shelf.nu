@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { ListItemData } from "~/components/list/list-item";
 import { EmptyState } from "./empty-state";
 
@@ -14,6 +15,7 @@ import { Pagination } from "./pagination";
 interface ListProps {
   ItemComponent: any;
   items: ListItemData[];
+  CustomHeader?: any;
   totalItems: number;
   modelName: {
     singular: string;
@@ -29,6 +31,7 @@ interface ListProps {
 export const List = ({
   ItemComponent,
   items,
+  CustomHeader,
   totalItems,
   modelName,
   perPage,
@@ -46,12 +49,16 @@ export const List = ({
         <EmptyState modelName={modelName} search={search} />
       ) : (
         <div>
-          <ListHeader
-            items={items}
-            totalItems={totalItems}
-            modelName={modelName}
-            perPage={perPage}
-          />
+          {CustomHeader ? (
+            <CustomHeader />
+          ) : (
+            <ListHeader
+              items={items}
+              totalItems={totalItems}
+              modelName={modelName}
+              perPage={perPage}
+            />
+          )}
 
           <div>
             {items.map((item: any) => (

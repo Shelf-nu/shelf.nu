@@ -11,8 +11,6 @@ interface ListHeaderProps {
 }
 
 export const ListHeader = ({ items, totalItems, perPage, modelName }: ListHeaderProps) => {
-  // const { items, totalItems, perPage, modelName } =
-  //   useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
 
   return (

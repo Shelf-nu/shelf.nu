@@ -92,7 +92,7 @@ export default function ItemIndexPage() {
 
 function ChecklistContent({ item }: { item: Checklist }) {
   return (
-    <Link className={`block `} to={item.id}>
+    <Link className={`block `} to={`${item.id}/checklist`}>
       <article className="flex gap-3">
         <div className="flex w-full items-center justify-between gap-3">
           <div className="flex gap-3">
