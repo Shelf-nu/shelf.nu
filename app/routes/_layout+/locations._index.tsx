@@ -1,9 +1,8 @@
-
+import type { Location } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json, type V2_MetaFunction } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 
-import type { Location } from "@prisma/client";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";

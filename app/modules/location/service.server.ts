@@ -1,6 +1,20 @@
 import type { Prisma, User, Location } from "@prisma/client";
 import { db } from "~/database";
 
+export async function getLocation({
+  userId,
+  id,
+}: Pick<Location, "id"> & {
+  userId: User["id"];
+}) {
+  return db.location.findFirst({
+    where: { id, userId },
+    include: {
+      assets: true,
+    },
+  });
+}
+
 export async function getAllLocations({ userId }: { userId: User["id"] }) {
   return await db.location.findMany({ where: { userId } });
 }
@@ -54,14 +68,16 @@ export async function getLocations({
 export async function createLocation({
   name,
   description,
+  address,
   userId,
-}: Pick<Location, "description" | "name"> & {
+}: Pick<Location, "description" | "name" | "address"> & {
   userId: User["id"];
 }) {
   return db.location.create({
     data: {
       name,
       description,
+      address,
       user: {
         connect: {
           id: userId,
