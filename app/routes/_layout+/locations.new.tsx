@@ -1,18 +1,41 @@
-import { json, redirect, type LoaderArgs } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { z } from "zod";
+import { titleAtom } from "~/atoms/locations.new";
+
+import Header from "~/components/layout/header";
+import {
+  LocationForm,
+  NewLocationFormSchema,
+} from "~/components/locations/form";
+
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createLocation } from "~/modules/location";
 import { assertIsPost } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+const title = "New Location";
 
-export const NewLocationFormSchema = z.object({
-  name: z.string().min(2, "Name is required"),
-  description: z.string(),
-  address: z.string(),
-});
+export async function loader({ request }: LoaderArgs) {
+  await requireAuthSession(request);
 
-export async function action({ request }: LoaderArgs) {
+  const header = {
+    title,
+  };
+
+  return json({ header });
+}
+
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
+
+export const handle = {
+  breadcrumb: () => <span>{title}</span>,
+};
+
+export async function action({ request }: ActionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
 
@@ -54,8 +77,8 @@ export async function action({ request }: LoaderArgs) {
   });
 
   sendNotification({
-    title: "Asset created",
-    message: "Your asset has been created successfully",
+    title: "Location created",
+    message: "Your location has been created successfully",
     icon: { name: "success", variant: "success" },
   });
 
@@ -64,4 +87,17 @@ export async function action({ request }: LoaderArgs) {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
   });
+}
+
+export default function NewLocationPage() {
+  const title = useAtomValue(titleAtom);
+
+  return (
+    <>
+      <Header title={title} />
+      <div>
+        <LocationForm />
+      </div>
+    </>
+  );
 }
