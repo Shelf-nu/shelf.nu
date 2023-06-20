@@ -1,15 +1,25 @@
-import type { V2_MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useAtomValue } from "jotai";
+import { parseFormAny } from "react-zorm";
 import { titleAtom } from "~/atoms/locations.new";
 
-import { LocationForm } from "~/components/locations/form";
 import Header from "~/components/layout/header";
+import {
+  LocationForm,
+  NewLocationFormSchema,
+} from "~/components/locations/form";
 
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { createLocation } from "~/modules/location";
+import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 const title = "New Location";
 
-export async function loader() {
+export async function loader({ request }: LoaderArgs) {
+  await requireAuthSession(request);
+
   const header = {
     title,
   };
@@ -25,7 +35,61 @@ export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export default function NewAssetPage() {
+export async function action({ request }: ActionArgs) {
+  const authSession = await requireAuthSession(request);
+  assertIsPost(request);
+
+  /** Here we need to clone the request as we need 2 different streams:
+   * 1. Access form data for creating asset
+   * 2. Access form data via upload handler to be able to upload the file
+   *
+   * This solution is based on : https://github.com/remix-run/remix/issues/3971#issuecomment-1222127635
+   */
+  const clonedRequest = request.clone();
+
+  const formData = await clonedRequest.formData();
+  const result = await NewLocationFormSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
+
+  if (!result.success) {
+    return json(
+      {
+        errors: result.error,
+      },
+      {
+        status: 400,
+        headers: {
+          "Set-Cookie": await commitAuthSession(request, { authSession }),
+        },
+      }
+    );
+  }
+
+  const { name, description, address } = result.data;
+  /** This checks if tags are passed and build the  */
+
+  const location = await createLocation({
+    name,
+    description,
+    address,
+    userId: authSession.userId,
+  });
+
+  sendNotification({
+    title: "Location created",
+    message: "Your location has been created successfully",
+    icon: { name: "success", variant: "success" },
+  });
+
+  return redirect(`/locations/${location.id}`, {
+    headers: {
+      "Set-Cookie": await commitAuthSession(request, { authSession }),
+    },
+  });
+}
+
+export default function NewLocationPage() {
   const title = useAtomValue(titleAtom);
 
   return (

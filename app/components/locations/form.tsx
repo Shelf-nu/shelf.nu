@@ -14,7 +14,7 @@ import Input from "../forms/input";
 import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
 
-export const NewAssetFormSchema = z.object({
+export const NewLocationFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
   description: z.string(),
   address: z.string(),
@@ -29,7 +29,7 @@ interface Props {
 
 export const LocationForm = ({ name, address, description }: Props) => {
   const navigation = useNavigation();
-  const zo = useZorm("NewQuestionWizardScreen", NewAssetFormSchema);
+  const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
   const disabled = isFormProcessing(navigation.state);
 
   //   const fileError = useAtomValue(fileErrorAtom);
