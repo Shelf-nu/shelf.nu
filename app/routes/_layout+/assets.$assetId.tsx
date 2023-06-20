@@ -148,8 +148,8 @@ export default function AssetDetailsPage() {
               alt: asset.title,
             }}
             className={tw(
-              "hidden h-auto w-[343px] rounded-lg object-cover md:block lg:w-full",
-              asset.description ? "rounded-b-none" : ""
+              "hidden h-auto w-[343px] rounded-lg border object-cover md:block lg:w-full",
+              asset.description ? "rounded-b-none border-b-0" : ""
             )}
           />
           {asset.description ? (

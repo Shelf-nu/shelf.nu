@@ -167,7 +167,7 @@ export default function AssetIndexPage() {
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         <Filters>
-          <div className="flex items-center justify-between gap-6 md:justify-end">
+          <div className="flex items-center justify-around gap-6 md:justify-end">
             {hasFiltersToClear ? (
               <div className="hidden gap-6 md:flex">
                 <Button
@@ -245,7 +245,7 @@ const ListAssetContent = ({
           </button>
         </div>
       </td>
-      <td className="hidden border-b p-4 md:table-cell md:px-6">
+      <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
         {category ? (
           <Badge color={category.color}>{category.name}</Badge>
         ) : null}
