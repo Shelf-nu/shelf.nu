@@ -1,20 +1,57 @@
-import { LoaderArgs, json, type V2_MetaFunction } from "@remix-run/node";
+
+import type { LoaderArgs } from "@remix-run/node";
+import { json, type V2_MetaFunction } from "@remix-run/node";
+import { useNavigate } from "@remix-run/react";
+
 import type { Location } from "@prisma/client";
 import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { Button } from "~/components/shared/button";
-import { useNavigate } from "@remix-run/react";
 import { requireAuthSession } from "~/modules/auth";
+import { getLocations } from "~/modules/location";
+import {
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+} from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export async function loader({ request }: LoaderArgs) {
-  await requireAuthSession(request);
-  const title = "Locations";
-  const header = {
-    title,
+  const { userId } = await requireAuthSession(request);
+
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search } = getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
+
+  const { locations, totalLocations } = await getLocations({
+    userId,
+    page,
+    perPage,
+    search,
+  });
+  const totalPages = Math.ceil(totalLocations / perPage);
+
+  const header: HeaderData = {
+    title: "Locations",
   };
-  return json({ header });
+  const modelName = {
+    singular: "location",
+    plural: "locations",
+  };
+  return json({
+    header,
+    items: locations,
+    search,
+    page,
+    totalItems: totalLocations,
+    totalPages,
+    perPage,
+    prev,
+    next,
+    modelName,
+  });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
