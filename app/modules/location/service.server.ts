@@ -56,6 +56,9 @@ export async function getLocations({
       take,
       where,
       orderBy: { updatedAt: "desc" },
+      include: {
+        assets: true,
+      },
     }),
 
     /** Count them */

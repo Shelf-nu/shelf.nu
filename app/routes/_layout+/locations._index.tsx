@@ -113,7 +113,7 @@ const ListItemContent = ({ item }: { item: Location }) => {
         </div>
       </td>
       <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
-        54
+        {item.assets.length}
       </td>
     </>
   );
