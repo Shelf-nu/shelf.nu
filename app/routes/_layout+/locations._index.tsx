@@ -1,14 +1,23 @@
-import type { V2_MetaFunction } from "@remix-run/node";
+import { LoaderArgs, json, type V2_MetaFunction } from "@remix-run/node";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { loader } from "./locations";
 import { Button } from "~/components/shared/button";
 import { useNavigate } from "@remix-run/react";
+import { requireAuthSession } from "~/modules/auth";
+
+export async function loader({ request }: LoaderArgs) {
+  await requireAuthSession(request);
+  const title = "Locations";
+  const header = {
+    title,
+  };
+  return json({ header });
+}
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.header.title) },
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export default function LocationsIndexPage() {
@@ -44,7 +53,6 @@ export default function LocationsIndexPage() {
 }
 
 const ListItemContent = ({ item }: { item: any }) => {
-  const { category, tags } = item;
   return (
     <>
       <td className="w-full  border-b">
@@ -52,8 +60,8 @@ const ListItemContent = ({ item }: { item: any }) => {
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
               <img
-                src=""
-                alt=""
+                src={item.img}
+                alt="img"
                 className="h-10 w-10 rounded-[4px] object-cover"
               />
             </div>
@@ -62,13 +70,13 @@ const ListItemContent = ({ item }: { item: any }) => {
               <div className="hidden text-gray-600 md:block">
                 {item.longitude}, {item.latitude}
               </div>
-              <div className="block md:hidden">54</div>
+              <div className="block md:hidden">{item.assets.length}</div>
             </div>
           </div>
         </div>
       </td>
       <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
-        54
+        {item.assets.length}
       </td>
     </>
   );
