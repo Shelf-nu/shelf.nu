@@ -1,6 +1,9 @@
+
 import type { LoaderArgs } from "@remix-run/node";
 import { json, type V2_MetaFunction } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
+
+import type { Location } from "@prisma/client";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -87,7 +90,7 @@ export default function LocationsIndexPage() {
   );
 }
 
-const ListItemContent = ({ item }: { item: any }) => {
+const ListItemContent = ({ item }: { item: Location }) => {
   return (
     <>
       <td className="w-full  border-b">
@@ -95,23 +98,23 @@ const ListItemContent = ({ item }: { item: any }) => {
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
               <img
-                src={item.img}
+                src="/images/asset-placeholder.jpg"
                 alt="img"
                 className="h-10 w-10 rounded-[4px] object-cover"
               />
             </div>
             <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-              <div className="font-medium">{item.title}</div>
+              <div className="font-medium">{item.name}</div>
               <div className="hidden text-gray-600 md:block">
-                {item.longitude}, {item.latitude}
+                {item.address}
               </div>
-              <div className="block md:hidden">{item.assets.length}</div>
+              <div className="block md:hidden">54</div>
             </div>
           </div>
         </div>
       </td>
       <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
-        {item.assets.length}
+        54
       </td>
     </>
   );
