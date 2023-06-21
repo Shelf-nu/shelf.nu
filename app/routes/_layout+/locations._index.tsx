@@ -1,4 +1,4 @@
-import type { Location } from "@prisma/client";
+import type { Asset, Location } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json, type V2_MetaFunction } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
@@ -89,7 +89,11 @@ export default function LocationsIndexPage() {
   );
 }
 
-const ListItemContent = ({ item }: { item: Location }) => {
+interface LocationWithAssets extends Location {
+  assets: Asset[];
+}
+
+const ListItemContent = ({ item }: { item: LocationWithAssets }) => {
   return (
     <>
       <td className="w-full  border-b">

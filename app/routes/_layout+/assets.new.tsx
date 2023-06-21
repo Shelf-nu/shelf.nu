@@ -8,10 +8,13 @@ import { titleAtom } from "~/atoms/assets.new";
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
 
-import { createAsset, updateAssetMainImage } from "~/modules/asset";
+import {
+  createAsset,
+  getAllRelatedEntries,
+  updateAssetMainImage,
+} from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { getAllCategories } from "~/modules/category";
-import { buildTagsSet, getAllTags } from "~/modules/tag";
+import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -20,10 +23,7 @@ const title = "New Asset";
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-  const categories = await getAllCategories({
-    userId,
-  });
-  const tags = await getAllTags({
+  const { categories, tags, locations } = await getAllRelatedEntries({
     userId,
   });
 
@@ -31,7 +31,7 @@ export async function loader({ request }: LoaderArgs) {
     title,
   };
 
-  return json({ header, categories, tags });
+  return json({ header, categories, tags, locations });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -73,7 +73,7 @@ export async function action({ request }: LoaderArgs) {
     );
   }
 
-  const { title, description, category, qrId } = result.data;
+  const { title, description, category, qrId, location } = result.data;
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
 
@@ -82,6 +82,7 @@ export async function action({ request }: LoaderArgs) {
     description,
     userId: authSession.userId,
     categoryId: category,
+    locationId: location,
     qrId,
     tags,
   });

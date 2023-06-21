@@ -10,21 +10,22 @@ import { ErrorBoundryComponent } from "~/components/errors";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { getAsset, updateAsset, updateAssetMainImage } from "~/modules/asset";
+import {
+  getAllRelatedEntries,
+  getAsset,
+  updateAsset,
+  updateAssetMainImage,
+} from "~/modules/asset";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { getAllCategories } from "~/modules/category";
-import { buildTagsSet, getAllTags } from "~/modules/tag";
+import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-  const categories = await getAllCategories({
-    userId,
-  });
-  const tags = await getAllTags({
+  const { categories, tags, locations } = await getAllRelatedEntries({
     userId,
   });
 
@@ -45,6 +46,7 @@ export async function loader({ request, params }: LoaderArgs) {
     header,
     categories,
     tags,
+    locations,
   });
 }
 
@@ -88,7 +90,7 @@ export async function action({ request, params }: ActionArgs) {
     userId: authSession.userId,
   });
 
-  const { title, description, category } = result.data;
+  const { title, description, category, location } = result.data;
 
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
@@ -99,6 +101,7 @@ export async function action({ request, params }: ActionArgs) {
     description,
     categoryId: category,
     tags,
+    locationId: location,
   });
 
   sendNotification({
@@ -133,6 +136,7 @@ export default function AssetEditPage() {
         <AssetForm
           title={asset.title}
           category={asset.categoryId}
+          location={asset.locationId}
           description={asset.description}
           tags={tags}
         />

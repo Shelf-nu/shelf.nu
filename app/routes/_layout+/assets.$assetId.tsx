@@ -1,7 +1,9 @@
+import type { Location } from "@prisma/client";
 import type {
   ActionArgs,
   LinksFunction,
   LoaderArgs,
+  SerializeFrom,
   V2_MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
@@ -35,6 +37,8 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
+
+type ShelfLocation = Location;
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -113,6 +117,11 @@ export const links: LinksFunction = () => [
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
+  /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
+   * Source: https://github.com/prisma/prisma/discussions/14371
+   */
+  const location = asset?.location as SerializeFrom<ShelfLocation>;
+
   const user = useUserData();
   usePosition();
   return (
@@ -176,6 +185,18 @@ export default function AssetDetailsPage() {
                     <Badge color={asset.category?.color}>
                       {asset.category?.name}
                     </Badge>
+                  </div>
+                </li>
+              ) : null}
+              {location ? (
+                <li className="mb-4 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Location
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Tag key={location.id} className="mb-2 ml-2">
+                      {location.name}
+                    </Tag>
                   </div>
                 </li>
               ) : null}

@@ -10,6 +10,7 @@ import {
   validateFileAtom,
 } from "~/atoms/assets.new";
 import { isFormProcessing } from "~/utils";
+import { LocationSelect } from "./location/location-select";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -21,6 +22,7 @@ export const NewAssetFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
   description: z.string(),
   category: z.string(),
+  location: z.string(),
   qrId: z.string().optional(),
   tags: z.string().optional(),
 });
@@ -29,6 +31,7 @@ export const NewAssetFormSchema = z.object({
 interface Props {
   title?: Asset["title"];
   category?: Asset["categoryId"];
+  location?: Asset["locationId"];
   description?: Asset["description"];
   qrId?: Qr["id"] | null;
   tags?: Tag[];
@@ -37,6 +40,7 @@ interface Props {
 export const AssetForm = ({
   title,
   category,
+  location,
   description,
   qrId,
   tags,
@@ -132,7 +136,7 @@ export const AssetForm = ({
         }
         className="pt-[10px]"
       >
-        <TagsAutocomplete existingTags={tags || []} />
+        <LocationSelect defaultValue={location || undefined} />
       </FormRow>
 
       <div>
