@@ -1,26 +1,29 @@
+import type { Asset, Category, Tag, Location } from "@prisma/client";
+import type { ActionArgs } from "@remix-run/node";
 import {
   json,
+  redirect,
   type LinksFunction,
   type LoaderArgs,
   type V2_MetaFunction,
 } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
-import { ActionsDopdown } from "~/components/locations/actions-dropdown";
+import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { List } from "~/components/list/list";
+import { ActionsDopdown } from "~/components/location";
+import { ShelfMap } from "~/components/location/map";
 import { Badge, Button } from "~/components/shared";
 import { Card } from "~/components/shared/card";
-import { requireAuthSession } from "~/modules/auth";
-import { getLocation } from "~/modules/location";
-import { getRequiredParam, tw } from "~/utils";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { useLoaderData, useNavigate } from "@remix-run/react";
-import { ShelfMap } from "~/components/assets/location/map";
-import { List } from "~/components/list/list";
-import { Asset, Category, Tag } from "@prisma/client";
-import { ChevronRight } from "~/components/icons";
 import { Tag as TagBadge } from "~/components/shared/tag";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { deleteLocation, getLocation } from "~/modules/location";
 import assetCss from "~/styles/asset.css";
+import { assertIsDelete, getRequiredParam, tw } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
@@ -34,126 +37,22 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   };
 
   const modelName = {
-    singular: "item",
-    plural: "items",
+    singular: "location",
+    plural: "locations",
   };
 
-  const items = [
-    {
-      id: "clj41xxks000ug7b074y0wdlv",
-      title: "Nikon DSLR Camera",
-      description:
-        "Purchased on 1st feb 2023.\r\n" +
-        "To be used for product photography in the office.",
-      mainImage: null,
-      mainImageExpiration: null,
-      createdAt: "2023-06-20T08:57:17.848Z",
-      updatedAt: "2023-06-20T11:08:10.436Z",
-      userId: "56cfecc4-61ed-441a-972c-e4511b1fc7b4",
-      categoryId: "clj40mjnl0000g7b09dkqjsg1",
-      locationId: null,
-      category: {
-        id: "clj40mjnl0000g7b09dkqjsg1",
-        name: "Office Equipment",
-        description:
-          "Items that are used for office work, such as computers, printers, scanners, phones, etc.",
-        color: "#ab339f",
-        createdAt: "2023-06-20T08:20:27.009Z",
-        updatedAt: "2023-06-20T08:20:27.009Z",
-        userId: "56cfecc4-61ed-441a-972c-e4511b1fc7b4",
-      },
-      tags: [
-        {
-          createdAt: "2023-06-20T08:21:56.111Z",
-          description: "",
-          id: "clj40ogfk000sg7b02fudki6f",
-          name: "Tech",
-          updatedAt: "2023-06-20T08:21:56.111Z",
-          userId: "56cfecc4-61ed-441a-972c-e4511b1fc7b4",
-        },
-      ],
-    },
-    {
-      id: "clj41xxks000ug7b074y0wd34v",
-      title: "Canon DSLR Camera",
-      description:
-        "Purchased on 1st feb 2023.\r\n" +
-        "To be used for product photography in the office.",
-      mainImage: null,
-      mainImageExpiration: null,
-      createdAt: "2023-06-20T08:57:17.848Z",
-      updatedAt: "2023-06-20T11:08:10.436Z",
-      userId: "56cfecc4-61ed-441a-972c-e4511b1fc7b4",
-      categoryId: "clj40mjnl0000g7b09dkqjs31",
-      locationId: null,
-      category: {
-        id: "clj40mjnl0000g7b09dkqjsg34",
-        name: "Cameras",
-        description:
-          "Items that are used for office work, such as computers, printers, scanners, phones, etc.",
-        color: "#175CD3",
-        createdAt: "2023-06-20T08:20:27.009Z",
-        updatedAt: "2023-06-20T08:20:27.009Z",
-        userId: "56cfecc4-61ed-441a-972c-e4511b1fc7b4",
-      },
-      tags: [
-        {
-          createdAt: "2023-06-20T08:21:56.111Z",
-          description: "",
-          id: "clj40ogfk000sg7b02fudkef6f",
-          name: "Tech",
-          updatedAt: "2023-06-20T08:21:56.111Z",
-          userId: "56cfecc4-61ed-441a-972c-e4511b1fc7b4",
-        },
-      ],
-    },
-    {
-      id: "clj41xxks000ug7b074y0wdefv",
-      title: "LED screen",
-      description:
-        "Purchased on 1st feb 2023.\r\n" +
-        "To be used for product photography in the office.",
-      mainImage: null,
-      mainImageExpiration: null,
-      createdAt: "2023-06-20T08:57:17.848Z",
-      updatedAt: "2023-06-20T11:08:10.436Z",
-      userId: "56cfecc4-61ed-441a-972c-e4511b1fc7b4",
-      categoryId: "clj40mjnl0000g7b09dkqjswe1",
-      locationId: null,
-      category: {
-        id: "clj40mjnl0000g7b09dkqjswe",
-        name: "Office Equipment",
-        description:
-          "Items that are used for office work, such as computers, printers, scanners, phones, etc.",
-        color: "#ab339f",
-        createdAt: "2023-06-20T08:20:27.009Z",
-        updatedAt: "2023-06-20T08:20:27.009Z",
-        userId: "56cfecc4-61ed-441a-972c-e4511b1fc7b4",
-      },
-      tags: [
-        {
-          createdAt: "2023-06-20T08:21:56.111Z",
-          description: "",
-          id: "clj40ogfk000sg7b02fudkef6f",
-          name: "Tech",
-          updatedAt: "2023-06-20T08:21:56.111Z",
-          userId: "56cfecc4-61ed-441a-972c-e4511b1fc7b4",
-        },
-      ],
-    },
-  ];
   const page = 1;
-  const totalItems = items.length;
-  const perPage = 10;
+  const totalItems = location.assets.length;
+  const perPage = 8;
   const next = null;
   const prev = null;
-  const totalPages = 1;
+  const totalPages = location.assets.length / perPage;
 
   return json({
     location,
     header,
     modelName,
-    items,
+    items: location.assets,
     page,
     totalItems,
     perPage,
@@ -176,46 +75,57 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
 ];
 
+export async function action({ request, params }: ActionArgs) {
+  assertIsDelete(request);
+  const id = await getRequiredParam(params, "locationId");
+  const authSession = await requireAuthSession(request);
+
+  await deleteLocation({ userId: authSession.userId, id });
+
+  sendNotification({
+    title: "Location deleted",
+    message: "Your location has been deleted successfully",
+    icon: { name: "trash", variant: "error" },
+  });
+
+  return redirect(`/locations`, {
+    headers: {
+      "Set-Cookie": await commitAuthSession(request, { authSession }),
+    },
+  });
+}
+
 export default function LocationPage() {
   const { location } = useLoaderData<typeof loader>();
-  const navigate = useNavigate();
   return (
     <div>
       <Header>
-        <Button
-          to="qr"
-          variant="secondary"
-          icon="barcode"
-          onlyIconOnMobile={true}
-        >
-          View QR code
-        </Button>
-
         <ActionsDopdown location={location} />
       </Header>
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
           <img
             src="/images/asset-placeholder.jpg"
+            alt={`${location.name}`}
             className={tw(
-              "hidden h-auto w-[343px] rounded-lg border object-cover md:block md:h-[343px] xl:h-auto md:w-full",
+              "hidden h-auto w-[343px] rounded-lg border object-cover md:block md:h-[343px] md:w-full xl:h-auto",
               location.description ? "rounded-b-none border-b-0" : ""
             )}
           />
           {location.description ? (
-            <Card className="mt-0 md:rounded-t-none mb-4">
+            <Card className="mb-4 mt-0 md:rounded-t-none">
               <p className=" text-gray-600">{location.description}</p>
             </Card>
           ) : null}
 
-          <div className="border border-gray-200 px-4 py-5 flex items-center justify-between gap-10 rounded-lg mb-4">
+          <div className="mb-4 flex items-center justify-between gap-10 rounded-lg border border-gray-200 px-4 py-5">
             <span className=" text-xs font-medium text-gray-600">Address</span>
             <span className="font-medium">{location.address}</span>
           </div>
 
           <div className="mb-10">
             <ShelfMap latitude={48.858093} longitude={2.294694} />
-            <div className="p-4 text-text-xs text-gray-600 border text-center border-gray-200">
+            <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
               <p>
                 <Button
                   to={`https://www.google.com/maps/search/?api=1&query=${48.858093},${2.294694}&zoom=15&markers=${48.858093},${2.294694}`}
@@ -233,7 +143,7 @@ export default function LocationPage() {
         <div className="w-full lg:ml-8">
           <List
             ItemComponent={ListAssetContent}
-            navigate={(itemId) => navigate(itemId)}
+            // navigate={(itemId) => navigate(itemId)}
             headerChildren={
               <>
                 <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
@@ -241,9 +151,6 @@ export default function LocationPage() {
                 </th>
                 <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
                   Tags
-                </th>
-                <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                  Location
                 </th>
               </>
             }
@@ -260,17 +167,19 @@ const ListAssetContent = ({
   item: Asset & {
     category?: Category;
     tags?: Tag[];
+    location?: Location;
   };
 }) => {
   const { category, tags } = item;
   return (
     <>
-      <td className="w-auto lg:w-3/5 max-w-3/5 border-b">
+      <td className="w-full border-b">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
               <img
                 src="/images/asset-placeholder.jpg"
+                alt={`${item.title}`}
                 className="h-10 w-10 rounded-[4px] object-cover"
               />
             </div>
@@ -297,18 +206,6 @@ const ListAssetContent = ({
       </td>
       <td className="hidden whitespace-nowrap border-b p-4 text-left md:table-cell md:px-6">
         <ListItemTagsColumn tags={tags} />
-      </td>
-      <td className="hidden whitespace-nowrap border-b p-4 text-left md:table-cell md:px-6">
-        <span className="inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
-          <img
-            src="/images/no-location-image.jpg"
-            alt="img"
-            className="w-4 h-4 rounded-full"
-          />
-          <span className="ml-1.5 text-[12px] font-medium text-gray-700">
-            Gear Room III
-          </span>
-        </span>
       </td>
     </>
   );

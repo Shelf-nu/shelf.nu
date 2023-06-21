@@ -10,7 +10,12 @@ export async function getLocation({
   return db.location.findFirst({
     where: { id, userId },
     include: {
-      assets: true,
+      assets: {
+        include: {
+          category: true,
+          tags: true,
+        },
+      },
     },
   });
 }
@@ -87,5 +92,14 @@ export async function createLocation({
         },
       },
     },
+  });
+}
+
+export async function deleteLocation({
+  id,
+  userId,
+}: Pick<Location, "id"> & { userId: User["id"] }) {
+  return await db.location.deleteMany({
+    where: { id, userId },
   });
 }

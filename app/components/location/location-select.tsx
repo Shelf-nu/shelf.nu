@@ -9,7 +9,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../../forms";
+} from "../forms";
 
 export const LocationSelect = ({ defaultValue }: { defaultValue?: string }) => {
   /** This takes care of the search bar inside the dropdown */

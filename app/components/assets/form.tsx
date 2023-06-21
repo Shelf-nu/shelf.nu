@@ -10,7 +10,7 @@ import {
   validateFileAtom,
 } from "~/atoms/assets.new";
 import { isFormProcessing } from "~/utils";
-import { LocationSelect } from "./location/location-select";
+import { LocationSelect } from "../location/location-select";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
