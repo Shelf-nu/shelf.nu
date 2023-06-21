@@ -45,7 +45,7 @@ label span {
 }
 
 p {
-  @apply text-text-sm font-normal text-gray-900;
+  @apply font-normal;
 }
 
 @keyframes spinner {

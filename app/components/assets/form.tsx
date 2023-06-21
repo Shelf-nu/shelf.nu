@@ -10,6 +10,7 @@ import {
   validateFileAtom,
 } from "~/atoms/assets.new";
 import { isFormProcessing } from "~/utils";
+import { LocationSelect } from "./location/location-select";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -21,6 +22,7 @@ export const NewAssetFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
   description: z.string(),
   category: z.string(),
+  location: z.string(),
   qrId: z.string().optional(),
   tags: z.string().optional(),
 });
@@ -29,6 +31,7 @@ export const NewAssetFormSchema = z.object({
 interface Props {
   title?: Asset["title"];
   category?: Asset["categoryId"];
+  location?: Asset["locationId"];
   description?: Asset["description"];
   qrId?: Qr["id"] | null;
   tags?: Tag[];
@@ -37,6 +40,7 @@ interface Props {
 export const AssetForm = ({
   title,
   category,
+  location,
   description,
   qrId,
   tags,
@@ -59,7 +63,7 @@ export const AssetForm = ({
       {qrId ? (
         <input type="hidden" name={zo.fields.qrId()} value={qrId} />
       ) : null}
-      <FormRow rowLabel={"Name"} className="border-b-0">
+      <FormRow rowLabel={"Name"} className="border-b-0 pb-[10px]">
         <Input
           label="Name"
           hideLabel
@@ -73,7 +77,7 @@ export const AssetForm = ({
         />
       </FormRow>
 
-      <FormRow rowLabel={"Main image"}>
+      <FormRow rowLabel={"Main image"} className="pt-[10px]">
         <div>
           <p>Accepts PNG, JPG or JPEG (max.4 MB)</p>
           <Input
@@ -99,6 +103,7 @@ export const AssetForm = ({
             index.
           </p>
         }
+        className="border-b-0 pb-[10px]"
       >
         <CategorySelect defaultValue={category || undefined} />
       </FormRow>
@@ -113,8 +118,25 @@ export const AssetForm = ({
             </Link>
           </p>
         }
+        className="border-b-0 py-[10px]"
       >
         <TagsAutocomplete existingTags={tags || []} />
+      </FormRow>
+
+      <FormRow
+        rowLabel={"Location"}
+        subHeading={
+          <p>
+            A location is a place where an item is supposed to be located. This
+            is different than the last scanned location{" "}
+            <Link to="/locations/new" className="text-gray-600 underline">
+              Create locations
+            </Link>
+          </p>
+        }
+        className="pt-[10px]"
+      >
+        <LocationSelect defaultValue={location || undefined} />
       </FormRow>
 
       <div>

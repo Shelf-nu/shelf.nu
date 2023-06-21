@@ -1,7 +1,9 @@
+import type { Location } from "@prisma/client";
 import type {
   ActionArgs,
   LinksFunction,
   LoaderArgs,
+  SerializeFrom,
   V2_MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
@@ -10,7 +12,7 @@ import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
-import { LocationDetails } from "~/components/assets/location";
+import { ScanDetails } from "~/components/assets/location";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -35,6 +37,8 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
+
+type ShelfLocation = Location;
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -113,6 +117,11 @@ export const links: LinksFunction = () => [
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
+  /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
+   * Source: https://github.com/prisma/prisma/discussions/14371
+   */
+  const location = asset?.location as SerializeFrom<ShelfLocation>;
+
   const user = useUserData();
   usePosition();
   return (
@@ -179,6 +188,18 @@ export default function AssetDetailsPage() {
                   </div>
                 </li>
               ) : null}
+              {location ? (
+                <li className="mb-4 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Location
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Tag key={location.id} className="mb-2 ml-2">
+                      {location.name}
+                    </Tag>
+                  </div>
+                </li>
+              ) : null}
               {asset?.tags?.length > 0 ? (
                 <li className="mb-2 flex justify-between">
                   <span className="text-[12px] font-medium text-gray-600">
@@ -209,7 +230,7 @@ export default function AssetDetailsPage() {
             </ul>
           </Card>
 
-          <LocationDetails />
+          <ScanDetails />
         </div>
 
         <div className="w-full lg:ml-8">

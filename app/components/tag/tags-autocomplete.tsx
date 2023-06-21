@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import type { Tag as ShelfTag } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { Tag } from "react-tag-autocomplete";
@@ -10,6 +10,11 @@ export interface Suggestion {
 }
 
 export const TagsAutocomplete = ({ existingTags }: { existingTags: Tag[] }) => {
+  /* This is a workaround for the SSR issue with react-tag-autocomplete */
+  if (typeof document === "undefined") {
+    React.useLayoutEffect = React.useEffect;
+  }
+
   /** Get the tags from the loader */
 
   const suggestions = useLoaderData().tags.map((tag: ShelfTag) => ({

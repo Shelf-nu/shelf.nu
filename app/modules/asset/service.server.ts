@@ -1,5 +1,6 @@
 import type {
   Category,
+  Location,
   Note,
   Prisma,
   Qr,
@@ -28,6 +29,7 @@ export async function getAsset({
       },
       qrCodes: true,
       tags: true,
+      location: true,
     },
   });
 }
@@ -105,10 +107,13 @@ export async function createAsset({
   description,
   userId,
   categoryId,
+  locationId,
   qrId,
   tags,
-}: Pick<Asset, "description" | "title" | "categoryId"> & {
-  userId: User["id"];
+}: Pick<
+  Asset,
+  "description" | "title" | "categoryId" | "locationId" | "userId"
+> & {
   qrId?: Qr["id"];
   tags?: { set: { id: string }[] };
 }) {
@@ -160,6 +165,17 @@ export async function createAsset({
     });
   }
 
+  /** If a locationId is passed, link the location to the asset. */
+  if (locationId) {
+    Object.assign(data, {
+      location: {
+        connect: {
+          id: locationId,
+        },
+      },
+    });
+  }
+
   /** If a categoryId is passed, link the category to the asset. */
   if (tags && tags?.set?.length > 0) {
     Object.assign(data, {
@@ -179,13 +195,14 @@ interface UpdateAssetPayload {
   title?: Asset["title"];
   description?: Asset["description"];
   categoryId?: Asset["categoryId"];
+  locationId?: Asset["locationId"];
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
   tags?: { set: { id: string }[] };
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
-  const { categoryId, id } = payload;
+  const { categoryId, id, locationId } = payload;
   /** Delete the category id from the payload so we can use connect syntax from prisma */
   delete payload.categoryId;
 
@@ -194,6 +211,18 @@ export async function updateAsset(payload: UpdateAssetPayload) {
       category: {
         connect: {
           id: categoryId,
+        },
+      },
+    });
+  }
+
+  /** Delete the category id from the payload so we can use connect syntax from prisma */
+  delete payload.locationId;
+  if (locationId) {
+    Object.assign(payload, {
+      location: {
+        connect: {
+          id: locationId,
         },
       },
     });
@@ -284,4 +313,23 @@ export async function deleteNote({
   return db.note.deleteMany({
     where: { id, userId },
   });
+}
+
+/** Fetches all related entries required for creating a new asset */
+export async function getAllRelatedEntries({
+  userId,
+}: {
+  userId: User["id"];
+}): Promise<{ categories: Category[]; tags: Tag[]; locations: Location[] }> {
+  const [categories, tags, locations] = await db.$transaction([
+    /** Get the categories */
+    db.category.findMany({ where: { userId } }),
+
+    /** Get the tags */
+    db.tag.findMany({ where: { userId } }),
+
+    /** Get the locations */
+    db.location.findMany({ where: { userId } }),
+  ]);
+  return { categories, tags, locations };
 }
