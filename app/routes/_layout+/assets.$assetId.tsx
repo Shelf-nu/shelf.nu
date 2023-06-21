@@ -153,7 +153,7 @@ export default function AssetDetailsPage() {
             )}
           />
           {asset.description ? (
-            <Card className="mt-0 rounded-t-none">
+            <Card className="mt-0 md:rounded-t-none">
               <p className=" text-gray-600">{asset.description}</p>
             </Card>
           ) : null}

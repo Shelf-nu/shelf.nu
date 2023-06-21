@@ -107,13 +107,13 @@ const ListItemContent = ({ item }: { item: Location }) => {
               <div className="hidden text-gray-600 md:block">
                 {item.address}
               </div>
-              <div className="block md:hidden">54</div>
+              <div className="block md:hidden">10</div>
             </div>
           </div>
         </div>
       </td>
       <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
-        {item.assets.length}
+        10
       </td>
     </>
   );

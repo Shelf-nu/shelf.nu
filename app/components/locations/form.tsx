@@ -86,7 +86,6 @@ export const LocationForm = ({ name, address, description }: Props) => {
           disabled={disabled}
           error={zo.errors.address()?.message}
           autoFocus
-          onChange={updateName}
           className="w-full"
           defaultValue={address || undefined}
         />

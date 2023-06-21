@@ -25,7 +25,7 @@ export const List = ({
   navigate?: (id: string) => void;
 }) => {
   const { items } = useLoaderData<IndexResponse>();
-
+  console.log(items);
   const hasItems = items?.length > 0;
 
   return (
