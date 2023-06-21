@@ -10,7 +10,7 @@ import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
-import { LocationDetails } from "~/components/assets/location";
+import { ScanDetails } from "~/components/assets/location";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -209,7 +209,7 @@ export default function AssetDetailsPage() {
             </ul>
           </Card>
 
-          <LocationDetails />
+          <ScanDetails />
         </div>
 
         <div className="w-full lg:ml-8">

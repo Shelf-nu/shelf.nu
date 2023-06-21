@@ -3,11 +3,7 @@ import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import {
-  fileErrorAtom,
-  updateTitleAtom,
-  validateFileAtom,
-} from "~/atoms/locations.new";
+import { updateTitleAtom } from "~/atoms/locations.new";
 import { isFormProcessing } from "~/utils";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -43,7 +39,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
       className="flex w-full flex-col gap-2"
       encType="multipart/form-data"
     >
-      <FormRow rowLabel={"Name"} className="border-b-0">
+      <FormRow rowLabel={"Name"} className="border-b-0 pb-[10px]">
         <Input
           label="Name"
           hideLabel
@@ -54,6 +50,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
           onChange={updateName}
           className="w-full"
           defaultValue={name || undefined}
+          placeholder="Storage room"
         />
       </FormRow>
 
@@ -78,6 +75,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
       <FormRow
         rowLabel={"Address"}
         subHeading={<p>Will set location’s geo position to address</p>}
+        className="pt-[10px]"
       >
         <Input
           label="Address"
@@ -98,7 +96,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
           subHeading={
             <p>
               This is the initial object description. It will be shown on the
-              asset’s overview page. You can always change it.
+              location page. You can always change it.
             </p>
           }
         >
@@ -107,9 +105,9 @@ export const LocationForm = ({ name, address, description }: Props) => {
             label={zo.fields.description()}
             name={zo.fields.description()}
             defaultValue={description || ""}
-            placeholder="Add a description for your asset."
+            placeholder="Add a description for your location."
             disabled={disabled}
-            data-test-id="assetDescription"
+            data-test-id="locationDescription"
             className="w-full"
           />
         </FormRow>
