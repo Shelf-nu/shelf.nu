@@ -189,7 +189,7 @@ export default function AssetDetailsPage() {
                 </li>
               ) : null}
               {location ? (
-                <li className="mb-4 flex justify-between">
+                <li className="mb-2 flex justify-between">
                   <span className="text-[12px] font-medium text-gray-600">
                     Location
                   </span>

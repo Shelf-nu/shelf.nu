@@ -77,7 +77,7 @@ export const links: LinksFunction = () => [
 
 export async function action({ request, params }: ActionArgs) {
   assertIsDelete(request);
-  const id = await getRequiredParam(params, "locationId");
+  const id = getRequiredParam(params, "locationId");
   const authSession = await requireAuthSession(request);
 
   await deleteLocation({ userId: authSession.userId, id });

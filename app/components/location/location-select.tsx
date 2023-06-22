@@ -28,7 +28,8 @@ export const LocationSelect = ({ defaultValue }: { defaultValue?: string }) => {
 
   return (
     <div className="relative w-full">
-      <Select name="location" defaultValue={defaultValue || undefined}>
+      <input type="hidden" name="currentLocationId" value={defaultValue} />
+      <Select name="newLocationId" defaultValue={defaultValue || undefined}>
         <SelectTrigger className="">
           <SelectValue placeholder="Select location" />
         </SelectTrigger>

@@ -103,3 +103,15 @@ export async function deleteLocation({
     where: { id, userId },
   });
 }
+
+export async function updateLocation(payload: {
+  id: Location["id"];
+  name?: Location["name"];
+  address?: Location["address"];
+  description?: Location["description"];
+}) {
+  return await db.location.update({
+    where: { id: payload.id },
+    data: payload,
+  });
+}
