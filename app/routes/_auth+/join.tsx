@@ -6,16 +6,21 @@ import { useSearchParams } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
 import { getAuthSession, ContinueWithEmailForm } from "~/modules/auth";
+import { getCurrentSearchParams } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
-  const title = "Create an account";
-  const subHeading = "Start your journey with Shelf";
+  const searchParams = getCurrentSearchParams(request);
+  const isResend = searchParams.get("resend") !== null;
+
+  const title = isResend ? "Resend confirmation email" : "Create an account";
+  const subHeading =
+    "If you had issues with confirming your email, you can resend the confirmation email using the form below";
 
   if (authSession) return redirect("/");
 
-  return json({ title, subHeading });
+  return json({ title, subHeading, isResend });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -24,6 +29,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 
 export default function Join() {
   const [searchParams] = useSearchParams();
+  const isResend = searchParams.get("resend") !== null;
 
   return (
     <div className="w-full max-w-md">
@@ -32,7 +38,9 @@ export default function Join() {
       </div>
       <div className="mt-6 flex items-center justify-center">
         <div className="text-center text-sm text-gray-500">
-          Already have an account?{" "}
+          {isResend
+            ? "Already confirmed your account?"
+            : "Already have an account?"}{" "}
           <Button
             variant="link"
             to={{
