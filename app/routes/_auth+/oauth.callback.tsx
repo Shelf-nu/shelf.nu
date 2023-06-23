@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { json, redirect } from "@remix-run/node";
 import type { LoaderArgs, ActionArgs } from "@remix-run/node";
@@ -96,6 +96,7 @@ export async function action({ request }: ActionArgs) {
 
 export default function LoginCallback() {
   const error = useActionData<typeof action>();
+  const [clientError, setClientError] = useState("");
   const fetcher = useFetcher();
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? "/";
@@ -113,6 +114,7 @@ export default function LoginCallback() {
 
         // we should not trust what's happen client side
         // so, we only pick the refresh token, and let's back-end getting user session from it
+
         const refreshToken = supabaseSession?.refresh_token;
 
         if (!refreshToken) return;
@@ -132,5 +134,30 @@ export default function LoginCallback() {
     };
   }, [fetcher, redirectTo, supabase.auth]);
 
-  return error ? <div>{error.message}</div> : null;
+  useEffect(() => {
+    if (window?.location?.hash) {
+      /**
+       * We check the hash fragment of the url as this is what suaabase uses to return an error
+       * If it exists, we update the clientError state with it
+       * */
+      const parsedHash = new URLSearchParams(window.location.hash.substring(1));
+
+      const error = parsedHash.get("error_description");
+
+      if (error && error !== "") {
+        setClientError(() => error);
+      }
+    }
+  }, []);
+
+  if (error) return <div className="text-center">{error.message}</div>;
+  if (clientError)
+    return (
+      <div className="text-center">
+        <p className="font-medium">{clientError}.</p> Please try to Sign In with
+        a magic link. If the issue persists please get in touch with the Shelf
+        team.{" "}
+      </div>
+    );
+  return null;
 }
