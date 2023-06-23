@@ -22,17 +22,40 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { deleteLocation, getLocation } from "~/modules/location";
 import assetCss from "~/styles/asset.css";
-import { assertIsDelete, getRequiredParam, tw } from "~/utils";
+import {
+  assertIsDelete,
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+  getRequiredParam,
+  tw,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
   const id = getRequiredParam(params, "locationId");
-  const location = await getLocation({ userId, id });
+
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search } = getParamsValues(searchParams);
+
+  const { location, totalAssetsWithinLocation } = await getLocation({
+    userId,
+    id,
+    page,
+    perPage,
+    search,
+  });
+
   if (!location) {
     throw new Response("Not Found", { status: 404 });
   }
+
+  const totalItems = totalAssetsWithinLocation;
+  const totalPages = totalAssetsWithinLocation / perPage;
+  const { prev, next } = generatePageMeta(request);
+
   const header: HeaderData = {
     title: location.name,
   };
@@ -41,13 +64,6 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     singular: "asset",
     plural: "assets",
   };
-
-  const page = 1;
-  const totalItems = location.assets.length;
-  const perPage = 8;
-  const next = null;
-  const prev = null;
-  const totalPages = location.assets.length / perPage;
 
   return json({
     location,
