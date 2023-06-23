@@ -126,3 +126,10 @@ p {
 .markdown-viewer table th {
   @apply font-normal;
 }
+
+.dialog-backdrop {
+  @apply fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50;
+}
+dialog {
+  @apply relative z-10 w-[80%] rounded-lg bg-white p-6 shadow-lg md:w-[600px];
+}

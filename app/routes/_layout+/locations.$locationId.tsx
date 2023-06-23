@@ -10,6 +10,7 @@ import {
 import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ChevronRight } from "~/components/icons";
+import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters } from "~/components/list";
@@ -119,6 +120,8 @@ export default function LocationPage() {
       <Header>
         <ActionsDopdown location={location} />
       </Header>
+      <ContextualModal />
+
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
           <img
@@ -162,7 +165,12 @@ export default function LocationPage() {
             <Filters>
               <div className="flex items-center justify-around gap-6 md:justify-end">
                 <div className="hidden gap-6 md:flex">
-                  <Button as="button" to="." variant="primary">
+                  <Button
+                    as="button"
+                    to="add-assets"
+                    variant="primary"
+                    icon="plus"
+                  >
                     Add Assets
                   </Button>
                 </div>
