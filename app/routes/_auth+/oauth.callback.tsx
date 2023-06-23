@@ -117,24 +117,7 @@ export default function LoginCallback() {
 
         const refreshToken = supabaseSession?.refresh_token;
 
-        if (!refreshToken) {
-          /**
-           * if we can't find a refresh token, it means the user has not signed in with a magic link
-           * This means that supabase should have returned a hash fragment with an error_description
-           * If it exists, we update the clientError state with it
-           * */
-
-          const parsedHash = new URLSearchParams(
-            window.location.hash.substring(1)
-          );
-
-          const error = parsedHash.get("error_description");
-
-          if (error && error !== "") {
-            setClientError(() => error);
-          }
-          return;
-        }
+        if (!refreshToken) return;
 
         const formData = new FormData();
 
@@ -150,6 +133,23 @@ export default function LoginCallback() {
       subscription.unsubscribe();
     };
   }, [fetcher, redirectTo, supabase.auth]);
+
+  useEffect(() => {
+    if (window?.location?.hash) {
+      /**
+       * if we can't find a refresh token, it means the user has not signed in with a magic link
+       * This means that supabase should have returned a hash fragment with an error_description
+       * If it exists, we update the clientError state with it
+       * */
+      const parsedHash = new URLSearchParams(window.location.hash.substring(1));
+
+      const error = parsedHash.get("error_description");
+
+      if (error && error !== "") {
+        setClientError(() => error);
+      }
+    }
+  }, []);
 
   if (error) return <div className="text-center">{error.message}</div>;
   if (clientError)
