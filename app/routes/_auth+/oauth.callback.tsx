@@ -137,8 +137,7 @@ export default function LoginCallback() {
   useEffect(() => {
     if (window?.location?.hash) {
       /**
-       * if we can't find a refresh token, it means the user has not signed in with a magic link
-       * This means that supabase should have returned a hash fragment with an error_description
+       * We check the hash fragment of the url as this is what suaabase uses to return an error
        * If it exists, we update the clientError state with it
        * */
       const parsedHash = new URLSearchParams(window.location.hash.substring(1));
