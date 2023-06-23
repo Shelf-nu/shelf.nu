@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useMatches } from "@remix-run/react";
-import { Button } from "../shared";
 import { XIcon } from "../icons";
+import { Button } from "../shared";
 
 export const Dialog = ({
   children,

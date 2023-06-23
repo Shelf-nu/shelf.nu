@@ -9,10 +9,19 @@ import type {
   Tag,
 } from "@prisma/client";
 import { ErrorCorrection } from "@prisma/client";
+import type { LoaderArgs } from "@remix-run/node";
 import { db } from "~/database";
-import { dateTimeInUnix, oneDayFromNow } from "~/utils";
+import {
+  dateTimeInUnix,
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+  oneDayFromNow,
+} from "~/utils";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import { getAllCategories } from "../category";
 import { getQr } from "../qr";
+import { getAllTags } from "../tag";
 
 export async function getAsset({
   userId,
@@ -391,3 +400,47 @@ export async function getAllRelatedEntries({
   ]);
   return { categories, tags, locations };
 }
+
+export const getAllPaginatedAndFilretableAssets = async ({
+  request,
+  userId,
+}: {
+  request: LoaderArgs["request"];
+  userId: User["id"];
+}) => {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search, categoriesIds, tagsIds } =
+    getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
+
+  const categories = await getAllCategories({
+    userId,
+  });
+
+  const tags = await getAllTags({
+    userId,
+  });
+
+  const { assets, totalAssets } = await getAssets({
+    userId,
+    page,
+    perPage,
+    search,
+    categoriesIds,
+    tagsIds,
+  });
+  const totalPages = Math.ceil(totalAssets / perPage);
+
+  return {
+    page,
+    perPage,
+    search,
+    totalAssets,
+    prev,
+    next,
+    categories,
+    tags,
+    assets,
+    totalPages,
+  };
+};

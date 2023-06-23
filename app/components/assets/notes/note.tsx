@@ -28,7 +28,6 @@ const Update = ({ note, when }: { note: NoteType; when?: boolean }) => (
     <div className="message flex flex-1 items-start gap-2">
       <Tag>{new Date(note.createdAt).toLocaleDateString()}</Tag>{" "}
       <MarkdownViewer content={note.content} />
-      <ActionsDopdown note={note} />
     </div>
   </div>
 );
