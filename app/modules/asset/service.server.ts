@@ -401,7 +401,7 @@ export async function getAllRelatedEntries({
   return { categories, tags, locations };
 }
 
-export const getAllPaginatedAndFilretableAssets = async ({
+export const getPaginatedAndFilterableAssets = async ({
   request,
   userId,
 }: {
