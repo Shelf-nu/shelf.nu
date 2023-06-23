@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { json, redirect } from "@remix-run/node";
 import type { LoaderArgs, ActionArgs } from "@remix-run/node";
@@ -14,6 +14,7 @@ import {
 } from "~/modules/auth";
 import { tryCreateUser, getUserByEmail } from "~/modules/user";
 import { assertIsPost, randomUsernameFromEmail, safeRedirect } from "~/utils";
+import { t } from "vitest/dist/global-58e8e951";
 
 // imagine a user go back after OAuth login success or type this URL
 // we don't want him to fall in a black hole 👽
@@ -96,6 +97,7 @@ export async function action({ request }: ActionArgs) {
 
 export default function LoginCallback() {
   const error = useActionData<typeof action>();
+  const [clientError, setClientError] = useState("");
   const fetcher = useFetcher();
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? "/";
@@ -105,7 +107,8 @@ export default function LoginCallback() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
-      if (event === "SIGNED_IN") {
+      // console.log(event);
+      if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
         // supabase sdk has ability to read url fragment that contains your token after third party provider redirects you here
         // this fragment url looks like https://.....#access_token=evxxxxxxxx&refresh_token=xxxxxx, and it's not readable server-side (Oauth security)
         // supabase auth listener gives us a user session, based on what it founds in this fragment url
@@ -113,9 +116,25 @@ export default function LoginCallback() {
 
         // we should not trust what's happen client side
         // so, we only pick the refresh token, and let's back-end getting user session from it
+
         const refreshToken = supabaseSession?.refresh_token;
 
-        if (!refreshToken) return;
+        if (!refreshToken) {
+          /**
+           * if we can't find a refresh token, it means the user has not signed in with a magic link
+           * This means that supabase should have returned a hash fragment with an error_description
+           * If it exists, we update the clientError state with it
+           * */
+
+          const parsedHash = new URLSearchParams(
+            window.location.hash.substring(1)
+          );
+          const error = parsedHash.get("error_description");
+          if (error && error !== "") {
+            setClientError(() => error);
+          }
+          return;
+        }
 
         const formData = new FormData();
 
@@ -132,5 +151,14 @@ export default function LoginCallback() {
     };
   }, [fetcher, redirectTo, supabase.auth]);
 
-  return error ? <div>{error.message}</div> : null;
+  if (error) return <div className="text-center">{error.message}</div>;
+  if (clientError)
+    return (
+      <div className="text-center">
+        <p className="font-medium">{clientError}.</p> Please try to Sign In with
+        a magic link. If the issue persists please get in touch with the Shelf
+        team.{" "}
+      </div>
+    );
+  return null;
 }
