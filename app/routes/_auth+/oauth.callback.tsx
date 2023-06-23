@@ -14,7 +14,6 @@ import {
 } from "~/modules/auth";
 import { tryCreateUser, getUserByEmail } from "~/modules/user";
 import { assertIsPost, randomUsernameFromEmail, safeRedirect } from "~/utils";
-import { t } from "vitest/dist/global-58e8e951";
 
 // imagine a user go back after OAuth login success or type this URL
 // we don't want him to fall in a black hole 👽
