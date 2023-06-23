@@ -57,7 +57,7 @@ export const DeleteLocation = ({
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               type="submit"
-              data-test-id="confirmdeleteAssetButton"
+              data-test-id="confirmdeleteLocationButton"
             >
               Delete
             </Button>

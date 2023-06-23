@@ -5,10 +5,7 @@ import { parseFormAny } from "react-zorm";
 import { titleAtom } from "~/atoms/locations.new";
 
 import Header from "~/components/layout/header";
-import {
-  LocationForm,
-  NewLocationFormSchema,
-} from "~/components/locations/form";
+import { LocationForm, NewLocationFormSchema } from "~/components/location";
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createLocation } from "~/modules/location";

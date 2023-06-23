@@ -196,18 +196,38 @@ interface UpdateAssetPayload {
   description?: Asset["description"];
   categoryId?: Asset["categoryId"];
   locationId?: Asset["locationId"];
+  currentLocationId?: Asset["locationId"];
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
   tags?: { set: { id: string }[] };
+  userId?: User["id"];
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
-  const { categoryId, id, locationId } = payload;
-  /** Delete the category id from the payload so we can use connect syntax from prisma */
-  delete payload.categoryId;
+  const {
+    title,
+    description,
+    mainImage,
+    mainImageExpiration,
+    categoryId,
+    id,
+    locationId,
+    currentLocationId,
+    userId,
+  } = payload;
+  const isChangingLocation =
+    locationId && currentLocationId && locationId !== currentLocationId;
 
+  const data = {
+    title,
+    description,
+    mainImage,
+    mainImageExpiration,
+  };
+
+  /** Delete the category id from the payload so we can use connect syntax from prisma */
   if (categoryId) {
-    Object.assign(payload, {
+    Object.assign(data, {
       category: {
         connect: {
           id: categoryId,
@@ -217,9 +237,8 @@ export async function updateAsset(payload: UpdateAssetPayload) {
   }
 
   /** Delete the category id from the payload so we can use connect syntax from prisma */
-  delete payload.locationId;
   if (locationId) {
-    Object.assign(payload, {
+    Object.assign(data, {
       location: {
         connect: {
           id: locationId,
@@ -228,10 +247,46 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     });
   }
 
-  return db.asset.update({
+  const asset = await db.asset.update({
     where: { id },
-    data: payload,
+    data,
+    include: { location: true },
   });
+
+  // /** If the location id was passed, we create a note for the move */
+  if (isChangingLocation) {
+    /**
+     * Create a note for the move
+     * Here we actually need to query the locations so we can print their names
+     * */
+
+    const [newLocation, prevLocation] = await db.location.findMany({
+      where: {
+        id: {
+          in: [currentLocationId as string, locationId as string],
+        },
+        userId,
+      },
+      select: {
+        name: true,
+        user: {
+          select: {
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    await createNote({
+      content: `**${newLocation.user.firstName} ${newLocation.user.lastName}** updated the location of **${asset.title}** from **${newLocation.name}** to **${prevLocation.name}**`,
+      type: "UPDATE",
+      userId: userId as string,
+      assetId: id,
+    });
+  }
+
+  return asset;
 }
 
 export async function deleteAsset({
@@ -276,19 +331,22 @@ export async function updateAssetMainImage({
     id: assetId,
     mainImage: signedUrl,
     mainImageExpiration: oneDayFromNow(),
+    userId,
   });
 }
 
 export async function createNote({
   content,
+  type,
   userId,
   assetId,
-}: Pick<Note, "content"> & {
+}: Pick<Note, "content" | "type"> & {
   userId: User["id"];
   assetId: Asset["id"];
 }) {
   const data = {
     content,
+    type: type || "COMMENT",
     user: {
       connect: {
         id: userId,

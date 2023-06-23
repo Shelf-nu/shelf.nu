@@ -10,10 +10,10 @@ import {
   validateFileAtom,
 } from "~/atoms/assets.new";
 import { isFormProcessing } from "~/utils";
-import { LocationSelect } from "./location/location-select";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import { LocationSelect } from "../location/location-select";
 import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
@@ -22,7 +22,11 @@ export const NewAssetFormSchema = z.object({
   title: z.string().min(2, "Title is required"),
   description: z.string(),
   category: z.string(),
-  location: z.string(),
+  newLocationId: z.string().optional(),
+  /** This holds the value of the current location. We need it for comparison reasons on the server.
+   * We send it as part of the form data and compare it with the current location of the asset and prevent querying the database if it's the same.
+   */
+  currentLocationId: z.string().optional(),
   qrId: z.string().optional(),
   tags: z.string().optional(),
 });

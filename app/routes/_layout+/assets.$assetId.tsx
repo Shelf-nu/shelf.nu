@@ -12,13 +12,13 @@ import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
-import { ScanDetails } from "~/components/assets/location";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { ScanDetails } from "~/components/location";
 
 import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
@@ -162,7 +162,7 @@ export default function AssetDetailsPage() {
             )}
           />
           {asset.description ? (
-            <Card className="mt-0 md:rounded-t-none">
+            <Card className="mt-0 rounded-t-none">
               <p className=" text-gray-600">{asset.description}</p>
             </Card>
           ) : null}
@@ -189,7 +189,7 @@ export default function AssetDetailsPage() {
                 </li>
               ) : null}
               {location ? (
-                <li className="mb-4 flex justify-between">
+                <li className="mb-2 flex justify-between">
                   <span className="text-[12px] font-medium text-gray-600">
                     Location
                   </span>

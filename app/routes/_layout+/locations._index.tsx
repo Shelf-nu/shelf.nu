@@ -65,8 +65,8 @@ export default function LocationsIndexPage() {
         <Button
           to="new"
           role="link"
-          aria-label={`new asset`}
-          icon="location"
+          aria-label={`new location`}
+          icon="plus"
           data-test-id="createNewLocation"
         >
           Add Location
@@ -93,32 +93,28 @@ interface LocationWithAssets extends Location {
   assets: Asset[];
 }
 
-const ListItemContent = ({ item }: { item: LocationWithAssets }) => {
-  return (
-    <>
-      <td className="w-full  border-b">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
-              <img
-                src="/images/asset-placeholder.jpg"
-                alt="img"
-                className="h-10 w-10 rounded-[4px] object-cover"
-              />
-            </div>
-            <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-              <div className="font-medium">{item.name}</div>
-              <div className="hidden text-gray-600 md:block">
-                {item.address}
-              </div>
-              <div className="block md:hidden">10</div>
-            </div>
+const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
+  <>
+    <td className="w-full  border-b">
+      <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
+            <img
+              src="/images/asset-placeholder.jpg"
+              alt="img"
+              className="h-10 w-10 rounded-[4px] object-cover"
+            />
+          </div>
+          <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
+            <div className="font-medium">{item.name}</div>
+            <div className="hidden text-gray-600 md:block">{item.address}</div>
+            <div className="block md:hidden">10</div>
           </div>
         </div>
-      </td>
-      <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
-        10
-      </td>
-    </>
-  );
-};
+      </div>
+    </td>
+    <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
+      {item.assets.length}
+    </td>
+  </>
+);

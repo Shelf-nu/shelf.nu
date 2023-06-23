@@ -88,6 +88,7 @@ model Tag {
 model Note {
   id      String @id @default(cuid())
   content String
+  type    NoteType @default(COMMENT)
 
   // Datetime
   createdAt DateTime @default(now())
@@ -99,6 +100,13 @@ model Note {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
 }
+
+enum NoteType {
+  COMMENT
+  UPDATE
+}
+
+
 
 model Qr {
   id String @id @default(cuid())
