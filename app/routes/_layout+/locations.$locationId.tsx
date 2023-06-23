@@ -12,6 +12,7 @@ import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Filters } from "~/components/list";
 import { List } from "~/components/list/list";
 import { ActionsDopdown } from "~/components/location";
 import { ShelfMap } from "~/components/location/map";
@@ -37,8 +38,8 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   };
 
   const modelName = {
-    singular: "location",
-    plural: "locations",
+    singular: "asset",
+    plural: "assets",
   };
 
   const page = 1;
@@ -141,20 +142,31 @@ export default function LocationPage() {
         </div>
 
         <div className="w-full lg:ml-8">
-          <List
-            ItemComponent={ListAssetContent}
-            // navigate={(itemId) => navigate(itemId)}
-            headerChildren={
-              <>
-                <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                  Category
-                </th>
-                <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                  Tags
-                </th>
-              </>
-            }
-          />
+          <div className="flex flex-col md:gap-2">
+            <Filters>
+              <div className="flex items-center justify-around gap-6 md:justify-end">
+                <div className="hidden gap-6 md:flex">
+                  <Button as="button" to="." variant="primary">
+                    Add Assets
+                  </Button>
+                </div>
+              </div>
+            </Filters>
+            <List
+              ItemComponent={ListAssetContent}
+              // navigate={(itemId) => navigate(itemId)}
+              headerChildren={
+                <>
+                  <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+                    Category
+                  </th>
+                  <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+                    Tags
+                  </th>
+                </>
+              }
+            />
+          </div>
         </div>
       </div>
     </div>
