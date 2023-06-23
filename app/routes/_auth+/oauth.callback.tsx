@@ -7,6 +7,7 @@ import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 
 import { Button } from "~/components/shared";
+import { Spinner } from "~/components/shared/spinner";
 import { getSupabase } from "~/integrations/supabase";
 import {
   refreshAccessToken,
@@ -163,5 +164,10 @@ export default function LoginCallback() {
         team.{" "}
       </div>
     );
-  return null;
+  return (
+    <div className="flex flex-col items-center text-center">
+      <Spinner />
+      <p className="mt-2">Attempting to login...</p>
+    </div>
+  );
 }
