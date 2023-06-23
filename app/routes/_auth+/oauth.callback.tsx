@@ -106,7 +106,6 @@ export default function LoginCallback() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
-      console.log("event", event);
       if (event === "SIGNED_IN") {
         // supabase sdk has ability to read url fragment that contains your token after third party provider redirects you here
         // this fragment url looks like https://.....#access_token=evxxxxxxxx&refresh_token=xxxxxx, and it's not readable server-side (Oauth security)
@@ -117,7 +116,6 @@ export default function LoginCallback() {
         // so, we only pick the refresh token, and let's back-end getting user session from it
 
         const refreshToken = supabaseSession?.refresh_token;
-        console.log("refreshToken", refreshToken);
 
         if (!refreshToken) {
           /**
@@ -129,10 +127,8 @@ export default function LoginCallback() {
           const parsedHash = new URLSearchParams(
             window.location.hash.substring(1)
           );
-          console.log("parsedHash", parsedHash);
 
           const error = parsedHash.get("error_description");
-          console.log("error", error);
 
           if (error && error !== "") {
             setClientError(() => error);
