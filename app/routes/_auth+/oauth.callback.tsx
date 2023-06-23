@@ -6,6 +6,8 @@ import { useActionData, useFetcher, useSearchParams } from "@remix-run/react";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 
+import { Button } from "~/components/shared";
+import { Spinner } from "~/components/shared/spinner";
 import { getSupabase } from "~/integrations/supabase";
 import {
   refreshAccessToken,
@@ -154,10 +156,18 @@ export default function LoginCallback() {
   if (clientError)
     return (
       <div className="text-center">
-        <p className="font-medium">{clientError}.</p> Please try to Sign In with
-        a magic link. If the issue persists please get in touch with the Shelf
+        <h3 className="font-medium">{clientError}.</h3>
+        <Button variant="link" to="/join?resend">
+          Resend confirmation link
+        </Button>
+        <p>If the issue persists please get in touch with the Shelf</p>
         team.{" "}
       </div>
     );
-  return null;
+  return (
+    <div className="flex flex-col items-center text-center">
+      <Spinner />
+      <p className="mt-2">Attempting to login...</p>
+    </div>
+  );
 }
