@@ -23,7 +23,7 @@ export const Note = ({ note }: { note: NoteType }) => {
   );
 };
 
-const Update = ({ note, when }: { note: NoteType; when?: boolean }) => (
+const Update = ({ note }: { note: NoteType; when?: boolean }) => (
   <div className="flex px-3.5 py-3">
     <div className="message flex flex-1 items-start gap-2">
       <Tag>{new Date(note.createdAt).toLocaleDateString()}</Tag>{" "}
@@ -35,7 +35,6 @@ const Update = ({ note, when }: { note: NoteType; when?: boolean }) => (
 const Comment = ({
   note,
   user,
-  when,
 }: {
   note: NoteType;
   user: User;

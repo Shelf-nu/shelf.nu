@@ -119,11 +119,9 @@ export async function createAsset({
   locationId,
   qrId,
   tags,
-}: Pick<
-  Asset,
-  "description" | "title" | "categoryId" | "locationId" | "userId"
-> & {
+}: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
   qrId?: Qr["id"];
+  locationId?: Location["id"];
   tags?: { set: { id: string }[] };
 }) {
   /** User connction data */
@@ -349,7 +347,8 @@ export async function createNote({
   type,
   userId,
   assetId,
-}: Pick<Note, "content" | "type"> & {
+}: Pick<Note, "content"> & {
+  type?: Note["type"];
   userId: User["id"];
   assetId: Asset["id"];
 }) {

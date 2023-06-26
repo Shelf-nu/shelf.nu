@@ -2,12 +2,12 @@ import { useRef, type ReactNode, useEffect } from "react";
 import { Form, useLoaderData, useSubmit } from "@remix-run/react";
 import { useAtom } from "jotai";
 
+import { tw } from "~/utils";
 import {
   toggleIsFilteringCategoriesAtom,
   toggleIsFilteringTagsAtom,
 } from "./atoms";
 import { SearchForm } from "./search-form";
-import { tw } from "~/utils";
 
 export const Filters = ({
   children,
