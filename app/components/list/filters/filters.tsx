@@ -7,8 +7,15 @@ import {
   toggleIsFilteringTagsAtom,
 } from "./atoms";
 import { SearchForm } from "./search-form";
+import { tw } from "~/utils";
 
-export const Filters = ({ children }: { children?: ReactNode }) => {
+export const Filters = ({
+  children,
+  className,
+}: {
+  children?: ReactNode;
+  className?: string;
+}) => {
   const { search } = useLoaderData();
 
   const [isFilteringCategories, toggleIsFilteringCategories] = useAtom(
@@ -48,7 +55,12 @@ export const Filters = ({ children }: { children?: ReactNode }) => {
   }, [submit, isFilteringTags, toggleIsFilteringTags]);
 
   return (
-    <div className="flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
+    <div
+      className={tw(
+        "flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5",
+        className
+      )}
+    >
       <Form ref={formRef} className="w-full">
         <div className="w-full items-center justify-between md:flex">
           <div className="flex items-center gap-5">
