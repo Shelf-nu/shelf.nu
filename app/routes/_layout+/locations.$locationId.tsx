@@ -10,6 +10,7 @@ import {
 import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ChevronRight } from "~/components/icons";
+import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters } from "~/components/list";
@@ -22,17 +23,40 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { deleteLocation, getLocation } from "~/modules/location";
 import assetCss from "~/styles/asset.css";
-import { assertIsDelete, getRequiredParam, tw } from "~/utils";
+import {
+  assertIsDelete,
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+  getRequiredParam,
+  tw,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
   const id = getRequiredParam(params, "locationId");
-  const location = await getLocation({ userId, id });
+
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search } = getParamsValues(searchParams);
+
+  const { location, totalAssetsWithinLocation } = await getLocation({
+    userId,
+    id,
+    page,
+    perPage,
+    search,
+  });
+
   if (!location) {
     throw new Response("Not Found", { status: 404 });
   }
+
+  const totalItems = totalAssetsWithinLocation;
+  const totalPages = totalAssetsWithinLocation / perPage;
+  const { prev, next } = generatePageMeta(request);
+
   const header: HeaderData = {
     title: location.name,
   };
@@ -41,13 +65,6 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     singular: "asset",
     plural: "assets",
   };
-
-  const page = 1;
-  const totalItems = location.assets.length;
-  const perPage = 8;
-  const next = null;
-  const prev = null;
-  const totalPages = location.assets.length / perPage;
 
   return json({
     location,
@@ -103,6 +120,8 @@ export default function LocationPage() {
       <Header>
         <ActionsDopdown location={location} />
       </Header>
+      <ContextualModal />
+
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
           <img
@@ -146,7 +165,12 @@ export default function LocationPage() {
             <Filters>
               <div className="flex items-center justify-around gap-6 md:justify-end">
                 <div className="hidden gap-6 md:flex">
-                  <Button as="button" to="." variant="primary">
+                  <Button
+                    as="button"
+                    to="add-assets"
+                    variant="primary"
+                    icon="plus"
+                  >
                     Add Assets
                   </Button>
                 </div>

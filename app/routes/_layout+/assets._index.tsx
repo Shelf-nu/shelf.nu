@@ -21,17 +21,10 @@ import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
-import { getAssets } from "~/modules/asset";
+import { getAllPaginatedAndFilretableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { getAllCategories } from "~/modules/category";
-import { getAllTags } from "~/modules/tag";
 import { getUserByID } from "~/modules/user";
-import {
-  generatePageMeta,
-  getCurrentSearchParams,
-  getParamsValues,
-  notFound,
-} from "~/utils";
+import { notFound } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export interface IndexResponse {
@@ -75,29 +68,21 @@ export async function loader({ request }: LoaderArgs) {
   if (!user) {
     return redirect("/login");
   }
-
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search, categoriesIds, tagsIds } =
-    getParamsValues(searchParams);
-  const { prev, next } = generatePageMeta(request);
-
-  const categories = await getAllCategories({
-    userId,
-  });
-
-  const tags = await getAllTags({
-    userId,
-  });
-
-  const { assets, totalAssets } = await getAssets({
-    userId,
-    page,
-    perPage,
+  const {
     search,
-    categoriesIds,
-    tagsIds,
+    totalAssets,
+    perPage,
+    page,
+    prev,
+    next,
+    categories,
+    tags,
+    assets,
+    totalPages,
+  } = await getAllPaginatedAndFilretableAssets({
+    request,
+    userId,
   });
-  const totalPages = Math.ceil(totalAssets / perPage);
 
   if (page > totalPages) {
     return redirect("/assets");

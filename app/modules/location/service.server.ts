@@ -4,20 +4,55 @@ import { db } from "~/database";
 export async function getLocation({
   userId,
   id,
+  page = 1,
+  perPage = 8,
+  search,
 }: Pick<Location, "id"> & {
   userId: User["id"];
+  /** Page number. Starts at 1 */
+  page?: number;
+
+  /** Items to be loaded per page */
+  perPage?: number;
+
+  search?: string | null;
 }) {
-  return db.location.findFirst({
-    where: { id, userId },
-    include: {
-      assets: {
-        include: {
-          category: true,
-          tags: true,
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
+  let assetsWhere: Prisma.AssetWhereInput = {};
+
+  if (search) {
+    assetsWhere.title = {
+      contains: search,
+      mode: "insensitive",
+    };
+  }
+  const [location, totalAssetsWithinLocation] = await db.$transaction([
+    /** Get the items */
+    db.location.findFirst({
+      where: { id, userId },
+      include: {
+        assets: {
+          include: {
+            category: true,
+            tags: true,
+          },
+          skip,
+          take,
+          where: assetsWhere,
         },
       },
-    },
-  });
+    }),
+
+    /** Count them */
+    db.asset.count({
+      where: {
+        locationId: id,
+      },
+    }),
+  ]);
+
+  return { location, totalAssetsWithinLocation };
 }
 
 export async function getAllLocations({ userId }: { userId: User["id"] }) {
