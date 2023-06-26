@@ -21,7 +21,7 @@ import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
-import { getAllPaginatedAndFilretableAssets } from "~/modules/asset";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByID } from "~/modules/user";
 import { notFound } from "~/utils";
@@ -79,7 +79,7 @@ export async function loader({ request }: LoaderArgs) {
     tags,
     assets,
     totalPages,
-  } = await getAllPaginatedAndFilretableAssets({
+  } = await getPaginatedAndFilterableAssets({
     request,
     userId,
   });

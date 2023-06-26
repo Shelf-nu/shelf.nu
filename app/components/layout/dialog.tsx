@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { useMatches } from "@remix-run/react";
+import { useCallback, type ReactNode } from "react";
+import { useMatches, useNavigate } from "@remix-run/react";
 import { XIcon } from "../icons";
 import { Button } from "../shared";
 
@@ -12,9 +12,17 @@ export const Dialog = ({
 }) => {
   const matches = useMatches();
   const prevRoute = matches[matches.length - 2];
+  const navigate = useNavigate();
+  const handleBackdropClose = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (e.target !== e.currentTarget) return;
+      navigate(prevRoute);
+    },
+    [prevRoute, navigate]
+  );
 
   return open ? (
-    <div className="dialog-backdrop">
+    <div className="dialog-backdrop" onClick={handleBackdropClose}>
       <dialog className="dialog" open={true}>
         <Button
           to={prevRoute}
