@@ -28,9 +28,15 @@ export const loader = async ({ request }: LoaderArgs) => {
     request,
     userId,
   });
+
+  const modelName = {
+    singular: "asset",
+    plural: "assets",
+  };
   return json({
     showModal: true,
     ...data,
+    modelName,
   });
 };
 
