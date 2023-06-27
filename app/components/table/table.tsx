@@ -11,8 +11,13 @@ export function Table({
   className?: string;
 }) {
   return (
-    <div className="rounded-[12px] border border-gray-200 bg-white">
-      <table className={tw("w-full table-auto border-collapse", className)}>
+    <div
+      className={tw(
+        "rounded-[12px] border border-gray-200 bg-white",
+        className
+      )}
+    >
+      <table className="w-full table-auto border-collapse">
         {tableHeads ? (
           <thead>
             <tr>{tableHeads}</tr>
@@ -53,16 +58,16 @@ export function TableRow({
   return <tr className={tw("hover:bg-gray-50", className)}>{children}</tr>;
 }
 
-// export function TableRowData ({
-//   children,
-//   className,
-// }: {
-//   children: React.ReactNode;
-//   className?: string;
-// }) {
-//     return(
-//         <td>
-
-//         </td>
-//     );
-// }
+export function TableData({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <td className={tw("whitespace-nowrap border-b p-4 md:px-6", className)}>
+      {children}
+    </td>
+  );
+}

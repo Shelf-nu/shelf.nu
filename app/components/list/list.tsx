@@ -7,6 +7,7 @@ import { EmptyState } from "./empty-state";
 import { ListHeader } from "./list-header";
 import { ListItem } from "./list-item";
 import { Pagination } from "./pagination";
+import { tw } from "~/utils";
 
 /**
  * List components takes advantage use `useFetcher()`
@@ -18,23 +19,30 @@ export const List = ({
   ItemComponent,
   headerChildren,
   navigate,
+  className,
 }: {
   ItemComponent: any;
-  headerChildren: ReactNode;
+  headerChildren?: ReactNode;
   /** Function to be passed if the rows of the table should navigate */
   navigate?: (id: string) => void;
+  className?: string;
 }) => {
   const { items } = useLoaderData<IndexResponse>();
   const hasItems = items?.length > 0;
 
   return (
-    <div className="-mx-4 border border-gray-200 bg-white  md:mx-0 md:rounded-[12px]">
+    <div
+      className={tw(
+        "-mx-4 border border-gray-200 bg-white  md:mx-0 md:rounded-[12px]",
+        className
+      )}
+    >
       {!hasItems ? (
         <EmptyState />
       ) : (
         <>
           <table className=" w-full table-auto border-collapse">
-            <ListHeader>{headerChildren}</ListHeader>
+            <ListHeader children={headerChildren} />
             <tbody>
               {items.map((item) => (
                 <ListItem item={item} key={item.id} navigate={navigate}>

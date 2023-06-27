@@ -1,4 +1,5 @@
 import type { Asset } from "@prisma/client";
+import { List } from "~/components/list";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useParams } from "@remix-run/react";
@@ -15,7 +16,7 @@ import { CategoryFilters } from "~/components/list/filters/category";
 import { TagFilters } from "~/components/list/filters/tag";
 import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
-import { Table, TableRow } from "~/components/table";
+import { TableData } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
@@ -24,7 +25,18 @@ import { assertIsPost } from "~/utils";
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
 
-  const data = await getPaginatedAndFilterableAssets({
+  const {
+    search,
+    totalAssets,
+    perPage,
+    page,
+    prev,
+    next,
+    categories,
+    tags,
+    assets,
+    totalPages,
+  } = await getPaginatedAndFilterableAssets({
     request,
     userId,
   });
@@ -35,7 +47,16 @@ export const loader = async ({ request }: LoaderArgs) => {
   };
   return json({
     showModal: true,
-    ...data,
+    items: assets,
+    categories,
+    tags,
+    search,
+    page,
+    totalItems: totalAssets,
+    perPage,
+    totalPages,
+    next,
+    prev,
     modelName,
   });
 };
@@ -67,28 +88,6 @@ export const action = async ({ request, params }: ActionArgs) => {
 };
 
 export default function AddAssetsToLocation() {
-  const { assets } = useLoaderData<typeof loader>();
-  return (
-    <div>
-      <header className="mb-5">
-        <h2>Move assets to ‘Gear Room III’ location</h2>
-        <p>
-          Search your database for assets that you would like to move to this
-          location.
-        </p>
-      </header>
-      <Table
-        tableRows={<RowComponent items={assets} />}
-        tableHeads={<TableHead />}
-      />
-    </div>
-  );
-}
-
-interface DataObject {
-  [key: string]: any;
-}
-const TableHead = () => {
   const selectedCategories = useAtomValue(selectedCategoriesAtom);
   const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
 
@@ -103,8 +102,15 @@ const TableHead = () => {
     clearTagFilters();
   };
   return (
-    <th colSpan={2}>
-      <Filters className="!borber-b !border-b-solid border-0 border-none">
+    <div>
+      <header className="mb-5">
+        <h2>Move assets to ‘Gear Room III’ location</h2>
+        <p>
+          Search your database for assets that you would like to move to this
+          location.
+        </p>
+      </header>
+      <Filters className="mb-2">
         <div className="flex items-center justify-around gap-6 md:justify-end">
           {hasFiltersToClear ? (
             <div className="hidden gap-6 md:flex">
@@ -123,44 +129,46 @@ const TableHead = () => {
           <TagFilters />
         </div>
       </Filters>
-    </th>
+      <List ItemComponent={RowComponent} className="mb-8" />
+      <Button variant="secondary" width="full" to={".."}>
+        Done
+      </Button>
+    </div>
   );
-};
-const RowComponent = ({ items }: DataObject) => {
+}
+
+const RowComponent = ({ item }: { item: Asset }) => {
   const { locationId } = useParams();
 
   return (
     <>
-      {items.map((item: Asset) => (
-        <TableRow key={item.id}>
-          <td className="w-full  border-t">
-            <div className="flex justify-between gap-3 p-4 md:px-6">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
-                  <AssetImage
-                    asset={{
-                      assetId: item.id,
-                      mainImage: item.mainImage,
-                      mainImageExpiration: item.mainImageExpiration,
-                      alt: item.title,
-                    }}
-                    className="h-10 w-10 rounded-[4px] object-cover"
-                  />
-                </div>
-                <div className="flex flex-row items-center gap-2">
-                  <div className="font-medium">{item.title}</div>
-                </div>
-              </div>
+      <TableData className="w-full p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
+              <AssetImage
+                asset={{
+                  assetId: item.id,
+                  mainImage: item.mainImage,
+                  mainImageExpiration: item.mainImageExpiration,
+                  alt: item.title,
+                }}
+                className="h-10 w-10 rounded-[4px] object-cover"
+              />
             </div>
-          </td>
-          <td className="border-t p-4 text-left md:px-6">
-            <AddAssetForm
-              assetId={item.id}
-              isChecked={item.locationId === locationId || false}
-            />
-          </td>
-        </TableRow>
-      ))}
+            <div className="flex flex-row items-center gap-2">
+              <div className="font-medium">{item.title}</div>
+            </div>
+          </div>
+        </div>
+      </TableData>
+
+      <TableData>
+        <AddAssetForm
+          assetId={item.id}
+          isChecked={item.locationId === locationId || false}
+        />
+      </TableData>
     </>
   );
 };
