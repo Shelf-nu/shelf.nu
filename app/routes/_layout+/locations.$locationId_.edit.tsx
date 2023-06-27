@@ -18,7 +18,7 @@ export async function loader({ request, params }: LoaderArgs) {
 
   const id = getRequiredParam(params, "locationId");
 
-  const location = await getLocation({ userId, id });
+  const { location } = await getLocation({ userId, id });
   if (!location) {
     throw new Response("Not Found", { status: 404 });
   }

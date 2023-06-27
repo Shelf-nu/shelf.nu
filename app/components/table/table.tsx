@@ -11,7 +11,7 @@ export function Table({
   className?: string;
 }) {
   return (
-    <div className="border border-gray-200 bg-white rounded-[12px]">
+    <div className="rounded-[12px] border border-gray-200 bg-white">
       <table className={tw("w-full table-auto border-collapse", className)}>
         {tableHeads ? (
           <thead>

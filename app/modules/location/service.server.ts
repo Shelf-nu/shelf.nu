@@ -12,7 +12,7 @@ export async function getLocation({
   /** Page number. Starts at 1 */
   page?: number;
 
-  /** Items to be loaded per page */
+  /** Assets to be loaded per page with the lcoation */
   perPage?: number;
 
   search?: string | null;

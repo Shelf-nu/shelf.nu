@@ -73,7 +73,7 @@ export async function action({ request }: LoaderArgs) {
     );
   }
 
-  const { title, description, category, qrId, location } = result.data;
+  const { title, description, category, qrId, newLocationId } = result.data;
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
 
@@ -82,7 +82,7 @@ export async function action({ request }: LoaderArgs) {
     description,
     userId: authSession.userId,
     categoryId: category,
-    locationId: location,
+    locationId: newLocationId,
     qrId,
     tags,
   });
