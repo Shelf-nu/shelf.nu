@@ -44,7 +44,6 @@ interface Props {
 export const AssetForm = ({
   title,
   category,
-  location,
   description,
   qrId,
   tags,
@@ -140,7 +139,7 @@ export const AssetForm = ({
         }
         className="pt-[10px]"
       >
-        <LocationSelect defaultValue={location || undefined} />
+        <LocationSelect />
       </FormRow>
 
       <div>

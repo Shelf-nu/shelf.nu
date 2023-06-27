@@ -79,15 +79,15 @@ export async function action({ request }: ActionArgs) {
     unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
   );
 
-  const image = formDataFile.get("image") as File;
-  invariant(image instanceof File, "file not the right type");
+  const file = formDataFile.get("image") as File | null;
+  invariant(file instanceof File, "file not the right type");
 
   const location = await createLocation({
     name,
     description,
     address,
     userId: authSession.userId,
-    image: Buffer.from(await image.arrayBuffer()),
+    image: file || null,
   });
 
   sendNotification({

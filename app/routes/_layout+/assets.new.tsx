@@ -10,6 +10,7 @@ import Header from "~/components/layout/header";
 
 import {
   createAsset,
+  createNote,
   getAllRelatedEntries,
   updateAssetMainImage,
 } from "~/modules/asset";
@@ -99,6 +100,15 @@ export async function action({ request }: LoaderArgs) {
     message: "Your asset has been created successfully",
     icon: { name: "success", variant: "success" },
   });
+
+  if (asset.location) {
+    await createNote({
+      content: `**${asset.user.firstName} ${asset.user.lastName}** set the location of **${asset.title}** to **${asset.location.name}**`,
+      type: "UPDATE",
+      userId: authSession.userId,
+      assetId: asset.id,
+    });
+  }
 
   return redirect(`/assets/${asset.id}`, {
     headers: {

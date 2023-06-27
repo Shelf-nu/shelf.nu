@@ -102,7 +102,7 @@ export async function action({ request, params }: ActionArgs) {
     description,
     categoryId: category,
     tags,
-    locationId: newLocationId,
+    newLocationId,
     currentLocationId,
     userId: authSession.userId,
   });

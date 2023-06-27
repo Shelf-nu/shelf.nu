@@ -6,14 +6,16 @@ import { useNavigate } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
-
 import { Button } from "~/components/shared/button";
+import { Image } from "~/components/shared/image";
+
 import { requireAuthSession } from "~/modules/auth";
 import { getLocations } from "~/modules/location";
 import {
   generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
+  tw,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -99,10 +101,13 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
-            <img
-              src="/images/asset-placeholder.jpg"
+            <Image
+              imageId={item.imageId}
               alt="img"
-              className="h-10 w-10 rounded-[4px] object-cover"
+              className={tw(
+                "h-10 w-10 rounded-[4px] object-cover",
+                item.description ? "rounded-b-none border-b-0" : ""
+              )}
             />
           </div>
           <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">

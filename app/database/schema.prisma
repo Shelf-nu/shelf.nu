@@ -7,6 +7,21 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model Image {
+  id String @id @default(cuid())
+
+  contentType String
+  altText     String?
+  blob        Bytes
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  location  Location?
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+}
+
 model User {
   id             String  @id @default(cuid())
   email          String  @unique
@@ -28,6 +43,7 @@ model User {
   scans      Scan[]
   tags       Tag[]
   locations  Location[]
+  images     Image[]
 
   @@unique([email, username])
 }
@@ -178,7 +194,9 @@ model Location {
   name        String
   description String?
   address     String?
-  image       Bytes?
+
+  image       Image?  @relation(fields: [imageId], references: [id])
+  imageId     String? @unique
 
   // Datetime
   createdAt DateTime @default(now())
@@ -188,5 +206,5 @@ model Location {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 
-  assets Asset[]
+  assets  Asset[]
 }
