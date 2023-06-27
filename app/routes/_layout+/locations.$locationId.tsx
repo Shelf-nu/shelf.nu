@@ -193,6 +193,7 @@ export default function LocationPage() {
                 title: "There are currently no assets at the location",
                 text: "Add assets in this location",
                 newButtonRoute: "add-assets",
+                newButtonContent: "Add asset",
               }}
             />
           </div>

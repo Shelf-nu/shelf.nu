@@ -136,6 +136,7 @@ export default function AddAssetsToLocation() {
           title: "You haven't added any assets yet.",
           text: "What are you waiting for? Create your first asset now!",
           newButtonRoute: "/assets/new",
+          newButtonContent: "New asset",
         }}
       />
       <Button variant="secondary" width="full" to={".."}>

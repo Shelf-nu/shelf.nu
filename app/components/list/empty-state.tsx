@@ -7,6 +7,7 @@ export interface CustomEmptyState {
     title: string;
     text: string;
     newButtonRoute: string;
+    newButtonContent: string;
   };
 }
 export const EmptyState = ({ customContent }: CustomEmptyState) => {
@@ -61,7 +62,9 @@ export const EmptyState = ({ customContent }: CustomEmptyState) => {
           aria-label={`new ${singular}`}
           icon="plus"
         >
-          New {singular}
+          {customContent?.newButtonContent
+            ? customContent.newButtonContent
+            : `New ${singular}`}
         </Button>
       </div>
     </div>

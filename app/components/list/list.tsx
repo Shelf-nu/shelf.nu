@@ -31,6 +31,7 @@ export const List = ({
     title: string;
     text: string;
     newButtonRoute: string;
+    newButtonContent: string;
   };
 }) => {
   const { items } = useLoaderData<IndexResponse>();
