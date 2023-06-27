@@ -87,7 +87,7 @@ export async function action({ request }: LoaderArgs) {
     tags,
   });
 
-  // Not sure how to handle this failign as the asset is already created
+  // Not sure how to handle this failing as the asset is already created
   await updateAssetMainImage({
     request,
     assetId: asset.id,

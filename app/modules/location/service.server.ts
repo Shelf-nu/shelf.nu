@@ -113,7 +113,8 @@ export async function createLocation({
   description,
   address,
   userId,
-}: Pick<Location, "description" | "name" | "address"> & {
+  image,
+}: Pick<Location, "description" | "name" | "address" | "image"> & {
   userId: User["id"];
 }) {
   return db.location.create({
@@ -121,6 +122,7 @@ export async function createLocation({
       name,
       description,
       address,
+      image,
       user: {
         connect: {
           id: userId,

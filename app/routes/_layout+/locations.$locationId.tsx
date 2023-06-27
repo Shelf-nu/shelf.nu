@@ -49,6 +49,8 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     search,
   });
 
+  console.log(location);
+
   if (!location) {
     throw new Response("Not Found", { status: 404 });
   }
@@ -125,7 +127,10 @@ export default function LocationPage() {
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
           <img
-            src="/images/asset-placeholder.jpg"
+            src={
+              location?.image?.toString("base64") ||
+              "/images/asset-placeholder.jpg"
+            }
             alt={`${location.name}`}
             className={tw(
               "hidden h-auto w-[343px] rounded-lg border object-cover md:block md:h-[343px] md:w-full xl:h-auto",
