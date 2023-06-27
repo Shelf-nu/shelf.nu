@@ -194,6 +194,10 @@ export async function createAsset({
 
   return db.asset.create({
     data,
+    include: {
+      location: true,
+      user: true,
+    },
   });
 }
 
@@ -202,7 +206,7 @@ interface UpdateAssetPayload {
   title?: Asset["title"];
   description?: Asset["description"];
   categoryId?: Asset["categoryId"];
-  locationId?: Asset["locationId"];
+  newLocationId?: Asset["locationId"];
   currentLocationId?: Asset["locationId"];
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
@@ -218,12 +222,12 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     mainImageExpiration,
     categoryId,
     id,
-    locationId,
+    newLocationId,
     currentLocationId,
     userId,
   } = payload;
   const isChangingLocation =
-    locationId && currentLocationId && locationId !== currentLocationId;
+    newLocationId && currentLocationId && newLocationId !== currentLocationId;
 
   const data = {
     title,
@@ -244,11 +248,11 @@ export async function updateAsset(payload: UpdateAssetPayload) {
   }
 
   /** Delete the category id from the payload so we can use connect syntax from prisma */
-  if (locationId) {
+  if (newLocationId) {
     Object.assign(data, {
       location: {
         connect: {
-          id: locationId,
+          id: newLocationId,
         },
       },
     });
@@ -267,29 +271,40 @@ export async function updateAsset(payload: UpdateAssetPayload) {
      * Here we actually need to query the locations so we can print their names
      * */
 
-    const [newLocation, prevLocation] = await db.location.findMany({
-      where: {
-        id: {
-          in: [currentLocationId as string, locationId as string],
+    const [currentLocation, newLocation] = await db.$transaction([
+      /** Get the items */
+      db.location.findFirst({
+        where: {
+          id: currentLocationId,
+          userId,
         },
-        userId,
-      },
-      select: {
-        name: true,
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
+      }),
+
+      db.location.findFirst({
+        where: {
+          id: newLocationId,
+          userId,
+        },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+            },
           },
         },
-      },
-    });
+      }),
+    ]);
 
-    await createNote({
-      content: `**${newLocation.user.firstName} ${newLocation.user.lastName}** updated the location of **${asset.title}** from **${newLocation.name}** to **${prevLocation.name}**`,
-      type: "UPDATE",
-      userId: userId as string,
-      assetId: id,
+    await createLocationChangeNote({
+      currentLocation,
+      newLocation: newLocation as Location,
+      firstName: newLocation?.user.firstName || "",
+      lastName: newLocation?.user.lastName || "",
+      assetName: asset?.title,
+      assetId: asset.id,
+      userId: newLocation?.userId as string,
+      isRemoving: false,
     });
   }
 
@@ -442,4 +457,45 @@ export const getPaginatedAndFilterableAssets = async ({
     assets,
     totalPages,
   };
+};
+
+export const createLocationChangeNote = async ({
+  currentLocation,
+  newLocation,
+  firstName,
+  lastName,
+  assetName,
+  assetId,
+  userId,
+  isRemoving,
+}: {
+  currentLocation: Location | null;
+  newLocation: Location;
+  firstName: string;
+  lastName: string;
+  assetName: Asset["title"];
+  assetId: Asset["id"];
+  userId: User["id"];
+  isRemoving: boolean;
+}) => {
+  /**
+   * WE have a few cases to handle:
+   * 1. Setting the first location
+   * 2. Updating the location
+   * 3. Removing the location
+   */
+
+  let message = currentLocation
+    ? `**${firstName} ${lastName}** updated the location of **${assetName}** from **${currentLocation.name}** to **${newLocation.name}**` // updating location
+    : `**${firstName} ${lastName}** set the location of **${assetName}** to **${newLocation.name}**`; // setting to first location
+
+  if (isRemoving) {
+    message = `**${firstName} ${lastName}** removed  **${assetName}** from location **${currentLocation?.name}**`; // removing location
+  }
+  await createNote({
+    content: message,
+    type: "UPDATE",
+    userId,
+    assetId,
+  });
 };

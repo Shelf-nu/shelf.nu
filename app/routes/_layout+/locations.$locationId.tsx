@@ -7,8 +7,9 @@ import {
   type LoaderArgs,
   type V2_MetaFunction,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useNavigate } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import { AssetImage } from "~/components/assets/asset-image";
 import { ChevronRight } from "~/components/icons";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
@@ -19,6 +20,7 @@ import { ActionsDopdown } from "~/components/location";
 import { ShelfMap } from "~/components/location/map";
 import { Badge, Button } from "~/components/shared";
 import { Card } from "~/components/shared/card";
+import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { deleteLocation, getLocation } from "~/modules/location";
@@ -48,8 +50,6 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     perPage,
     search,
   });
-
-  console.log(location);
 
   if (!location) {
     throw new Response("Not Found", { status: 404 });
@@ -117,6 +117,8 @@ export async function action({ request, params }: ActionArgs) {
 
 export default function LocationPage() {
   const { location } = useLoaderData<typeof loader>();
+  const navigate = useNavigate();
+
   return (
     <div>
       <Header>
@@ -126,11 +128,8 @@ export default function LocationPage() {
 
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
-          <img
-            src={
-              location?.image?.toString("base64") ||
-              "/images/asset-placeholder.jpg"
-            }
+          <Image
+            imageId={location?.imageId}
             alt={`${location.name}`}
             className={tw(
               "hidden h-auto w-[343px] rounded-lg border object-cover md:block md:h-[343px] md:w-full xl:h-auto",
@@ -138,17 +137,21 @@ export default function LocationPage() {
             )}
           />
           {location.description ? (
-            <Card className="mb-4 mt-0 md:rounded-t-none">
+            <Card className=" mt-0 md:rounded-t-none">
               <p className=" text-gray-600">{location.description}</p>
             </Card>
           ) : null}
 
-          <div className="mb-4 flex items-center justify-between gap-10 rounded-lg border border-gray-200 px-4 py-5">
-            <span className=" text-xs font-medium text-gray-600">Address</span>
-            <span className="font-medium">{location.address}</span>
-          </div>
+          {location.address ? (
+            <div className="mt-4 flex items-center justify-between gap-10 rounded-lg border border-gray-200 px-4 py-5">
+              <span className=" text-xs font-medium text-gray-600">
+                Address
+              </span>
+              <span className="font-medium">{location.address}</span>
+            </div>
+          ) : null}
 
-          <div className="mb-10">
+          <div className="mb-10 mt-4">
             <ShelfMap latitude={48.858093} longitude={2.294694} />
             <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
               <p>
@@ -176,14 +179,14 @@ export default function LocationPage() {
                     variant="primary"
                     icon="plus"
                   >
-                    Add Assets
+                    Manage Assets
                   </Button>
                 </div>
               </div>
             </Filters>
             <List
               ItemComponent={ListAssetContent}
-              // navigate={(itemId) => navigate(itemId)}
+              navigate={(itemId) => navigate(`/assets/${itemId}`)}
               headerChildren={
                 <>
                   <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
@@ -224,9 +227,13 @@ const ListAssetContent = ({
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
-              <img
-                src="/images/asset-placeholder.jpg"
-                alt={`${item.title}`}
+              <AssetImage
+                asset={{
+                  assetId: item.id,
+                  mainImage: item.mainImage,
+                  mainImageExpiration: item.mainImageExpiration,
+                  alt: item.title,
+                }}
                 className="h-10 w-10 rounded-[4px] object-cover"
               />
             </div>

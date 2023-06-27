@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Location } from "@prisma/client";
+import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared";
 import { SearchInput } from "./search-input";
 import { useLocationSearch } from "./useLocationSearch";
@@ -11,7 +12,7 @@ import {
   SelectValue,
 } from "../forms";
 
-export const LocationSelect = ({ defaultValue }: { defaultValue?: string }) => {
+export const LocationSelect = () => {
   /** This takes care of the search bar inside the dropdown */
   const {
     locationSearch,
@@ -25,11 +26,19 @@ export const LocationSelect = ({ defaultValue }: { defaultValue?: string }) => {
     () => refinedLocations.length > 0,
     [refinedLocations]
   );
+  const { asset } = useLoaderData();
 
   return (
     <div className="relative w-full">
-      <input type="hidden" name="currentLocationId" value={defaultValue} />
-      <Select name="newLocationId" defaultValue={defaultValue || undefined}>
+      <input
+        type="hidden"
+        name="currentLocationId"
+        value={asset?.locationId || ""}
+      />
+      <Select
+        name="newLocationId"
+        defaultValue={asset?.locationId || undefined}
+      >
         <SelectTrigger className="">
           <SelectValue placeholder="Select location" />
         </SelectTrigger>

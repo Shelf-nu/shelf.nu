@@ -1,5 +1,6 @@
 import type { Prisma, User, Location } from "@prisma/client";
 import { db } from "~/database";
+// import { blobFromBuffer } from "~/utils/blob-from-buffer";
 
 export async function getLocation({
   userId,
@@ -114,22 +115,38 @@ export async function createLocation({
   address,
   userId,
   image,
-}: Pick<Location, "description" | "name" | "address" | "image"> & {
+}: Pick<Location, "description" | "name" | "address"> & {
   userId: User["id"];
+  image: File | null;
 }) {
-  return db.location.create({
-    data: {
-      name,
-      description,
-      address,
-      image,
-      user: {
-        connect: {
-          id: userId,
-        },
+  const data = {
+    name,
+    description,
+    address,
+    user: {
+      connect: {
+        id: userId,
       },
     },
-  });
+  };
+
+  if (image) {
+    Object.assign(data, {
+      image: {
+        create: {
+          blob: Buffer.from(await image.arrayBuffer()),
+          contentType: image.type,
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  return db.location.create({ data });
 }
 
 export async function deleteLocation({

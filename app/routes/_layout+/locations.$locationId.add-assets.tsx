@@ -1,11 +1,10 @@
 import type { Asset } from "@prisma/client";
-import { List } from "~/components/list";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useParams } from "@remix-run/react";
 import { useAtomValue, useAtom } from "jotai";
 import { AssetImage } from "~/components/assets/asset-image";
-import { Filters } from "~/components/list";
+import { List, Filters } from "~/components/list";
 import {
   selectedCategoriesAtom,
   clearCategoryFiltersAtom,
@@ -18,7 +17,10 @@ import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 import { TableData } from "~/components/table";
 import { db } from "~/database";
-import { createNote, getPaginatedAndFilterableAssets } from "~/modules/asset";
+import {
+  createLocationChangeNote,
+  getPaginatedAndFilterableAssets,
+} from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { assertIsPost } from "~/utils";
 
@@ -93,12 +95,16 @@ export const action = async ({ request, params }: ActionArgs) => {
     throw new Response("Something went wrong", { status: 500 });
   }
 
-  if (asset?.locationId !== locationId) {
-    await createNote({
-      content: `**${asset?.user.firstName} ${asset?.user.lastName}** updated the location of **${asset?.title}** from **${asset?.location?.name}** to **${location.name}**`,
-      type: "UPDATE",
-      userId: asset?.user.id as string,
-      assetId,
+  if (asset) {
+    await createLocationChangeNote({
+      currentLocation: asset?.location || null,
+      newLocation: location,
+      firstName: asset?.user.firstName || "",
+      lastName: asset?.user.lastName || "",
+      assetName: asset?.title,
+      assetId: asset.id,
+      userId: asset?.user.id,
+      isRemoving: !isChecked,
     });
   }
 
