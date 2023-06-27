@@ -128,7 +128,7 @@ export default function LocationPage() {
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
           <img
             src={
-              location?.image.toString("base64") ||
+              location?.image?.toString("base64") ||
               "/images/asset-placeholder.jpg"
             }
             alt={`${location.name}`}

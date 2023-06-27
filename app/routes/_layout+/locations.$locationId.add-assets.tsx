@@ -17,7 +17,7 @@ import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 import { Table, TableRow } from "~/components/table";
 import { db } from "~/database";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset";
+import { createNote, getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { assertIsPost } from "~/utils";
 
@@ -47,6 +47,15 @@ export const action = async ({ request, params }: ActionArgs) => {
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
   const isChecked = formData.get("isChecked") === "yes";
+  const asset = await db.asset.findUnique({
+    where: {
+      id: assetId,
+    },
+    include: {
+      location: true,
+      user: true,
+    },
+  });
 
   const location = await db.location.update({
     where: {
@@ -61,6 +70,15 @@ export const action = async ({ request, params }: ActionArgs) => {
 
   if (!location) {
     throw new Response("Something went wrong", { status: 500 });
+  }
+
+  if (asset?.locationId !== locationId) {
+    await createNote({
+      content: `**${asset?.user.firstName} ${asset?.user.lastName}** updated the location of **${asset?.title}** from **${asset?.location?.name}** to **${location.name}**`,
+      type: "UPDATE",
+      userId: asset?.user.id as string,
+      assetId,
+    });
   }
 
   return json({ ok: true });
