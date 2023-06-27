@@ -86,7 +86,7 @@ model Tag {
 }
 
 model Note {
-  id      String @id @default(cuid())
+  id      String   @id @default(cuid())
   content String
   type    NoteType @default(COMMENT)
 
@@ -105,8 +105,6 @@ enum NoteType {
   COMMENT
   UPDATE
 }
-
-
 
 model Qr {
   id String @id @default(cuid())
@@ -180,14 +178,15 @@ model Location {
   name        String
   description String?
   address     String?
+  image       Bytes?
 
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
-  
+
   assets Asset[]
 }

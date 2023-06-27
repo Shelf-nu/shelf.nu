@@ -1,5 +1,11 @@
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import {
+  json,
+  redirect,
+  unstable_createMemoryUploadHandler,
+  unstable_parseMultipartFormData,
+} from "@remix-run/node";
+import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { titleAtom } from "~/atoms/locations.new";
@@ -31,6 +37,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
+const MAX_SIZE = 1024 * 1024 * 5; // 5MB
 
 export async function action({ request }: ActionArgs) {
   const authSession = await requireAuthSession(request);
@@ -45,6 +52,7 @@ export async function action({ request }: ActionArgs) {
   const clonedRequest = request.clone();
 
   const formData = await clonedRequest.formData();
+
   const result = await NewLocationFormSchema.safeParseAsync(
     parseFormAny(formData)
   );
@@ -66,11 +74,20 @@ export async function action({ request }: ActionArgs) {
   const { name, description, address } = result.data;
   /** This checks if tags are passed and build the  */
 
+  const formDataFile = await unstable_parseMultipartFormData(
+    request,
+    unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+  );
+
+  const image = formDataFile.get("image") as File;
+  invariant(image instanceof File, "file not the right type");
+
   const location = await createLocation({
     name,
     description,
     address,
     userId: authSession.userId,
+    image: Buffer.from(await image.arrayBuffer()),
   });
 
   sendNotification({
