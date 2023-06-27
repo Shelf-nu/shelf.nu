@@ -20,12 +20,18 @@ export const List = ({
   headerChildren,
   navigate,
   className,
+  customEmptyStateContent,
 }: {
   ItemComponent: any;
   headerChildren?: ReactNode;
   /** Function to be passed if the rows of the table should navigate */
   navigate?: (id: string) => void;
   className?: string;
+  customEmptyStateContent?: {
+    title: string;
+    text: string;
+    newButtonRoute: string;
+  };
 }) => {
   const { items } = useLoaderData<IndexResponse>();
   const hasItems = items?.length > 0;
@@ -38,7 +44,7 @@ export const List = ({
       )}
     >
       {!hasItems ? (
-        <EmptyState />
+        <EmptyState customContent={customEmptyStateContent} />
       ) : (
         <>
           <table className=" w-full table-auto border-collapse">

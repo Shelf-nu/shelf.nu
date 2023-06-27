@@ -2,7 +2,7 @@ import type { Asset } from "@prisma/client";
 import { List } from "~/components/list";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useParams } from "@remix-run/react";
+import { useParams } from "@remix-run/react";
 import { useAtomValue, useAtom } from "jotai";
 import { AssetImage } from "~/components/assets/asset-image";
 import { Filters } from "~/components/list";
@@ -129,7 +129,15 @@ export default function AddAssetsToLocation() {
           <TagFilters />
         </div>
       </Filters>
-      <List ItemComponent={RowComponent} className="mb-8" />
+      <List
+        ItemComponent={RowComponent}
+        className="mb-8"
+        customEmptyStateContent={{
+          title: "You haven't added any assets yet.",
+          text: "What are you waiting for? Create your first asset now!",
+          newButtonRoute: "/assets/new",
+        }}
+      />
       <Button variant="secondary" width="full" to={".."}>
         Done
       </Button>

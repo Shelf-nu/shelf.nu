@@ -2,8 +2,14 @@ import { useLoaderData } from "@remix-run/react";
 
 import { ClearSearch } from "./filters/clear-search";
 import { Button } from "../shared/button";
-
-export const EmptyState = () => {
+export interface CustomEmptyState {
+  customContent?: {
+    title: string;
+    text: string;
+    newButtonRoute: string;
+  };
+}
+export const EmptyState = ({ customContent }: CustomEmptyState) => {
   const { search, modelName } = useLoaderData();
   const { singular, plural } = modelName;
 
@@ -15,18 +21,28 @@ export const EmptyState = () => {
   };
 
   return (
-    <div className="flex h-full flex-col justify-center gap-[32px] py-[150px] text-center">
+    <div className="flex h-full flex-col justify-center gap-[32px] py-[100px] text-center">
       <div className="flex flex-col items-center">
         <img
           src="/images/empty-state.svg"
           alt="Empty state"
           className="h-auto w-[172px]"
         />
-
-        <div className="text-text-lg font-semibold text-gray-900">
-          {texts.title}
-        </div>
-        <p>{texts.p}</p>
+        {customContent ? (
+          <div>
+            <div className="text-text-lg font-semibold text-gray-900">
+              {customContent.title}
+            </div>
+            <p>{customContent.text}</p>
+          </div>
+        ) : (
+          <div>
+            <div className="text-text-lg font-semibold text-gray-900">
+              {texts.title}
+            </div>
+            <p>{texts.p}</p>
+          </div>
+        )}
       </div>
       <div className="flex justify-center gap-3">
         {search && (
@@ -38,7 +54,13 @@ export const EmptyState = () => {
             Clear Search
           </ClearSearch>
         )}
-        <Button to="new" aria-label={`new ${singular}`} icon="plus">
+        <Button
+          to={
+            customContent?.newButtonRoute ? customContent.newButtonRoute : "new"
+          }
+          aria-label={`new ${singular}`}
+          icon="plus"
+        >
           New {singular}
         </Button>
       </div>
