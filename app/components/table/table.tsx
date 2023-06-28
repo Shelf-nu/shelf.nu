@@ -25,7 +25,7 @@ export function Th({
   return (
     <th
       className={tw(
-        "hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6",
+        "border-b p-4 text-left font-normal text-gray-600 md:px-6",
         className
       )}
     >

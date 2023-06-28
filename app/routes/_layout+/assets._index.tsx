@@ -176,8 +176,8 @@ export default function AssetIndexPage() {
           navigate={(itemId) => navigate(itemId)}
           headerChildren={
             <>
-              <Th>Category</Th>
-              <Th>Tags</Th>
+              <Th className="hidden md:table-cell">Category</Th>
+              <Th className="hidden md:table-cell">Tags</Th>
             </>
           }
         />
