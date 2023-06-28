@@ -170,7 +170,13 @@ export default function AddAssetsToLocation() {
   );
 }
 
-const RowComponent = ({ item }: { item: Asset }) => {
+type AssetWithLocation = Asset & {
+  location: {
+    name: string;
+  };
+};
+
+const RowComponent = ({ item }: { item: AssetWithLocation }) => {
   const { locationId } = useParams();
 
   return (
@@ -178,7 +184,7 @@ const RowComponent = ({ item }: { item: Asset }) => {
       <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
+            <div className="flex h-12 w-12 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -186,11 +192,20 @@ const RowComponent = ({ item }: { item: Asset }) => {
                   mainImageExpiration: item.mainImageExpiration,
                   alt: item.title,
                 }}
-                className="h-10 w-10 rounded-[4px] object-cover"
+                className="h-full w-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-row items-center gap-2">
+            <div className="flex flex-col">
               <div className="font-medium">{item.title}</div>
+              {item.location ? (
+                <div
+                  className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
+                  title={`Current location: ${item.location.name}`}
+                >
+                  <div className="h-2 w-2 rounded-full bg-gray-500"></div>
+                  <span>{item.location.name}</span>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

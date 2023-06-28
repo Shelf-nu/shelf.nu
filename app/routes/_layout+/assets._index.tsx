@@ -200,7 +200,7 @@ const ListAssetContent = ({
       <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
+            <div className="flex h-12 w-12 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -208,7 +208,7 @@ const ListAssetContent = ({
                   mainImageExpiration: item.mainImageExpiration,
                   alt: item.title,
                 }}
-                className="h-10 w-10 rounded-[4px] object-cover"
+                className="h-full w-full rounded-[4px] border object-cover"
               />
             </div>
             <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">

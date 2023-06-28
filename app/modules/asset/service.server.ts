@@ -100,7 +100,15 @@ export async function getAssets({
       skip,
       take,
       where,
-      include: { category: true, tags: true },
+      include: {
+        category: true,
+        tags: true,
+        location: {
+          select: {
+            name: true,
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
     }),
 
