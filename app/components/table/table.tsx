@@ -1,4 +1,5 @@
-import React, { TdHTMLAttributes } from "react";
+import type { TdHTMLAttributes } from "react";
+import React from "react";
 import { tw } from "~/utils";
 
 export function Table({
