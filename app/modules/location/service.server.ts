@@ -149,13 +149,18 @@ export async function createLocation({
   return db.location.create({ data });
 }
 
-export async function deleteLocation({
-  id,
-  userId,
-}: Pick<Location, "id"> & { userId: User["id"] }) {
-  return await db.location.deleteMany({
-    where: { id, userId },
+export async function deleteLocation({ id }: Pick<Location, "id">) {
+  const location = await db.location.delete({
+    where: { id },
   });
+
+  if (location.imageId) {
+    await db.image.delete({
+      where: { id: location.imageId },
+    });
+  }
+
+  return location;
 }
 
 export async function updateLocation(payload: {
@@ -163,9 +168,34 @@ export async function updateLocation(payload: {
   name?: Location["name"];
   address?: Location["address"];
   description?: Location["description"];
+  image: File | null;
+  userId: User["id"];
 }) {
+  const { id, name, address, description, image, userId } = payload;
+  const data = {
+    name,
+    description,
+    address,
+  };
+
+  if (image) {
+    Object.assign(data, {
+      image: {
+        update: {
+          blob: Buffer.from(await image.arrayBuffer()),
+          contentType: image.type,
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
+        },
+      },
+    });
+  }
+
   return await db.location.update({
-    where: { id: payload.id },
-    data: payload,
+    where: { id },
+    data: data,
   });
 }

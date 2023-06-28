@@ -10,6 +10,7 @@ import {
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { AssetImage } from "~/components/assets/asset-image";
+import { ErrorBoundryComponent } from "~/components/errors";
 import { ChevronRight } from "~/components/icons";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
@@ -101,7 +102,7 @@ export async function action({ request, params }: ActionArgs) {
   const id = getRequiredParam(params, "locationId");
   const authSession = await requireAuthSession(request);
 
-  await deleteLocation({ userId: authSession.userId, id });
+  await deleteLocation({ id });
 
   sendNotification({
     title: "Location deleted",
@@ -284,3 +285,7 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
     </div>
   ) : null;
 };
+
+export const ErrorBoundary = () => (
+  <ErrorBoundryComponent title="Sorry, location you are looking for doesn't exist" />
+);

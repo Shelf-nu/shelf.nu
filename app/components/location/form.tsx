@@ -1,9 +1,13 @@
 import type { Location } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { updateTitleAtom } from "~/atoms/locations.new";
+import {
+  fileErrorAtom,
+  updateTitleAtom,
+  validateFileAtom,
+} from "~/atoms/locations.new";
 import { isFormProcessing } from "~/utils";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -28,8 +32,8 @@ export const LocationForm = ({ name, address, description }: Props) => {
   const zo = useZorm("NewQuestionWizardScreen", NewLocationFormSchema);
   const disabled = isFormProcessing(navigation.state);
 
-  //   const fileError = useAtomValue(fileErrorAtom);
-  //   const [, validateFile] = useAtom(validateFileAtom);
+  const fileError = useAtomValue(fileErrorAtom);
+  const [, validateFile] = useAtom(validateFileAtom);
   const [, updateName] = useAtom(updateTitleAtom);
 
   return (
@@ -62,10 +66,10 @@ export const LocationForm = ({ name, address, description }: Props) => {
             accept="image/png,.png,image/jpeg,.jpg,.jpeg"
             name="image"
             type="file"
-            // onChange={validateFile}
+            onChange={validateFile}
             label={"mainImage"}
             hideLabel
-            // error={fileError}
+            error={fileError}
             className="mt-2"
             inputClassName="border-0 shadow-none p-0 rounded-none"
           />
@@ -83,7 +87,6 @@ export const LocationForm = ({ name, address, description }: Props) => {
           name={zo.fields.address()}
           disabled={disabled}
           error={zo.errors.address()?.message}
-          autoFocus
           className="w-full"
           defaultValue={address || undefined}
         />
