@@ -1,8 +1,14 @@
 import type { ActionArgs, V2_MetaFunction } from "@remix-run/node";
-import { json, type LoaderArgs } from "@remix-run/node";
+import {
+  json,
+  unstable_parseMultipartFormData,
+  type LoaderArgs,
+  unstable_createMemoryUploadHandler,
+} from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
+import invariant from "tiny-invariant";
 import { titleAtom } from "~/atoms/locations.new";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -12,6 +18,7 @@ import { getLocation, updateLocation } from "~/modules/location";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -44,6 +51,7 @@ export const handle = {
 export async function action({ request, params }: ActionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  const clonedRequest = request.clone();
 
   const id = getRequiredParam(params, "locationId");
   const formData = await request.formData();
@@ -68,11 +76,21 @@ export async function action({ request, params }: ActionArgs) {
 
   const { name, description, address } = result.data;
 
+  const formDataFile = await unstable_parseMultipartFormData(
+    clonedRequest,
+    unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+  );
+
+  const file = formDataFile.get("image") as File | null;
+  invariant(file instanceof File, "file not the right type");
+
   await updateLocation({
     id,
+    userId: authSession.userId,
     name,
     description,
     address,
+    image: file || null,
   });
 
   sendNotification({

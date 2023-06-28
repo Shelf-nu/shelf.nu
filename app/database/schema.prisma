@@ -18,6 +18,7 @@ model Image {
   updatedAt DateTime   @updatedAt
 
   location  Location?
+  
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 }

@@ -5,6 +5,7 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
+import { ErrorBoundryComponent } from "~/components/errors";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
@@ -55,3 +56,7 @@ export default function App() {
     </div>
   );
 }
+
+export const ErrorBoundary = () => (
+  <ErrorBoundryComponent title="Sorry, page you are looking for doesn't exist" />
+);

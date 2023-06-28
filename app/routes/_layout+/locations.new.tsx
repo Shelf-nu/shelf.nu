@@ -37,7 +37,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
-const MAX_SIZE = 1024 * 1024 * 5; // 5MB
+export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
 export async function action({ request }: ActionArgs) {
   const authSession = await requireAuthSession(request);

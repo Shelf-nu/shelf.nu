@@ -232,7 +232,7 @@ const ListAssetContent = ({
           <Badge color={category.color}>{category.name}</Badge>
         ) : null}
       </Td>
-      <Td className="text-left hidden md:table-cell">
+      <Td className="hidden text-left md:table-cell">
         <ListItemTagsColumn tags={tags} />
       </Td>
     </>
