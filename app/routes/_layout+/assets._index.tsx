@@ -21,6 +21,7 @@ import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
+import { Td, Th } from "~/components/table";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByID } from "~/modules/user";
@@ -175,12 +176,8 @@ export default function AssetIndexPage() {
           navigate={(itemId) => navigate(itemId)}
           headerChildren={
             <>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Category
-              </th>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Tags
-              </th>
+              <Th>Category</Th>
+              <Th>Tags</Th>
             </>
           }
         />
@@ -200,7 +197,7 @@ const ListAssetContent = ({
   const { category, tags } = item;
   return (
     <>
-      <td className="w-full  border-b">
+      <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
@@ -229,15 +226,15 @@ const ListAssetContent = ({
             <ChevronRight />
           </button>
         </div>
-      </td>
-      <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
+      </Td>
+      <Td className="hidden md:table-cell">
         {category ? (
           <Badge color={category.color}>{category.name}</Badge>
         ) : null}
-      </td>
-      <td className="hidden whitespace-nowrap border-b p-4 text-left md:table-cell md:px-6">
+      </Td>
+      <Td className="text-left hidden md:table-cell">
         <ListItemTagsColumn tags={tags} />
-      </td>
+      </Td>
     </>
   );
 };

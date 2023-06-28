@@ -7,6 +7,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
+import { Th, Td } from "~/components/table";
 import { DeleteTag } from "~/components/tag/delete-tag";
 
 import { requireAuthSession } from "~/modules/auth";
@@ -101,9 +102,7 @@ export default function CategoriesPage() {
           ItemComponent={TagItem}
           headerChildren={
             <>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Actions
-              </th>
+              <Th>Actions</Th>
             </>
           }
         />
@@ -118,14 +117,11 @@ const TagItem = ({
   item: Pick<Tag, "id" | "description" | "name">;
 }) => (
   <>
-    <td
-      title={`Tag: ${item.name}`}
-      className="hidden w-full border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6"
-    >
+    <Td className="w-full text-left" title={`Tag: ${item.name}`}>
       <TagBadge>{item.name}</TagBadge>
-    </td>
-    <td className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
+    </Td>
+    <Td className="text-left">
       <DeleteTag tag={item} />
-    </td>
+    </Td>
   </>
 );

@@ -22,6 +22,7 @@ import { Badge, Button } from "~/components/shared";
 import { Card } from "~/components/shared/card";
 import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
+import { Td, Th } from "~/components/table";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { deleteLocation, getLocation } from "~/modules/location";
 import assetCss from "~/styles/asset.css";
@@ -189,12 +190,8 @@ export default function LocationPage() {
               navigate={(itemId) => navigate(`/assets/${itemId}`)}
               headerChildren={
                 <>
-                  <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                    Category
-                  </th>
-                  <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                    Tags
-                  </th>
+                  <Th>Category</Th>
+                  <Th>Tags</Th>
                 </>
               }
               customEmptyStateContent={{
@@ -223,7 +220,7 @@ const ListAssetContent = ({
   const { category, tags } = item;
   return (
     <>
-      <td className="w-full border-b">
+      <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
@@ -252,15 +249,15 @@ const ListAssetContent = ({
             <ChevronRight />
           </button>
         </div>
-      </td>
-      <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
+      </Td>
+      <Td>
         {category ? (
           <Badge color={category.color}>{category.name}</Badge>
         ) : null}
-      </td>
-      <td className="hidden whitespace-nowrap border-b p-4 text-left md:table-cell md:px-6">
+      </Td>
+      <Td className="text-left">
         <ListItemTagsColumn tags={tags} />
-      </td>
+      </Td>
     </>
   );
 };

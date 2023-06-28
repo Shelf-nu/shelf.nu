@@ -15,7 +15,7 @@ import { CategoryFilters } from "~/components/list/filters/category";
 import { TagFilters } from "~/components/list/filters/tag";
 import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
-import { TableData } from "~/components/table";
+import { Td } from "~/components/table";
 import { db } from "~/database";
 import {
   createLocationChangeNote,
@@ -175,7 +175,7 @@ const RowComponent = ({ item }: { item: Asset }) => {
 
   return (
     <>
-      <TableData className="w-full p-0 md:p-0">
+      <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
@@ -194,14 +194,14 @@ const RowComponent = ({ item }: { item: Asset }) => {
             </div>
           </div>
         </div>
-      </TableData>
+      </Td>
 
-      <TableData>
+      <Td>
         <AddAssetForm
           assetId={item.id}
           isChecked={item.locationId === locationId || false}
         />
-      </TableData>
+      </Td>
     </>
   );
 };

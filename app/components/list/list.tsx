@@ -8,6 +8,7 @@ import { EmptyState } from "./empty-state";
 import { ListHeader } from "./list-header";
 import { ListItem } from "./list-item";
 import { Pagination } from "./pagination";
+import { Table } from "../table";
 
 /**
  * List components takes advantage use `useFetcher()`
@@ -48,7 +49,7 @@ export const List = ({
         <EmptyState customContent={customEmptyStateContent} />
       ) : (
         <>
-          <table className=" w-full table-auto border-collapse">
+          <Table>
             <ListHeader children={headerChildren} />
             <tbody>
               {items.map((item) => (
@@ -57,7 +58,7 @@ export const List = ({
                 </ListItem>
               ))}
             </tbody>
-          </table>
+          </Table>
           <Pagination />
         </>
       )}

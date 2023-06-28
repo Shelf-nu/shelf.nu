@@ -8,6 +8,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
+import { Td, Th } from "~/components/table";
 
 import { requireAuthSession } from "~/modules/auth";
 import { getLocations } from "~/modules/location";
@@ -80,9 +81,7 @@ export default function LocationsIndexPage() {
           navigate={(itemId) => navigate(itemId)}
           headerChildren={
             <>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Assets
-              </th>
+              <Th>Assets</Th>
             </>
           }
         />
@@ -97,7 +96,7 @@ interface LocationWithAssets extends Location {
 
 const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
   <>
-    <td className="w-full  border-b">
+    <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
@@ -117,9 +116,7 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
           </div>
         </div>
       </div>
-    </td>
-    <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
-      {item.assets.length}
-    </td>
+    </Td>
+    <Td>{item.assets.length}</Td>
   </>
 );

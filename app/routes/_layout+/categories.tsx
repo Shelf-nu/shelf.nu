@@ -8,6 +8,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { Th, Td } from "~/components/table";
 
 import { requireAuthSession } from "~/modules/auth";
 import { deleteCategory, getCategories } from "~/modules/category";
@@ -101,12 +102,8 @@ export default function CategoriesPage() {
           ItemComponent={CategoryItem}
           headerChildren={
             <>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Description
-              </th>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Actions
-              </th>
+              <Th>Description</Th>
+              <Th>Actions</Th>
             </>
           }
         />
@@ -121,17 +118,14 @@ const CategoryItem = ({
   item: Pick<Category, "id" | "description" | "name" | "color">;
 }) => (
   <>
-    <td title={`Category: ${item.name}`} className="w-1/4 border-b p-4 md:px-6">
+    <Td title={`Category: ${item.name}`} className="w-1/4 ">
       <Badge color={item.color}>{item.name}</Badge>
-    </td>
-    <td
-      className="w-3/4 border-b p-4 text-gray-500 md:px-6"
-      title="Description"
-    >
+    </Td>
+    <Td className="w-3/4 text-gray-500" title="Description">
       {item.description}
-    </td>
-    <td className="whitespace-nowrap border-b p-4 md:px-6">
+    </Td>
+    <Td>
       <DeleteCategory category={item} />
-    </td>
+    </Td>
   </>
 );

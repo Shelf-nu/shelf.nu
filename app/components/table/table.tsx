@@ -1,35 +1,21 @@
-import React from "react";
+import React, { TdHTMLAttributes } from "react";
 import { tw } from "~/utils";
 
 export function Table({
-  tableHeads,
-  tableRows,
+  children,
   className,
 }: {
-  tableHeads?: React.ReactNode;
-  tableRows: React.ReactNode;
+  children: React.ReactNode;
   className?: string;
 }) {
   return (
-    <div
-      className={tw(
-        "rounded-[12px] border border-gray-200 bg-white",
-        className
-      )}
-    >
-      <table className="w-full table-auto border-collapse">
-        {tableHeads ? (
-          <thead>
-            <tr>{tableHeads}</tr>
-          </thead>
-        ) : null}
-        <tbody>{tableRows}</tbody>
-      </table>
-    </div>
+    <table className={tw("w-full table-auto border-collapse", className)}>
+      {children}
+    </table>
   );
 }
 
-export function TableHead({
+export function Th({
   children,
   className,
 }: {
@@ -48,7 +34,7 @@ export function TableHead({
   );
 }
 
-export function TableRow({
+export function Tr({
   children,
   className,
 }: {
@@ -58,15 +44,17 @@ export function TableRow({
   return <tr className={tw("hover:bg-gray-50", className)}>{children}</tr>;
 }
 
-export function TableData({
-  children,
-  className,
-}: {
+interface TdProps extends TdHTMLAttributes<HTMLTableCellElement> {
   children: React.ReactNode;
   className?: string;
-}) {
+}
+
+export function Td({ children, className, ...props }: TdProps) {
   return (
-    <td className={tw("whitespace-nowrap border-b p-4 md:px-6", className)}>
+    <td
+      className={tw("whitespace-nowrap border-b p-4 md:px-6", className)}
+      {...props}
+    >
       {children}
     </td>
   );
