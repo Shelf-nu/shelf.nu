@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { Location } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared";
+import { tw } from "~/utils";
 import { SearchInput } from "./search-input";
 import { useLocationSearch } from "./useLocationSearch";
 import {
@@ -11,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../forms";
+import { Image } from "../shared/image";
 
 export const LocationSelect = () => {
   /** This takes care of the search bar inside the dropdown */
@@ -77,8 +79,18 @@ export const LocationSelect = () => {
 
                 <div className="border-b border-b-gray-300 py-2 ">
                   {refinedLocations.map((c: Location) => (
-                    <SelectItem value={c.id} key={c.id}>
-                      {c.name}{" "}
+                    <SelectItem value={c.id} key={c.id} className="p-2">
+                      <div className="flex items-center gap-2">
+                        <Image
+                          imageId={c.imageId}
+                          alt="img"
+                          className={tw(
+                            "h-6 w-6 rounded-[2px] object-cover",
+                            c.description ? "rounded-b-none border-b-0" : ""
+                          )}
+                        />
+                        <div>{c.name}</div>
+                      </div>
                     </SelectItem>
                   ))}
                 </div>
