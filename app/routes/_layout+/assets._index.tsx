@@ -21,17 +21,11 @@ import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
-import { getAssets } from "~/modules/asset";
+import { Td, Th } from "~/components/table";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { getAllCategories } from "~/modules/category";
-import { getAllTags } from "~/modules/tag";
 import { getUserByID } from "~/modules/user";
-import {
-  generatePageMeta,
-  getCurrentSearchParams,
-  getParamsValues,
-  notFound,
-} from "~/utils";
+import { notFound } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export interface IndexResponse {
@@ -75,29 +69,21 @@ export async function loader({ request }: LoaderArgs) {
   if (!user) {
     return redirect("/login");
   }
-
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search, categoriesIds, tagsIds } =
-    getParamsValues(searchParams);
-  const { prev, next } = generatePageMeta(request);
-
-  const categories = await getAllCategories({
-    userId,
-  });
-
-  const tags = await getAllTags({
-    userId,
-  });
-
-  const { assets, totalAssets } = await getAssets({
-    userId,
-    page,
-    perPage,
+  const {
     search,
-    categoriesIds,
-    tagsIds,
+    totalAssets,
+    perPage,
+    page,
+    prev,
+    next,
+    categories,
+    tags,
+    assets,
+    totalPages,
+  } = await getPaginatedAndFilterableAssets({
+    request,
+    userId,
   });
-  const totalPages = Math.ceil(totalAssets / perPage);
 
   if (page > totalPages) {
     return redirect("/assets");
@@ -190,12 +176,8 @@ export default function AssetIndexPage() {
           navigate={(itemId) => navigate(itemId)}
           headerChildren={
             <>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Category
-              </th>
-              <th className="hidden border-b p-4 text-left font-normal text-gray-600 md:table-cell md:px-6">
-                Tags
-              </th>
+              <Th className="hidden md:table-cell">Category</Th>
+              <Th className="hidden md:table-cell">Tags</Th>
             </>
           }
         />
@@ -215,10 +197,10 @@ const ListAssetContent = ({
   const { category, tags } = item;
   return (
     <>
-      <td className="w-full  border-b">
+      <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-[4px] border">
+            <div className="flex h-12 w-12 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -226,7 +208,7 @@ const ListAssetContent = ({
                   mainImageExpiration: item.mainImageExpiration,
                   alt: item.title,
                 }}
-                className="h-10 w-10 rounded-[4px] object-cover"
+                className="h-full w-full rounded-[4px] border object-cover"
               />
             </div>
             <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
@@ -244,15 +226,15 @@ const ListAssetContent = ({
             <ChevronRight />
           </button>
         </div>
-      </td>
-      <td className="hidden whitespace-nowrap border-b p-4 md:table-cell md:px-6">
+      </Td>
+      <Td className="hidden md:table-cell">
         {category ? (
           <Badge color={category.color}>{category.name}</Badge>
         ) : null}
-      </td>
-      <td className="hidden whitespace-nowrap border-b p-4 text-left md:table-cell md:px-6">
+      </Td>
+      <Td className="hidden text-left md:table-cell">
         <ListItemTagsColumn tags={tags} />
-      </td>
+      </Td>
     </>
   );
 };

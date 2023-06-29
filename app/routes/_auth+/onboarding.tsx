@@ -38,7 +38,6 @@ const OnboardingFormSchema = z
   );
 
 export async function loader({ request }: LoaderArgs) {
-  // const authSession = await getAuthSession(request);
   const authSession = await requireAuthSession(request);
 
   const user = await getUserByID(authSession?.userId);

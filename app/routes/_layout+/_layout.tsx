@@ -5,6 +5,7 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Outlet, useLoaderData } from "@remix-run/react";
+import { ErrorBoundryComponent } from "~/components/errors";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
@@ -44,7 +45,7 @@ export default function App() {
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
       <div className="flex flex-col md:flex-row">
         <Sidebar user={user} />
-        <main className=" flex-1 bg-gray-25 px-4 py-8 md:px-8">
+        <main className=" flex-1 bg-gray-25 px-4 py-8 md:w-[calc(100%-312px)] md:px-8">
           <div className="flex h-full flex-1 flex-col">
             <Breadcrumbs />
             <Outlet />
@@ -55,3 +56,7 @@ export default function App() {
     </div>
   );
 }
+
+export const ErrorBoundary = () => (
+  <ErrorBoundryComponent title="Sorry, page you are looking for doesn't exist" />
+);

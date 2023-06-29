@@ -2,13 +2,20 @@ import { useRef, type ReactNode, useEffect } from "react";
 import { Form, useLoaderData, useSubmit } from "@remix-run/react";
 import { useAtom } from "jotai";
 
+import { tw } from "~/utils";
 import {
   toggleIsFilteringCategoriesAtom,
   toggleIsFilteringTagsAtom,
 } from "./atoms";
 import { SearchForm } from "./search-form";
 
-export const Filters = ({ children }: { children?: ReactNode }) => {
+export const Filters = ({
+  children,
+  className,
+}: {
+  children?: ReactNode;
+  className?: string;
+}) => {
   const { search } = useLoaderData();
 
   const [isFilteringCategories, toggleIsFilteringCategories] = useAtom(
@@ -48,9 +55,14 @@ export const Filters = ({ children }: { children?: ReactNode }) => {
   }, [submit, isFilteringTags, toggleIsFilteringTags]);
 
   return (
-    <div className="flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
+    <div
+      className={tw(
+        "flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5",
+        className
+      )}
+    >
       <Form ref={formRef} className="w-full">
-        <div className="w-full items-center justify-between md:flex">
+        <div className="w-full items-center justify-between gap-2 md:flex">
           <div className="flex items-center gap-5">
             <SearchForm />
           </div>
