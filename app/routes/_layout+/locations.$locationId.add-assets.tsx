@@ -134,25 +134,8 @@ export default function AddAssetsToLocation() {
           location.
         </p>
       </header>
-      <Filters className="mb-2">
-        <div className="flex items-center justify-around gap-6 md:justify-end">
-          {hasFiltersToClear ? (
-            <div className="hidden gap-6 md:flex">
-              <Button
-                as="button"
-                onClick={handleClearFilters}
-                variant="link"
-                className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
-              >
-                Clear all filters
-              </Button>
-              <div className="text-gray-500"> | </div>
-            </div>
-          ) : null}
-          <CategoryFilters />
-          <TagFilters />
-        </div>
-      </Filters>
+      <Filters className="mb-2" />
+
       <List
         ItemComponent={RowComponent}
         className="mb-8"
