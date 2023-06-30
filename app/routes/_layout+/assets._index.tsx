@@ -231,7 +231,6 @@ const ListAssetContent = ({
             </div>
             <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
               <div className="font-medium">{item.title}</div>
-              <div className="hidden text-gray-600 md:block">{item.id}</div>
               <div className="block md:hidden">
                 {category ? (
                   <Badge color={category.color}>{category.name}</Badge>

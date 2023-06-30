@@ -7,7 +7,7 @@ export const Card = ({
   children: React.ReactNode;
   className?: string;
 }) => (
-  <div className={tw("my-6 rounded-lg border bg-white px-4 py-5", className)}>
+  <div className={tw("my-4 rounded-lg border bg-white px-4 py-5", className)}>
     {children}
   </div>
 );

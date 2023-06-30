@@ -99,7 +99,7 @@ export async function action({ request }: LoaderArgs) {
     icon: { name: "success", variant: "success" },
   });
 
-  return redirect(`/assets/${asset.id}`, {
+  return redirect(`/assets`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },

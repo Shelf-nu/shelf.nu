@@ -19,7 +19,7 @@ export const Notes = () => {
           {asset.notes.map((note: Note) => (
             <li
               key={note.id}
-              className="note mb-6 rounded-lg border bg-white md:mb-8"
+              className="note mb-4 rounded-lg border bg-white md:mb-4"
             >
               <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
                 <div>
