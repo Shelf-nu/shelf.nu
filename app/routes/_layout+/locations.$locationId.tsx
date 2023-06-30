@@ -176,7 +176,7 @@ export default function LocationPage() {
                 <div className="mb-10 mt-4">
                   <MapPlaceholder
                     description={
-                      "We couldn't geolocate your address. Please try formatting it differently.."
+                      "We couldn't geolocate your address. Please try formatting it differently."
                     }
                   />
                 </div>
