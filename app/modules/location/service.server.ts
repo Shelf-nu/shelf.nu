@@ -130,7 +130,7 @@ export async function createLocation({
     },
   };
 
-  if (image) {
+  if (image?.size && image?.size > 0) {
     Object.assign(data, {
       image: {
         create: {

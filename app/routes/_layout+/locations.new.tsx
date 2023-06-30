@@ -37,6 +37,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
+
 export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
 export async function action({ request }: ActionArgs) {
