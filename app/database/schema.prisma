@@ -27,6 +27,7 @@ model User {
   qrCodes    Qr[]
   scans      Scan[]
   tags       Tag[]
+  roles      Role[]
 
   @@unique([email, username])
 }
@@ -162,4 +163,19 @@ model Scan {
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Role {
+  id   String @id @unique @default(cuid())
+  name String @unique @default("USER")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+}
+
+enum Roles {
+  USER
+  ADMIN
 }
