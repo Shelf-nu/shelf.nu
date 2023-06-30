@@ -3,6 +3,7 @@ import { useAtom } from "jotai";
 import {
   AssetsIcon,
   CategoriesIcon,
+  LocationMarkerIcon,
   QuestionsIcon,
   SettingsIcon,
   TagsIcon,
@@ -27,6 +28,11 @@ const menuItemsTop = [
     icon: <TagsIcon />,
     to: "tags",
     label: "Tags",
+  },
+  {
+    icon: <LocationMarkerIcon />,
+    to: "locations",
+    label: "Locations (beta)",
   },
 ];
 const menuItemsBottom = [

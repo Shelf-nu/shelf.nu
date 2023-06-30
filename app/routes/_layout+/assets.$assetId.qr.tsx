@@ -54,7 +54,7 @@ export default function QRPreview() {
   return asset ? (
     <div className="">
       <header className="mb-6 flex items-center justify-between leading-7">
-        <h3>Download QR Tag</h3>
+        <h3>Download QR Code</h3>
         <Link to=".." className="text-gray-400">
           <XIcon />
         </Link>
@@ -116,7 +116,7 @@ export default function QRPreview() {
         variant="secondary"
         className="w-full"
       >
-        Download QR Tag
+        Download QR Code
       </Button>
     </div>
   ) : null;

@@ -9,7 +9,10 @@ export const ListHeader = ({ children }: { children?: React.ReactNode }) => {
   return (
     <thead>
       <tr className="">
-        <th className="border-b text-left font-normal text-gray-600">
+        <th
+          className="border-b text-left font-normal text-gray-600"
+          colSpan={children ? 1 : 100}
+        >
           <div className="flex justify-between px-6 py-[14px] ">
             {perPage < totalItems ? (
               <p>

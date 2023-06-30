@@ -4,7 +4,7 @@
 }
 
 .react-tags.is-active {
-  border-color: #4f46e5;
+  @apply border-primary-300;
 }
 
 .react-tags.is-disabled {
