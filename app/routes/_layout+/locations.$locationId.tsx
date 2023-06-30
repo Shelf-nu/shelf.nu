@@ -149,7 +149,7 @@ export default function LocationPage() {
             </Card>
           ) : null}
 
-          <TextualDivider text="Details" className="mb-8 lg:hidden" />
+          <TextualDivider text="Details" className="my-8 lg:hidden" />
 
           {location.address ? (
             <>
