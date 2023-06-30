@@ -78,7 +78,13 @@ export const LocationForm = ({ name, address, description }: Props) => {
 
       <FormRow
         rowLabel={"Address"}
-        subHeading={<p>Will set location’s geo position to address</p>}
+        subHeading={
+          <p>
+            Will set location’s geo position to address. Make sure to add an
+            accurate address, to ensure the map location is as accurate as
+            possible
+          </p>
+        }
         className="pt-[10px]"
       >
         <Input
