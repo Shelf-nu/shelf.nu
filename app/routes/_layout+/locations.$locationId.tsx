@@ -30,6 +30,7 @@ import assetCss from "~/styles/asset.css";
 import {
   assertIsDelete,
   generatePageMeta,
+  geolocate,
   getCurrentSearchParams,
   getParamsValues,
   getRequiredParam,
@@ -70,6 +71,8 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     plural: "assets",
   };
 
+  const mapData = await geolocate(location.address);
+
   return json({
     location,
     header,
@@ -81,6 +84,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     totalPages,
     next,
     prev,
+    mapData,
   });
 };
 
@@ -118,7 +122,7 @@ export async function action({ request, params }: ActionArgs) {
 }
 
 export default function LocationPage() {
-  const { location } = useLoaderData<typeof loader>();
+  const { location, mapData } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   return (
@@ -145,29 +149,32 @@ export default function LocationPage() {
           ) : null}
 
           {location.address ? (
-            <div className="mt-4 flex items-center justify-between gap-10 rounded-lg border border-gray-200 px-4 py-5">
-              <span className=" text-xs font-medium text-gray-600">
-                Address
-              </span>
-              <span className="font-medium">{location.address}</span>
-            </div>
+            <>
+              <div className="mt-4 flex items-center justify-between gap-10 rounded-lg border border-gray-200 px-4 py-5">
+                <span className=" text-xs font-medium text-gray-600">
+                  Address
+                </span>
+                <span className="font-medium">{location.address}</span>
+              </div>
+              {mapData ? (
+                <div className="mb-10 mt-4">
+                  <ShelfMap latitude={mapData.lat} longitude={mapData.lon} />
+                  <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
+                    <p>
+                      <Button
+                        to={`https://www.google.com/maps/search/?api=1&query=${mapData.lat},${mapData.lon}&zoom=15&markers=${mapData.lat},${mapData.lon}`}
+                        variant="link"
+                        target="_blank"
+                        rel="nofollow noopener noreferrer"
+                      >
+                        See in Google Maps
+                      </Button>
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+            </>
           ) : null}
-
-          <div className="mb-10 mt-4">
-            <ShelfMap latitude={48.858093} longitude={2.294694} />
-            <div className="border border-gray-200 p-4 text-center text-text-xs text-gray-600">
-              <p>
-                <Button
-                  to={`https://www.google.com/maps/search/?api=1&query=${48.858093},${2.294694}&zoom=15&markers=${48.858093},${2.294694}`}
-                  variant="link"
-                  target="_blank"
-                  rel="nofollow noopener noreferrer"
-                >
-                  See in Google Maps
-                </Button>
-              </p>
-            </div>
-          </div>
         </div>
 
         <div className="w-full lg:ml-8">

@@ -2,17 +2,8 @@ import type { Asset } from "@prisma/client";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useParams } from "@remix-run/react";
-import { useAtomValue, useAtom } from "jotai";
 import { AssetImage } from "~/components/assets/asset-image";
 import { List, Filters } from "~/components/list";
-import {
-  selectedCategoriesAtom,
-  clearCategoryFiltersAtom,
-  selectedTagsAtom,
-  clearTagFiltersAtom,
-} from "~/components/list/filters/atoms";
-import { CategoryFilters } from "~/components/list/filters/category";
-import { TagFilters } from "~/components/list/filters/tag";
 import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 import { Td } from "~/components/table";
@@ -112,19 +103,6 @@ export const action = async ({ request, params }: ActionArgs) => {
 };
 
 export default function AddAssetsToLocation() {
-  const selectedCategories = useAtomValue(selectedCategoriesAtom);
-  const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
-
-  const selectedTags = useAtomValue(selectedTagsAtom);
-  const [, clearTagFilters] = useAtom(clearTagFiltersAtom);
-
-  const hasFiltersToClear =
-    selectedCategories.items.length > 0 || selectedTags.items.length > 0;
-
-  const handleClearFilters = () => {
-    clearCategoryFilters();
-    clearTagFilters();
-  };
   return (
     <div>
       <header className="mb-5">
