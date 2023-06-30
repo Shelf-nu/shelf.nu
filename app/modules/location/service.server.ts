@@ -178,7 +178,7 @@ export async function updateLocation(payload: {
     address,
   };
 
-  if (image) {
+  if (image?.size && image?.size > 0) {
     Object.assign(data, {
       image: {
         update: {
