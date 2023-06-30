@@ -23,7 +23,7 @@ export default function Header({
         <div className="mb-4 sm:mb-0">
           <Heading
             as="h2"
-            className="text-display-xs font-semibold md:text-display-sm"
+            className="break-all text-display-xs font-semibold md:text-display-sm"
           >
             {title || header?.title}
           </Heading>

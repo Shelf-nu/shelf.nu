@@ -62,7 +62,7 @@ export const Filters = ({
       )}
     >
       <Form ref={formRef} className="w-full">
-        <div className="w-full items-center justify-between gap-2 md:flex">
+        <div className="form-wrapper w-full items-center justify-between gap-2 md:flex">
           <div className="flex items-center gap-5">
             <SearchForm />
           </div>

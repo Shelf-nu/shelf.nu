@@ -7,6 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+import { tw } from "~/utils";
 import { DeleteLocation } from "./delete-location";
 import { Button } from "../shared";
 
@@ -14,12 +15,20 @@ interface Props {
   location: {
     name: Location["name"];
   };
+  fullWidth?: boolean;
 }
 
-export const ActionsDopdown = ({ location }: Props) => (
+export const ActionsDopdown = ({ location, fullWidth }: Props) => (
   <DropdownMenu>
-    <DropdownMenuTrigger className="asset-actions">
-      <Button variant="secondary" to="#" data-test-id="assetActionsButton">
+    <DropdownMenuTrigger
+      className={tw("asset-actions", fullWidth ? "w-full" : "")}
+    >
+      <Button
+        variant="secondary"
+        to="#"
+        width={fullWidth ? "full" : "auto"}
+        data-test-id="assetActionsButton"
+      >
         <span className="flex items-center gap-2">
           Actions <ChevronRight className="chev" />
         </span>

@@ -27,7 +27,9 @@ export const Dialog = ({
         <Button
           to={prevRoute}
           variant="link"
-          className={"absolute right-6 top-[26px] leading-none text-gray-500"}
+          className={
+            "absolute right-4 top-[16px] leading-none text-gray-500 md:right-6 md:top-[26px]"
+          }
         >
           <XIcon />
         </Button>

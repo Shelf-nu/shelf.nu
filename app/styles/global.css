@@ -131,5 +131,9 @@ p {
   @apply fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50;
 }
 dialog {
-  @apply relative z-10 w-[80%] rounded-lg bg-white p-6 shadow-lg md:w-[600px];
+  @apply relative z-10 m-0 h-full w-full overflow-y-auto bg-white p-6 shadow-lg md:m-auto md:h-auto md:w-[600px] md:rounded-lg;
+}
+
+.responsive-filters .form-wrapper {
+  @apply flex-col items-start xl:flex-row xl:items-center;
 }
