@@ -17,7 +17,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters } from "~/components/list";
 import { List } from "~/components/list/list";
-import { ActionsDopdown } from "~/components/location";
+import { ActionsDopdown, MapPlaceholder } from "~/components/location";
 import { ShelfMap } from "~/components/location/map";
 import { Badge, Button } from "~/components/shared";
 import { Card } from "~/components/shared/card";
@@ -172,7 +172,15 @@ export default function LocationPage() {
                     </p>
                   </div>
                 </div>
-              ) : null}
+              ) : (
+                <div className="mb-10 mt-4">
+                  <MapPlaceholder
+                    description={
+                      "We couldn't geolocate your address. Please try formatting it differently.."
+                    }
+                  />
+                </div>
+              )}
             </>
           ) : null}
         </div>
