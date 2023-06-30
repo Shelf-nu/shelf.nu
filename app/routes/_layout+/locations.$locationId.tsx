@@ -17,12 +17,13 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters } from "~/components/list";
 import { List } from "~/components/list/list";
-import { ActionsDopdown } from "~/components/location";
+import { ActionsDopdown, MapPlaceholder } from "~/components/location";
 import { ShelfMap } from "~/components/location/map";
 import { Badge, Button } from "~/components/shared";
 import { Card } from "~/components/shared/card";
 import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
+import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { deleteLocation, getLocation } from "~/modules/location";
@@ -133,12 +134,12 @@ export default function LocationPage() {
       <ContextualModal />
 
       <div className="mt-8 block lg:flex">
-        <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
+        <div className="shrink-0 overflow-hidden lg:w-[250px] 2xl:w-[400px]">
           <Image
             imageId={location?.imageId}
             alt={`${location.name}`}
             className={tw(
-              "hidden h-auto w-[343px] rounded-lg border object-cover md:block md:h-[343px] md:w-full xl:h-auto",
+              "block h-auto w-full rounded-lg border object-cover 2xl:h-auto",
               location.description ? "rounded-b-none border-b-0" : ""
             )}
           />
@@ -147,6 +148,8 @@ export default function LocationPage() {
               <p className=" text-gray-600">{location.description}</p>
             </Card>
           ) : null}
+
+          <TextualDivider text="Details" className="mb-8 lg:hidden" />
 
           {location.address ? (
             <>
@@ -172,16 +175,39 @@ export default function LocationPage() {
                     </p>
                   </div>
                 </div>
-              ) : null}
+              ) : (
+                <div className="mb-10 mt-4">
+                  <MapPlaceholder
+                    description={
+                      "We couldn't geolocate your address. Please try formatting it differently."
+                    }
+                  />
+                </div>
+              )}
             </>
           ) : null}
         </div>
 
-        <div className="w-full lg:ml-8">
+        <div className=" w-full lg:ml-8 lg:w-[calc(100%-282px)]">
+          <TextualDivider text="Assets" className="mb-8 lg:hidden" />
+          <div className="mb-3 flex gap-4 lg:hidden">
+            <Button
+              as="button"
+              to="add-assets"
+              variant="primary"
+              icon="plus"
+              width="full"
+            >
+              Manage Assets
+            </Button>
+            <div className="w-full">
+              <ActionsDopdown location={location} fullWidth />
+            </div>
+          </div>
           <div className="flex flex-col md:gap-2">
-            <Filters>
-              <div className="flex items-center justify-around gap-6 md:justify-end">
-                <div className="hidden gap-6 md:flex">
+            <Filters className="responsive-filters mb-2 lg:mb-0">
+              <div className="flex items-center justify-normal gap-6 xl:justify-end">
+                <div className="hidden lg:block">
                   <Button
                     as="button"
                     to="add-assets"
@@ -198,8 +224,8 @@ export default function LocationPage() {
               navigate={(itemId) => navigate(`/assets/${itemId}`)}
               headerChildren={
                 <>
-                  <Th>Category</Th>
-                  <Th>Tags</Th>
+                  <Th className="hidden md:table-cell">Category</Th>
+                  <Th className="hidden md:table-cell">Tags</Th>
                 </>
               }
               customEmptyStateContent={{
@@ -244,7 +270,6 @@ const ListAssetContent = ({
             </div>
             <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
               <div className="font-medium">{item.title}</div>
-              <div className="hidden text-gray-600 md:block">{item.id}</div>
               <div className="block md:hidden">
                 {category ? (
                   <Badge color={category.color}>{category.name}</Badge>
@@ -258,12 +283,12 @@ const ListAssetContent = ({
           </button>
         </div>
       </Td>
-      <Td>
+      <Td className="hidden md:table-cell">
         {category ? (
           <Badge color={category.color}>{category.name}</Badge>
         ) : null}
       </Td>
-      <Td className="text-left">
+      <Td className="hidden text-left md:table-cell">
         <ListItemTagsColumn tags={tags} />
       </Td>
     </>

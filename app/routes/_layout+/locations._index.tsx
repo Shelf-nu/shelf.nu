@@ -112,7 +112,6 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
           <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
             <div className="font-medium">{item.name}</div>
             <div className="hidden text-gray-600 md:block">{item.address}</div>
-            <div className="block md:hidden">10</div>
           </div>
         </div>
       </div>
