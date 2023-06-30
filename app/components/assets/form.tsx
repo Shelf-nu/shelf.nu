@@ -76,7 +76,7 @@ export const AssetForm = ({
           autoFocus
           onChange={updateTitle}
           className="w-full"
-          defaultValue={title || undefined}
+          defaultValue={title || ""}
         />
       </FormRow>
 

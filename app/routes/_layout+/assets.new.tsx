@@ -101,6 +101,7 @@ export async function action({ request }: LoaderArgs) {
     icon: { name: "success", variant: "success" },
   });
 
+
   if (asset.location) {
     await createNote({
       content: `**${asset.user.firstName} ${asset.user.lastName}** set the location of **${asset.title}** to **${asset.location.name}**`,
@@ -109,8 +110,8 @@ export async function action({ request }: LoaderArgs) {
       assetId: asset.id,
     });
   }
-
-  return redirect(`/assets/${asset.id}`, {
+  
+  return redirect(`/assets`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
