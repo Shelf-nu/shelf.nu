@@ -32,7 +32,7 @@ const menuItemsTop = [
   {
     icon: <LocationMarkerIcon />,
     to: "locations",
-    label: "Locations",
+    label: "Locations (beta)",
   },
 ];
 const menuItemsBottom = [
