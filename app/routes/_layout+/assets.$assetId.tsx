@@ -212,7 +212,7 @@ export default function AssetDetailsPage() {
           <LocationDetails />
         </div>
 
-        <div className="w-full lg:ml-8">
+        <div className="w-full lg:ml-6">
           <TextualDivider text="Notes" className="mb-8 lg:hidden" />
           <Notes />
         </div>
