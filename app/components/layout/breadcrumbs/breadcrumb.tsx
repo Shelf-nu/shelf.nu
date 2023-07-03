@@ -14,7 +14,11 @@ export function Breadcrumb({
    * take the page title and render it.
    * This takes care of showing the correct title in asset show page*/
   if (typeof breadcrumb === "string" && breadcrumb === "single") {
-    breadcrumb = match?.data?.asset?.title || "Not found";
+    if (match?.data?.location) {
+      breadcrumb = match?.data?.location?.name || "Not found";
+    } else {
+      breadcrumb = match?.data?.asset?.title || "Not found";
+    }
   }
 
   return breadcrumb ? (

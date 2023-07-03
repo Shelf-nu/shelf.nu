@@ -3,7 +3,7 @@ import { Button } from "~/components/shared";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
 
-export function LocationDetails() {
+export function ScanDetails() {
   const { lastScan } = useLoaderData();
   let latitude, longitude;
 

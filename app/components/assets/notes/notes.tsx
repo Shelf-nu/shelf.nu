@@ -1,14 +1,11 @@
-import type { Note } from "@prisma/client";
+import type { Note as NoteType } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { MarkdownViewer } from "~/components/markdown";
-import { useUserData } from "~/hooks";
-import { timeAgo } from "~/utils/time-ago";
-import { ActionsDopdown } from "./actions-dropdown";
+
 import { NewNote } from "./new";
+import { Note } from "./note";
 
 export const Notes = () => {
   const { asset } = useLoaderData();
-  const user = useUserData();
   const hasNotes = asset?.notes.length > 0;
 
   return (
@@ -16,26 +13,8 @@ export const Notes = () => {
       <NewNote />
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
-          {asset.notes.map((note: Note) => (
-            <li
-              key={note.id}
-              className="note mb-4 rounded-lg border bg-white md:mb-4"
-            >
-              <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
-                <div>
-                  <span className="commentator font-medium text-gray-900">
-                    {user?.firstName} {user?.lastName}
-                  </span>{" "}
-                  <span className="text-gray-600">
-                    {timeAgo(note.createdAt)}
-                  </span>
-                </div>
-                <ActionsDopdown note={note} />
-              </header>
-              <div className="message px-3.5 py-3">
-                <MarkdownViewer content={note.content} />
-              </div>
-            </li>
+          {asset.notes.map((note: NoteType) => (
+            <Note key={note.id} note={note} />
           ))}
         </ul>
       ) : (

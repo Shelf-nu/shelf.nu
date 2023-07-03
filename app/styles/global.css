@@ -45,7 +45,7 @@ label span {
 }
 
 p {
-  @apply text-text-sm font-normal text-gray-900;
+  @apply font-normal;
 }
 
 @keyframes spinner {
@@ -121,4 +121,15 @@ p {
 
 .markdown-viewer table th {
   @apply font-normal;
+}
+
+.dialog-backdrop {
+  @apply fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50;
+}
+dialog {
+  @apply relative z-10 m-0 h-full w-full overflow-y-auto bg-white p-6 shadow-lg md:m-auto md:h-auto md:w-[600px] md:rounded-lg;
+}
+
+.responsive-filters .form-wrapper {
+  @apply flex-col items-start xl:flex-row xl:items-center;
 }

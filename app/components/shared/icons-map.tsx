@@ -17,6 +17,7 @@ import {
   WriteIcon,
   TagsIcon,
   CategoriesIcon,
+  LocationMarkerIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -37,7 +38,8 @@ export type Icon =
   | "question"
   | "write"
   | "tag"
-  | "category";
+  | "category"
+  | "location";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -61,6 +63,7 @@ export const iconsMap: IconsMap = {
   write: <WriteIcon />,
   tag: <TagsIcon />,
   category: <CategoriesIcon />,
+  location: <LocationMarkerIcon />,
 };
 
 export default iconsMap;

@@ -16,3 +16,4 @@ export * from "./get-random-color";
 export * from "./list";
 export * from "./gif-to-png";
 export * from "./slugify";
+export * from "./geolocate.server";
