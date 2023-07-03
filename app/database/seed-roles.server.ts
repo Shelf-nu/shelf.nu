@@ -45,6 +45,12 @@ const getUserId = async (email = "hello@supabase.com"): Promise<string> => {
 
 async function seed() {
   try {
+    await prisma.role.create({
+      data: {
+        name: "admin",
+      },
+    });
+
     const id = await getUserId();
 
     // cleanup the existing database
@@ -56,6 +62,22 @@ async function seed() {
       data: {
         email,
         id,
+      },
+    });
+
+    await prisma.asset.create({
+      data: {
+        title: "My first item",
+        description: "Hello, world!",
+        userId: user.id,
+      },
+    });
+
+    await prisma.asset.create({
+      data: {
+        title: "My second item",
+        description: "Hello, world!",
+        userId: user.id,
       },
     });
 

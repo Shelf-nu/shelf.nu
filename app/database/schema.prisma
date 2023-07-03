@@ -217,7 +217,7 @@ model Location {
 // Master data for roles
 model Role {
   id   String @id @unique @default(cuid())
-  name String @unique @default("USER")
+  name Roles @unique @default(USER)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
