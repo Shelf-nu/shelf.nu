@@ -1,3 +1,4 @@
+import { Roles } from "@prisma/client";
 import { matchRequestUrl, rest } from "msw";
 
 import { server } from "mocks";
@@ -214,6 +215,11 @@ describe(createUserAccount.name, () => {
         id: USER_ID,
         username: username,
         categories: { create: defaultUserCategories },
+        roles: {
+          connect: {
+            name: Roles["USER"],
+          },
+        },
       },
     });
 

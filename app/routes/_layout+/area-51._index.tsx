@@ -5,7 +5,7 @@ import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Pagination } from "~/components/list/pagination";
-import { Td, Th } from "~/components/table";
+import { Td } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user";
 import { requireAdmin } from "~/utils/roles.servers";
 
