@@ -165,6 +165,9 @@ model Scan {
   updatedAt DateTime @updatedAt
 }
 
+
+
+// Master data for roles
 model Role {
   id   String @id @unique @default(cuid())
   name String @unique @default("USER")
