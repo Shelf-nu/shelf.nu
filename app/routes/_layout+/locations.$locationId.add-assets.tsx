@@ -1,7 +1,7 @@
 import type { Asset } from "@prisma/client";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useParams } from "@remix-run/react";
+import { useLoaderData, useParams } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
 import { List, Filters } from "~/components/list";
 import { AddAssetForm } from "~/components/location/add-asset-form";
@@ -15,8 +15,14 @@ import {
 import { requireAuthSession } from "~/modules/auth";
 import { assertIsPost } from "~/utils";
 
-export const loader = async ({ request }: LoaderArgs) => {
+export const loader = async ({ request, params }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
+  const lcationId = params.locationId as string;
+  const location = await db.location.findUnique({
+    where: {
+      id: lcationId,
+    },
+  });
 
   const {
     search,
@@ -51,6 +57,7 @@ export const loader = async ({ request }: LoaderArgs) => {
     next,
     prev,
     modelName,
+    location,
   });
 };
 
@@ -103,10 +110,11 @@ export const action = async ({ request, params }: ActionArgs) => {
 };
 
 export default function AddAssetsToLocation() {
+  const { location } = useLoaderData<typeof loader>();
   return (
     <div>
       <header className="mb-5">
-        <h2>Move assets to ‘Gear Room III’ location</h2>
+        <h2>Move assets to ‘{location?.name}’ location</h2>
         <p>
           Search your database for assets that you would like to move to this
           location.
