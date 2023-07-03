@@ -43,12 +43,9 @@ model User {
   qrCodes    Qr[]
   scans      Scan[]
   tags       Tag[]
-<<<<<<< HEAD
   roles      Role[]
-=======
   locations  Location[]
   images     Image[]
->>>>>>> origin/main
 
   @@unique([email, username])
 }
