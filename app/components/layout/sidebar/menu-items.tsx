@@ -1,4 +1,4 @@
-import { NavLink } from "@remix-run/react";
+import { NavLink, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
 import {
   AssetsIcon,
@@ -9,6 +9,7 @@ import {
   TagsIcon,
 } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
+import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
@@ -46,10 +47,34 @@ const menuItemsBottom = [
 
 const MenuItems = () => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
+  const { isAdmin } = useLoaderData<typeof loader>();
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-full flex-col justify-between">
         <ul className="menu mt-6 md:mt-10">
+          {isAdmin ? (
+            <li>
+              <NavLink
+                className={({ isActive }) =>
+                  tw(
+                    "my-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900",
+                    isActive ? "bg-gray-100 text-gray-900" : ""
+                  )
+                }
+                to={"/area-51"}
+                onClick={toggleMobileNav}
+                title={"Area 51"}
+              >
+                <i className="icon text-gray-500">🛸</i>
+                <span className="text whitespace-nowrap transition duration-200 ease-linear">
+                  Area 51
+                </span>
+              </NavLink>
+              <hr />
+            </li>
+          ) : null}
+
           {menuItemsTop.map((item) => (
             <li key={item.label}>
               <NavLink

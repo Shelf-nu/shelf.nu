@@ -13,20 +13,30 @@ export const ErrorBoundryComponent = ({
   message,
 }: ErrorContentProps) => {
   const error = useRouteError();
-
   /** 404 ERROR */
   if (isRouteErrorResponse(error))
-    return (
-      <ErrorContent
-        title={title ? title : "Sorry, this page doesnt exist"}
-        message={
-          message
-            ? message
-            : "It may have been (re)moved or the URL you’ve entered is incorrect."
-        }
-        showReload={false}
-      />
-    );
+    switch (error.status) {
+      case 404:
+        return (
+          <ErrorContent
+            title={title ? title : "Sorry, this page doesnt exist"}
+            message={
+              message
+                ? message
+                : "It may have been (re)moved or the URL you’ve entered is incorrect."
+            }
+            showReload={false}
+          />
+        );
+      case 403:
+        return (
+          <ErrorContent
+            title={title ? title : "Unauthorized."}
+            message={"You don't have access to this page"}
+            showReload={false}
+          />
+        );
+    }
 
   /** 500 error */
   const errorMessage = error instanceof Error ? error.message : "Unknown error";

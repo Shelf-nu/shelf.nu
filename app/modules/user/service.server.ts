@@ -1,5 +1,6 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, Roles } from "@prisma/client";
 import type { Category, User } from "@prisma/client";
+import type { LoaderArgs } from "@remix-run/node";
 import { db } from "~/database";
 
 import type { AuthSession } from "~/modules/auth";
@@ -10,6 +11,11 @@ import {
   deleteAuthAccount,
   updateAccountPassword,
 } from "~/modules/auth";
+import {
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+} from "~/utils";
 import type { UpdateUserPayload, UpdateUserResponse } from "./types";
 
 export const defaultUserCategories: Pick<
@@ -80,6 +86,11 @@ async function createUser({
         username,
         categories: {
           create: defaultUserCategories,
+        },
+        roles: {
+          connect: {
+            name: Roles["USER"],
+          },
         },
       },
     })
@@ -171,4 +182,75 @@ export async function updateUser(
     }
     return { user: null, errors: null };
   }
+}
+
+export const getPaginatedAndFilterableUsers = async ({
+  request,
+}: {
+  request: LoaderArgs["request"];
+}) => {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, search } = getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
+
+  const { users, totalUsers } = await getUsers({
+    page,
+    perPage: 25,
+    search,
+  });
+  const totalPages = Math.ceil(totalUsers / 25);
+
+  return {
+    page,
+    perPage: 25,
+    search,
+    totalUsers,
+    prev,
+    next,
+    users,
+    totalPages,
+  };
+};
+
+export async function getUsers({
+  page = 1,
+  perPage = 8,
+  search,
+}: {
+  /** Page number. Starts at 1 */
+  page: number;
+
+  /** Assets to be loaded per page */
+  perPage?: number;
+
+  search?: string | null;
+}) {
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+
+  /** Default value of where. Takes the assetss belonging to current user */
+  let where: Prisma.UserWhereInput = {};
+
+  /** If the search string exists, add it to the where object */
+  if (search) {
+    where.email = {
+      contains: search,
+      mode: "insensitive",
+    };
+  }
+
+  const [users, totalUsers] = await db.$transaction([
+    /** Get the users */
+    db.user.findMany({
+      skip,
+      take,
+      where,
+      orderBy: { createdAt: "desc" },
+    }),
+
+    /** Count them */
+    db.user.count({ where }),
+  ]);
+
+  return { users, totalUsers };
 }
