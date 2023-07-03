@@ -1,9 +1,9 @@
 import { useRef } from "react";
-import type { User } from "@prisma/client";
-import { Link } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { ShelfTypography } from "~/components/icons/library";
 
+import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 
 import { toggleSidebarAtom, toggleMobileNavAtom } from "./atoms";
@@ -12,11 +12,9 @@ import MenuButton from "./menu-button";
 import MenuItems from "./menu-items";
 import Overlay from "./overlay";
 
-interface Props {
-  user: User;
-}
+export default function Sidebar() {
+  const { user } = useLoaderData<typeof loader>();
 
-export default function Sidebar({ user }: Props) {
   const [isSidebarCollapsed] = useAtom(toggleSidebarAtom);
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);

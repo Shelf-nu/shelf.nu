@@ -1,21 +1,21 @@
 /* eslint-disable no-console */
 import type { Role } from "@prisma/client";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Roles } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
 const createUserRole = async () => {
   const existingRole = await prisma.role.findFirst({
     where: {
-      name: "USER",
+      name: Roles["USER"],
     },
   });
 
-  if (existingRole) return;
+  if (existingRole) return null;
 
   return await prisma.role.create({
     data: {
-      name: "USER",
+      name: Roles["USER"],
     },
   });
 };
@@ -23,30 +23,35 @@ const createUserRole = async () => {
 const createAdminRole = async () => {
   const existingRole = await prisma.role.findFirst({
     where: {
-      name: "ADMIN",
+      name: Roles["ADMIN"],
     },
   });
 
-  if (existingRole) return;
+  if (existingRole) return null;
 
   return await prisma.role.create({
     data: {
-      name: "USER",
+      name: Roles["ADMIN"],
     },
   });
 };
 
 const addUserRoleToAllExistingUsers = async () => {
-  const allUsers = await prisma.user.findMany();
+  const allUsers = await prisma.user.findMany({
+    include: {
+      roles: true,
+    },
+  });
 
   const userRole = (await prisma.role.findFirst({
     where: {
-      name: "USER",
+      name: Roles["USER"],
     },
   })) as Role;
 
   allUsers.map(async (user) => {
-    await prisma.user.update({
+    if (user.roles?.some((role) => role.name === Roles["USER"])) return;
+    return await prisma.user.update({
       where: {
         id: user.id,
       },
@@ -60,32 +65,28 @@ const addUserRoleToAllExistingUsers = async () => {
     });
   });
 
-  return await prisma.role.create({
-    data: {
-      name: "USER",
-    },
-  });
+  return allUsers;
 };
 
 async function seed() {
   try {
     const userRole = await createUserRole();
     if (userRole) {
-      console.log(`User role already exists. Skipping...`);
-    } else {
       console.log(`User role created.`);
+    } else {
+      console.log(`User role already exists. Skipping...`);
     }
 
     const adminRole = await createAdminRole();
     if (adminRole) {
-      console.log(`Admin role already exists. Skipping...`);
-    } else {
       console.log(`Admin role created.`);
+    } else {
+      console.log(`Admin role already exists. Skipping...`);
     }
 
-    await addUserRoleToAllExistingUsers();
+    const allUsers = await addUserRoleToAllExistingUsers();
 
-    console.log("all users roles updated");
+    console.log(`Total of ${allUsers.length} users' roles updated`);
 
     console.log(`Database has been seeded. 🌱\n`);
   } catch (cause) {
