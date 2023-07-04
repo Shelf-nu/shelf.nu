@@ -1,7 +1,10 @@
+import type { ActionArgs } from "@remix-run/node";
 import { json, type LoaderArgs } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Form, useLoaderData, Link } from "@remix-run/react";
+import { Button } from "~/components/shared";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database";
+import { generateOrphanedCodes } from "~/modules/qr";
 import { requireAdmin } from "~/utils/roles.servers";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
@@ -9,10 +12,25 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   const userId = params.userId as string;
   const user = await db.user.findUnique({
     where: { id: userId },
-    include: { qrCodes: true },
+    include: {
+      qrCodes: {
+        orderBy: { createdAt: "desc" },
+      },
+    },
   });
 
   return json({ user });
+};
+
+export const action = async ({ request }: ActionArgs) => {
+  const { id } = await requireAdmin(request);
+  const formData = await request.formData();
+
+  await generateOrphanedCodes({
+    userId: id,
+    amount: Number(formData.get("amount")),
+  });
+  return json({ message: "Generated 10 Orphaned QR codes" });
 };
 
 export default function Area51UserPage() {
@@ -20,7 +38,14 @@ export default function Area51UserPage() {
   return (
     <div>
       <div>
-        <h1>User: {user?.email}</h1>
+        <div className="flex justify-between">
+          <h1>User: {user?.email}</h1>
+          <div>
+            <Button to={`/api/${user?.id}/orphaned-codes.zip`} reloadDocument>
+              Print orphaned codes
+            </Button>
+          </div>
+        </div>
         <ul className="mt-5">
           {user
             ? Object.entries(user).map(([key, value]) => (
@@ -34,7 +59,25 @@ export default function Area51UserPage() {
         </ul>
       </div>
       <div className="mt-10">
-        <h2>QR Codes</h2>
+        <div className="flex justify-between">
+          <div className="flex items-end gap-3">
+            <h2>QR Codes</h2>
+            <span>{user?.qrCodes.length} total codes</span>
+          </div>
+          <Form method="post">
+            <input
+              type="number"
+              max={100}
+              min={1}
+              name="amount"
+              required
+              defaultValue={10}
+            />
+            <Button type="submit" to={""}>
+              Generate Orphaned QR codes
+            </Button>
+          </Form>
+        </div>
         <Table className="mt-5">
           <thead className="bg-gray-100">
             <tr className="font-semibold">
@@ -43,6 +86,9 @@ export default function Area51UserPage() {
               </th>
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 Asset id
+              </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                Created At
               </th>
             </tr>
           </thead>
@@ -59,6 +105,7 @@ export default function Area51UserPage() {
                   </Link>
                 </Td>
                 <Td>{qrCode.assetId ? qrCode.assetId : "Orphaned"}</Td>
+                <Td>{new Date(qrCode.createdAt).toLocaleDateString()}</Td>
               </Tr>
             ))}
           </tbody>
