@@ -81,6 +81,7 @@ export default function Area51UserPage() {
         <Table className="mt-5">
           <thead className="bg-gray-100">
             <tr className="font-semibold">
+              <th className="border-b p-4 text-left text-gray-600 md:px-6" />
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 QR code id
               </th>
@@ -96,6 +97,9 @@ export default function Area51UserPage() {
           <tbody>
             {user?.qrCodes.map((qrCode) => (
               <Tr key={qrCode.id}>
+                <Td>
+                  <input type="checkbox" name="qrId" value={qrCode.id} />
+                </Td>
                 <Td>
                   <Link
                     to={`/qr/${qrCode.id}`}
