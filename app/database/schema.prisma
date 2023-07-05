@@ -43,6 +43,7 @@ model User {
   qrCodes    Qr[]
   scans      Scan[]
   tags       Tag[]
+  roles      Role[]
   locations  Location[]
   images     Image[]
 
@@ -190,6 +191,7 @@ model Scan {
   updatedAt DateTime @updatedAt
 }
 
+
 model Location {
   id          String  @id @default(cuid())
   name        String
@@ -209,3 +211,22 @@ model Location {
 
   assets  Asset[]
 }
+
+
+
+// Master data for roles
+model Role {
+  id   String @id @unique @default(cuid())
+  name Roles @unique @default(USER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+}
+
+enum Roles {
+  USER
+  ADMIN
+}
+

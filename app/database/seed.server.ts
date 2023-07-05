@@ -59,22 +59,6 @@ async function seed() {
       },
     });
 
-    await prisma.asset.create({
-      data: {
-        title: "My first item",
-        description: "Hello, world!",
-        userId: user.id,
-      },
-    });
-
-    await prisma.asset.create({
-      data: {
-        title: "My second item",
-        description: "Hello, world!",
-        userId: user.id,
-      },
-    });
-
     console.log(`Database has been seeded. 🌱\n`);
     console.log(
       `User added to your database 👇 \n🆔: ${user.id}\n📧: ${user.email}\n🔑: supabase`

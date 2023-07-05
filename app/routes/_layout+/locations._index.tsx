@@ -1,6 +1,6 @@
 import type { Asset, Location } from "@prisma/client";
-import type { LoaderArgs } from "@remix-run/node";
-import { json, type V2_MetaFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 
 import Header from "~/components/layout/header";

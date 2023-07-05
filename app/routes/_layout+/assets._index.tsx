@@ -90,7 +90,7 @@ export async function loader({ request }: LoaderArgs) {
   }
 
   if (!assets) {
-    throw notFound(`No user with id ${userId}`);
+    throw notFound(`No assets found`);
   }
 
   const header: HeaderData = {

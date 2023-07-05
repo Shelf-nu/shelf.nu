@@ -1,5 +1,5 @@
-import type { LoaderArgs } from "@remix-run/node";
-import { json, type ActionArgs, redirect } from "@remix-run/node";
+import type { LoaderArgs, ActionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { parseFormAny } from "react-zorm";
 import { NewNoteSchema } from "~/components/assets/notes/new";
 import { createNote, deleteNote } from "~/modules/asset";
