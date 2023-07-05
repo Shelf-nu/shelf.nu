@@ -97,7 +97,7 @@ export default function Area51UserPage() {
           <tbody>
             {user?.qrCodes.map((qrCode) => (
               <Tr key={qrCode.id}>
-                <Td>
+                <Td className="w-1">
                   <input type="checkbox" name="qrId" value={qrCode.id} />
                 </Td>
                 <Td>
@@ -109,7 +109,7 @@ export default function Area51UserPage() {
                   </Link>
                 </Td>
                 <Td>{qrCode.assetId ? qrCode.assetId : "Orphaned"}</Td>
-                <Td>{new Date(qrCode.createdAt).toLocaleDateString()}</Td>
+                <Td>{qrCode.createdAt}</Td>
               </Tr>
             ))}
           </tbody>
