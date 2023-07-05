@@ -1,5 +1,5 @@
-import type { ActionArgs } from "@remix-run/node";
-import { json, type LoaderArgs } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { Form, useLoaderData, Link } from "@remix-run/react";
 import { Button } from "~/components/shared";
 import { Table, Td, Tr } from "~/components/table";

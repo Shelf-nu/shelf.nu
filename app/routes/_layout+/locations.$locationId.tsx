@@ -1,11 +1,10 @@
 import type { Asset, Category, Tag, Location } from "@prisma/client";
-import type { ActionArgs } from "@remix-run/node";
-import {
-  json,
-  redirect,
-  type LinksFunction,
-  type LoaderArgs,
-  type V2_MetaFunction,
+import { json, redirect } from "@remix-run/node";
+import type {
+  ActionArgs,
+  LinksFunction,
+  LoaderArgs,
+  V2_MetaFunction,
 } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
