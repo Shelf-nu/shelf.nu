@@ -21,7 +21,6 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     const code = QRCode(0, ErrorCorrection["L"]);
     code.addData(`${process.env.SERVER_URL}/qr/${c.id}`);
     code.make();
-    // const img = code.createDataURL(3, 0);
     const svg = code.createSvgTag({ cellSize: 3, margin: 0, scalable: true });
 
     zip.file(`${index + 1} - ${c.id}.svg`, svg);
