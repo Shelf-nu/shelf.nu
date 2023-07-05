@@ -30,7 +30,7 @@ export const action = async ({ request }: ActionArgs) => {
     userId: id,
     amount: Number(formData.get("amount")),
   });
-  return json({ message: "Generated 10 Orphaned QR codes" });
+  return json({ message: "Generated Orphaned QR codes" });
 };
 
 export default function Area51UserPage() {
@@ -67,7 +67,7 @@ export default function Area51UserPage() {
           <Form method="post">
             <input
               type="number"
-              max={100}
+              max={1000}
               min={1}
               name="amount"
               required
