@@ -30,7 +30,7 @@ export function FileDropzone({
   const { data } = fetcher;
   const serverError = data?.error;
 
-  const disabled = isFormProcessing(fetcher.state);
+  const isPending = isFormProcessing(fetcher.state);
 
   /**
    * THis effect takes care of the transitions of the states to manage
