@@ -10,6 +10,6 @@ process.env.SERVER_URL = "http://localhost:3000";
 
 installGlobals();
 
-beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => server.resetHandlers());

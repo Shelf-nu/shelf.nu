@@ -286,7 +286,7 @@ export async function updateProfilePicture({
   const profilePicture = fileData.get("profile-picture") as string;
 
   /** if profile picture is an empty string, the upload failed so we return an error */
-  if (!profilePicture && profilePicture === "") {
+  if (!profilePicture || profilePicture === "") {
     return json(
       {
         error: "Something went wrong. Please refresh and try again",

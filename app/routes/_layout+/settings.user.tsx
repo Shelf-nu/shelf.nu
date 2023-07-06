@@ -91,17 +91,17 @@ export async function action({ request }: ActionArgs) {
       id: authSession.userId,
     };
 
+    await updateProfilePicture({
+      request,
+      userId: authSession.userId,
+    });
+
     /** Update the user */
     const updatedUser = await updateUser(updateUserPayload);
 
     if (updatedUser.errors) {
       return json({ errors: updatedUser.errors }, { status: 400 });
     }
-
-    await updateProfilePicture({
-      request,
-      userId: authSession.userId,
-    });
 
     sendNotification({
       title: "User updated",
