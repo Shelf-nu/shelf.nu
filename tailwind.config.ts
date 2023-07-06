@@ -1,4 +1,6 @@
-module.exports = {
+import type { Config } from "tailwindcss";
+
+export default {
   content: ["./app/**/*.{ts,tsx,jsx,js}"],
   theme: {
     extend: {
@@ -164,16 +166,16 @@ module.exports = {
       },
       keyframes: {
         "accordion-down": {
-          from: { height: 0 },
+          from: { height: "0" },
           to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
           from: { height: "var(--radix-accordion-content-height)" },
-          to: { height: 0 },
+          to: { height: "0" },
         },
         hide: {
-          from: { opacity: 1 },
-          to: { opacity: 0 },
+          from: { opacity: "1" },
+          to: { opacity: "0" },
         },
         slideIn: {
           from: {
@@ -206,4 +208,4 @@ module.exports = {
     require("tailwind-scrollbar"),
     require("tailwindcss-animate"),
   ],
-};
+} satisfies Config;
