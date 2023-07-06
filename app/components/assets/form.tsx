@@ -4,11 +4,8 @@ import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import {
-  fileErrorAtom,
-  updateTitleAtom,
-  validateFileAtom,
-} from "~/atoms/assets.new";
+import { updateTitleAtom } from "~/atoms/assets.new";
+import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { isFormProcessing } from "~/utils";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";

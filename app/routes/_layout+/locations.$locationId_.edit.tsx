@@ -83,6 +83,8 @@ export async function action({ request, params }: ActionArgs) {
   const file = formDataFile.get("image") as File | null;
   invariant(file instanceof File, "file not the right type");
 
+  console.log("file", file);
+
   await updateLocation({
     id,
     userId: authSession.userId,

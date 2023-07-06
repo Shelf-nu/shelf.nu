@@ -27,11 +27,8 @@ export function FileDropzone({
   const [fileInfo, updateAllFileInfo] = useAtom(derivedFileInfoAtom);
   const { filename, message, error } = fileInfo;
 
-  console.log("fileInfo", fileInfo)
-
   const { type, data } = fetcher;
   const serverError = data?.error;
-  console.log("serverError", serverError)
 
   const isPending = ["actionSubmission", "loaderSubmission"].includes(type);
 

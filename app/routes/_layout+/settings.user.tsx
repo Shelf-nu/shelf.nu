@@ -5,7 +5,7 @@ import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
-import { fileErrorAtom, validateFileAtom } from "~/atoms/assets.new";
+import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -98,12 +98,10 @@ export async function action({ request }: ActionArgs) {
       return json({ errors: updatedUser.errors }, { status: 400 });
     }
 
-    console.log(updatedUser);
-
-    // await updateProfilePicture({
-    //   request,
-    //   userId: authSession.userId,
-    // });
+    await updateProfilePicture({
+      request,
+      userId: authSession.userId,
+    });
 
     sendNotification({
       title: "User updated",
@@ -150,7 +148,13 @@ export default function UserPage() {
           Update your photo and personal details here.
         </p>
       </div>
-      <Form method="post" ref={zo.ref} className="" replace>
+      <Form
+        method="post"
+        ref={zo.ref}
+        className=""
+        replace
+        encType="multipart/form-data"
+      >
         <FormRow rowLabel={"Full name"} className="border-t-[1px]">
           <div className="flex gap-6">
             <Input

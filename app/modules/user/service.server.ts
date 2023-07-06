@@ -272,8 +272,6 @@ export async function updateProfilePicture({
   const user = await getUserByID(userId);
   const previousProfilePictureUrl = user?.profilePicture || undefined;
 
-  console.log("user", user);
-
   const fileData = await parseFileFormData({
     request,
     newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
@@ -286,8 +284,6 @@ export async function updateProfilePicture({
   });
 
   const profilePicture = fileData.get("profile-picture") as string;
-
-  console.log("profilePicture", profilePicture);
 
   /** if profile picture is an empty string, the upload failed so we return an error */
   if (!profilePicture && profilePicture === "") {
