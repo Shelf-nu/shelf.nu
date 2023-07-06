@@ -2,12 +2,13 @@ import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 
 import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useAtom, useAtomValue } from "jotai";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
+import { fileErrorAtom, validateFileAtom } from "~/atoms/assets.new";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { ProfilePictureUpload } from "~/components/shared/file-dropzone/profile-picture-upload";
 import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
 
@@ -18,7 +19,7 @@ import {
   requireAuthSession,
   sendResetPasswordLink,
 } from "~/modules/auth";
-import { updateUser } from "~/modules/user";
+import { updateProfilePicture, updateUser } from "~/modules/user";
 import type {
   UpdateUserPayload,
   UpdateUserResponse,
@@ -45,7 +46,8 @@ export async function action({ request }: ActionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
 
-  const formData = await request.formData();
+  const clonedRequest = request.clone();
+  const formData = await clonedRequest.formData();
 
   /** Handle Password Reset */
   if (formData.get("intent") === "resetPassword") {
@@ -65,7 +67,7 @@ export async function action({ request }: ActionArgs) {
 
     /** Logout user after 3 seconds */
     await delay(2000);
-    return destroyAuthSession(request);
+    return destroyAuthSession(clonedRequest);
   }
 
   /** Handle the use update */
@@ -95,6 +97,13 @@ export async function action({ request }: ActionArgs) {
     if (updatedUser.errors) {
       return json({ errors: updatedUser.errors }, { status: 400 });
     }
+
+    console.log(updatedUser);
+
+    // await updateProfilePicture({
+    //   request,
+    //   userId: authSession.userId,
+    // });
 
     sendNotification({
       title: "User updated",
@@ -130,6 +139,9 @@ export default function UserPage() {
   const disabled = isFormProcessing(transition.state);
   const data = useActionData<UpdateUserResponse>();
   const user = useUserData();
+
+  const fileError = useAtomValue(fileErrorAtom);
+  const [, validateFile] = useAtom(validateFileAtom);
   return (
     <div className=" flex flex-col">
       <div className=" mb-6">
@@ -186,6 +198,31 @@ export default function UserPage() {
           />
         </FormRow>
 
+        <FormRow
+          rowLabel="Profile picture"
+          // subHeading="This will be displayed on your profile."
+          className="border-t"
+        >
+          <div className="flex gap-3">
+            <ProfilePicture />
+            <div>
+              <p>Accepts PNG, JPG or JPEG (max.4 MB)</p>
+              <Input
+                disabled={disabled}
+                accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+                name="profile-picture"
+                type="file"
+                onChange={validateFile}
+                label={"profile-picture"}
+                hideLabel
+                error={fileError}
+                className="mt-2"
+                inputClassName="border-0 shadow-none p-0 rounded-none"
+              />
+            </div>
+          </div>
+        </FormRow>
+
         <div className="mt-4 text-right">
           <Button
             disabled={disabled}
@@ -197,24 +234,6 @@ export default function UserPage() {
           </Button>
         </div>
       </Form>
-
-      <div className=" mb-6">
-        <h3 className="text-text-lg font-semibold">Profile picture</h3>
-        <p className="text-sm text-gray-600">
-          This will be displayed on your profile.
-        </p>
-      </div>
-
-      <FormRow
-        rowLabel="Upload profile picture"
-        // subHeading="This will be displayed on your profile."
-        className="border-t"
-      >
-        <div className="flex w-full gap-5">
-          <ProfilePicture />
-          <ProfilePictureUpload />
-        </div>
-      </FormRow>
 
       <div className=" my-6">
         <h3 className="text-text-lg font-semibold">Password</h3>

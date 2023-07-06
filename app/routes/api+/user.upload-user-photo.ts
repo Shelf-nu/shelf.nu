@@ -16,6 +16,7 @@ export const action = async ({ request }: ActionArgs) => {
   const { userId } = await requireAuthSession(request);
 
   const user = await getUserByID(userId);
+
   /** needed for deleting */
   const previousProfilePictureUrl = user?.profilePicture || undefined;
 
@@ -29,6 +30,7 @@ export const action = async ({ request }: ActionArgs) => {
       withoutEnlargement: true,
     },
   });
+
   const profilePicture = formData.get("file") as string;
 
   /** if profile picture is an empty string, the upload failed so we return an error */

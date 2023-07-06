@@ -1,6 +1,7 @@
 import { Prisma, Roles } from "@prisma/client";
 import type { Category, User } from "@prisma/client";
-import type { LoaderArgs } from "@remix-run/node";
+import { json, type LoaderArgs } from "@remix-run/node";
+import sharp from "sharp";
 import { db } from "~/database";
 
 import type { AuthSession } from "~/modules/auth";
@@ -12,10 +13,16 @@ import {
   updateAccountPassword,
 } from "~/modules/auth";
 import {
+  dateTimeInUnix,
   generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
 } from "~/utils";
+import {
+  deleteProfilePicture,
+  getPublicFileURL,
+  parseFileFormData,
+} from "~/utils/storage.server";
 import type { UpdateUserPayload, UpdateUserResponse } from "./types";
 
 export const defaultUserCategories: Pick<
@@ -253,4 +260,53 @@ export async function getUsers({
   ]);
 
   return { users, totalUsers };
+}
+
+export async function updateProfilePicture({
+  request,
+  userId,
+}: {
+  request: Request;
+  userId: User["id"];
+}) {
+  const user = await getUserByID(userId);
+  const previousProfilePictureUrl = user?.profilePicture || undefined;
+
+  console.log("user", user);
+
+  const fileData = await parseFileFormData({
+    request,
+    newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
+    resizeOptions: {
+      height: 150,
+      width: 150,
+      fit: sharp.fit.cover,
+      withoutEnlargement: true,
+    },
+  });
+
+  const profilePicture = fileData.get("profile-picture") as string;
+
+  console.log("profilePicture", profilePicture);
+
+  /** if profile picture is an empty string, the upload failed so we return an error */
+  if (!profilePicture && profilePicture === "") {
+    return json(
+      {
+        error: "Something went wrong. Please refresh and try again",
+      },
+      { status: 500 }
+    );
+  }
+
+  if (previousProfilePictureUrl) {
+    /** Delete the old picture  */
+    await deleteProfilePicture({ url: previousProfilePictureUrl });
+  }
+
+  /** Update user with new picture */
+  return await updateUser({
+    id: userId,
+    profilePicture: getPublicFileURL({ filename: profilePicture }),
+  });
 }
