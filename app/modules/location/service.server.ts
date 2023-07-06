@@ -194,14 +194,8 @@ export async function updateLocation(payload: {
     });
   }
 
-  const loc = await db.location.update({
+  return await db.location.update({
     where: { id },
     data: data,
-    include: {
-      image: true,
-    },
   });
-  console.log("loc", loc);
-
-  return loc;
 }
