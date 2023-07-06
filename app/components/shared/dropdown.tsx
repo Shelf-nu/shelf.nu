@@ -52,7 +52,7 @@ const DropdownMenuSubContent = React.forwardRef<
     <DropdownMenuPrimitive.SubContent
       ref={ref}
       className={tw(
-        "animate-in slide-in-from-left-1 z-50 min-w-[8rem] overflow-hidden rounded-lg border border-slate-100 bg-white  shadow-md ",
+        "z-50 min-w-[8rem] overflow-hidden rounded-lg border border-slate-100 bg-white shadow-md animate-in  slide-in-from-left-1 ",
         className
       )}
       {...props}
@@ -70,7 +70,7 @@ const DropdownMenuContent = React.forwardRef<
         ref={ref}
         sideOffset={sideOffset}
         className={tw(
-          " animate-in data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-md border border-gray-300 bg-white p-3  shadow-md",
+          " z-50 min-w-[8rem] overflow-hidden rounded-md border border-gray-300 bg-white p-3 shadow-md animate-in data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2  data-[side=top]:slide-in-from-bottom-2",
           className
         )}
         {...props}
@@ -116,7 +116,7 @@ const DropdownMenuCheckboxItem = React.forwardRef<
       {...props}
     >
       {children}
-      <span className="text-primary absolute right-2  flex items-center justify-center">
+      <span className="absolute right-2 flex  items-center justify-center text-primary">
         <DropdownMenuPrimitive.ItemIndicator>
           <CheckIcon />
         </DropdownMenuPrimitive.ItemIndicator>
