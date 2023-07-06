@@ -30,9 +30,6 @@ jobs:
         with:
           useLockFile: false
 
-      - name: ⚙️ Build CSS
-        run: npm run generate:css
-
       - name: 🔬 Lint
         run: npm run lint
 
