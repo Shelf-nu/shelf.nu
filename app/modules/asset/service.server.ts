@@ -191,7 +191,7 @@ export async function createAsset({
     });
   }
 
-  /** If a categoryId is passed, link the category to the asset. */
+  /** If a tags is passed, link the category to the asset. */
   if (tags && tags?.set?.length > 0) {
     Object.assign(data, {
       tags: {
@@ -229,6 +229,7 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     mainImage,
     mainImageExpiration,
     categoryId,
+    tags,
     id,
     newLocationId,
     currentLocationId,
@@ -266,10 +267,17 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     });
   }
 
+  /** If a tags is passed, link the category to the asset. */
+  if (tags && tags?.set) {
+    Object.assign(data, {
+      tags,
+    });
+  }
+
   const asset = await db.asset.update({
     where: { id },
     data,
-    include: { location: true },
+    include: { location: true, tags: true },
   });
 
   // /** If the location id was passed, we create a note for the move */
