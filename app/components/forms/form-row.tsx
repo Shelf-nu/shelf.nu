@@ -25,9 +25,7 @@ export default function FormRow({
     >
       <div className="hidden lg:block lg:basis-[280px]">
         <div className="text-text-sm font-medium text-gray-700">{rowLabel}</div>
-        <SubHeading className="text-text-xs text-gray-600">
-          {subHeading}
-        </SubHeading>
+        <SubHeading className="text-xs text-gray-600">{subHeading}</SubHeading>
       </div>
 
       <div className="flex w-[512px]">{children}</div>

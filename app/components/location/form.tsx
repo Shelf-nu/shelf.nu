@@ -3,11 +3,8 @@ import { Form, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import {
-  fileErrorAtom,
-  updateTitleAtom,
-  validateFileAtom,
-} from "~/atoms/locations.new";
+import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { updateTitleAtom } from "~/atoms/locations.new";
 import { isFormProcessing } from "~/utils";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";

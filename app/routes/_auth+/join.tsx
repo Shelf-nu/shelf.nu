@@ -15,8 +15,9 @@ export async function loader({ request }: LoaderArgs) {
   const isResend = searchParams.get("resend") !== null;
 
   const title = isResend ? "Resend confirmation email" : "Create an account";
-  const subHeading =
-    "If you had issues with confirming your email, you can resend the confirmation email using the form below";
+  const subHeading = isResend
+    ? "If you had issues with confirming your email, you can resend the confirmation email using the form below"
+    : "Start your journey with Shelf";
 
   if (authSession) return redirect("/");
 
