@@ -169,7 +169,10 @@ export async function updateUser(
     });
 
     if (updateUserPayload.password) {
-      updateAccountPassword(updateUserPayload.id, updateUserPayload.password);
+      await updateAccountPassword(
+        updateUserPayload.id,
+        updateUserPayload.password
+      );
     }
 
     return { user: updatedUser, errors: null };
