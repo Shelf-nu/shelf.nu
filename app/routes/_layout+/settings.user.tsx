@@ -19,7 +19,7 @@ import {
   requireAuthSession,
   sendResetPasswordLink,
 } from "~/modules/auth";
-import { updateUser } from "~/modules/user";
+import { updateProfilePicture, updateUser } from "~/modules/user";
 import type {
   UpdateUserPayload,
   UpdateUserResponse,
@@ -91,10 +91,10 @@ export async function action({ request }: ActionArgs) {
       id: authSession.userId,
     };
 
-    // await updateProfilePicture({
-    //   request,
-    //   userId: authSession.userId,
-    // });
+    await updateProfilePicture({
+      request,
+      userId: authSession.userId,
+    });
 
     /** Update the user */
     const updatedUser = await updateUser(updateUserPayload);
