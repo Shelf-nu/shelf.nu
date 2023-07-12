@@ -20,6 +20,8 @@ export async function getLocation({
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
+
+  /** Build where object for querying related assets */
   let assetsWhere: Prisma.AssetWhereInput = {};
 
   if (search) {
@@ -179,16 +181,24 @@ export async function updateLocation(payload: {
   };
 
   if (image?.size && image?.size > 0) {
+    const imageData = {
+      blob: Buffer.from(await image.arrayBuffer()),
+      contentType: image.type,
+      user: {
+        connect: {
+          id: userId,
+        },
+      },
+    };
+
+    /** We do an upsert, because if a user creates a location wihtout an image,
+     * we need to create an Image when the location is updated,
+     * else we need to update the Image */
     Object.assign(data, {
       image: {
-        update: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
-          user: {
-            connect: {
-              id: userId,
-            },
-          },
+        upsert: {
+          create: imageData,
+          update: imageData,
         },
       },
     });

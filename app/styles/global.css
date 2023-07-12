@@ -10,7 +10,7 @@ html {
 }
 
 body {
-  @apply text-text-sm bg-white text-gray-900;
+  @apply bg-white text-text-sm text-gray-900;
 }
 
 h1,
@@ -87,7 +87,7 @@ p {
 }
 
 .markdown-viewer blockquote {
-  @apply border-primary-500 border-l-4 pl-4;
+  @apply border-l-4 border-primary-500 pl-4;
 }
 
 .markdown-viewer h1,
