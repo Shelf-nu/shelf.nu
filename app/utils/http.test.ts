@@ -8,6 +8,9 @@ import {
   safeRedirect,
 } from "./http.server";
 
+// @vitest-environment node
+// 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
+
 const BASE_URL = "https://my-app.com";
 
 describe(getCurrentPath.name, () => {

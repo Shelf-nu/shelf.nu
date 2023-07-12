@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
@@ -8,7 +8,7 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
-import { getSupabase } from "~/integrations/supabase";
+import { supabaseClient } from "~/integrations/supabase";
 
 import {
   commitAuthSession,
@@ -112,12 +112,11 @@ export default function ResetPassword() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  const supabase = useMemo(() => getSupabase(), []);
 
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
+    } = supabaseClient.auth.onAuthStateChange((event, supabaseSession) => {
       // In local development, we doesn't see "PASSWORD_RECOVERY" event because:
       // Effect run twice and break listener chain
       if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
@@ -133,7 +132,7 @@ export default function ResetPassword() {
       // prevent memory leak. Listener stays alive 👨‍🎤
       subscription.unsubscribe();
     };
-  }, [setUserRefreshToken, supabase.auth]);
+  }, [setUserRefreshToken]);
 
   return (
     <div className="flex min-h-full flex-col justify-center">

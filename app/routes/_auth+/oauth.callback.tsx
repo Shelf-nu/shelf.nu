@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { json, redirect } from "@remix-run/node";
 import type { LoaderArgs, ActionArgs } from "@remix-run/node";
@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { Button } from "~/components/shared";
 import { Spinner } from "~/components/shared/spinner";
-import { getSupabase } from "~/integrations/supabase";
+import { supabaseClient } from "~/integrations/supabase";
 import {
   refreshAccessToken,
   commitAuthSession,
@@ -102,12 +102,11 @@ export default function LoginCallback() {
   const fetcher = useFetcher();
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? "/";
-  const supabase = useMemo(() => getSupabase(), []);
 
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
+    } = supabaseClient.auth.onAuthStateChange((event, supabaseSession) => {
       if (event === "SIGNED_IN") {
         // supabase sdk has ability to read url fragment that contains your token after third party provider redirects you here
         // this fragment url looks like https://.....#access_token=evxxxxxxxx&refresh_token=xxxxxx, and it's not readable server-side (Oauth security)
@@ -134,7 +133,7 @@ export default function LoginCallback() {
       // prevent memory leak. Listener stays alive 👨‍🎤
       subscription.unsubscribe();
     };
-  }, [fetcher, redirectTo, supabase.auth]);
+  }, [fetcher, redirectTo]);
 
   useEffect(() => {
     if (window?.location?.hash) {
