@@ -1,4 +1,3 @@
-import type { Checklist } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import {
@@ -12,15 +11,13 @@ import Input from "../forms/input";
 import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
 
-
-
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
-  title?: Checklist["title"];
-  description?: Checklist["description"];
+  title?: any;
+  description?: any;
 }
 
-export const NewChecklistForm = ({ title, description}: Props) => {
+export const NewChecklistForm = ({ title, description }: Props) => {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
@@ -48,11 +45,8 @@ export const NewChecklistForm = ({ title, description}: Props) => {
         />
       </FormRow>
 
-
       <div>
-        <FormRow
-          rowLabel="Description"
-        >
+        <FormRow rowLabel="Description">
           <Input
             inputType="textarea"
             label="Description"

@@ -1,7 +1,7 @@
 import type { Category } from "@prisma/client";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, Outlet, useLoaderData } from "@remix-run/react";
+import { Link, Outlet } from "@remix-run/react";
 import { DeleteCategory } from "~/components/category/delete-category";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -20,7 +20,6 @@ import {
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import type { IndexResponse } from "./items._index";
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -83,17 +82,6 @@ export const handle = {
 };
 
 export default function CategoriesPage() {
-  const {
-    items,
-    totalItems,
-    perPage,
-    modelName,
-    search,
-    page,
-    totalPages,
-    next,
-    prev,
-  } = useLoaderData<IndexResponse>();
   return (
     <>
       <Header>
