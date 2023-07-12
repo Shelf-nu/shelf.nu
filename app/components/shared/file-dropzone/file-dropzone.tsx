@@ -6,7 +6,7 @@ import type { DropzoneOptions, FileRejection } from "react-dropzone";
 import { useDropzone } from "react-dropzone";
 
 import { FileUploadIcon } from "~/components/icons/library";
-import { formatBytes, tw } from "~/utils";
+import { formatBytes, isFormProcessing, tw } from "~/utils";
 import { derivedFileInfoAtom } from "./atoms";
 
 import { StatusMessage } from "./status-message";
@@ -27,10 +27,10 @@ export function FileDropzone({
   const [fileInfo, updateAllFileInfo] = useAtom(derivedFileInfoAtom);
   const { filename, message, error } = fileInfo;
 
-  const { type, data } = fetcher;
+  const { data } = fetcher;
   const serverError = data?.error;
 
-  const isPending = ["actionSubmission", "loaderSubmission"].includes(type);
+  const isPending = isFormProcessing(fetcher.state);
 
   /**
    * THis effect takes care of the transitions of the states to manage

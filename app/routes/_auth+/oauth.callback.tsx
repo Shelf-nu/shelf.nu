@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { json, redirect } from "@remix-run/node";
 import type { LoaderArgs, ActionArgs } from "@remix-run/node";
@@ -6,6 +6,8 @@ import { useActionData, useFetcher, useSearchParams } from "@remix-run/react";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 
+import { Button } from "~/components/shared";
+import { Spinner } from "~/components/shared/spinner";
 import { getSupabase } from "~/integrations/supabase";
 import {
   refreshAccessToken,
@@ -20,7 +22,7 @@ import { assertIsPost, randomUsernameFromEmail, safeRedirect } from "~/utils";
 export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
 
-  if (authSession) return redirect("/items");
+  if (authSession) return redirect("/");
 
   return json({});
 }
@@ -46,7 +48,7 @@ export async function action({ request }: ActionArgs) {
   }
 
   const { redirectTo, refreshToken } = result.data;
-  const safeRedirectTo = safeRedirect(redirectTo, "/items");
+  const safeRedirectTo = safeRedirect(redirectTo, "/");
 
   // We should not trust what is sent from the client
   // https://github.com/rphlmr/supa-fly-stack/issues/45
@@ -96,9 +98,10 @@ export async function action({ request }: ActionArgs) {
 
 export default function LoginCallback() {
   const error = useActionData<typeof action>();
+  const [clientError, setClientError] = useState("");
   const fetcher = useFetcher();
   const [searchParams] = useSearchParams();
-  const redirectTo = searchParams.get("redirectTo") ?? "/items";
+  const redirectTo = searchParams.get("redirectTo") ?? "/";
   const supabase = useMemo(() => getSupabase(), []);
 
   useEffect(() => {
@@ -113,6 +116,7 @@ export default function LoginCallback() {
 
         // we should not trust what's happen client side
         // so, we only pick the refresh token, and let's back-end getting user session from it
+
         const refreshToken = supabaseSession?.refresh_token;
 
         if (!refreshToken) return;
@@ -132,5 +136,38 @@ export default function LoginCallback() {
     };
   }, [fetcher, redirectTo, supabase.auth]);
 
-  return error ? <div>{error.message}</div> : null;
+  useEffect(() => {
+    if (window?.location?.hash) {
+      /**
+       * We check the hash fragment of the url as this is what suaabase uses to return an error
+       * If it exists, we update the clientError state with it
+       * */
+      const parsedHash = new URLSearchParams(window.location.hash.substring(1));
+
+      const error = parsedHash.get("error_description");
+
+      if (error && error !== "") {
+        setClientError(() => error);
+      }
+    }
+  }, []);
+
+  if (error) return <div className="text-center">{error.message}</div>;
+  if (clientError)
+    return (
+      <div className="text-center">
+        <h3 className="font-medium">{clientError}.</h3>
+        <Button variant="link" to="/join?resend">
+          Resend confirmation link
+        </Button>
+        <p>If the issue persists please get in touch with the Shelf</p>
+        team.{" "}
+      </div>
+    );
+  return (
+    <div className="flex flex-col items-center text-center">
+      <Spinner />
+      <p className="mt-2">Attempting to login...</p>
+    </div>
+  );
 }

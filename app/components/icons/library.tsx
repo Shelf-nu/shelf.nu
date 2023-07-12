@@ -422,7 +422,7 @@ export const CoinsIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export function PrintTagIcon(props: SVGProps<SVGSVGElement>) {
+export function CategoriesIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       width="22"
@@ -556,7 +556,7 @@ export function PenIcon(props: SVGProps<SVGSVGElement>) {
     >
       <path
         d="M1.39668 15.0964C1.43497 14.7518 1.45411 14.5795 1.50624 14.4185C1.55249 14.2756 1.61784 14.1396 1.70051 14.0142C1.79369 13.8729 1.91627 13.7504 2.16142 13.5052L13.1667 2.49999C14.0871 1.57951 15.5795 1.57951 16.5 2.49999C17.4205 3.42046 17.4205 4.91285 16.5 5.83332L5.49475 16.8386C5.2496 17.0837 5.12702 17.2063 4.98572 17.2995C4.86035 17.3821 4.72439 17.4475 4.58152 17.4937C4.42048 17.5459 4.24819 17.565 3.90362 17.6033L1.08331 17.9167L1.39668 15.0964Z"
-        stroke="white"
+        stroke="currentColor"
         strokeWidth="1.66667"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -717,6 +717,88 @@ export function MapIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function QuestionsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={20}
+      height={21}
+      fill="none"
+      {...props}
+    >
+      <path
+        stroke="#667085"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M5 6.5h5M5 10h8m-5.316 6H14.2c1.68 0 2.52 0 3.162-.327a3 3 0 0 0 1.311-1.311C19 13.72 19 12.88 19 11.2V5.8c0-1.68 0-2.52-.327-3.162a3 3 0 0 0-1.311-1.311C16.72 1 15.88 1 14.2 1H5.8c-1.68 0-2.52 0-3.162.327a3 3 0 0 0-1.311 1.311C1 3.28 1 4.12 1 5.8v12.535c0 .533 0 .8.11.937a.5.5 0 0 0 .39.188c.176 0 .384-.167.8-.5l2.385-1.908c.488-.39.731-.585 1.002-.724.241-.122.497-.212.762-.267C6.748 16 7.06 16 7.684 16Z"
+      />
+    </svg>
+  );
+}
+
+export const WriteIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={20}
+    height={20}
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.667}
+      d="M9.167 3.333h-3.5c-1.4 0-2.1 0-2.635.273a2.5 2.5 0 0 0-1.093 1.092c-.272.535-.272 1.235-.272 2.635v7c0 1.4 0 2.1.272 2.635a2.5 2.5 0 0 0 1.093 1.093c.534.272 1.234.272 2.635.272h7c1.4 0 2.1 0 2.635-.272.47-.24.852-.622 1.092-1.093.273-.535.273-1.235.273-2.635v-3.5m-10 2.5h1.395c.408 0 .612 0 .803-.046.17-.04.333-.108.482-.2.168-.102.312-.246.6-.535l7.97-7.969a1.768 1.768 0 1 0-2.5-2.5l-7.97 7.97c-.288.287-.432.432-.535.6-.091.149-.159.311-.2.482-.045.191-.045.395-.045.803v1.395Z"
+    />
+  </svg>
+);
+
+export const TagsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={20}
+    height={23}
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="m19 10-7.594-7.594c-.519-.519-.778-.778-1.081-.964a3.001 3.001 0 0 0-.867-.36C9.112 1 8.746 1 8.012 1H4M1 7.7v1.975c0 .489 0 .733.055.963.05.204.13.4.24.579.123.201.296.374.642.72l7.8 7.8c.792.792 1.188 1.188 1.645 1.337a2 2 0 0 0 1.236 0c.457-.149.853-.545 1.645-1.337l2.474-2.474c.792-.792 1.188-1.188 1.337-1.645a2 2 0 0 0 0-1.236c-.149-.457-.545-.853-1.337-1.645l-7.3-7.3c-.346-.346-.519-.519-.72-.642a2 2 0 0 0-.579-.24c-.23-.055-.474-.055-.963-.055H4.2c-1.12 0-1.68 0-2.108.218a2 2 0 0 0-.874.874C1 6.02 1 6.58 1 7.7Z"
+    />
+  </svg>
+);
+
+export const LocationMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="18"
+    height="22"
+    viewBox="0 0 18 22"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M9 12C10.6569 12 12 10.6569 12 9C12 7.34315 10.6569 6 9 6C7.34315 6 6 7.34315 6 9C6 10.6569 7.34315 12 9 12Z"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M9 21C13 17 17 13.4183 17 9C17 4.58172 13.4183 1 9 1C4.58172 1 1 4.58172 1 9C1 13.4183 5 17 9 21Z"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 export function CheckboxIcon(props: SVGProps<SVGSVGElement>) {
   return (

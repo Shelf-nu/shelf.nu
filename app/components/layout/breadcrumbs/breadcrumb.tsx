@@ -12,12 +12,16 @@ export function Breadcrumb({
   /**
    * If the value is "single" that means we have to
    * take the page title and render it.
-   * This takes care of showing the correct title in item show page*/
+   * This takes care of showing the correct title in asset show page*/
   if (typeof breadcrumb === "string" && breadcrumb === "single") {
-    breadcrumb = match.data.item.title;
+    if (match?.data?.location) {
+      breadcrumb = match?.data?.location?.name || "Not found";
+    } else {
+      breadcrumb = match?.data?.asset?.title || "Not found";
+    }
   }
 
-  return (
+  return breadcrumb ? (
     <div className="breadcrumb">
       {breadcrumb}{" "}
       {!isLastItem && (
@@ -26,5 +30,5 @@ export function Breadcrumb({
         </span>
       )}
     </div>
-  );
+  ) : null;
 }

@@ -1,13 +1,12 @@
-# Shelf.nu
+# Shelf.nu - Open Source Asset Management Infrastructure for everyone.
 
 [![Twitter](https://img.shields.io/twitter/url/https/twitter.com/cloudposse.svg?style=social&label=Follow%20%40ShelfQR)](https://twitter.com/ShelfQR)
 [![🚀 Deploy](https://github.com/Shelf-nu/shelf.nu/actions/workflows/deploy.yml/badge.svg?branch=dev)](https://github.com/Shelf-nu/shelf.nu/actions/workflows/deploy.yml)
 
-Shelf 🏷️ Asset tagging infrastructure for absolutely everyone.
+Shelf 🏷️ Asset Management infrastructure for absolutely everyone (open source).
 
-![shelfcovergithub](https://user-images.githubusercontent.com/12449255/220158652-8069a993-0251-470e-bd92-29326c899fe8.jpg)
 
-Shelf is a simple and visual inventory and asset tracking system that allows people to track their physical assets with ease.
+Shelf is a simple and visual asset management and location tracking system that allows people to track their physical assets with ease.
 
 ## Core Features and Benefits
 
@@ -159,7 +158,7 @@ Prior to your first deployment, you'll need to do a few things:
 
   > **Note:** For production app, make sure this name matches the `app` set in your `fly.toml` file. Otherwise, you will not be able to deploy.
 
-  - Initialize Git.
+  - Initialize Empty Git repository.
 
   ```sh
   git init

@@ -1,4 +1,4 @@
-const nodemailer = require("nodemailer");
+import nodemailer from "nodemailer";
 
 export const sendEmail = async ({
   to,
@@ -21,13 +21,13 @@ export const sendEmail = async ({
   // Generate test SMTP service account from ethereal.email
 
   // create reusable transporter object using the default SMTP transport
-  let transporter = nodemailer.createTransport({
+  const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: 465,
     secure: true, // true for 465, false for other ports
     auth: {
-      user: process.env.SMTP_USER, // generated ethereal user
-      pass: process.env.SMTP_PWD, // generated ethereal password
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PWD,
     },
   });
 
@@ -37,7 +37,7 @@ export const sendEmail = async ({
     to, // list of receivers
     subject, // Subject line
     text, // plain text body
-    html: html || null, // html body
+    html: html || "", // html body
   });
 
   // console.log("Message sent: %s", info.messageId);

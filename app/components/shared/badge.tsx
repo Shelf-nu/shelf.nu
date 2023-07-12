@@ -2,10 +2,12 @@ export const Badge = ({
   children,
   color,
   noBg = false,
+  withDot = true,
 }: {
   children: string;
   color: string;
   noBg?: boolean;
+  withDot?: boolean;
 }) => (
   <span
     style={{
@@ -15,12 +17,15 @@ export const Badge = ({
     }}
     className="inline-flex items-center gap-1 rounded-2xl py-[2px] pl-[6px] pr-2 text-[12px] font-medium"
   >
-    <div
-      style={{
-        backgroundColor: color,
-      }}
-      className="h-2 w-2 rounded-full"
-    />
+    {withDot ? (
+      <div
+        style={{
+          backgroundColor: color,
+        }}
+        className="h-2 w-2 rounded-full"
+      />
+    ) : null}
+
     <span>{children}</span>
   </span>
 );

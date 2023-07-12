@@ -1,9 +1,8 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
-import { atom, useAtom } from "jotai";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -26,7 +25,7 @@ export async function loader({ request }: LoaderArgs) {
   const subHeading =
     "Your new password must be different to previously used passwords.";
 
-  if (authSession) return redirect("/items");
+  if (authSession) return redirect("/");
 
   return json({ title, subHeading });
 }
@@ -94,7 +93,7 @@ export async function action({ request }: ActionArgs) {
     );
   }
 
-  return redirect("/items", {
+  return redirect("/", {
     headers: {
       "Set-Cookie": await commitAuthSession(request, {
         authSession,
@@ -104,15 +103,12 @@ export async function action({ request }: ActionArgs) {
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.title) },
+  { title: data ? appendToMetaTitle(data.title) : "" },
 ];
-
-
-const userRefreshTokenAtom = atom("")
 
 export default function ResetPassword() {
   const zo = useZorm("ResetPasswordForm", ResetPasswordSchema);
-  const [userRefreshToken, setUserRefreshToken] = useAtom(userRefreshTokenAtom);
+  const [userRefreshToken, setUserRefreshToken] = useState("");
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -122,7 +118,9 @@ export default function ResetPassword() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
-      if (event === "SIGNED_IN") {
+      // In local development, we doesn't see "PASSWORD_RECOVERY" event because:
+      // Effect run twice and break listener chain
+      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
         const refreshToken = supabaseSession?.refresh_token;
 
         if (!refreshToken) return;

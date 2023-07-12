@@ -1,24 +1,12 @@
 import { useMemo } from "react";
+import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
+import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { PageNumber } from "./page-number";
 
-export const Pagination = ({
-  page,
-  totalItems,
-  totalPages,
-  perPage,
-  next,
-  prev,
-}: {
-  totalItems: number;
-  perPage: number;
-  page: number;
-  totalPages: number;
-  next: string;
-  prev: string;
-}) => {
-  // const { page, totalItems, totalPages, perPage, next, prev } =
-  //   useLoaderData<IndexResponse>();
+export const Pagination = () => {
+  const { page, totalItems, totalPages, perPage, next, prev } =
+    useLoaderData<IndexResponse>();
 
   const pageNumbers = useMemo(() => {
     const pages = [];
@@ -37,7 +25,7 @@ export const Pagination = ({
   );
 
   return (
-    <div className="flex items-center justify-between border-t px-6 py-[18px]">
+    <div className="flex items-center justify-between  px-6 py-[18px]">
       <Button variant="secondary" size="sm" to={prev} disabled={prevDisabled}>
         {"< Previous"}
       </Button>

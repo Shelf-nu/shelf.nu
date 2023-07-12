@@ -36,7 +36,7 @@ async function deleteUser(email: string) {
     }
   }
 
-  await deleteAuthAccount(user?.id!);
+  await deleteAuthAccount(user?.id as string);
 }
 
 deleteUser(process.argv[2]);

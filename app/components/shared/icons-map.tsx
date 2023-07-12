@@ -12,6 +12,12 @@ import {
   XIcon,
   BarCodeIcon,
   PenIcon,
+  HomeIcon,
+  QuestionsIcon,
+  WriteIcon,
+  TagsIcon,
+  CategoriesIcon,
+  LocationMarkerIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -27,8 +33,13 @@ export type Icon =
   | "coins"
   | "barcode"
   | "pen"
-  | "success";
-
+  | "success"
+  | "home"
+  | "question"
+  | "write"
+  | "tag"
+  | "category"
+  | "location";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -44,9 +55,15 @@ export const iconsMap: IconsMap = {
   x: <XIcon />,
   refresh: <RefreshIcon />,
   coins: <CoinsIcon />,
-  barcode: <BarCodeIcon/>,
+  barcode: <BarCodeIcon />,
   pen: <PenIcon />,
   success: <SuccessIcon />,
+  home: <HomeIcon />,
+  question: <QuestionsIcon />,
+  write: <WriteIcon />,
+  tag: <TagsIcon />,
+  category: <CategoriesIcon />,
+  location: <LocationMarkerIcon />,
 };
 
 export default iconsMap;

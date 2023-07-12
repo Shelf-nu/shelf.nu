@@ -7,6 +7,22 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model Image {
+  id String @id @default(cuid())
+
+  contentType String
+  altText     String?
+  blob        Bytes
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  location  Location?
+  
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+}
+
 model User {
   id             String  @id @default(cuid())
   email          String  @unique
@@ -14,22 +30,27 @@ model User {
   firstName      String?
   lastName       String?
   profilePicture String?
+  onboarded      Boolean @default(false)
 
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relationships
-  items      Item[]
+  assets     Asset[]
   categories Category[]
   notes      Note[]
   qrCodes    Qr[]
   scans      Scan[]
+  tags       Tag[]
+  roles      Role[]
+  locations  Location[]
+  images     Image[]
 
   @@unique([email, username])
 }
 
-model Item {
+model Asset {
   id                  String    @id @default(cuid())
   title               String
   description         String?
@@ -41,28 +62,17 @@ model Item {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId     String
-  category   Category?     @relation(fields: [categoryId], references: [id])
+  category   Category? @relation(fields: [categoryId], references: [id])
   categoryId String?
-  notes      Note[]
-  qrCodes    Qr[]
-  reports    ReportFound[]
-}
+  location   Location? @relation(fields: [locationId], references: [id])
+  locationId String?
 
-model Note {
-  id      String @id @default(cuid())
-  content String
-
-  // Datetime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relationships
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId String
-  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  itemId String
+  notes   Note[]
+  qrCodes Qr[]
+  reports ReportFound[]
+  tags    Tag[]
 }
 
 model Category {
@@ -76,9 +86,42 @@ model Category {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  items  Item[]
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assets Asset[]
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
+}
+
+model Tag {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  assets      Asset[]
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  // Datetime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Note {
+  id      String   @id @default(cuid())
+  content String
+  type    NoteType @default(COMMENT)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId  String
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
+}
+
+enum NoteType {
+  COMMENT
+  UPDATE
 }
 
 model Qr {
@@ -91,8 +134,8 @@ model Qr {
   errorCorrection ErrorCorrection @default(L)
 
   // Relationships
-  item   Item?   @relation(fields: [itemId], references: [id], onDelete: SetNull)
-  itemId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  assetId String?
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
@@ -114,8 +157,8 @@ model ReportFound {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  itemId String
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
 }
 
 enum ErrorCorrection {
@@ -147,3 +190,43 @@ model Scan {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+
+model Location {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  address     String?
+
+  image       Image?  @relation(fields: [imageId], references: [id])
+  imageId     String? @unique
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String
+
+  assets  Asset[]
+}
+
+
+
+// Master data for roles
+model Role {
+  id   String @id @unique @default(cuid())
+  name Roles @unique @default(USER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+}
+
+enum Roles {
+  USER
+  ADMIN
+}
+

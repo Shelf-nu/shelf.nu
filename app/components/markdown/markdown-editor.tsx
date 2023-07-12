@@ -1,5 +1,5 @@
-import type { TextareaHTMLAttributes } from "react";
-import { useEffect, type ChangeEvent, forwardRef } from "react";
+import { useEffect, forwardRef } from "react";
+import type { TextareaHTMLAttributes, ChangeEvent } from "react";
 import { Link, useFetcher } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 import { tw } from "~/utils";
@@ -77,7 +77,6 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
           inputType="textarea"
           placeholder={placeholder}
           hideLabel
-          data-test-id="itemDescription"
           inputClassName={tw("text-text-md", className)}
           ref={ref}
           {...rest}

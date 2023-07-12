@@ -18,7 +18,7 @@ export async function loader({ request }: LoaderArgs) {
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.header.title) },
+  { title: appendToMetaTitle(data?.header.title) },
 ];
 
 export const handle = {
@@ -27,7 +27,7 @@ export const handle = {
 
 export default function ItemDetailsPage() {
   const items = [
-    { to: "checklist", content: "Checklist" },
+    { to: ".", content: "Checklist" },
     { to: "history", content: "History" },
   ];
   return (

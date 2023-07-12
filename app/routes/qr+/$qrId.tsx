@@ -1,5 +1,5 @@
-import type { ActionArgs } from "@remix-run/node";
-import { redirect, type LoaderArgs, json } from "@remix-run/node";
+import { redirect, json } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";
@@ -25,8 +25,6 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     qrId: id,
     deleted: !qr,
   });
-
-  // registerScan(scan.id);
 
   /** If the QR doesn't exist, return a 404
    *
@@ -72,12 +70,14 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   }
 
   /**
-   * When there is no itemId that means that the item was deleted so the QR code is orphaned.
-   * Here we redirect to a page where the user has the option to link to existing item or create a new one.
+   * When there is no assetId that means that the asset was deleted so the QR code is orphaned.
+   * Here we redirect to a page where the user has the option to link to existing asset or create a new one.
    */
-  if (!qr.itemId) return redirect(`link?scanId=${scan.id}`);
+  if (!qr.assetId) return redirect(`link?scanId=${scan.id}`);
 
-  return redirect(`/items/${qr.itemId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`);
+  return redirect(
+    `/assets/${qr.assetId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`
+  );
 };
 
 export const action = async ({ request }: ActionArgs) => {
@@ -96,21 +96,13 @@ export const action = async ({ request }: ActionArgs) => {
   return json({ ok: true });
 };
 
-/** 404 handling */
-export function CatchBoundary() {
+export function ErrorBoundary() {
   const error = useRouteError();
 
-  return isRouteErrorResponse(error) ? <QrNotFound /> : null;
-}
-
-export function ErrorBoundry() {
-  const error = useRouteError();
-  return isRouteErrorResponse(error) ? (
-    <div className="mx-auto max-w-[300px] text-center">
-      <h1>{error.status}</h1>
-      <p>{error.statusText}</p>
-    </div>
-  ) : null;
+  /** 404 error */
+  if (isRouteErrorResponse(error)) {
+    return <QrNotFound />;
+  }
 }
 
 export default function Qr() {

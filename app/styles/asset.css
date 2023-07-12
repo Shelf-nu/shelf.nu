@@ -1,0 +1,7 @@
+.asset-actions .chev {
+  @apply rotate-90;
+}
+
+.asset-actions[data-state="open"] .chev {
+  @apply -rotate-90;
+}

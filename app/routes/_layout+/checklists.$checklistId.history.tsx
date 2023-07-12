@@ -1,9 +1,16 @@
-import type { Checklist } from "@prisma/client";
-import { MinusSquareIcon, TrashIcon } from "~/components/icons";
+import type { LoaderArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared";
+import { Td, Th } from "~/components/table";
+import { requireAuthSession } from "~/modules/auth";
 
-export default function ChecklistHistory() {
+export async function loader({ request }: LoaderArgs) {
+  await requireAuthSession(request);
+  const title = "Checklists History";
+  const header = {
+    title,
+  };
   const items = [
     {
       id: "1",
@@ -34,51 +41,57 @@ export default function ChecklistHistory() {
       completedItems: 8,
     },
   ];
+  const totalItems = 4;
+  const perPage = 8;
+  const page = 1;
+  const prev = "";
+  const next = "";
+  const totalPages = 1;
+  const modelName = {
+    singular: "date",
+    plural: "dates",
+  };
+  return json({
+    header,
+    items,
+    totalItems,
+    page,
+    prev,
+    next,
+    perPage,
+    totalPages,
+    modelName,
+  });
+}
+
+export default function ChecklistHistory() {
   return (
     <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
       <List
-        ItemComponent={ChecklistContent}
-        items={items}
-        CustomHeader={ChecklistHeader}
-        totalItems={4}
-        perPage={8}
-        modelName={{ singular: "item", plural: "items" }}
-        search={null}
-        page={1}
-        totalPages={1}
-        next=""
-        prev=""
+        ItemComponent={RowContent}
+        headerChildren={
+          <>
+            <Th>Status</Th>
+            <Th>Result</Th>
+          </>
+        }
       />
     </div>
   );
 }
 
-function ChecklistContent({ item }: { item: any }) {
+function RowContent({ item }: { item: any }) {
   return (
-    <article className="flex gap-3">
-      <div className="flex w-full items-center justify-between gap-3">
-        <div>
-          <span>{item.date}</span>
-        </div>
-        <div className="flex gap-12">
-          <Badge color="#027A48">Completed</Badge>
-          <Badge color="#027A48">8/8</Badge>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function ChecklistHeader() {
-  return (
-    <div className="custom-list-header">
-      <div>
-        <span>Date</span>
-      </div>
-      <div className="flex gap-12">
-        <span>Status</span>
-        <span>Result</span>
-      </div>
-    </div>
+    <>
+      <Td className="w-full">
+        <div className="font-medium">{item.date}</div>
+      </Td>
+      <Td>
+        <Badge color="#027A48">Completed</Badge>
+      </Td>
+      <Td className="text-left">
+        <Badge color="#027A48">8/8</Badge>
+      </Td>
+    </>
   );
 }

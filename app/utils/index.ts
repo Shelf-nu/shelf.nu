@@ -15,3 +15,5 @@ export * from "./extract-image-name-from-supabase-url";
 export * from "./get-random-color";
 export * from "./list";
 export * from "./gif-to-png";
+export * from "./slugify";
+export * from "./geolocate.server";

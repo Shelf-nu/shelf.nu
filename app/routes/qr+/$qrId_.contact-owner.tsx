@@ -1,4 +1,4 @@
-import type { Item } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 import { json, type ActionArgs } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -6,7 +6,7 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
-import { getItem } from "~/modules/item";
+import { getAsset } from "~/modules/asset";
 import { getQr } from "~/modules/qr";
 import { createReport, sendReportEmails } from "~/modules/report-found";
 import { getUserByID } from "~/modules/user";
@@ -25,13 +25,13 @@ export const action = async ({ request, params }: ActionArgs) => {
   const qrId = params.qrId as string;
   const qr = await getQr(qrId);
 
-  if (!qr || !qr.itemId) {
+  if (!qr || !qr.assetId) {
     return new Response("QR code doesnt exist.", { status: 400 });
   }
 
   const owner = await getUserByID(qr.userId);
   if (!owner) return new Response("Something went wrong", { status: 500 });
-  const item = await getItem({ userId: owner.id, id: qr.itemId });
+  const asset = await getAsset({ userId: owner.id, id: qr.assetId });
 
   const formData = await request.formData();
   const result = await NewReportSchema.safeParseAsync(parseFormAny(formData));
@@ -46,18 +46,18 @@ export const action = async ({ request, params }: ActionArgs) => {
   const report = await createReport({
     email,
     content,
-    itemId: qr.itemId,
+    assetId: qr.assetId,
   });
   if (!report) return new Response("Something went wrong", { status: 500 });
 
   /**
    * Here we send 2 emails.
-   * 1. To the owner of the item
-   * 2. To the person who reported the item as found
+   * 1. To the owner of the asset
+   * 2. To the person who reported the asset as found
    */
   sendReportEmails({
     owner,
-    item: item as Item,
+    asset: asset as Asset,
     message: report.content,
     reporterEmail: report.email,
   });

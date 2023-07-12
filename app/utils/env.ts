@@ -6,6 +6,8 @@ declare global {
       SUPABASE_URL: string;
       SUPABASE_ANON_PUBLIC: string;
       MAPTILER_TOKEN: string;
+      MICROSOFT_CLARITY_ID: string;
+      CRISP_WEBSITE_ID: string;
     };
   }
 }
@@ -19,6 +21,8 @@ declare global {
       SUPABASE_ANON_PUBLIC: string;
       SESSION_SECRET: string;
       MAPTILER_TOKEN: string;
+      CRISP_WEBSITE_ID: string;
+      MICROSOFT_CLARITY_ID: string;
     }
   }
 }
@@ -65,11 +69,21 @@ export const SUPABASE_ANON_PUBLIC = getEnv("SUPABASE_ANON_PUBLIC", {
 export const MAPTILER_TOKEN = getEnv("MAPTILER_TOKEN", {
   isSecret: false,
 });
+export const CRISP_WEBSITE_ID = getEnv("CRISP_WEBSITE_ID", {
+  isSecret: false,
+  isRequired: false,
+});
+export const MICROSOFT_CLARITY_ID = getEnv("MICROSOFT_CLARITY_ID", {
+  isSecret: false,
+  isRequired: false,
+});
 
 export function getBrowserEnv() {
   return {
     SUPABASE_URL,
     SUPABASE_ANON_PUBLIC,
     MAPTILER_TOKEN,
+    CRISP_WEBSITE_ID,
+    MICROSOFT_CLARITY_ID,
   };
 }

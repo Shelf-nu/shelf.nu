@@ -12,7 +12,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
     : undefined;
 
   if (user) {
-    return redirect("items");
+    return redirect(user.onboarded ? "/assets" : "onboarding");
   }
   return redirect("login");
 };

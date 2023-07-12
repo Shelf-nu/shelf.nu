@@ -12,8 +12,8 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
     ? await getUserByEmail(authSession?.email)
     : undefined;
 
-  if (user) {
-    return redirect("items");
+  if (user && user.onboarded) {
+    return redirect("assets");
   }
   return null;
 };
@@ -36,7 +36,7 @@ export default function App() {
             </Link>
 
             <h1>{title}</h1>
-            <SubHeading>{subHeading}</SubHeading>
+            <SubHeading className="max-w-md">{subHeading}</SubHeading>
           </div>
           <div className=" w-[360px]">
             <Outlet />

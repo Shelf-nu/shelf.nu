@@ -1,33 +1,33 @@
-import type { ListItemData } from "./list-item";
+import { useLoaderData } from "@remix-run/react";
+import type { IndexResponse } from "~/routes/_layout+/assets._index";
 
-interface ListHeaderProps {
-  items: ListItemData[];
-  totalItems: number;
-  modelName: {
-    singular: string;
-    plural: string;
-  };
-  perPage: number;
-}
-
-export const ListHeader = ({ items, totalItems, perPage, modelName }: ListHeaderProps) => {
+export const ListHeader = ({ children }: { children?: React.ReactNode }) => {
+  const { items, totalItems, perPage, modelName } =
+    useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
 
   return (
-    <div className=" flex justify-between border-b px-6 py-[14px] text-gray-600">
-      <div>
-        {perPage < totalItems ? (
-          <p>
-            {items.length} {items.length > 1 ? plural : singular}{" "}
-            <span className="text-gray-400">out of {totalItems}</span>
-          </p>
-        ) : (
-          <span>
-            {totalItems} {items.length > 1 ? plural : singular}
-          </span>
-        )}
-      </div>
-      {singular === "checklist" ? <div><span>Last Check</span></div> : ""}
-    </div>
+    <thead>
+      <tr className="">
+        <th
+          className="border-b text-left font-normal text-gray-600"
+          colSpan={children ? 1 : 100}
+        >
+          <div className="flex justify-between px-6 py-[14px] ">
+            {perPage < totalItems ? (
+              <p>
+                {items.length} {items.length > 1 ? plural : singular}{" "}
+                <span className="text-gray-400">out of {totalItems}</span>
+              </p>
+            ) : (
+              <span>
+                {totalItems} {items.length > 1 ? plural : singular}
+              </span>
+            )}
+          </div>
+        </th>
+        {children}
+      </tr>
+    </thead>
   );
 };

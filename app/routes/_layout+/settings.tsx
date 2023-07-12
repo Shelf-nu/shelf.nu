@@ -23,16 +23,13 @@ export async function loader({ request }: LoaderArgs) {
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.header.title) },
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export const shouldRevalidate = () => false;
 
 export default function SettingsPage() {
-  const items = [
-    { to: "user", content: "My details" },
-    { to: "items", content: "Items" },
-  ];
+  const items = [{ to: "user", content: "My details" }];
   return (
     <>
       <Header />
