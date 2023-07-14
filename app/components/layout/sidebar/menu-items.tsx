@@ -110,6 +110,7 @@ const MenuItems = () => {
                 to={item.to}
                 data-test-id={`${item.label.toLowerCase()}SidebarMenuItem`}
                 onClick={toggleMobileNav}
+                title={item.label}
               >
                 <i className="icon text-gray-500">{item.icon}</i>
                 <span className="text whitespace-nowrap transition duration-200 ease-linear">
@@ -125,7 +126,7 @@ const MenuItems = () => {
               )}
               variant="link"
               width="full"
-              titke="Questions/Feedback"
+              title="Questions/Feedback"
             >
               <span className="flex items-center justify-start gap-3">
                 <i className="icon text-gray-500">
