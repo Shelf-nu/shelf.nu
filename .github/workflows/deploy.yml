@@ -84,8 +84,8 @@ jobs:
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
-      - name: 🛑 Cancel Previous Runs
-        uses: styfle/cancel-workflow-action@0.11.0
+      # - name: 🛑 Cancel Previous Runs
+      #   uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
         uses: actions/checkout@v3
@@ -104,13 +104,13 @@ jobs:
       - name: ⎔ Setup node
         uses: actions/setup-node@v3
         with:
-          node-version: 16
+          node-version: 18
 
-      - name: 📥 Install deps
-        run: npm ci
+      - name: 📥 Download deps
+        uses: bahmutov/npm-install@v1
 
-      - name: 🖥️ Install Playwright Browsers
-        run: npx playwright install --with-deps
+      - name: 📥 Install Playwright Browsers
+        run: npm run test:e2e:install
 
       - name: ⚙️ Build
         run: npm run build

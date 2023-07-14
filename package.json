@@ -18,6 +18,7 @@
     "test:cov": "vitest --coverage",
     "test:e2e:dev": "start-server-and-test dev http://localhost:3000 'npx playwright test --ui'",
     "test:e2e:run": "start-server-and-test dev http://localhost:3000 'npx playwright test'",
+    "test:e2e:install": "npx playwright install --with-deps chromium",
     "pretest:e2e:run": "npm run build",
     "typecheck": "tsc -b",
     "validate": "run-p \"test -- --run\" lint typecheck test:e2e:run",

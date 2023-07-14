@@ -1,4 +1,4 @@
-import { Page, test as base } from "@playwright/test";
+import { test as base } from "@playwright/test";
 import nodemailer from "nodemailer";
 import { faker } from "@faker-js/faker";
 import { expect } from "@playwright/test";
@@ -30,6 +30,7 @@ export const test = base.extend<{}, { account: Account }>({
       await page.fill("#magic-link", email);
 
       await page.click("[data-test-id=continueWithMagicLink]");
+      await page.waitForTimeout(2000);
 
       await expect(page.getByText("Check your emails")).toBeVisible();
 

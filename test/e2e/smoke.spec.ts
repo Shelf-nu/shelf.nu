@@ -48,6 +48,8 @@ test("should allow you to make a category", async ({ page, account }) => {
   await page.click('[data-test-id="categoriesSidebarMenuItem"]');
   await page.click('[data-test-id="createNewCategory"]');
   await expect(page).toHaveURL(/.*categories\/new/);
+  await page.waitForTimeout(500);
+
   const focusedElementCat = await page.$(":focus");
   expect(await focusedElementCat?.getAttribute("name")).toBe("name");
   await page
