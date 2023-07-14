@@ -85,12 +85,13 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       attachedStyles,
       className
     );
+
     return (
       <Component
         className={finalStyles}
         prefetch={props.to ? "intent" : "none"}
         {...props}
-        title={title || children}
+        title={title}
         ref={ref}
       >
         {icon && iconsMap[icon]}{" "}
