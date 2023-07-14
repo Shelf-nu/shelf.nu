@@ -80,6 +80,7 @@ jobs:
         run: npm run test
 
   playwright:
+    name: 🎭 Playwright
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
@@ -105,10 +106,8 @@ jobs:
         with:
           node-version: 16
 
-      - name: 📥 Download deps
-        uses: bahmutov/npm-install@v1
-        with:
-          useLockFile: false
+      - name: 📥 Install deps
+        run: npm ci
 
       - name: 🖥️ Install Playwright Browsers
         run: npx playwright install --with-deps
