@@ -22,6 +22,10 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   return json({ user });
 };
 
+export const handle = {
+  breadcrumb: () => "User details",
+};
+
 export const action = async ({ request, params }: ActionArgs) => {
   await requireAdmin(request);
   const formData = await request.formData();

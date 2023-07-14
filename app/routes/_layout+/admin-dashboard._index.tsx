@@ -17,11 +17,11 @@ export const loader = async ({ request }: LoaderArgs) => {
     });
 
   if (page > totalPages) {
-    return redirect("/area-51");
+    return redirect("/admin-dashboard");
   }
 
   const header: HeaderData = {
-    title: `Area 51`,
+    title: `Admin dashboard`,
   };
 
   const modelName = {
@@ -47,7 +47,7 @@ export default function Area51() {
   const navigate = useNavigate();
   return (
     <div>
-      <h1>Area 51</h1>
+      <h1>Admin dashboard</h1>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         <Filters>
           <Pagination />
