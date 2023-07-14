@@ -11,7 +11,7 @@ export async function loader({ request }: LoaderArgs) {
 }
 
 export const handle = {
-  breadcrumb: () => <Link to="/area-51">Area 51</Link>,
+  breadcrumb: () => <Link to="/admin-dashboard">Admin dashboard</Link>,
 };
 
 export default function Area51Page() {

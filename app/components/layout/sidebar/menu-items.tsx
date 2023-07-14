@@ -62,13 +62,13 @@ const MenuItems = () => {
                     isActive ? "bg-gray-100 text-gray-900" : ""
                   )
                 }
-                to={"/area-51"}
+                to={"/admin-dashboard"}
                 onClick={toggleMobileNav}
-                title={"Area 51"}
+                title={"Admin dashboard"}
               >
                 <i className="icon text-gray-500">🛸</i>
                 <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                  Area 51
+                  Admin dashboard
                 </span>
               </NavLink>
               <hr />
