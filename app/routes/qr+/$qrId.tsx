@@ -1,5 +1,5 @@
-import type { ActionArgs } from "@remix-run/node";
-import { redirect, type LoaderArgs, json } from "@remix-run/node";
+import { redirect, json } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";

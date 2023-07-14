@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -9,19 +10,23 @@ import { ErrorBoundryComponent } from "~/components/errors";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { getAsset, updateAsset, updateAssetMainImage } from "~/modules/asset";
+import {
+  getAllRelatedEntries,
+  getAsset,
+  updateAsset,
+  updateAssetMainImage,
+} from "~/modules/asset";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { getCategories } from "~/modules/category";
+import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-  const { categories } = await getCategories({
+  const { categories, tags, locations } = await getAllRelatedEntries({
     userId,
-    perPage: 100,
   });
 
   const id = getRequiredParam(params, "assetId");
@@ -40,6 +45,8 @@ export async function loader({ request, params }: LoaderArgs) {
     asset,
     header,
     categories,
+    tags,
+    locations,
   });
 }
 
@@ -61,6 +68,7 @@ export async function action({ request, params }: ActionArgs) {
   const result = await NewAssetFormSchema.safeParseAsync(
     parseFormAny(formData)
   );
+
   if (!result.success) {
     return json(
       {
@@ -76,19 +84,27 @@ export async function action({ request, params }: ActionArgs) {
     );
   }
 
-  updateAssetMainImage({
+  await updateAssetMainImage({
     request,
     assetId: id,
     userId: authSession.userId,
   });
 
-  const { title, description, category } = result.data;
+  const { title, description, category, newLocationId, currentLocationId } =
+    result.data;
+
+  /** This checks if tags are passed and build the  */
+  const tags = buildTagsSet(result.data.tags);
 
   await updateAsset({
     id,
     title,
     description,
     categoryId: category,
+    tags,
+    newLocationId,
+    currentLocationId,
+    userId: authSession.userId,
   });
 
   sendNotification({
@@ -111,6 +127,10 @@ export default function AssetEditPage() {
   const title = useAtomValue(titleAtom);
   const hasTitle = title !== "Untitled asset";
   const { asset } = useLoaderData<typeof loader>();
+  const tags = useMemo(
+    () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],
+    [asset.tags]
+  );
 
   return (
     <>
@@ -119,7 +139,9 @@ export default function AssetEditPage() {
         <AssetForm
           title={asset.title}
           category={asset.categoryId}
+          location={asset.locationId}
           description={asset.description}
+          tags={tags}
         />
       </div>
     </>

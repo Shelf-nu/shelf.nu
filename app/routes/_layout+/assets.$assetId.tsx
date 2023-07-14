@@ -1,7 +1,9 @@
+import type { Location } from "@prisma/client";
 import type {
   ActionArgs,
   LinksFunction,
   LoaderArgs,
+  SerializeFrom,
   V2_MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
@@ -10,16 +12,18 @@ import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
-import { LocationDetails } from "~/components/assets/location";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { ScanDetails } from "~/components/location";
 
 import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
+import { Card } from "~/components/shared/card";
+import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import ProfilePicture from "~/components/user/profile-picture";
 import { usePosition, useUserData } from "~/hooks";
@@ -28,11 +32,13 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
-import { assertIsDelete, getRequiredParam } from "~/utils";
+import { assertIsDelete, getRequiredParam, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
+
+type ShelfLocation = Location;
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -59,7 +65,6 @@ export async function loader({ request, params }: LoaderArgs) {
 
   const header: HeaderData = {
     title: asset.title,
-    subHeading: asset.id,
   };
 
   return json({
@@ -112,6 +117,11 @@ export const links: LinksFunction = () => [
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
+  /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
+   * Source: https://github.com/prisma/prisma/discussions/14371
+   */
+  const location = asset?.location as SerializeFrom<ShelfLocation>;
+
   const user = useUserData();
   usePosition();
   return (
@@ -146,38 +156,84 @@ export default function AssetDetailsPage() {
               mainImageExpiration: asset.mainImageExpiration,
               alt: asset.title,
             }}
-            className="mx-auto mb-8 hidden h-auto w-[343px] rounded-lg object-cover md:block lg:w-full"
+            className={tw(
+              "hidden h-auto w-[343px] rounded-lg border object-cover md:block lg:w-full",
+              asset.description ? "rounded-b-none border-b-0" : ""
+            )}
           />
-          <p className="mb-8 text-gray-600">{asset.description}</p>
+          {asset.description ? (
+            <Card className="mt-0 rounded-t-none">
+              <p className=" text-gray-600">{asset.description}</p>
+            </Card>
+          ) : null}
+
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
-          <ul className="item-information mb-8">
-            {asset?.category ? (
+          <Card>
+            <ul className="item-information">
               <li className="mb-4 flex justify-between">
-                <span className="font-medium text-gray-600">Category</span>
+                <span className="text-[12px] font-medium text-gray-600">
+                  ID
+                </span>
+                <div className="max-w-[250px]">{asset.id}</div>
+              </li>
+              {asset?.category ? (
+                <li className="mb-4 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Category
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Badge color={asset.category?.color}>
+                      {asset.category?.name}
+                    </Badge>
+                  </div>
+                </li>
+              ) : null}
+              {location ? (
+                <li className="mb-2 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Location
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Tag key={location.id} className="mb-2 ml-2">
+                      {location.name}
+                    </Tag>
+                  </div>
+                </li>
+              ) : null}
+              {asset?.tags?.length > 0 ? (
+                <li className="mb-2 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Tags
+                  </span>
+                  <div className="text-right ">
+                    {asset.tags.map((tag) => (
+                      <Tag key={tag.id} className="mb-2 ml-2">
+                        {tag.name}
+                      </Tag>
+                    ))}
+                  </div>
+                </li>
+              ) : null}
+              <li className="flex justify-between">
+                <span className="text-[12px] font-medium text-gray-600">
+                  Owner
+                </span>
                 <div className="max-w-[250px]">
-                  <Badge color={asset.category?.color}>
-                    {asset.category?.name}
-                  </Badge>
+                  <span className="mb-1 ml-1 inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
+                    <ProfilePicture width="w-4" height="h-4" />
+                    <span className="ml-1.5 text-[12px] font-medium text-gray-700">
+                      {user?.firstName} {user?.lastName}
+                    </span>
+                  </span>
                 </div>
               </li>
-            ) : null}
-            <li className="mb-4 flex justify-between">
-              <span className="font-medium text-gray-600">Owner</span>
-              <div className="max-w-[250px]">
-                <span className="mb-1 ml-1 inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
-                  <ProfilePicture width="w-4" height="h-4" />
-                  <span className="ml-1.5 text-[12px] font-medium text-gray-700">
-                    {user?.firstName} {user?.lastName}
-                  </span>
-                </span>
-              </div>
-            </li>
-          </ul>
+            </ul>
+          </Card>
 
-          <LocationDetails />
+          <ScanDetails />
         </div>
 
-        <div className="w-full lg:ml-8">
+        <div className="w-full lg:ml-6">
           <TextualDivider text="Notes" className="mb-8 lg:hidden" />
           <Notes />
         </div>

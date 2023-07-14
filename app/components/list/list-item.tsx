@@ -1,3 +1,5 @@
+import { tw } from "~/utils";
+
 export interface ListItemData {
   id: string;
   title: string;
@@ -6,14 +8,17 @@ export interface ListItemData {
 export const ListItem = ({
   item,
   children,
+  navigate,
 }: {
   item: ListItemData;
   children: React.ReactNode;
+  navigate?: (id: string) => void;
 }) => (
-  <article
+  <tr
     key={item.id}
-    className="border-b p-4 last:border-b-0 hover:bg-gray-50 md:px-6"
+    onClick={navigate ? () => navigate(item.id) : undefined}
+    className={tw("hover:bg-gray-50", navigate ? "cursor-pointer" : "")}
   >
     {children}
-  </article>
+  </tr>
 );

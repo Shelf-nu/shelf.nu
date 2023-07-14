@@ -1,4 +1,4 @@
-import type { Qr } from "@prisma/client";
+import type { Qr, User } from "@prisma/client";
 import QRCode from "qrcode-generator";
 import { db } from "~/database";
 import { gifToPng } from "~/utils";
@@ -68,4 +68,19 @@ export async function generateCode({
       id: qr.id,
     },
   };
+}
+
+export async function generateOrphanedCodes({
+  userId,
+  amount,
+}: {
+  userId: User["id"];
+  amount: number;
+}) {
+  const data = Array.from({ length: amount }).map(() => ({ userId }));
+
+  return await db.qr.createMany({
+    data: data,
+    skipDuplicates: true, // Skip 'Bobo'
+  });
 }

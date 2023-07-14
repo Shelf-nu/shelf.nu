@@ -24,7 +24,7 @@ import { HomeIcon } from "./components/icons/library";
 import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
-import tailwindStylesheetUrl from "./styles/tailwind.css";
+import styles from "./tailwind.css";
 import { getBrowserEnv } from "./utils/env";
 export interface RootData {
   env: typeof getBrowserEnv;
@@ -40,7 +40,7 @@ export const handle = {
 };
 
 export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: tailwindStylesheetUrl },
+  { rel: "stylesheet", href: styles },
   { rel: "stylesheet", href: fontsStylesheetUrl },
   { rel: "stylesheet", href: globalStylesheetUrl },
 ];

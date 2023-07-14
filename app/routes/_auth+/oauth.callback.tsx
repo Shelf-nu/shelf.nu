@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useState } from "react";
 
 import { json, redirect } from "@remix-run/node";
 import type { LoaderArgs, ActionArgs } from "@remix-run/node";
@@ -6,7 +6,9 @@ import { useActionData, useFetcher, useSearchParams } from "@remix-run/react";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 
-import { getSupabase } from "~/integrations/supabase";
+import { Button } from "~/components/shared";
+import { Spinner } from "~/components/shared/spinner";
+import { supabaseClient } from "~/integrations/supabase";
 import {
   refreshAccessToken,
   commitAuthSession,
@@ -96,15 +98,15 @@ export async function action({ request }: ActionArgs) {
 
 export default function LoginCallback() {
   const error = useActionData<typeof action>();
+  const [clientError, setClientError] = useState("");
   const fetcher = useFetcher();
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? "/";
-  const supabase = useMemo(() => getSupabase(), []);
 
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, supabaseSession) => {
+    } = supabaseClient.auth.onAuthStateChange((event, supabaseSession) => {
       if (event === "SIGNED_IN") {
         // supabase sdk has ability to read url fragment that contains your token after third party provider redirects you here
         // this fragment url looks like https://.....#access_token=evxxxxxxxx&refresh_token=xxxxxx, and it's not readable server-side (Oauth security)
@@ -113,6 +115,7 @@ export default function LoginCallback() {
 
         // we should not trust what's happen client side
         // so, we only pick the refresh token, and let's back-end getting user session from it
+
         const refreshToken = supabaseSession?.refresh_token;
 
         if (!refreshToken) return;
@@ -130,7 +133,40 @@ export default function LoginCallback() {
       // prevent memory leak. Listener stays alive 👨‍🎤
       subscription.unsubscribe();
     };
-  }, [fetcher, redirectTo, supabase.auth]);
+  }, [fetcher, redirectTo]);
 
-  return error ? <div>{error.message}</div> : null;
+  useEffect(() => {
+    if (window?.location?.hash) {
+      /**
+       * We check the hash fragment of the url as this is what suaabase uses to return an error
+       * If it exists, we update the clientError state with it
+       * */
+      const parsedHash = new URLSearchParams(window.location.hash.substring(1));
+
+      const error = parsedHash.get("error_description");
+
+      if (error && error !== "") {
+        setClientError(() => error);
+      }
+    }
+  }, []);
+
+  if (error) return <div className="text-center">{error.message}</div>;
+  if (clientError)
+    return (
+      <div className="text-center">
+        <h3 className="font-medium">{clientError}.</h3>
+        <Button variant="link" to="/join?resend">
+          Resend confirmation link
+        </Button>
+        <p>If the issue persists please get in touch with the Shelf</p>
+        team.{" "}
+      </div>
+    );
+  return (
+    <div className="flex flex-col items-center text-center">
+      <Spinner />
+      <p className="mt-2">Attempting to login...</p>
+    </div>
+  );
 }

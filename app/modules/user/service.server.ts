@@ -1,5 +1,7 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, Roles } from "@prisma/client";
 import type { Category, User } from "@prisma/client";
+import { json, type LoaderArgs } from "@remix-run/node";
+import sharp from "sharp";
 import { db } from "~/database";
 
 import type { AuthSession } from "~/modules/auth";
@@ -10,6 +12,17 @@ import {
   deleteAuthAccount,
   updateAccountPassword,
 } from "~/modules/auth";
+import {
+  dateTimeInUnix,
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+} from "~/utils";
+import {
+  deleteProfilePicture,
+  getPublicFileURL,
+  parseFileFormData,
+} from "~/utils/storage.server";
 import type { UpdateUserPayload, UpdateUserResponse } from "./types";
 
 export const defaultUserCategories: Pick<
@@ -81,6 +94,11 @@ async function createUser({
         categories: {
           create: defaultUserCategories,
         },
+        roles: {
+          connect: {
+            name: Roles["USER"],
+          },
+        },
       },
     })
     .then((user) => user)
@@ -150,8 +168,11 @@ export async function updateUser(
       },
     });
 
-    if (updateUserPayload?.password) {
-      updateAccountPassword(updateUserPayload.id, updateUserPayload.password);
+    if (updateUserPayload.password) {
+      await updateAccountPassword(
+        updateUserPayload.id,
+        updateUserPayload.password
+      );
     }
 
     return { user: updatedUser, errors: null };
@@ -171,4 +192,120 @@ export async function updateUser(
     }
     return { user: null, errors: null };
   }
+}
+
+export const getPaginatedAndFilterableUsers = async ({
+  request,
+}: {
+  request: LoaderArgs["request"];
+}) => {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, search } = getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
+
+  const { users, totalUsers } = await getUsers({
+    page,
+    perPage: 25,
+    search,
+  });
+  const totalPages = Math.ceil(totalUsers / 25);
+
+  return {
+    page,
+    perPage: 25,
+    search,
+    totalUsers,
+    prev,
+    next,
+    users,
+    totalPages,
+  };
+};
+
+export async function getUsers({
+  page = 1,
+  perPage = 8,
+  search,
+}: {
+  /** Page number. Starts at 1 */
+  page: number;
+
+  /** Assets to be loaded per page */
+  perPage?: number;
+
+  search?: string | null;
+}) {
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+
+  /** Default value of where. Takes the assetss belonging to current user */
+  let where: Prisma.UserWhereInput = {};
+
+  /** If the search string exists, add it to the where object */
+  if (search) {
+    where.email = {
+      contains: search,
+      mode: "insensitive",
+    };
+  }
+
+  const [users, totalUsers] = await db.$transaction([
+    /** Get the users */
+    db.user.findMany({
+      skip,
+      take,
+      where,
+      orderBy: { createdAt: "desc" },
+    }),
+
+    /** Count them */
+    db.user.count({ where }),
+  ]);
+
+  return { users, totalUsers };
+}
+
+export async function updateProfilePicture({
+  request,
+  userId,
+}: {
+  request: Request;
+  userId: User["id"];
+}) {
+  const user = await getUserByID(userId);
+  const previousProfilePictureUrl = user?.profilePicture || undefined;
+
+  const fileData = await parseFileFormData({
+    request,
+    newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
+    resizeOptions: {
+      height: 150,
+      width: 150,
+      fit: sharp.fit.cover,
+      withoutEnlargement: true,
+    },
+  });
+
+  const profilePicture = fileData.get("profile-picture") as string;
+
+  /** if profile picture is an empty string, the upload failed so we return an error */
+  if (!profilePicture || profilePicture === "") {
+    return json(
+      {
+        error: "Something went wrong. Please refresh and try again",
+      },
+      { status: 500 }
+    );
+  }
+
+  if (previousProfilePictureUrl) {
+    /** Delete the old picture  */
+    await deleteProfilePicture({ url: previousProfilePictureUrl });
+  }
+
+  /** Update user with new picture */
+  return await updateUser({
+    id: userId,
+    profilePicture: getPublicFileURL({ filename: profilePicture }),
+  });
 }

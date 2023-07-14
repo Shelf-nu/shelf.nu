@@ -8,6 +8,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { Th, Td } from "~/components/table";
 
 import { requireAuthSession } from "~/modules/auth";
 import { deleteCategory, getCategories } from "~/modules/category";
@@ -97,7 +98,15 @@ export default function CategoriesPage() {
       <div className="mt-8 flex flex-1 flex-col gap-2">
         <Filters />
         <Outlet />
-        <List ItemComponent={CategoryItem} />
+        <List
+          ItemComponent={CategoryItem}
+          headerChildren={
+            <>
+              <Th>Description</Th>
+              <Th>Actions</Th>
+            </>
+          }
+        />
       </div>
     </>
   );
@@ -108,20 +117,15 @@ const CategoryItem = ({
 }: {
   item: Pick<Category, "id" | "description" | "name" | "color">;
 }) => (
-  <div className="flex items-center justify-between gap-4">
-    <div className="flex grow items-center gap-4">
-      <div
-        title={`Category: ${item.name}`}
-        className="w-auto shrink-0 md:w-1/4"
-      >
-        <Badge color={item.color}>{item.name}</Badge>
-      </div>
-      <div className="w-2/3 text-gray-500" title="Description">
-        {item.description}
-      </div>
-    </div>
-    <div>
+  <>
+    <Td title={`Category: ${item.name}`} className="w-1/4 ">
+      <Badge color={item.color}>{item.name}</Badge>
+    </Td>
+    <Td className="w-3/4 text-gray-500" title="Description">
+      {item.description}
+    </Td>
+    <Td>
       <DeleteCategory category={item} />
-    </div>
-  </div>
+    </Td>
+  </>
 );

@@ -14,7 +14,6 @@ export function ProfilePictureUpload() {
       if (acceptedFiles) {
         const file = acceptedFiles[0];
         setFileInfo(file);
-
         fetcher.submit(
           /**
            * For some reason even tho its multipart/form-data submit() is not

@@ -1,24 +1,29 @@
 import { useRef, type ReactNode, useEffect } from "react";
 import { Form, useLoaderData, useSubmit } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom } from "jotai";
 
-import { Button } from "~/components/shared";
+import { tw } from "~/utils";
 import {
-  clearFiltersAtom,
-  selectedCategoriesAtom,
-  toggleIsFilteringAtom,
+  toggleIsFilteringCategoriesAtom,
+  toggleIsFilteringTagsAtom,
 } from "./atoms";
 import { SearchForm } from "./search-form";
 
-export const Filters = ({ children }: { children?: ReactNode }) => {
+export const Filters = ({
+  children,
+  className,
+}: {
+  children?: ReactNode;
+  className?: string;
+}) => {
   const { search } = useLoaderData();
 
-  const [isFilteringCategories, toggleIsFiltering] = useAtom(
-    toggleIsFilteringAtom
+  const [isFilteringCategories, toggleIsFilteringCategories] = useAtom(
+    toggleIsFilteringCategoriesAtom
   );
-
-  const selectedCategories = useAtomValue(selectedCategoriesAtom);
-  const [, clearFilters] = useAtom(clearFiltersAtom);
+  const [isFilteringTags, toggleIsFilteringTags] = useAtom(
+    toggleIsFilteringTagsAtom
+  );
 
   const submit = useSubmit();
 
@@ -37,33 +42,31 @@ export const Filters = ({ children }: { children?: ReactNode }) => {
     /** check the flag and if its true, submit the form. */
     if (isFilteringCategories) {
       submit(formRef.current);
-      toggleIsFiltering();
+      toggleIsFilteringCategories();
     }
-  }, [submit, isFilteringCategories, toggleIsFiltering]);
+  }, [submit, isFilteringCategories, toggleIsFilteringCategories]);
+
+  useEffect(() => {
+    /** check the flag and if its true, submit the form. */
+    if (isFilteringTags) {
+      submit(formRef.current);
+      toggleIsFilteringTags();
+    }
+  }, [submit, isFilteringTags, toggleIsFilteringTags]);
 
   return (
-    <div className="flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
+    <div
+      className={tw(
+        "flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5",
+        className
+      )}
+    >
       <Form ref={formRef} className="w-full">
-        <div className="w-full items-center justify-between md:flex">
+        <div className="form-wrapper w-full items-center justify-between gap-2 md:flex">
           <div className="flex items-center gap-5">
             <SearchForm />
           </div>
-          <div className="inline-flex w-full shrink-0 justify-end gap-2 p-3 md:w-1/2 md:p-0 lg:gap-4 xl:w-1/4">
-            {selectedCategories.items.length > 0 ? (
-              <>
-                <Button
-                  as="button"
-                  onClick={clearFilters}
-                  variant="link"
-                  className="block max-w-none text-xs font-normal  text-gray-500 hover:text-gray-600"
-                >
-                  Clear filters
-                </Button>
-                <div className="text-gray-500"> | </div>
-              </>
-            ) : null}
-            <div>{children}</div>
-          </div>
+          <div className="flex-1">{children}</div>
         </div>
       </Form>
     </div>

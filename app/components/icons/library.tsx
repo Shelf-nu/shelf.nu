@@ -422,7 +422,7 @@ export const CoinsIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export function PrintTagIcon(props: SVGProps<SVGSVGElement>) {
+export function CategoriesIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       width="22"
@@ -737,3 +737,65 @@ export function QuestionsIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export const WriteIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={20}
+    height={20}
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.667}
+      d="M9.167 3.333h-3.5c-1.4 0-2.1 0-2.635.273a2.5 2.5 0 0 0-1.093 1.092c-.272.535-.272 1.235-.272 2.635v7c0 1.4 0 2.1.272 2.635a2.5 2.5 0 0 0 1.093 1.093c.534.272 1.234.272 2.635.272h7c1.4 0 2.1 0 2.635-.272.47-.24.852-.622 1.092-1.093.273-.535.273-1.235.273-2.635v-3.5m-10 2.5h1.395c.408 0 .612 0 .803-.046.17-.04.333-.108.482-.2.168-.102.312-.246.6-.535l7.97-7.969a1.768 1.768 0 1 0-2.5-2.5l-7.97 7.97c-.288.287-.432.432-.535.6-.091.149-.159.311-.2.482-.045.191-.045.395-.045.803v1.395Z"
+    />
+  </svg>
+);
+
+export const TagsIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={20}
+    height={23}
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="m19 10-7.594-7.594c-.519-.519-.778-.778-1.081-.964a3.001 3.001 0 0 0-.867-.36C9.112 1 8.746 1 8.012 1H4M1 7.7v1.975c0 .489 0 .733.055.963.05.204.13.4.24.579.123.201.296.374.642.72l7.8 7.8c.792.792 1.188 1.188 1.645 1.337a2 2 0 0 0 1.236 0c.457-.149.853-.545 1.645-1.337l2.474-2.474c.792-.792 1.188-1.188 1.337-1.645a2 2 0 0 0 0-1.236c-.149-.457-.545-.853-1.337-1.645l-7.3-7.3c-.346-.346-.519-.519-.72-.642a2 2 0 0 0-.579-.24c-.23-.055-.474-.055-.963-.055H4.2c-1.12 0-1.68 0-2.108.218a2 2 0 0 0-.874.874C1 6.02 1 6.58 1 7.7Z"
+    />
+  </svg>
+);
+
+export const LocationMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="18"
+    height="22"
+    viewBox="0 0 18 22"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M9 12C10.6569 12 12 10.6569 12 9C12 7.34315 10.6569 6 9 6C7.34315 6 6 7.34315 6 9C6 10.6569 7.34315 12 9 12Z"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M9 21C13 17 17 13.4183 17 9C17 4.58172 13.4183 1 9 1C4.58172 1 1 4.58172 1 9C1 13.4183 5 17 9 21Z"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);

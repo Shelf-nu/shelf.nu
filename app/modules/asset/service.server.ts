@@ -1,9 +1,27 @@
-import type { Category, Note, Prisma, Qr, Asset, User } from "@prisma/client";
+import type {
+  Category,
+  Location,
+  Note,
+  Prisma,
+  Qr,
+  Asset,
+  User,
+  Tag,
+} from "@prisma/client";
 import { ErrorCorrection } from "@prisma/client";
+import type { LoaderArgs } from "@remix-run/node";
 import { db } from "~/database";
-import { dateTimeInUnix, oneDayFromNow } from "~/utils";
+import {
+  dateTimeInUnix,
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+  oneDayFromNow,
+} from "~/utils";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import { getAllCategories } from "../category";
 import { getQr } from "../qr";
+import { getAllTags } from "../tag";
 
 export async function getAsset({
   userId,
@@ -19,6 +37,8 @@ export async function getAsset({
         orderBy: { createdAt: "desc" },
       },
       qrCodes: true,
+      tags: true,
+      location: true,
     },
   });
 }
@@ -29,6 +49,7 @@ export async function getAssets({
   perPage = 8,
   search,
   categoriesIds,
+  tagsIds,
 }: {
   userId: User["id"];
 
@@ -41,6 +62,7 @@ export async function getAssets({
   search?: string | null;
 
   categoriesIds?: Category["id"][] | null;
+  tagsIds?: Tag["id"][] | null;
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
@@ -62,13 +84,31 @@ export async function getAssets({
     };
   }
 
+  if (tagsIds && tagsIds.length > 0) {
+    where.tags = {
+      some: {
+        id: {
+          in: tagsIds,
+        },
+      },
+    };
+  }
+
   const [assets, totalAssets] = await db.$transaction([
     /** Get the assets */
     db.asset.findMany({
       skip,
       take,
       where,
-      include: { category: true },
+      include: {
+        category: true,
+        tags: true,
+        location: {
+          select: {
+            name: true,
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
     }),
 
@@ -84,10 +124,13 @@ export async function createAsset({
   description,
   userId,
   categoryId,
+  locationId,
   qrId,
-}: Pick<Asset, "description" | "title" | "categoryId"> & {
-  userId: User["id"];
+  tags,
+}: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
   qrId?: Qr["id"];
+  locationId?: Location["id"];
+  tags?: { set: { id: string }[] };
 }) {
   /** User connction data */
   const user = {
@@ -137,8 +180,32 @@ export async function createAsset({
     });
   }
 
+  /** If a locationId is passed, link the location to the asset. */
+  if (locationId) {
+    Object.assign(data, {
+      location: {
+        connect: {
+          id: locationId,
+        },
+      },
+    });
+  }
+
+  /** If a tags is passed, link the category to the asset. */
+  if (tags && tags?.set?.length > 0) {
+    Object.assign(data, {
+      tags: {
+        connect: tags?.set,
+      },
+    });
+  }
+
   return db.asset.create({
     data,
+    include: {
+      location: true,
+      user: true,
+    },
   });
 }
 
@@ -147,17 +214,40 @@ interface UpdateAssetPayload {
   title?: Asset["title"];
   description?: Asset["description"];
   categoryId?: Asset["categoryId"];
+  newLocationId?: Asset["locationId"];
+  currentLocationId?: Asset["locationId"];
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
+  tags?: { set: { id: string }[] };
+  userId?: User["id"];
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
-  const { categoryId, id } = payload;
-  /** Delete the category id from the payload so we can use connect syntax from prisma */
-  delete payload.categoryId;
+  const {
+    title,
+    description,
+    mainImage,
+    mainImageExpiration,
+    categoryId,
+    tags,
+    id,
+    newLocationId,
+    currentLocationId,
+    userId,
+  } = payload;
+  const isChangingLocation =
+    newLocationId && currentLocationId && newLocationId !== currentLocationId;
 
+  const data = {
+    title,
+    description,
+    mainImage,
+    mainImageExpiration,
+  };
+
+  /** Delete the category id from the payload so we can use connect syntax from prisma */
   if (categoryId) {
-    Object.assign(payload, {
+    Object.assign(data, {
       category: {
         connect: {
           id: categoryId,
@@ -166,10 +256,75 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     });
   }
 
-  return db.asset.update({
+  /** Delete the category id from the payload so we can use connect syntax from prisma */
+  if (newLocationId) {
+    Object.assign(data, {
+      location: {
+        connect: {
+          id: newLocationId,
+        },
+      },
+    });
+  }
+
+  /** If a tags is passed, link the category to the asset. */
+  if (tags && tags?.set) {
+    Object.assign(data, {
+      tags,
+    });
+  }
+
+  const asset = await db.asset.update({
     where: { id },
-    data: payload,
+    data,
+    include: { location: true, tags: true },
   });
+
+  // /** If the location id was passed, we create a note for the move */
+  if (isChangingLocation) {
+    /**
+     * Create a note for the move
+     * Here we actually need to query the locations so we can print their names
+     * */
+
+    const [currentLocation, newLocation] = await db.$transaction([
+      /** Get the items */
+      db.location.findFirst({
+        where: {
+          id: currentLocationId,
+          userId,
+        },
+      }),
+
+      db.location.findFirst({
+        where: {
+          id: newLocationId,
+          userId,
+        },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    await createLocationChangeNote({
+      currentLocation,
+      newLocation: newLocation as Location,
+      firstName: newLocation?.user.firstName || "",
+      lastName: newLocation?.user.lastName || "",
+      assetName: asset?.title,
+      assetId: asset.id,
+      userId: newLocation?.userId as string,
+      isRemoving: false,
+    });
+  }
+
+  return asset;
 }
 
 export async function deleteAsset({
@@ -214,19 +369,23 @@ export async function updateAssetMainImage({
     id: assetId,
     mainImage: signedUrl,
     mainImageExpiration: oneDayFromNow(),
+    userId,
   });
 }
 
 export async function createNote({
   content,
+  type,
   userId,
   assetId,
 }: Pick<Note, "content"> & {
+  type?: Note["type"];
   userId: User["id"];
   assetId: Asset["id"];
 }) {
   const data = {
     content,
+    type: type || "COMMENT",
     user: {
       connect: {
         id: userId,
@@ -252,3 +411,107 @@ export async function deleteNote({
     where: { id, userId },
   });
 }
+
+/** Fetches all related entries required for creating a new asset */
+export async function getAllRelatedEntries({
+  userId,
+}: {
+  userId: User["id"];
+}): Promise<{ categories: Category[]; tags: Tag[]; locations: Location[] }> {
+  const [categories, tags, locations] = await db.$transaction([
+    /** Get the categories */
+    db.category.findMany({ where: { userId } }),
+
+    /** Get the tags */
+    db.tag.findMany({ where: { userId } }),
+
+    /** Get the locations */
+    db.location.findMany({ where: { userId } }),
+  ]);
+  return { categories, tags, locations };
+}
+
+export const getPaginatedAndFilterableAssets = async ({
+  request,
+  userId,
+}: {
+  request: LoaderArgs["request"];
+  userId: User["id"];
+}) => {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search, categoriesIds, tagsIds } =
+    getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
+
+  const categories = await getAllCategories({
+    userId,
+  });
+
+  const tags = await getAllTags({
+    userId,
+  });
+
+  const { assets, totalAssets } = await getAssets({
+    userId,
+    page,
+    perPage,
+    search,
+    categoriesIds,
+    tagsIds,
+  });
+  const totalPages = Math.ceil(totalAssets / perPage);
+
+  return {
+    page,
+    perPage,
+    search,
+    totalAssets,
+    prev,
+    next,
+    categories,
+    tags,
+    assets,
+    totalPages,
+  };
+};
+
+export const createLocationChangeNote = async ({
+  currentLocation,
+  newLocation,
+  firstName,
+  lastName,
+  assetName,
+  assetId,
+  userId,
+  isRemoving,
+}: {
+  currentLocation: Location | null;
+  newLocation: Location;
+  firstName: string;
+  lastName: string;
+  assetName: Asset["title"];
+  assetId: Asset["id"];
+  userId: User["id"];
+  isRemoving: boolean;
+}) => {
+  /**
+   * WE have a few cases to handle:
+   * 1. Setting the first location
+   * 2. Updating the location
+   * 3. Removing the location
+   */
+
+  let message = currentLocation
+    ? `**${firstName} ${lastName}** updated the location of **${assetName}** from **${currentLocation.name}** to **${newLocation.name}**` // updating location
+    : `**${firstName} ${lastName}** set the location of **${assetName}** to **${newLocation.name}**`; // setting to first location
+
+  if (isRemoving) {
+    message = `**${firstName} ${lastName}** removed  **${assetName}** from location **${currentLocation?.name}**`; // removing location
+  }
+  await createNote({
+    content: message,
+    type: "UPDATE",
+    userId,
+    assetId,
+  });
+};

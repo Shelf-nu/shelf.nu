@@ -30,9 +30,6 @@ jobs:
         with:
           useLockFile: false
 
-      - name: ⚙️ Build CSS
-        run: npm run generate:css
-
       - name: 🔬 Lint
         run: npm run lint
 
@@ -80,7 +77,7 @@ jobs:
           useLockFile: false
 
       - name: ⚡ Run vitest
-        run: npm run test -- --coverage
+        run: npm run test
 
   playwright:
     timeout-minutes: 60

@@ -1,3 +1,4 @@
+import { Roles } from "@prisma/client";
 import { matchRequestUrl, rest } from "msw";
 
 import { server } from "mocks";
@@ -13,6 +14,9 @@ import { db } from "~/database";
 import { randomUsernameFromEmail } from "~/utils";
 import { createUserAccount, defaultUserCategories } from "./service.server";
 
+// @vitest-environment node
+// 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
+
 // mock db
 vitest.mock("~/database", () => ({
   db: {
@@ -25,9 +29,7 @@ vitest.mock("~/database", () => ({
 describe(createUserAccount.name, () => {
   it("should return null if no auth account created", async () => {
     expect.assertions(3);
-
     const fetchAuthAdminUserAPI = new Map();
-
     server.events.on("request:start", (req) => {
       const matchesMethod = req.method === "POST";
       const matchesUrl = matchRequestUrl(
@@ -35,10 +37,8 @@ describe(createUserAccount.name, () => {
         SUPABASE_AUTH_ADMIN_USER_API,
         SUPABASE_URL
       ).matches;
-
       if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
     });
-
     // https://mswjs.io/docs/api/setup-server/use#one-time-override
     server.use(
       rest.post(
@@ -50,11 +50,8 @@ describe(createUserAccount.name, () => {
           )
       )
     );
-
     const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, "");
-
     server.events.removeAllListeners();
-
     expect(result).toBeNull();
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
     const [request] = fetchAuthAdminUserAPI.values();
@@ -64,13 +61,10 @@ describe(createUserAccount.name, () => {
       email_confirm: true,
     });
   });
-
   it("should return null and delete auth account if unable to sign in", async () => {
     expect.assertions(5);
-
     const fetchAuthTokenAPI = new Map();
     const fetchAuthAdminUserAPI = new Map();
-
     server.events.on("request:start", (req) => {
       const matchesMethod = req.method === "POST";
       const matchesUrl = matchRequestUrl(
@@ -78,10 +72,8 @@ describe(createUserAccount.name, () => {
         SUPABASE_AUTH_TOKEN_API,
         SUPABASE_URL
       ).matches;
-
       if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
     });
-
     server.events.on("request:start", (req) => {
       const matchesMethod = req.method === "DELETE";
       const matchesUrl = matchRequestUrl(
@@ -89,10 +81,8 @@ describe(createUserAccount.name, () => {
         `${SUPABASE_AUTH_ADMIN_USER_API}/*`,
         SUPABASE_URL
       ).matches;
-
       if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
     });
-
     server.use(
       rest.post(
         `${SUPABASE_URL}${SUPABASE_AUTH_TOKEN_API}`,
@@ -103,11 +93,8 @@ describe(createUserAccount.name, () => {
           )
       )
     );
-
     const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, "");
-
     server.events.removeAllListeners();
-
     expect(result).toBeNull();
     expect(fetchAuthTokenAPI.size).toEqual(1);
     const [signInRequest] = fetchAuthTokenAPI.values();
@@ -123,13 +110,10 @@ describe(createUserAccount.name, () => {
       `${SUPABASE_AUTH_ADMIN_USER_API}/${USER_ID}`
     );
   });
-
   it("should return null and delete auth account if unable to create user in database", async () => {
     expect.assertions(4);
-
     const fetchAuthTokenAPI = new Map();
     const fetchAuthAdminUserAPI = new Map();
-
     server.events.on("request:start", (req) => {
       const matchesMethod = req.method === "POST";
       const matchesUrl = matchRequestUrl(
@@ -137,10 +121,8 @@ describe(createUserAccount.name, () => {
         SUPABASE_AUTH_TOKEN_API,
         SUPABASE_URL
       ).matches;
-
       if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
     });
-
     server.events.on("request:start", (req) => {
       const matchesMethod = req.method === "DELETE";
       const matchesUrl = matchRequestUrl(
@@ -148,34 +130,25 @@ describe(createUserAccount.name, () => {
         `${SUPABASE_AUTH_ADMIN_USER_API}/*`,
         SUPABASE_URL
       ).matches;
-
       if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
     });
-
     //@ts-expect-error missing vitest type
     db.user.create.mockResolvedValue(null);
-
     const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, "");
-
     server.events.removeAllListeners();
-
     expect(result).toBeNull();
     expect(fetchAuthTokenAPI.size).toEqual(1);
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
-
     // expect call delete auth account with the expected user id
     const [authAdminUserReq] = fetchAuthAdminUserAPI.values();
     expect(authAdminUserReq.url.pathname).toEqual(
       `${SUPABASE_AUTH_ADMIN_USER_API}/${USER_ID}`
     );
   });
-
   it("should create an account", async () => {
     expect.assertions(4);
-
     const fetchAuthAdminUserAPI = new Map();
     const fetchAuthTokenAPI = new Map();
-
     server.events.on("request:start", (req) => {
       const matchesMethod = req.method === "POST";
       const matchesUrl = matchRequestUrl(
@@ -183,10 +156,8 @@ describe(createUserAccount.name, () => {
         SUPABASE_AUTH_ADMIN_USER_API,
         SUPABASE_URL
       ).matches;
-
       if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
     });
-
     server.events.on("request:start", (req) => {
       const matchesMethod = req.method === "POST";
       const matchesUrl = matchRequestUrl(
@@ -194,29 +165,28 @@ describe(createUserAccount.name, () => {
         SUPABASE_AUTH_TOKEN_API,
         SUPABASE_URL
       ).matches;
-
       if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
     });
-
     //@ts-expect-error missing vitest type
     db.user.create.mockResolvedValue({ id: USER_ID, email: USER_EMAIL });
     const username = randomUsernameFromEmail(USER_EMAIL);
     const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, username);
-
     // we don't want to test the implementation of the function
     result!.expiresAt = -1;
-
     server.events.removeAllListeners();
-
     expect(db.user.create).toBeCalledWith({
       data: {
         email: USER_EMAIL,
         id: USER_ID,
         username: username,
         categories: { create: defaultUserCategories },
+        roles: {
+          connect: {
+            name: Roles["USER"],
+          },
+        },
       },
     });
-
     expect(result).toEqual(authSession);
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
     expect(fetchAuthTokenAPI.size).toEqual(1);
