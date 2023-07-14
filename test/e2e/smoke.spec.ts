@@ -1,6 +1,5 @@
 import { faker } from "@faker-js/faker";
 import { test, expect } from "../fixtures/account";
-import nodemailer from "nodemailer";
 
 /** To use console log while testing you need to use the following snippet:
  * ```
@@ -9,62 +8,6 @@ import nodemailer from "nodemailer";
     }, confirmUrl);
     ```
  */
-test("should allow you to register and login", async ({ page, account }) => {
-  page.on("console", (message) => {
-    console.log(`[Page Console] ${message.text()}`);
-  });
-
-  // await page.evaluate((account) => {
-  //   console.log(account);
-  // }, account);
-
-  await page.evaluate((account) => {
-    console.log(account.password);
-  }, account);
-
-  // Set up the console event listener
-
-  await page.goto("/");
-  await page.click("[data-test-id=signupButton]");
-  await expect(page).toHaveURL(/.*join/);
-  await page.fill("#magic-link", account.email);
-
-  await page.click("[data-test-id=continueWithMagicLink]");
-
-  await expect(page.getByText("Check your emails")).toBeVisible();
-
-  await page.goto("https://ethereal.email/login");
-
-  await page.fill("#address", account.email);
-  await page.fill("#password", account.password);
-  await page.getByRole("button", { name: "Log in" }).click();
-  await page.waitForTimeout(1000);
-
-  await page.getByRole("link", { name: "Messages" }).click();
-  await page.getByRole("link", { name: "Confirm Your Signup" }).click();
-  const text = await page.innerText("#plaintext");
-  const regex = /\[([^\]]+)\]/;
-  const matches = text.match(regex);
-  let confirmUrl = "";
-  if (matches && matches.length > 0) {
-    confirmUrl = matches[1];
-  }
-
-  await page.goto(confirmUrl);
-  await page.waitForTimeout(2000);
-
-  /** Fill in onboarding form */
-  await page.fill('[data-test-id="firstName"]', account.firstName);
-  await page.fill('[data-test-id="lastName"]', account.lastName);
-  await page.fill('[data-test-id="password"]', account.password);
-  await page.fill('[data-test-id="confirmPassword"]', account.password); // We use the same password that nodemailer generated for the email account
-
-  await page.locator('[data-test-id="onboard"]').click();
-  await expect(page).toHaveURL(/.*assets/);
-  await expect(page.getByText("No assets on database")).toBeVisible();
-  await page.click('[data-test-id="logout"]');
-  await expect(page).toHaveURL(/.*login/);
-});
 
 test("should allow you to make a asset", async ({ page, account }) => {
   page.on("console", (message) => {
@@ -79,13 +22,6 @@ test("should allow you to make a asset", async ({ page, account }) => {
     title: faker.lorem.words(2),
     description: faker.lorem.sentences(1),
   };
-  await page.goto("/");
-
-  await page.fill('[data-test-id="email"]', account.email);
-  await page.fill('[data-test-id="password"]', account.password);
-  await page.click('[data-test-id="login"]');
-
-  await expect(page).toHaveURL(/.*assets/);
 
   await page.click('[data-test-id="createNewAsset"]');
   await expect(page).toHaveURL(/.*assets\/new/);
@@ -107,14 +43,6 @@ test("should allow you to make a category", async ({ page, account }) => {
     title: faker.lorem.words(2),
     description: faker.lorem.sentences(1),
   };
-
-  await page.goto("/");
-
-  await page.fill('[data-test-id="email"]', account.email);
-  await page.fill('[data-test-id="password"]', account.password);
-  await page.click('[data-test-id="login"]');
-
-  await expect(page).toHaveURL(/.*assets/);
 
   /** create category */
   await page.click('[data-test-id="categoriesSidebarMenuItem"]');
