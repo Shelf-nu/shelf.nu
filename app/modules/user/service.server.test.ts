@@ -14,6 +14,9 @@ import { db } from "~/database";
 import { randomUsernameFromEmail } from "~/utils";
 import { createUserAccount, defaultUserCategories } from "./service.server";
 
+// @vitest-environment node
+// 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
+
 // mock db
 vitest.mock("~/database", () => ({
   db: {

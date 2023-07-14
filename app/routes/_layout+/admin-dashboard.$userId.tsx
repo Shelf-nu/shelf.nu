@@ -22,12 +22,18 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   return json({ user });
 };
 
-export const action = async ({ request }: ActionArgs) => {
-  const { id } = await requireAdmin(request);
+export const handle = {
+  breadcrumb: () => "User details",
+};
+
+export const action = async ({ request, params }: ActionArgs) => {
+  await requireAdmin(request);
   const formData = await request.formData();
+  /** ID of the target user we are generating codes for */
+  const userId = params.userId as string;
 
   await generateOrphanedCodes({
-    userId: id,
+    userId,
     amount: Number(formData.get("amount")),
   });
   return json({ message: "Generated Orphaned QR codes" });

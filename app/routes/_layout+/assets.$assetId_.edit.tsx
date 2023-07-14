@@ -84,7 +84,7 @@ export async function action({ request, params }: ActionArgs) {
     );
   }
 
-  updateAssetMainImage({
+  await updateAssetMainImage({
     request,
     assetId: id,
     userId: authSession.userId,
