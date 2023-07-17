@@ -24,25 +24,43 @@ export const test = base.extend<{}, { account: Account }>({
 
       const page = await browser.newPage();
 
+      page.on("console", (message) => {
+        console.log(`[Page Console] ${message.text()}`);
+      });
+
       await page.goto("/");
       await page.click("[data-test-id=signupButton]");
       await expect(page).toHaveURL(/.*join/);
       await page.fill("#magic-link", email);
 
       await page.click("[data-test-id=continueWithMagicLink]");
-      await page.waitForTimeout(10000);
 
-      // await expect(page.getByText("Check your emails")).toBeVisible();
+      await expect(page.getByText("Check your emails")).toBeVisible();
+
+      /** We are waiting to make sure the email arrives */
+      await page.waitForTimeout(10000);
 
       await page.goto("https://ethereal.email/login");
 
       await page.fill("#address", email);
       await page.fill("#password", password);
       await page.getByRole("button", { name: "Log in" }).click();
-      await page.waitForTimeout(1000);
+      // await page.waitForTimeout(10000);
 
       await page.getByRole("link", { name: "Messages" }).click();
-      await page.getByRole("link", { name: "Confirm Your Signup" }).click();
+      await page.getByRole("link", { name: "Your Magic Link" }).click();
+      // const linkNames = ["Confirm Your Signup", "Your Magic Link"];
+
+      // for (const name of linkNames) {
+      //   const link = page.getByRole("link", {
+      //     name: "Confirm Your Signup",
+      //   });
+      //   if (link) {
+      //     await link.click();
+      //     break;
+      //   }
+      // }
+
       const text = await page.innerText("#plaintext");
       const regex = /\[([^\]]+)\]/;
       const matches = text.match(regex);
@@ -52,6 +70,10 @@ export const test = base.extend<{}, { account: Account }>({
       }
 
       await page.goto(confirmUrl);
+
+      await page.evaluate((confirmUrl) => {
+        console.log(confirmUrl);
+      }, confirmUrl);
 
       // Wait for the field to be present on the DOM before filling it
       await page.waitForSelector('[data-test-id="firstName"]');
