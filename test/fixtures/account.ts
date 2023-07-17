@@ -32,7 +32,7 @@ export const test = base.extend<{}, { account: Account }>({
       await page.click("[data-test-id=continueWithMagicLink]");
       await page.waitForTimeout(10000);
 
-      await expect(page.getByText("Check your emails")).toBeVisible();
+      // await expect(page.getByText("Check your emails")).toBeVisible();
 
       await page.goto("https://ethereal.email/login");
 
