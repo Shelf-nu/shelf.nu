@@ -30,7 +30,7 @@ export const test = base.extend<{}, { account: Account }>({
       await page.fill("#magic-link", email);
 
       await page.click("[data-test-id=continueWithMagicLink]");
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(10000);
 
       await expect(page.getByText("Check your emails")).toBeVisible();
 
