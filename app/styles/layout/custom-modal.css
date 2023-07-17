@@ -1,0 +1,3 @@
+.dialog {
+  @apply max-h-[400px] w-[400px];
+}
