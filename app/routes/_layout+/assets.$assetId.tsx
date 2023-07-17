@@ -9,6 +9,7 @@ import type {
 import { redirect, json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
+import { useAtom } from "jotai";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -38,6 +39,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
+import { isCustodianAssignedAtom } from "./assets.$assetId.custody";
 
 type ShelfLocation = Location;
 
@@ -125,6 +127,8 @@ export default function AssetDetailsPage() {
 
   const user = useUserData();
   usePosition();
+
+  const [isCustodianAssigned] = useAtom(isCustodianAssignedAtom);
   return (
     <>
       <AssetImage
@@ -166,6 +170,25 @@ export default function AssetDetailsPage() {
           {asset.description ? (
             <Card className="mt-0 rounded-t-none">
               <p className=" text-gray-600">{asset.description}</p>
+            </Card>
+          ) : null}
+
+          {isCustodianAssigned ? (
+            <Card>
+              <div className="flex items-center gap-3">
+                <img
+                  src="/images/asset-placeholder.jpg"
+                  alt="custodian"
+                  className="h-10 w-10"
+                />
+                <div>
+                  <p className="font-medium">
+                    In custody of{" "}
+                    <span className="font-semibold">Carlos Virreira</span>
+                  </p>
+                  <span>Since Jun 28 2023</span>
+                </div>
+              </div>
             </Card>
           ) : null}
 
