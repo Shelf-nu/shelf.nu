@@ -49,17 +49,6 @@ export const test = base.extend<{}, { account: Account }>({
 
       await page.getByRole("link", { name: "Messages" }).click();
       await page.getByRole("link", { name: "Your Magic Link" }).click();
-      // const linkNames = ["Confirm Your Signup", "Your Magic Link"];
-
-      // for (const name of linkNames) {
-      //   const link = page.getByRole("link", {
-      //     name: "Confirm Your Signup",
-      //   });
-      //   if (link) {
-      //     await link.click();
-      //     break;
-      //   }
-      // }
 
       const text = await page.innerText("#plaintext");
       const regex = /\[([^\]]+)\]/;
@@ -67,13 +56,16 @@ export const test = base.extend<{}, { account: Account }>({
       let confirmUrl = "";
       if (matches && matches.length > 0) {
         confirmUrl = matches[1];
+
+        await page.evaluate((matches) => {
+          console.log("m", matches[1]);
+        }, matches);
+        await page.evaluate((confirmUrl) => {
+          console.log("cu", confirmUrl);
+        }, confirmUrl);
       }
 
       await page.goto(confirmUrl);
-
-      await page.evaluate((confirmUrl) => {
-        console.log(confirmUrl);
-      }, confirmUrl);
 
       // Wait for the field to be present on the DOM before filling it
       await page.waitForSelector('[data-test-id="firstName"]');
