@@ -7,7 +7,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
-export default function WorkspacesPage() {
+export default function WorkspacePage() {
   return (
     <div>
       <div className="mb-6 flex justify-between border-b pb-5">
