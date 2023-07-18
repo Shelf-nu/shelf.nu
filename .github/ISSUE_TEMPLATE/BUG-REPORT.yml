@@ -17,7 +17,6 @@ body:
       placeholder: ex. email@example.com
     validations:
       required: false
-      
   - type: textarea
     id: what-happened
     attributes:
@@ -27,7 +26,18 @@ body:
       value: "A bug happened!"
     validations:
       required: true
-      
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: To reproduce
+      description: Steps to reproduce this error
+      value: |
+        1. Go to \"...\"\n
+        2. Click on \"....\"\n
+        3. Scroll down to \"....\"\n
+        4. See error"\n
+    validations:
+      required: false 
   - type: dropdown
     id: version
     attributes:
@@ -37,8 +47,7 @@ body:
         - Hosted (app.shelf.nu)
         - Self-hosted
     validations:
-      required: true
-      
+      required: true  
   - type: dropdown
     id: browsers
     attributes:
