@@ -94,6 +94,13 @@ async function createUser({
         categories: {
           create: defaultUserCategories,
         },
+        organizations: {
+          create: [
+            {
+              name: "Personal",
+            },
+          ],
+        },
         roles: {
           connect: {
             name: Roles["USER"],

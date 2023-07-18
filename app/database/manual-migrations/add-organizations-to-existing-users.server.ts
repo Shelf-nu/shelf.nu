@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import type { Role } from "@prisma/client";
-import { PrismaClient, Roles } from "@prisma/client";
+import { OrganizationType, PrismaClient, Roles } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
@@ -19,7 +19,34 @@ Due to there being assets already existing we need to do a 2 step process
 async function seed() {
   try {
     // console.log(`Total of ${allUsers.length} users' roles updated`);
+    const allUsers = await prisma.user.findMany({
+      include: {
+        organizations: true,
+      },
+    });
 
+    allUsers.map(async (user) => {
+      if (
+        user.organizations?.some(
+          (org) => org.type === OrganizationType["PERSONAL"]
+        )
+      )
+        return;
+
+      return await prisma.user.update({
+        where: {
+          id: user.id,
+        },
+        data: {
+          organizations: {
+            create: [{ name: "Personal" }],
+          },
+        },
+      });
+    });
+    console.log(
+      `Users without a personal organization have been updated. 🌱\n`
+    );
     console.log(`Database has been seeded. 🌱\n`);
   } catch (cause) {
     console.error(cause);
