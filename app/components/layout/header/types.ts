@@ -24,7 +24,7 @@ export type Action = {
 
   /** Props to be passed to the component */
   props: LinkProps & {
-    /** Optional id used for testing it Cypress */
+    /** Optional id used for testing it Playwright */
     "data-test-id"?: string;
 
     /** The possible options for icons to be rendered in the button */
