@@ -89,7 +89,7 @@ export const CategoryCheckboxDropdown = () => {
                         variant="link"
                         className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
                       >
-                        Clear filters
+                        Clear filter
                       </Button>
                     </>
                   ) : null}
