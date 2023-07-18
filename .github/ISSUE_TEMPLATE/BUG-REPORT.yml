@@ -33,11 +33,10 @@ body:
     attributes:
       label: To reproduce
       description: Steps to reproduce this error
-      placeholder: >\n
-        1. Go to "..."\n
-        2. Click on "...."\n
-        3. Scroll down to "...."\n
-        4. See error\n\n
+      placeholder: "1. Go to \"...\"\n
+        2. Click on \"....\"\n
+        3. Scroll down to \"....\"\n
+        4. See error"\n
     validations:
       required: false
       
