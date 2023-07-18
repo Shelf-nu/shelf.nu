@@ -41,7 +41,6 @@ export const test = base.extend<{}, { account: Account }>({
       await page.fill("#address", email);
       await page.fill("#password", password);
       await page.getByRole("button", { name: "Log in" }).click();
-      // await page.waitForTimeout(10000);
 
       await page.getByRole("link", { name: "Messages" }).click();
       await page.getByRole("link", { name: "Your Magic Link" }).click();
@@ -73,7 +72,7 @@ export const test = base.extend<{}, { account: Account }>({
       // Use the account value.
       await use({ email, password, firstName, lastName });
     },
-    { scope: "worker" },
+    { scope: "worker", timeout: 60000 },
   ],
   page: async ({ page, account }, use) => {
     // Sign in with our account.
