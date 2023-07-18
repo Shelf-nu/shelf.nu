@@ -21,12 +21,21 @@ body:
     id: what-happened
     attributes:
       label: What happened?
-      description: Also tell us, what did you expect to happen?
-      placeholder: Steps to reproduce!
+      description: Steps to reproduce the issue.
       value: |
         Steps to reproduce:
 
         1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behaviour
+    attributes:
+      label: What is the expected behaviour?
+      description: Also tell us, what did you expect to happen?
     validations:
       required: true
   - type: dropdown
