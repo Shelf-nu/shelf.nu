@@ -97,7 +97,7 @@ jobs:
           envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
           envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
           envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          envkey_SERVER_URL: ${{ secrets.SERVER_URL_LOCALHOST }}
+          envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
           envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
           file_name: .env
 
