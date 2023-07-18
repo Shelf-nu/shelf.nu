@@ -1,6 +1,5 @@
 /* eslint-disable no-console */
-import type { Role } from "@prisma/client";
-import { OrganizationType, PrismaClient, Roles } from "@prisma/client";
+import { OrganizationType, PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
