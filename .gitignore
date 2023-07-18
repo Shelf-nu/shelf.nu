@@ -5,8 +5,6 @@ node_modules
 .env
 .cache
 
-/cypress/screenshots
-/cypress/videos
 /prisma/data.db
 /prisma/data.db-journal
 
@@ -20,6 +18,7 @@ node_modules
 
 # OS
 .DS_Store
-
-/playwright-report
+/test-results/
+/playwright-report/
+/playwright/.cache/
 /playwright-report/*

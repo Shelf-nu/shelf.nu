@@ -101,6 +101,7 @@ export default function Onboarding() {
         <div className="flex gap-6">
           <Input
             label="First name"
+            data-test-id="firstName"
             type="text"
             placeholder="Zaans"
             name={zo.fields.firstName()}
@@ -108,6 +109,7 @@ export default function Onboarding() {
           />
           <Input
             label="Last name"
+            data-test-id="lastName"
             type="text"
             placeholder="Huisje"
             name={zo.fields.lastName()}
