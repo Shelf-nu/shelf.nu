@@ -94,7 +94,7 @@ export async function loader({ request }: LoaderArgs) {
   }
 
   const header: HeaderData = {
-    title: user?.firstName ? `${user.firstName}'s stash` : `Your stash`,
+    title: user?.firstName ? `${user.firstName}'s inventory` : `Your inventory`,
   };
 
   const modelName = {
