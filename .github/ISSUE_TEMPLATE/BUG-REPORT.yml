@@ -32,8 +32,8 @@ body:
       label: Version
       description: What version of our software are you running?
       options:
-        - 1.0.2 (Default)
-        - 1.0.3 (Edge)
+        - Hosted (app.shelf.nu)
+        - Self-hosted
     validations:
       required: true
   - type: dropdown
@@ -46,11 +46,13 @@ body:
         - Chrome
         - Safari
         - Microsoft Edge
+    validations:
+      required: true
   - type: textarea
     id: logs
     attributes:
       label: Relevant log output
-      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
+      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks. Only relevant for hosted version.
       render: shell
   - type: checkboxes
     id: terms
