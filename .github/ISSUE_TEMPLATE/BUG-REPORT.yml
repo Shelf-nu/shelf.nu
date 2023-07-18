@@ -32,10 +32,10 @@ body:
       label: Version
       description: What version of our software are you running?
       options:
-        - Hosted (app.shelf.nu)
-        - Self-hosted
+        - 1.0.2 (Default)
+        - 1.0.3 (Edge)
     validations:
-      required: true  
+      required: true
   - type: dropdown
     id: browsers
     attributes:
@@ -46,11 +46,17 @@ body:
         - Chrome
         - Safari
         - Microsoft Edge
-       validations:
-        required: true
   - type: textarea
     id: logs
     attributes:
       label: Relevant log output
-      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks. Only relevant for self hosted solution.
+      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
       render: shell
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our [Code of Conduct](https://example.com)
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true
