@@ -14,10 +14,6 @@ test("should allow you to make a asset", async ({ page, account }) => {
     console.log(`[Page Console] ${message.text()}`);
   });
 
-  // await page.evaluate((account) => {
-  //   console.log(account.password);
-  // }, account);
-
   const testAsset = {
     title: faker.lorem.words(2),
     description: faker.lorem.sentences(1),

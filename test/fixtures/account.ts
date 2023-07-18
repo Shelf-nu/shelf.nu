@@ -24,10 +24,6 @@ export const test = base.extend<{}, { account: Account }>({
 
       const page = await browser.newPage();
 
-      page.on("console", (message) => {
-        console.log(`[Page Console] ${message.text()}`);
-      });
-
       await page.goto("/");
       await page.click("[data-test-id=signupButton]");
       await expect(page).toHaveURL(/.*join/);
@@ -56,13 +52,6 @@ export const test = base.extend<{}, { account: Account }>({
       let confirmUrl = "";
       if (matches && matches.length > 0) {
         confirmUrl = matches[1];
-
-        await page.evaluate((matches) => {
-          console.log("m", matches[1]);
-        }, matches);
-        await page.evaluate((confirmUrl) => {
-          console.log("cu", confirmUrl);
-        }, confirmUrl);
       }
 
       await page.goto(confirmUrl);
