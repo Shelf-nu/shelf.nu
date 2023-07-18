@@ -28,6 +28,7 @@ export async function signInWithEmail(email: string, password: string) {
 }
 
 export async function sendMagicLink(email: string) {
+  console.log("SERVER_URL", SERVER_URL);
   return getSupabaseAdmin().auth.signInWithOtp({
     email,
     options: {
