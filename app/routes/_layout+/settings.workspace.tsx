@@ -1,6 +1,7 @@
 import type { TeamMember } from "@prisma/client";
 import { json, type LoaderArgs, type V2_MetaFunction } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import ContextualModal from "~/components/layout/contextual-modal";
 import { List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
@@ -144,7 +145,9 @@ export default function WorkspacePage() {
             assets.
           </p>
         </div>
-        <Button variant="primary">Add team member</Button>
+        <Button variant="primary" to="add-member">
+          Add team member
+        </Button>
       </div>
       <div className="mb-6 flex gap-16">
         <div className="w-1/4">
@@ -156,9 +159,18 @@ export default function WorkspacePage() {
           </p>
         </div>
         <div className="flex-1">
-          <List ItemComponent={TeamMemberRow} />
+          <List
+            ItemComponent={TeamMemberRow}
+            customEmptyStateContent={{
+              title: "No team members on database",
+              text: "What are you waiting for? Add your first team member now!",
+              newButtonRoute: "add-member",
+              newButtonContent: "Add team member",
+            }}
+          />
         </div>
       </div>
+      <ContextualModal />
     </div>
   );
 }
