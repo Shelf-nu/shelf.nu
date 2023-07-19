@@ -231,6 +231,8 @@ enum Roles {
   ADMIN
 }
 
+
+
 model TeamMember {
   id   String @id @unique @default(cuid())
   name String
@@ -245,7 +247,7 @@ model TeamMember {
 model Custody {
   id String @id @default(cuid())
 
-  teamMember   TeamMember @relation(fields: [teamMemberId], references: [id])
+  custodian   TeamMember @relation(fields: [teamMemberId], references: [id])
   teamMemberId String
 
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)

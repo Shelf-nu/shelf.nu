@@ -5,7 +5,6 @@ const prisma = new PrismaClient();
 
 async function seed() {
   try {
-    // console.log(`Total of ${allUsers.length} users' roles updated`);
     const allUsers = await prisma.user.findMany({
       include: {
         organizations: true,
