@@ -1,10 +1,18 @@
-import { json } from "@remix-run/node";
+import type { TeamMember } from "@prisma/client";
+import { json, type LoaderArgs, type V2_MetaFunction } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import { List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
 import { ActionsDropdown } from "~/components/workspace/actions-dropdown";
+import { requireAuthSession } from "~/modules/auth";
+import { getUserPersonalOrganization } from "~/modules/organization";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader() {
+export const loader = async ({ request }: LoaderArgs) => {
+  const { userId } = await requireAuthSession(request);
+  const organization = await getUserPersonalOrganization({ userId });
+
   const members = [
     {
       id: 1,
@@ -34,6 +42,7 @@ export async function loader() {
   };
 
   return json({
+    organization,
     items: members,
     page: 1,
     totalItems: members.length,
@@ -42,10 +51,16 @@ export async function loader() {
     next: null,
     prev: null,
     modelName,
+    title: "Workspace",
   });
-}
+};
+
+export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.title) : "" },
+];
 
 export default function WorkspacePage() {
+  const { organization } = useLoaderData<typeof loader>();
   return (
     <div>
       <div className="mb-6 flex justify-between border-b pb-5">
@@ -148,7 +163,7 @@ export default function WorkspacePage() {
   );
 }
 
-function TeamMemberRow({ item }: { item: { id: string; name: string } }) {
+function TeamMemberRow({ item }: { item: TeamMember }) {
   return (
     <>
       <Td className="w-full">
