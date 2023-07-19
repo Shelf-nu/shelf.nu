@@ -175,16 +175,24 @@ export default function UserPage() {
         </FormRow>
 
         <FormRow rowLabel="Email address">
+          {/* Actial field used for resetting pwd and updating user */}
+          <input
+            type="hidden"
+            name={zo.fields.email()}
+            defaultValue={user?.email}
+            className="hidden w-full"
+          />
+          {/* Just previews the email address */}
           <Input
             label={zo.fields.email()}
             icon="mail"
             hideLabel={true}
             placeholder="zaans@huisje.com"
             type="text"
-            name={zo.fields.email()}
-            defaultValue={user?.email || undefined}
-            error={zo.errors.email()?.message || data?.errors?.email}
+            defaultValue={user?.email}
             className="w-full"
+            disabled={true}
+            title="To change your email address, please contact support."
           />
         </FormRow>
 

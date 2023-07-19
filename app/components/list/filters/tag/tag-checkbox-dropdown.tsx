@@ -3,8 +3,6 @@ import type { Category } from "@prisma/client";
 import { useSearchParams } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 
-import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
-
 import { useTagSearch } from "~/components/category/useTagSearch";
 import Input from "../../../forms/input";
 import { CheckIcon, ChevronRight } from "../../../icons";
