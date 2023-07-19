@@ -68,9 +68,7 @@ export const ActionsDopdown = ({ asset }: Props) => {
             Edit
           </Button>
         </DropdownMenuItem>
-        <DropdownMenuItem className="px-6 py-3">
-          <DeleteAsset asset={asset} />
-        </DropdownMenuItem>
+        <DeleteAsset asset={asset} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

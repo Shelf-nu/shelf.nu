@@ -571,27 +571,27 @@ export function VerticalDotsIcon(props: SVGProps<SVGSVGElement>) {
       width="4"
       height="16"
       viewBox="0 0 4 16"
-      fill="none"
+      fill="currentColor"
       xmlns="http://www.w3.org/2000/svg"
       {...props}
     >
       <path
         d="M2 8.83334C2.46024 8.83334 2.83334 8.46025 2.83334 8.00001C2.83334 7.53977 2.46024 7.16668 2 7.16668C1.53977 7.16668 1.16667 7.53977 1.16667 8.00001C1.16667 8.46025 1.53977 8.83334 2 8.83334Z"
-        stroke="#F2F4F7"
+        stroke="currentColor"
         strokeWidth="1.66667"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M2 3.00001C2.46024 3.00001 2.83334 2.62691 2.83334 2.16668C2.83334 1.70644 2.46024 1.33334 2 1.33334C1.53977 1.33334 1.16667 1.70644 1.16667 2.16668C1.16667 2.62691 1.53977 3.00001 2 3.00001Z"
-        stroke="#F2F4F7"
+        stroke="currentColor"
         strokeWidth="1.66667"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M2 14.6667C2.46024 14.6667 2.83334 14.2936 2.83334 13.8333C2.83334 13.3731 2.46024 13 2 13C1.53977 13 1.16667 13.3731 1.16667 13.8333C1.16667 14.2936 1.53977 14.6667 2 14.6667Z"
-        stroke="#F2F4F7"
+        stroke="currentColor"
         strokeWidth="1.66667"
         strokeLinecap="round"
         strokeLinejoin="round"
