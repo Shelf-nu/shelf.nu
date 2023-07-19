@@ -111,12 +111,7 @@ export default function WorkspacePage() {
                 <span className="block text-text-sm font-medium text-gray-900">
                   {user?.firstName} {user?.lastName}
                 </span>
-                <a
-                  href="mailto:carlos@whale-agency.com"
-                  className="text-sm text-gray-600"
-                >
-                  {user?.email}
-                </a>
+                <span className="text-sm text-gray-600">{user?.email}</span>
               </div>
             </div>
           </div>
@@ -130,7 +125,7 @@ export default function WorkspacePage() {
             assets.
           </p>
         </div>
-        <Button variant="primary" to="add-member">
+        <Button variant="primary" to={`${organization.id}/add-member`}>
           Add team member
         </Button>
       </div>
@@ -149,7 +144,7 @@ export default function WorkspacePage() {
             customEmptyStateContent={{
               title: "No team members on database",
               text: "What are you waiting for? Add your first team member now!",
-              newButtonRoute: "add-member",
+              newButtonRoute: `${organization.id}/add-member`,
               newButtonContent: "Add team member",
             }}
           />
