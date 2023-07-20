@@ -22,8 +22,8 @@ export const DeleteMember = ({
   teamMember: TeamMemberWithCustodies;
 }) => {
   const hasCustodies = useMemo(
-    () => teamMember.custodies.length > 0,
-    [teamMember.custodies]
+    () => teamMember?.custodies?.length > 0,
+    [teamMember]
   );
   return (
     <>
@@ -95,14 +95,19 @@ const UnableToDeleteMemberContent = ({
         {custodiesCount} assets. Please release custody before deleting the
         user.
       </AlertDialogDescription>
-      <button className="absolute right-5 top-5 cursor-pointer">
+      <AlertDialogCancel
+        asChild
+        className="absolute right-5 top-5 cursor-pointer"
+      >
         <XIcon />
-      </button>
+      </AlertDialogCancel>
     </AlertDialogHeader>
     <AlertDialogFooter>
-      <Button variant="secondary" width="full">
-        Close
-      </Button>
+      <AlertDialogCancel asChild>
+        <Button variant="secondary" width="full">
+          Close
+        </Button>
+      </AlertDialogCancel>
     </AlertDialogFooter>
   </AlertDialogContent>
 );
