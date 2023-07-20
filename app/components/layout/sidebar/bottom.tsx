@@ -24,7 +24,12 @@ export default function SidebarBottom({ user }: Props) {
             <div className="line-clamp-1 block text-ellipsis font-semibold">
               {user.username}
             </div>
-            <p className="line-clamp-1 block text-ellipsis">{user.email}</p>
+            <p
+              className="line-clamp-1 block text-ellipsis"
+              data-test-id="userEmail"
+            >
+              {user.email}
+            </p>
           </div>
         </div>
       </Link>

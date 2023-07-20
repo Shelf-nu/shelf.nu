@@ -3,6 +3,7 @@ import type { User } from "@prisma/client";
 export interface UpdateUserPayload {
   id: User["id"];
   username?: User["username"];
+  email?: User["email"];
   firstName?: User["firstName"];
   lastName?: User["lastName"];
   profilePicture?: User["profilePicture"];

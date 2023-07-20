@@ -162,9 +162,12 @@ export async function updateUser(
   updateUserPayload: UpdateUserPayload
 ): Promise<UpdateUserResponse> {
   try {
-    /** Remove password from object so we can pass it to prisma user update */
+    /**
+     * Remove password from object so we can pass it to prisma user update
+     * Also we remove the email as we dont allow it to be changed for now
+     * */
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const cleanClone = (({ password, confirmPassword, ...o }) => o)(
+    const cleanClone = (({ password, confirmPassword, email, ...o }) => o)(
       updateUserPayload
     );
 

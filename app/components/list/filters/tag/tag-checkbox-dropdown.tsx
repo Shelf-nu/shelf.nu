@@ -3,8 +3,6 @@ import type { Category } from "@prisma/client";
 import { useSearchParams } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 
-import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
-
 import { useTagSearch } from "~/components/category/useTagSearch";
 import Input from "../../../forms/input";
 import { CheckIcon, ChevronRight } from "../../../icons";
@@ -40,7 +38,7 @@ export const TagCheckboxDropdown = () => {
 
   const [, clearFilters] = useAtom(clearTagFiltersAtom);
 
-  const hasCategories = useMemo(() => refinedTags.length > 0, [refinedTags]);
+  const hasTags = useMemo(() => refinedTags.length > 0, [refinedTags]);
 
   /** Sets the initial selected categories based on the url params. Runs on first load only */
   useEffect(() => {
@@ -72,8 +70,13 @@ export const TagCheckboxDropdown = () => {
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[290px] md:w-[350px]">
-          {!hasCategories && !isSearchingTags ? (
-            <CategorySelectNoCategories />
+          {!hasTags && !isSearchingTags ? (
+            <div>
+              You don't seem to have any tags yet.{" "}
+              <Button to={"/tags/new"} variant="link" className="">
+                Create your first tag
+              </Button>
+            </div>
           ) : (
             <>
               <div className="relative">
@@ -87,7 +90,7 @@ export const TagCheckboxDropdown = () => {
                         variant="link"
                         className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
                       >
-                        Clear filters
+                        Clear filter
                       </Button>
                     </>
                   ) : null}
