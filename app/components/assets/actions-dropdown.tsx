@@ -18,7 +18,7 @@ interface Props {
 }
 
 export const ActionsDopdown = ({ asset }: Props) => (
-  <DropdownMenu>
+  <DropdownMenu modal={false}>
     <DropdownMenuTrigger className="asset-actions">
       <Button variant="secondary" to="#" data-test-id="assetActionsButton">
         <span className="flex items-center gap-2">
@@ -42,7 +42,6 @@ export const ActionsDopdown = ({ asset }: Props) => (
           Edit
         </Button>
       </DropdownMenuItem>
-
       <DeleteAsset asset={asset} />
     </DropdownMenuContent>
   </DropdownMenu>
