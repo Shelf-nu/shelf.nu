@@ -61,23 +61,21 @@ test("should allow you to make a category", async ({ page, account }) => {
 });
 
 test("should allow you to add team member", async ({ page, account }) => {
-  // const testCategory = {
-  //   title: faker.lorem.words(2),
-  //   description: faker.lorem.sentences(1),
-  // };
-  // /** create category */
-  // await page.click('[data-test-id="categoriesSidebarMenuItem"]');
-  // await page.click('[data-test-id="createNewCategory"]');
-  // await expect(page).toHaveURL(/.*categories\/new/);
-  // const focusedElementCat = await page.$(":focus");
-  // expect(await focusedElementCat?.getAttribute("name")).toBe("name");
-  // await page
-  //   .getByPlaceholder("Category name", { exact: true })
-  //   .fill(testCategory.title);
-  // await page.getByLabel("Description").fill(testCategory.description);
-  // await page.getByRole("button", { name: "Create" }).click();
-  // await expect(page.getByText(testCategory.title)).toBeVisible();
-  // await page.click('[data-test-id="closeToast"]');
-  // await page.click('[data-test-id="logout"]');
-  // await expect(page).toHaveURL(/.*login/);
+  const teamMemberName = faker.name.firstName();
+  /** create category */
+
+  await page.click('[data-test-id="settingsSidebarMenuItem"]');
+  await expect(page).toHaveURL(/.*settings\/user/);
+  // find link with text "Workspace" and click it
+  await page.getByRole("link", { name: "Workspace" }).click();
+  await expect(page).toHaveURL(/.*settings\/workspace/);
+
+  await page.getByRole("link", { name: "Add team member" }).click();
+  await expect(page).toHaveURL(/.*settings\/workspace\/[^]*\/add-member/);
+
+  await page.getByPlaceholder("Enter team member’s name").fill(teamMemberName);
+  await page.getByRole("button", { name: "Add team member" }).click();
+
+  await expect(page.getByText(teamMemberName)).toBeVisible();
+  await page.click('[data-test-id="closeToast"]');
 });
