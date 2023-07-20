@@ -34,7 +34,12 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
-import { assertIsDelete, getRequiredParam, tw } from "~/utils";
+import {
+  assertIsDelete,
+  getRequiredParam,
+  tw,
+  userFriendlyAssetStatus,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
@@ -140,7 +145,14 @@ export default function AssetDetailsPage() {
         }}
         className="mx-auto mb-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
       />
-      <Header subHeading={<>HelloWorld</>}>
+      <Header
+        subHeading={
+          <div>
+            <span>{userFriendlyAssetStatus(asset.status)}</span>
+            {location ? <span>{location.name}</span> : null}
+          </div>
+        }
+      >
         <Button
           to="qr"
           variant="secondary"
@@ -151,7 +163,6 @@ export default function AssetDetailsPage() {
         </Button>
 
         <ActionsDopdown asset={asset} />
-        <div>Hello world</div>
       </Header>
 
       <ContextualModal />
