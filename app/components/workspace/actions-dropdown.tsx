@@ -13,7 +13,7 @@ export function ActionsDropdown({
   teamMember: TeamMemberWithCustodies;
 }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger className="outline-none focus-visible:border-0">
         <i className="inline-block px-3 py-0 text-gray-400 ">
           <VerticalDotsIcon />
