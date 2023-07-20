@@ -2,13 +2,16 @@ import { VerticalDotsIcon } from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.workspace";
 import { DeleteMember } from "./delete-member";
-import { Button } from "../shared";
 
-export function ActionsDropdown() {
+export function ActionsDropdown({
+  teamMember,
+}: {
+  teamMember: TeamMemberWithCustodies;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="outline-none focus-visible:border-0">
@@ -20,18 +23,7 @@ export function ActionsDropdown() {
         align="end"
         className="order w-[180px] rounded-md bg-white p-0 text-right "
       >
-        <DeleteMember />
-        <DropdownMenuItem className="px-6 py-3">
-          <Button
-            to="edit"
-            role="link"
-            variant="link"
-            className="justify-start text-gray-700 hover:text-gray-700"
-            width="full"
-          >
-            Edit
-          </Button>
-        </DropdownMenuItem>
+        <DeleteMember teamMember={teamMember} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

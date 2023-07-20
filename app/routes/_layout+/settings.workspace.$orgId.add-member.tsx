@@ -65,6 +65,7 @@ export default function AddMember() {
             className="mb-8"
             placeholder="Enter team member’s name"
             required
+            autoFocus
           />
           <Button variant="primary" width="full" type="submit">
             Add team member

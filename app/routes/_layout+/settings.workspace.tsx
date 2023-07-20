@@ -1,5 +1,6 @@
-import type { TeamMember } from "@prisma/client";
-import { json, type LoaderArgs, type V2_MetaFunction } from "@remix-run/node";
+import type { Custody, TeamMember } from "@prisma/client";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -8,6 +9,7 @@ import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
 import ProfilePicture from "~/components/user/profile-picture";
 import { ActionsDropdown } from "~/components/workspace/actions-dropdown";
+import { db } from "~/database";
 import { useUserData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserPersonalOrganizationData } from "~/modules/organization";
@@ -40,6 +42,20 @@ export const loader = async ({ request }: LoaderArgs) => {
     modelName,
     title: "Workspace",
   });
+};
+
+export const action = async ({ request }: ActionArgs) => {
+  await requireAuthSession(request);
+
+  const formData = await request.formData();
+  const teamMemberId = formData.get("teamMemberId") as string;
+
+  await db.teamMember.delete({
+    where: {
+      id: teamMemberId,
+    },
+  });
+  return redirect(`/settings/workspace`);
 };
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -155,7 +171,11 @@ export default function WorkspacePage() {
   );
 }
 
-function TeamMemberRow({ item }: { item: TeamMember }) {
+export interface TeamMemberWithCustodies extends TeamMember {
+  custodies: Custody[];
+}
+
+function TeamMemberRow({ item }: { item: TeamMemberWithCustodies }) {
   return (
     <>
       <Td className="w-full">
@@ -163,7 +183,7 @@ function TeamMemberRow({ item }: { item: TeamMember }) {
           <span className="text-text-sm font-medium text-gray-900">
             {item.name}
           </span>
-          <ActionsDropdown />
+          <ActionsDropdown teamMember={item} />
         </div>
       </Td>
     </>

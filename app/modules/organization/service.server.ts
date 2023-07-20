@@ -17,7 +17,11 @@ export const getUserPersonalOrganizationData = async ({
         type: OrganizationType.PERSONAL,
       },
       include: {
-        members: true,
+        members: {
+          include: {
+            custodies: true,
+          },
+        },
       },
     }),
 
