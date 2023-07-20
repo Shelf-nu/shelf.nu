@@ -22,7 +22,7 @@ interface Props {
 export const ActionsDopdown = ({ asset }: Props) => {
   const [isCustodianAssigned] = useAtom(isCustodianAssignedAtom);
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger className="asset-actions">
         <Button variant="secondary" to="#" data-test-id="assetActionsButton">
           <span className="flex items-center gap-2">
