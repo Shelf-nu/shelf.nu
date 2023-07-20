@@ -59,3 +59,25 @@ test("should allow you to make a category", async ({ page, account }) => {
   await page.click('[data-test-id="logout"]');
   await expect(page).toHaveURL(/.*login/);
 });
+
+test("should allow you to add team member", async ({ page, account }) => {
+  // const testCategory = {
+  //   title: faker.lorem.words(2),
+  //   description: faker.lorem.sentences(1),
+  // };
+  // /** create category */
+  // await page.click('[data-test-id="categoriesSidebarMenuItem"]');
+  // await page.click('[data-test-id="createNewCategory"]');
+  // await expect(page).toHaveURL(/.*categories\/new/);
+  // const focusedElementCat = await page.$(":focus");
+  // expect(await focusedElementCat?.getAttribute("name")).toBe("name");
+  // await page
+  //   .getByPlaceholder("Category name", { exact: true })
+  //   .fill(testCategory.title);
+  // await page.getByLabel("Description").fill(testCategory.description);
+  // await page.getByRole("button", { name: "Create" }).click();
+  // await expect(page.getByText(testCategory.title)).toBeVisible();
+  // await page.click('[data-test-id="closeToast"]');
+  // await page.click('[data-test-id="logout"]');
+  // await expect(page).toHaveURL(/.*login/);
+});
