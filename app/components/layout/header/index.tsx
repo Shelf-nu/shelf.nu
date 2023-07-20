@@ -14,7 +14,7 @@ export default function Header({
    */
   title?: string | null;
   children?: React.ReactNode;
-  subHeading: React.ReactNode;
+  subHeading?: React.ReactNode;
 }) {
   const data = useLoaderData();
   const header = data?.header as HeaderData;
