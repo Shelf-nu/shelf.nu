@@ -140,7 +140,7 @@ export default function AssetDetailsPage() {
         }}
         className="mx-auto mb-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
       />
-      <Header>
+      <Header subHeading={<>HelloWorld</>}>
         <Button
           to="qr"
           variant="secondary"
@@ -151,7 +151,9 @@ export default function AssetDetailsPage() {
         </Button>
 
         <ActionsDopdown asset={asset} />
+        <div>Hello world</div>
       </Header>
+
       <ContextualModal />
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">

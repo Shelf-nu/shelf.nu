@@ -108,6 +108,11 @@ export async function getAssets({
             name: true,
           },
         },
+        custody: {
+          include: {
+            custodian: true,
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
     }),

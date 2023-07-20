@@ -7,12 +7,14 @@ import type { HeaderData } from "./types";
 export default function Header({
   title = null,
   children,
+  subHeading,
 }: {
   /** Pass a title to replace the default route title set in the loader
    * This is very useful for interactive adjustments of the title
    */
   title?: string | null;
   children?: React.ReactNode;
+  subHeading: React.ReactNode;
 }) {
   const data = useLoaderData();
   const header = data?.header as HeaderData;
@@ -27,7 +29,11 @@ export default function Header({
           >
             {title || header?.title}
           </Heading>
-          {header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>}
+          {subHeading ? (
+            <SubHeading>{subHeading}</SubHeading>
+          ) : (
+            header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>
+          )}
         </div>
 
         <div className="flex gap-3">{children}</div>

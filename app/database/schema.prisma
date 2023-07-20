@@ -57,6 +57,7 @@ model Asset {
   description         String?
   mainImage           String?
   mainImageExpiration DateTime?
+  status              AssetStatus @default(AVAILABLE)
 
   // Datetime
   createdAt DateTime @default(now())
@@ -77,6 +78,11 @@ model Asset {
   qrCodes Qr[]
   reports ReportFound[]
   tags    Tag[]
+}
+
+enum AssetStatus {
+  AVAILABLE
+  IN_CUSTODY
 }
 
 model Category {
