@@ -4,7 +4,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
-import { List } from "~/components/list";
+import { Filters, List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
 import ProfilePicture from "~/components/user/profile-picture";
@@ -12,15 +12,31 @@ import { ActionsDropdown } from "~/components/workspace/actions-dropdown";
 import { db } from "~/database";
 import { useUserData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
-import { getUserPersonalOrganizationData } from "~/modules/organization";
+import {
+  getPaginatedAndFilterableTeamMembers,
+  getUserPersonalOrganizationData,
+} from "~/modules/organization";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
   const { organization, totalAssets, totalLocations } =
     await getUserPersonalOrganizationData({ userId });
-
   if (!organization) throw new Error("Organization not found");
+
+  const {
+    page,
+    perPage,
+    search,
+    prev,
+    next,
+    teamMembers,
+    totalTeamMembers,
+    totalPages,
+  } = await getPaginatedAndFilterableTeamMembers({
+    request,
+    organizationId: organization.id,
+  });
 
   const modelName = {
     singular: "Team member",
@@ -32,13 +48,14 @@ export const loader = async ({ request }: LoaderArgs) => {
     totalAssets,
     totalLocations,
 
-    items: organization.members,
-    page: 1,
-    totalItems: organization.members.length,
-    perPage: 5,
-    totalPages: 1,
-    next: null,
-    prev: null,
+    search,
+    items: teamMembers,
+    page,
+    totalItems: totalTeamMembers,
+    perPage,
+    totalPages,
+    next,
+    prev,
     modelName,
     title: "Workspace",
   });
@@ -154,7 +171,8 @@ export default function WorkspacePage() {
             Team members are part of your workspace but do not have an account.
           </p>
         </div>
-        <div className="flex-1">
+        <div className="flex flex-1 flex-col gap-2">
+          <Filters />
           <List
             ItemComponent={TeamMemberRow}
             customEmptyStateContent={{

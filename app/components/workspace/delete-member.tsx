@@ -40,7 +40,9 @@ export const DeleteMember = ({
         </AlertDialogTrigger>
 
         {hasCustodies ? (
-          <UnableToDeleteMemberContent />
+          <UnableToDeleteMemberContent
+            custodiesCount={teamMember.custodies.length}
+          />
         ) : (
           <DeleteMemberContent id={teamMember.id} />
         )}
@@ -65,7 +67,7 @@ const DeleteMemberContent = ({ id }: { id: TeamMember["id"] }) => (
       </AlertDialogCancel>
     </AlertDialogHeader>
     <AlertDialogFooter>
-      <Form method="post">
+      <Form method="post" className="w-full">
         <input type="hidden" name="teamMemberId" value={id} />
         <Button
           className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
@@ -80,13 +82,18 @@ const DeleteMemberContent = ({ id }: { id: TeamMember["id"] }) => (
   </AlertDialogContent>
 );
 
-const UnableToDeleteMemberContent = () => (
+const UnableToDeleteMemberContent = ({
+  custodiesCount,
+}: {
+  custodiesCount: number;
+}) => (
   <AlertDialogContent className="relative">
     <AlertDialogHeader className="mb-8">
       <AlertDialogTitle>Unable to delete team member</AlertDialogTitle>
       <AlertDialogDescription>
-        The team member you are trying to delete has custody over 1 or more
-        assets. Please release custody before deleting the user.
+        The team member you are trying to delete has custody over{" "}
+        {custodiesCount} assets. Please release custody before deleting the
+        user.
       </AlertDialogDescription>
       <button className="absolute right-5 top-5 cursor-pointer">
         <XIcon />

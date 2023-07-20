@@ -1,5 +1,12 @@
-import { OrganizationType, type Organization } from "@prisma/client";
+import { OrganizationType } from "@prisma/client";
+import type { Prisma, Organization } from "@prisma/client";
+import type { LoaderArgs } from "@remix-run/node";
 import { db } from "~/database";
+import {
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+} from "~/utils";
 
 export const getUserPersonalOrganizationData = async ({
   userId,
@@ -50,7 +57,83 @@ export const getUserPersonalOrganizationData = async ({
 export const getOrganization = async ({ id }: { id: Organization["id"] }) =>
   db.organization.findUnique({
     where: { id },
-    include: {
-      members: true,
-    },
   });
+
+export const getPaginatedAndFilterableTeamMembers = async ({
+  request,
+  organizationId,
+}: {
+  request: LoaderArgs["request"];
+  organizationId: Organization["id"];
+}) => {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search } = getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
+
+  const { teamMembers, totalTeamMembers } = await getTeamMembers({
+    organizationId,
+    page,
+    perPage,
+    search,
+  });
+  const totalPages = Math.ceil(totalTeamMembers / perPage);
+
+  return {
+    page,
+    perPage,
+    search,
+    prev,
+    next,
+    teamMembers,
+    totalPages,
+    totalTeamMembers,
+  };
+};
+
+export async function getTeamMembers({
+  organizationId,
+  page = 1,
+  perPage = 8,
+  search,
+}: {
+  organizationId: Organization["id"];
+
+  /** Page number. Starts at 1 */
+  page: number;
+
+  /** Assets to be loaded per page */
+  perPage?: number;
+
+  search?: string | null;
+}) {
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+
+  /** Default value of where. Takes the assetss belonging to current user */
+  let where: Prisma.TeamMemberWhereInput = {
+    organizations: { some: { id: organizationId } },
+  };
+
+  /** If the search string exists, add it to the where object */
+  if (search) {
+    where.name = {
+      contains: search,
+      mode: "insensitive",
+    };
+  }
+
+  const [teamMembers, totalTeamMembers] = await db.$transaction([
+    /** Get the assets */
+    db.teamMember.findMany({
+      skip,
+      take,
+      where,
+      orderBy: { createdAt: "desc" },
+    }),
+
+    /** Count them */
+    db.teamMember.count({ where }),
+  ]);
+
+  return { teamMembers, totalTeamMembers };
+}
