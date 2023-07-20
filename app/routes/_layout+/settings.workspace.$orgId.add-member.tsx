@@ -7,6 +7,7 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/custom-modal.css";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request }: LoaderArgs) => {
   await requireAuthSession(request);
@@ -34,6 +35,12 @@ export const action = async ({ request, params }: ActionArgs) => {
 
   if (!teamMember)
     return json({ error: "Something went wrong. Please try again." });
+
+  sendNotification({
+    title: "Successfully added a new team member",
+    message: "You are now able to give this team member custody over assets.",
+    icon: { name: "success", variant: "success" },
+  });
 
   return redirect(`/settings/workspace`);
 };
