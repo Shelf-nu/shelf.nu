@@ -10,14 +10,10 @@ import { getUserByEmail } from "~/modules/user";
 
 installGlobals();
 
-async function deleteUser(email: string) {
+export async function deleteUser(email: string) {
   if (!email) {
     throw new Error("email required for login");
   }
-  if (!email.endsWith("@example.com")) {
-    throw new Error("All test emails must end in @example.com");
-  }
-
   const user = await getUserByEmail(email);
 
   try {
@@ -37,4 +33,4 @@ async function deleteUser(email: string) {
   await deleteAuthAccount(user?.id as string);
 }
 
-deleteUser(process.argv[2]);
+// deleteUser(process.argv[2]);

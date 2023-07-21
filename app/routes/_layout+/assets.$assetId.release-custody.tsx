@@ -56,7 +56,7 @@ export const action = async ({ request, params }: ActionArgs) => {
       assetId: asset.id,
     });
     sendNotification({
-      title: `${asset.title}’ is no longer in custody of ‘${custodianName}’`,
+      title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
       message: "This asset is available again.",
       icon: { name: "success", variant: "success" },
     });
