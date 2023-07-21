@@ -116,7 +116,7 @@ export default function WorkspacePage() {
                   {organization.name}
                 </span>
                 <p className="text-sm text-gray-600">
-                  {totalAssets} assets - {totalLocations} locations - 1 user -{" "}
+                  {totalAssets} assets - {totalLocations} locations - 1 admin -{" "}
                   {totalMembers} team members
                 </p>
               </div>

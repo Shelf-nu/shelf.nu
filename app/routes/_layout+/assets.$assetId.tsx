@@ -9,7 +9,7 @@ import type {
 import { redirect, json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
-import { atom, useAtom } from "jotai";
+import { atom } from "jotai";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -44,8 +44,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
-
-type ShelfLocation = Location;
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -126,15 +124,14 @@ export const isCustodianAssignedAtom = atom(false);
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
+  const assetIsAvailable = asset.status === "AVAILABLE";
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
-  const location = asset?.location as SerializeFrom<ShelfLocation>;
-
+  const location = asset?.location as SerializeFrom<Location>;
   const user = useUserData();
   usePosition();
 
-  const [isCustodianAssigned] = useAtom(isCustodianAssignedAtom);
   return (
     <>
       <AssetImage
@@ -149,13 +146,7 @@ export default function AssetDetailsPage() {
       <Header
         subHeading={
           <div className="mt-3 flex gap-2">
-            <Badge
-              color={
-                userFriendlyAssetStatus(asset.status) == "Available"
-                  ? "#12B76A"
-                  : "#2E90FA"
-              }
-            >
+            <Badge color={assetIsAvailable ? "#12B76A" : "#2E90FA"}>
               {userFriendlyAssetStatus(asset.status)}
             </Badge>
             {location ? (
@@ -199,20 +190,21 @@ export default function AssetDetailsPage() {
             </Card>
           ) : null}
 
-          {isCustodianAssigned ? (
+          {/* We simply check if the asset is available and we can assume that if it't not, there is a custodian assigned */}
+          {!assetIsAvailable && asset?.custody?.createdAt ? (
             <Card>
               <div className="flex items-center gap-3">
-                <img
-                  src="/images/asset-placeholder.jpg"
-                  alt="custodian"
-                  className="h-10 w-10"
-                />
                 <div>
-                  <p className="font-medium">
+                  <p className="">
                     In custody of{" "}
-                    <span className="font-semibold">Carlos Virreira</span>
+                    <span className="font-semibold">
+                      {asset.custody?.custodian.name}
+                    </span>
                   </p>
-                  <span>Since Jun 28 2023</span>
+                  <span>
+                    Since{" "}
+                    {new Date(asset?.custody?.createdAt).toLocaleDateString()}
+                  </span>
                 </div>
               </div>
             </Card>

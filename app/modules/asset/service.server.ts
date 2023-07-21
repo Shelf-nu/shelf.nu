@@ -29,7 +29,7 @@ export async function getAsset({
 }: Pick<Asset, "id"> & {
   userId: User["id"];
 }) {
-  return db.asset.findFirst({
+  const asset = await db.asset.findFirst({
     where: { id, userId },
     include: {
       category: true,
@@ -39,8 +39,16 @@ export async function getAsset({
       qrCodes: true,
       tags: true,
       location: true,
+      custody: {
+        select: {
+          createdAt: true,
+          custodian: true,
+        },
+      },
     },
   });
+
+  return asset;
 }
 
 export async function getAssets({

@@ -1,5 +1,4 @@
 import type { Asset } from "@prisma/client";
-import { useAtom } from "jotai";
 import { ChevronRight } from "~/components/icons";
 import {
   DropdownMenu,
@@ -7,8 +6,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-// eslint-disable-next-line import/no-cycle
-import { isCustodianAssignedAtom } from "~/routes/_layout+/assets.$assetId";
 import { DeleteAsset } from "./delete-asset";
 import { Button } from "../shared";
 
@@ -16,11 +13,12 @@ interface Props {
   asset: {
     title: Asset["title"];
     mainImage: Asset["mainImage"];
+    status: Asset["status"];
   };
 }
 
 export const ActionsDopdown = ({ asset }: Props) => {
-  const [isCustodianAssigned] = useAtom(isCustodianAssignedAtom);
+  const assetIsAvailable = asset.status === "AVAILABLE";
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger className="asset-actions">
@@ -35,7 +33,7 @@ export const ActionsDopdown = ({ asset }: Props) => {
         className="order w-[180px] rounded-md bg-white p-0 text-right "
       >
         <DropdownMenuItem className="border-b px-6 py-3">
-          {isCustodianAssigned ? (
+          {!assetIsAvailable ? (
             <Button
               to="release-custody"
               role="link"
