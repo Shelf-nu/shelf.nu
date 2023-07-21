@@ -164,7 +164,3 @@ test("should allow you to release custody of an asset", async ({
 
   await page.click('[data-test-id="closeToast"]');
 });
-
-test.afterAll(async ({ page, account }) => {
-  await deleteUser(account.email);
-});
