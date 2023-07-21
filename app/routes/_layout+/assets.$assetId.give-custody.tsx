@@ -10,6 +10,7 @@ import { createNote } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
@@ -73,11 +74,19 @@ export const action = async ({ request, params }: ActionArgs) => {
     },
   });
 
+  /** Once the asset is updated, we create the note */
   await createNote({
     content: `**${asset.user.firstName} ${asset.user.lastName}** has given **${custodianName}** custody over **${asset.title}**`,
     type: "UPDATE",
     userId: userId,
     assetId: asset.id,
+  });
+
+  sendNotification({
+    title: `‘${asset.title}’ is now in custody of ${custodianName}`,
+    message:
+      "Remember, this asset will be unavailable until custody is manually released.",
+    icon: { name: "success", variant: "success" },
   });
 
   return redirect(`/assets/${assetId}`);

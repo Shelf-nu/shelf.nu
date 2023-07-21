@@ -9,7 +9,6 @@ import type {
 import { redirect, json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
-import { atom } from "jotai";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -119,8 +118,6 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
   { rel: "stylesheet", href: mapCss },
 ];
-
-export const isCustodianAssignedAtom = atom(false);
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();

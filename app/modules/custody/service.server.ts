@@ -1,24 +1,25 @@
-import type { Asset, TeamMember } from "@prisma/client";
+import { AssetStatus, type Asset } from "@prisma/client";
 import { db } from "~/database";
 
-export const setCustody = async ({
-  assetId,
-  teamMemberId,
-}: {
-  assetId: Asset["id"];
-  teamMemberId: TeamMember["id"];
-}) => {
-  const [asset, teamMember] = await db.$transaction([
-    /** Get the assets */
-    db.asset.findUnique({
-      where: { id: assetId },
-    }),
+export const releaseCustody = async ({ assetId }: { assetId: Asset["id"] }) => {
+  const asset = await db.asset.update({
+    where: { id: assetId },
+    data: {
+      status: AssetStatus.AVAILABLE,
+      custody: {
+        delete: true,
+      },
+    },
+    include: {
+      user: {
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      },
+      custody: true,
+    },
+  });
 
-    /** Count them */
-    db.teamMember.findUnique({
-      where: { id: teamMemberId },
-    }),
-  ]);
-
-  return null;
+  return asset;
 };
