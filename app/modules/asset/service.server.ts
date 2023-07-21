@@ -117,8 +117,12 @@ export async function getAssets({
           },
         },
         custody: {
-          include: {
-            custodian: true,
+          select: {
+            custodian: {
+              select: {
+                name: true,
+              },
+            },
           },
         },
       },

@@ -193,7 +193,11 @@ const ListAssetContent = ({
   item: Asset & {
     category?: Category;
     tags?: Tag[];
-    custody: Custody;
+    custody: Custody & {
+      custodian: {
+        name: string;
+      };
+    };
   };
 }) => {
   const { category, tags, custody } = item;
@@ -232,7 +236,7 @@ const ListAssetContent = ({
       <Td className="hidden md:table-cell">
         {custody ? (
           <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
-            Some custodian
+            {custody.custodian.name}
           </span>
         ) : null}
       </Td>
