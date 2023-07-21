@@ -9,7 +9,7 @@ import type {
 import { redirect, json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
-import { useAtom } from "jotai";
+import { atom, useAtom } from "jotai";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -44,7 +44,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
-import { isCustodianAssignedAtom } from "./assets.$assetId.custody";
 
 type ShelfLocation = Location;
 
@@ -123,6 +122,8 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: mapCss },
 ];
 
+export const isCustodianAssignedAtom = atom(false);
+
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
@@ -147,9 +148,21 @@ export default function AssetDetailsPage() {
       />
       <Header
         subHeading={
-          <div>
-            <span>{userFriendlyAssetStatus(asset.status)}</span>
-            {location ? <span>{location.name}</span> : null}
+          <div className="mt-3 flex gap-2">
+            <Badge
+              color={
+                userFriendlyAssetStatus(asset.status) == "Available"
+                  ? "#12B76A"
+                  : "#2E90FA"
+              }
+            >
+              {userFriendlyAssetStatus(asset.status)}
+            </Badge>
+            {location ? (
+              <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
+                {location.name}
+              </span>
+            ) : null}
           </div>
         }
       >
