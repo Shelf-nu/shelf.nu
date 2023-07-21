@@ -29,7 +29,10 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 export const shouldRevalidate = () => false;
 
 export default function SettingsPage() {
-  const items = [{ to: "user", content: "My details" }];
+  const items = [
+    { to: "user", content: "My details" },
+    { to: "workspace", content: "Workspace" },
+  ];
   return (
     <>
       <Header />

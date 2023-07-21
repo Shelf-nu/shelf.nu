@@ -59,3 +59,23 @@ test("should allow you to make a category", async ({ page, account }) => {
   await page.click('[data-test-id="logout"]');
   await expect(page).toHaveURL(/.*login/);
 });
+
+test("should allow you to add team member", async ({ page, account }) => {
+  const teamMemberName = faker.name.firstName();
+  /** create category */
+
+  await page.click('[data-test-id="settingsSidebarMenuItem"]');
+  await expect(page).toHaveURL(/.*settings\/user/);
+  // find link with text "Workspace" and click it
+  await page.getByRole("link", { name: "Workspace" }).click();
+  await expect(page).toHaveURL(/.*settings\/workspace/);
+
+  await page.getByRole("link", { name: "Add team member" }).click();
+  await expect(page).toHaveURL(/.*settings\/workspace\/[^]*\/add-member/);
+
+  await page.getByPlaceholder("Enter team member’s name").fill(teamMemberName);
+  await page.getByRole("button", { name: "Add team member" }).click();
+
+  await expect(page.getByText(teamMemberName)).toBeVisible();
+  await page.click('[data-test-id="closeToast"]');
+});
