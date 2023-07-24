@@ -72,6 +72,7 @@ export async function action({ request }: ActionArgs) {
     title: "Tag deleted",
     message: "Your tag has been deleted successfully",
     icon: { name: "trash", variant: "error" },
+    senderId: userId,
   });
 
   return json({ success: true });
