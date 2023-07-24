@@ -97,6 +97,7 @@ export async function action({ request, params }: ActionArgs) {
     title: "Asset deleted",
     message: "Your asset has been deleted successfully",
     icon: { name: "trash", variant: "error" },
+    senderId: authSession.userId,
   });
 
   return redirect(`/assets`, {

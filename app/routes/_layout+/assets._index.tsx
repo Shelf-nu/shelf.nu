@@ -174,6 +174,7 @@ export default function AssetIndexPage() {
         <List
           ItemComponent={ListAssetContent}
           navigate={(itemId) => navigate(itemId)}
+          className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
               <Th className="hidden md:table-cell">Custodian</Th>
@@ -204,10 +205,10 @@ const ListAssetContent = ({
 
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
+      <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -218,8 +219,10 @@ const ListAssetContent = ({
                 className="h-full w-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-              <div className="font-medium">{item.title}</div>
+            <div className="">
+              <span className="word-break mb-1 block font-medium">
+                {item.title}
+              </span>
               <div className="block md:hidden">
                 {category ? (
                   <Badge color={category.color}>{category.name}</Badge>
