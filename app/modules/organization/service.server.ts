@@ -129,6 +129,9 @@ export async function getTeamMembers({
       take,
       where,
       orderBy: { createdAt: "desc" },
+      include: {
+        custodies: true,
+      },
     }),
 
     /** Count them */
