@@ -133,3 +133,9 @@ dialog {
 .responsive-filters .form-wrapper {
   @apply flex-col items-start xl:flex-row xl:items-center;
 }
+
+@media (max-width: 767px) {
+  .word-break {
+    word-break: break-word;
+  }
+}
