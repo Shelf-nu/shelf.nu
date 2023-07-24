@@ -192,6 +192,11 @@ export default function AssetDetailsPage() {
           {!assetIsAvailable && asset?.custody?.createdAt ? (
             <Card>
               <div className="flex items-center gap-3">
+                <img
+                  src="/images/default_pfp.jpg"
+                  alt="custodian"
+                  className="h-10 w-10 rounded"
+                />
                 <div>
                   <p className="">
                     In custody of{" "}

@@ -18,7 +18,7 @@ export const loader = async ({ request }: LoaderArgs) => {
 };
 
 export const action = async ({ request, params }: ActionArgs) => {
-  await requireAuthSession(request);
+  const { userId } = await requireAuthSession(request);
   const formData = await request.formData();
   const orgId = params.orgId as string;
 
@@ -40,6 +40,7 @@ export const action = async ({ request, params }: ActionArgs) => {
     title: "Successfully added a new team member",
     message: "You are now able to give this team member custody over assets.",
     icon: { name: "success", variant: "success" },
+    senderId: userId,
   });
 
   return redirect(`/settings/workspace`);

@@ -40,7 +40,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 };
 
 export const action = async ({ request, params }: ActionArgs) => {
-  await requireAuthSession(request);
+  const { userId } = await requireAuthSession(request);
   const assetId = params.assetId as string;
 
   const asset = await releaseCustody({ assetId });
@@ -59,6 +59,7 @@ export const action = async ({ request, params }: ActionArgs) => {
       title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
       message: "This asset is available again.",
       icon: { name: "success", variant: "success" },
+      senderId: userId,
     });
   }
 

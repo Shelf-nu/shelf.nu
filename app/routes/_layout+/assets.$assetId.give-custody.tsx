@@ -12,9 +12,22 @@ import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export const loader = async ({ request }: LoaderArgs) => {
+export const loader = async ({ request, params }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
+  const assetId = params.assetId as string;
+  const asset = await db.asset.findUnique({
+    where: { id: assetId },
+    select: {
+      custody: true,
+    },
+  });
 
+  /** If the asset already has a custody, this page should not be visible */
+  if (asset && asset.custody) {
+    return redirect(`/assets/${assetId}`);
+  }
+
+  /** We get all the team members that are part of the user's personal organization */
   const teamMembers = await db.teamMember.findMany({
     where: {
       organizations: {
@@ -87,6 +100,7 @@ export const action = async ({ request, params }: ActionArgs) => {
     message:
       "Remember, this asset will be unavailable until custody is manually released.",
     icon: { name: "success", variant: "success" },
+    senderId: userId,
   });
 
   return redirect(`/assets/${assetId}`);
