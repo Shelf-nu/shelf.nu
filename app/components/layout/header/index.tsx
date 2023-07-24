@@ -19,7 +19,7 @@ export default function Header({
 
   return header ? (
     <header>
-      <div className="block sm:flex sm:items-center sm:justify-between">
+      <div className="block sm:flex sm:items-center sm:justify-between sm:gap-3">
         <div className="mb-4 sm:mb-0">
           <Heading
             as="h2"
@@ -30,7 +30,7 @@ export default function Header({
           {header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>}
         </div>
 
-        <div className="flex gap-3">{children}</div>
+        <div className="flex shrink-0 gap-3">{children}</div>
       </div>
     </header>
   ) : null;
