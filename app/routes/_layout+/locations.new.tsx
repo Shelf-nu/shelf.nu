@@ -95,6 +95,7 @@ export async function action({ request }: ActionArgs) {
     title: "Location created",
     message: "Your location has been created successfully",
     icon: { name: "success", variant: "success" },
+    senderId: authSession.userId,
   });
 
   return redirect(`/locations/${location.id}`, {

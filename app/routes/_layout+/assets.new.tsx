@@ -99,8 +99,8 @@ export async function action({ request }: LoaderArgs) {
     title: "Asset created",
     message: "Your asset has been created successfully",
     icon: { name: "success", variant: "success" },
+    senderId: authSession.userId,
   });
-
 
   if (asset.location) {
     await createNote({
@@ -110,7 +110,7 @@ export async function action({ request }: LoaderArgs) {
       assetId: asset.id,
     });
   }
-  
+
   return redirect(`/assets`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),

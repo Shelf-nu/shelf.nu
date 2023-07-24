@@ -1,3 +1,4 @@
+import type { User } from "@prisma/client";
 import { atom } from "jotai";
 import type { Icon } from "~/components/shared/icons-map";
 
@@ -13,6 +14,7 @@ export interface NotificationType {
     className?: string;
   };
   time?: number;
+  senderId: User["id"] | null;
 }
 
 export const notificationAtom = atom<NotificationType>({
@@ -24,6 +26,7 @@ export const notificationAtom = atom<NotificationType>({
     variant: "gray",
     className: "",
   },
+  senderId: null,
 });
 
 /** Opens the Toast and shows the notification */
