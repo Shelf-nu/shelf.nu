@@ -24,7 +24,7 @@ export const Toaster = () => {
   };
 
   /** New notification coming from the server */
-  const newNotification = useEventSource("/api/sse/notification", {
+  const newNotification = useEventSource(`/api/sse/notification`, {
     event: "new-notification",
   });
   /** When the stream sends us a new notification update the state so it displays */

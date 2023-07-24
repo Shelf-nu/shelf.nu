@@ -1,5 +1,6 @@
 import type { NotificationType } from "~/atoms/notifications";
 import { emitter } from "./emitter.server";
+// import { useUserData } from "~/hooks";
 
 export function sendNotification(
   notification: Omit<NotificationType, "open">

@@ -111,6 +111,7 @@ export async function action({ request, params }: ActionArgs) {
     title: "Asset updated",
     message: "Your asset has been updated successfully",
     icon: { name: "success", variant: "success" },
+    senderId: authSession.userId,
   });
 
   return json(

@@ -107,6 +107,7 @@ export async function action({ request }: ActionArgs) {
       title: "User updated",
       message: "Your settings have been updated successfully",
       icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
     });
     return json(
       { success: true },

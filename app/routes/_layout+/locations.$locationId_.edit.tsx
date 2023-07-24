@@ -96,6 +96,7 @@ export async function action({ request, params }: ActionArgs) {
     title: "Location updated",
     message: "Your location  has been updated successfully",
     icon: { name: "success", variant: "success" },
+    senderId: authSession.userId,
   });
 
   return json(

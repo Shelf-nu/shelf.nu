@@ -64,6 +64,7 @@ export async function action({ request }: LoaderArgs) {
     title: "Category created",
     message: "Your category has been created successfully",
     icon: { name: "success", variant: "success" },
+    senderId: authSession.userId,
   });
 
   return redirect(`/categories`, {

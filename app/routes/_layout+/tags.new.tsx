@@ -58,6 +58,7 @@ export async function action({ request }: LoaderArgs) {
     title: "Tag created",
     message: "Your tag has been created successfully",
     icon: { name: "success", variant: "success" },
+    senderId: authSession.userId,
   });
 
   return redirect(`/tags`, {
