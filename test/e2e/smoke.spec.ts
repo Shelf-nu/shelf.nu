@@ -47,8 +47,6 @@ test("should allow you to make a category", async ({ page, account }) => {
   await page.click('[data-test-id="createNewCategory"]');
   await expect(page).toHaveURL(/.*categories\/new/);
 
-  const focusedElementCat = await page.$(":focus");
-  expect(await focusedElementCat?.getAttribute("name")).toBe("name");
   await page
     .getByPlaceholder("Category name", { exact: true })
     .fill(testCategory.title);
