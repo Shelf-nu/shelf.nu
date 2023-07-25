@@ -1,6 +1,5 @@
 import { faker } from "@faker-js/faker";
 import { test, expect } from "../fixtures/account";
-import { deleteUser } from "test/support/delete-user";
 
 /** To use console log while testing you need to use the following snippet:
  * ```
@@ -9,6 +8,9 @@ import { deleteUser } from "test/support/delete-user";
     }, confirmUrl);
     ```
  */
+
+// Annotate entire file as serial.
+test.describe.configure({ mode: "serial" });
 
 const testAsset = {
   title: faker.lorem.words(2),
