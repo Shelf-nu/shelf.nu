@@ -3,6 +3,7 @@ import { MetronomeLinks } from "@metronome-sh/react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
+  LoaderArgs,
   LoaderFunction,
   V2_MetaFunction,
 } from "@remix-run/node";
@@ -25,7 +26,9 @@ import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import styles from "./tailwind.css";
+import { ClientHintCheck, getHints } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
+import { useNonce } from "./utils/nonce-provider";
 export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
@@ -51,20 +54,26 @@ export const meta: V2_MetaFunction = () => [
   },
 ];
 
-export const loader: LoaderFunction = async () =>
+export const loader: LoaderFunction = async ({ request }: LoaderArgs) =>
   json({
     env: getBrowserEnv(),
+    requestInfo: {
+      hints: getHints(request),
+    },
   });
 
 export const shouldRevalidate = () => false;
 
 function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
   const { env } = useLoaderData<typeof loader>();
+  const nonce = useNonce();
   return (
     <html lang="en" className="h-full">
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <ClientHintCheck nonce={nonce} />
+
         <Meta />
         {title ? <title>{title}</title> : null}
         <Links />

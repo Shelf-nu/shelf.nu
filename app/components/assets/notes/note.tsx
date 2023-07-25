@@ -6,7 +6,11 @@ import { useUserData } from "~/hooks";
 import { timeAgo } from "~/utils/time-ago";
 import { ActionsDopdown } from "./actions-dropdown";
 
-export const Note = ({ note }: { note: NoteType }) => {
+export type NoteWithDate = NoteType & {
+  dateDisplay: string;
+};
+
+export const Note = ({ note }: { note: NoteWithDate }) => {
   const user = useUserData();
 
   return (
@@ -23,11 +27,17 @@ export const Note = ({ note }: { note: NoteType }) => {
   );
 };
 
-const Update = ({ note }: { note: NoteType; when?: boolean }) => (
+const Update = ({
+  note,
+}: {
+  note: NoteWithDate & {
+    dateDisplay: string;
+  };
+  when?: boolean;
+}) => (
   <div className="flex px-3.5 py-3">
     <div className="message flex flex-1 items-start gap-2">
-      <Tag>{new Date(note.createdAt).toLocaleDateString()}</Tag>{" "}
-      <MarkdownViewer content={note.content} />
+      <Tag>{note.dateDisplay}</Tag> <MarkdownViewer content={note.content} />
     </div>
   </div>
 );
@@ -36,7 +46,7 @@ const Comment = ({
   note,
   user,
 }: {
-  note: NoteType;
+  note: NoteWithDate;
   user: User;
   when?: boolean;
 }) => (
@@ -46,7 +56,7 @@ const Comment = ({
         <span className="commentator font-medium text-gray-900">
           {user?.firstName} {user?.lastName}
         </span>{" "}
-        <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
+        <span className="text-gray-600">{timeAgo(note.dateDisplay)}</span>
       </div>
       <ActionsDopdown note={note} />
     </header>
