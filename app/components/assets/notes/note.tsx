@@ -3,11 +3,14 @@ import { MarkdownViewer } from "~/components/markdown";
 import { Switch } from "~/components/shared/switch";
 import { Tag } from "~/components/shared/tag";
 import { useUserData } from "~/hooks";
+import { useHints } from "~/utils/client-hints";
 import { timeAgo } from "~/utils/time-ago";
 import { ActionsDopdown } from "./actions-dropdown";
 
 export const Note = ({ note }: { note: NoteType }) => {
   const user = useUserData();
+  const { timeZone } = useHints();
+  console.log(timeZone);
 
   return (
     <li key={note.id} className="note mb-6 rounded-lg border bg-white md:mb-8">
