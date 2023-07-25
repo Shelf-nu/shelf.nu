@@ -1,7 +1,7 @@
-import type { Note as NoteType } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 
 import { NewNote } from "./new";
+import type { NoteWithDate } from "./note";
 import { Note } from "./note";
 
 export const Notes = () => {
@@ -13,7 +13,7 @@ export const Notes = () => {
       <NewNote />
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
-          {asset.notes.map((note: NoteType) => (
+          {asset.notes.map((note: NoteWithDate) => (
             <Note key={note.id} note={note} />
           ))}
         </ul>

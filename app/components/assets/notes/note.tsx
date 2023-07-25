@@ -6,7 +6,7 @@ import { useUserData } from "~/hooks";
 import { timeAgo } from "~/utils/time-ago";
 import { ActionsDopdown } from "./actions-dropdown";
 
-type NoteWithDate = NoteType & {
+export type NoteWithDate = NoteType & {
   dateDisplay: string;
 };
 
