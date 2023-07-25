@@ -3,6 +3,11 @@ import { OrganizationType, PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+/** IMPORTANT NOTE
+ *
+ * You dont need to run this migration yet. It is prepared for the future.
+ */
+
 async function seed() {
   try {
     // console.log(`Total of ${allUsers.length} users' roles updated`);
