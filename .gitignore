@@ -18,7 +18,8 @@ node_modules
 
 # OS
 .DS_Store
-/test-results/
+test-results/
+
 /playwright-report/
 /playwright/.cache/
 /playwright-report/*
