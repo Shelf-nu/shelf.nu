@@ -40,6 +40,7 @@ import {
   userFriendlyAssetStatus,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
@@ -59,13 +60,26 @@ export async function loader({ request, params }: LoaderArgs) {
     ? parseScanData({
         scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
         userId,
+        request,
       })
     : null;
 
   const notes = asset.notes.map((note) => ({
     ...note,
+    dateDisplay: getDateTimeFormat(request).format(note.createdAt),
     content: parseMarkdownToReact(note.content),
   }));
+
+  let custody = null;
+  if (asset.custody) {
+    const date = new Date(asset.custody.createdAt);
+    const dateDisplay = getDateTimeFormat(request).format(date);
+
+    custody = {
+      ...asset.custody,
+      dateDisplay,
+    };
+  }
 
   const header: HeaderData = {
     title: asset.title,
@@ -74,6 +88,7 @@ export async function loader({ request, params }: LoaderArgs) {
   return json({
     asset: {
       ...asset,
+      custody,
       notes,
     },
     lastScan,
@@ -204,10 +219,7 @@ export default function AssetDetailsPage() {
                       {asset.custody?.custodian.name}
                     </span>
                   </p>
-                  <span>
-                    Since{" "}
-                    {new Date(asset?.custody?.createdAt).toLocaleDateString()}
-                  </span>
+                  <span>Since {asset.custody.dateDisplay}</span>
                 </div>
               </div>
             </Card>

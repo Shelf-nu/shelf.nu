@@ -2,8 +2,7 @@
  * This file contains utilities for using client hints for user preference which
  * are needed by the server, but are only known by the browser.
  */
-import * as React from "react";
-import { useRevalidator } from "@remix-run/react";
+import { parseAcceptLanguage } from "intl-parse-accept-language";
 import { useRequestInfo } from "./request-info";
 
 export const clientHints = {
@@ -12,7 +11,6 @@ export const clientHints = {
     getValueCode: `Intl.DateTimeFormat().resolvedOptions().timeZone`,
     fallback: "UTC",
   },
-  // add other hints here
 };
 
 type ClientHintNames = keyof typeof clientHints;
@@ -81,21 +79,6 @@ export function useHints() {
  * inaccurate value.
  */
 export function ClientHintCheck({ nonce }: { nonce: string }) {
-  // const { revalidate } = useRevalidator();
-  // React.useEffect(() => {
-  //   const themeQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  //   function handleThemeChange() {
-  //     document.cookie = `${clientHints.theme.cookieName}=${
-  //       themeQuery.matches ? "dark" : "light"
-  //     }`;
-  //     revalidate();
-  //   }
-  //   themeQuery.addEventListener("change", handleThemeChange);
-  //   return () => {
-  //     themeQuery.removeEventListener("change", handleThemeChange);
-  //   };
-  // }, [revalidate]);
-
   return (
     <script
       nonce={nonce}
@@ -130,4 +113,36 @@ if (cookieChanged && navigator.cookieEnabled) {
       }}
     />
   );
+}
+
+/**
+ * Uses the request's accept-language header to determine the user's preferred
+ * locale and the client hint cookies for the user's timeZone returns a
+ * DateTimeFormat object for that locale and timezone.
+ *
+ * All options can be overridden by passing in an options object. By default,
+ * the options are all "numeric" and the timeZone.
+ */
+export function getDateTimeFormat(
+  request: Request,
+  options?: Intl.DateTimeFormatOptions
+) {
+  const locales = parseAcceptLanguage(request.headers.get("accept-language"), {
+    validate: Intl.DateTimeFormat.supportedLocalesOf,
+  });
+  const locale = locales[0] ?? "en-US";
+
+  // change your default options here
+  const defaultOptions: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  };
+
+  options = {
+    ...defaultOptions,
+    ...options,
+    timeZone: options?.timeZone ?? getHints(request).timeZone,
+  };
+  return new Intl.DateTimeFormat(locale, options);
 }
