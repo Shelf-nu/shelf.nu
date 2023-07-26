@@ -57,19 +57,20 @@ export const LocationForm = ({ name, address, description }: Props) => {
 
       <FormRow rowLabel={"Main image"}>
         <div>
-          <p>Accepts PNG, JPG or JPEG (max.4 MB)</p>
+          <p className="hidden lg:block">Accepts PNG, JPG or JPEG (max.4 MB)</p>
           <Input
             // disabled={disabled}
             accept="image/png,.png,image/jpeg,.jpg,.jpeg"
             name="image"
             type="file"
             onChange={validateFile}
-            label={"mainImage"}
+            label={"Main image"}
             hideLabel
             error={fileError}
             className="mt-2"
             inputClassName="border-0 shadow-none p-0 rounded-none"
           />
+          <p className="mt-2 lg:hidden">Accepts PNG, JPG or JPEG (max.4 MB)</p>
         </div>
       </FormRow>
 
