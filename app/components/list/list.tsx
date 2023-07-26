@@ -11,9 +11,6 @@ import { Pagination } from "./pagination";
 import { Table } from "../table";
 
 /**
- * List components takes advantage use `useFetcher()`
- * to get the data of the parent route.
- *
  * The route is required to export {@link IndexResponse}
  */
 export const List = ({
