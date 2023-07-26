@@ -41,6 +41,7 @@ export const action = async ({ request, params }: ActionArgs) => {
       title: "Note created",
       message: "Your note has been created successfully",
       icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
     });
     const note = await createNote({
       ...result.data,
@@ -68,6 +69,7 @@ export const action = async ({ request, params }: ActionArgs) => {
       title: "Note deleted",
       message: "Your note has been deleted successfully",
       icon: { name: "trash", variant: "error" },
+      senderId: authSession.userId,
     });
 
     const deleted = await deleteNote({

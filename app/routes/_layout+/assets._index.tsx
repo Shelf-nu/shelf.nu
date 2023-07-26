@@ -1,4 +1,4 @@
-import type { Category, Asset, Tag } from "@prisma/client";
+import type { Category, Asset, Tag, Custody } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
@@ -174,8 +174,10 @@ export default function AssetIndexPage() {
         <List
           ItemComponent={ListAssetContent}
           navigate={(itemId) => navigate(itemId)}
+          className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
+              <Th className="hidden md:table-cell">Custodian</Th>
               <Th className="hidden md:table-cell">Category</Th>
               <Th className="hidden md:table-cell">Tags</Th>
             </>
@@ -192,15 +194,21 @@ const ListAssetContent = ({
   item: Asset & {
     category?: Category;
     tags?: Tag[];
+    custody: Custody & {
+      custodian: {
+        name: string;
+      };
+    };
   };
 }) => {
-  const { category, tags } = item;
+  const { category, tags, custody } = item;
+
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
+      <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -211,8 +219,10 @@ const ListAssetContent = ({
                 className="h-full w-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-              <div className="font-medium">{item.title}</div>
+            <div className="">
+              <span className="word-break mb-1 block font-medium">
+                {item.title}
+              </span>
               <div className="block md:hidden">
                 {category ? (
                   <Badge color={category.color}>{category.name}</Badge>
@@ -225,6 +235,13 @@ const ListAssetContent = ({
             <ChevronRight />
           </button>
         </div>
+      </Td>
+      <Td className="hidden md:table-cell">
+        {custody ? (
+          <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
+            {custody.custodian.name}
+          </span>
+        ) : null}
       </Td>
       <Td className="hidden md:table-cell">
         {category ? (

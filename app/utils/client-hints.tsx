@@ -1,0 +1,148 @@
+/**
+ * This file contains utilities for using client hints for user preference which
+ * are needed by the server, but are only known by the browser.
+ */
+import { parseAcceptLanguage } from "intl-parse-accept-language";
+import { useRequestInfo } from "./request-info";
+
+export const clientHints = {
+  timeZone: {
+    cookieName: "CH-time-zone",
+    getValueCode: `Intl.DateTimeFormat().resolvedOptions().timeZone`,
+    fallback: "UTC",
+  },
+};
+
+type ClientHintNames = keyof typeof clientHints;
+
+function getCookieValue(cookieString: string, name: ClientHintNames) {
+  const hint = clientHints[name];
+  if (!hint) {
+    throw new Error(`Unknown client hint: ${name}`);
+  }
+  const value = cookieString
+    .split(";")
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(hint.cookieName + "="))
+    ?.split("=")[1];
+
+  return value ? decodeURIComponent(value) : null;
+}
+
+/**
+ *
+ * @param request {Request} - optional request object (only used on server)
+ * @returns an object with the client hints and their values
+ */
+export function getHints(request?: Request) {
+  const cookieString =
+    typeof document !== "undefined"
+      ? document.cookie
+      : typeof request !== "undefined"
+      ? request.headers.get("Cookie") ?? ""
+      : "";
+
+  return Object.entries(clientHints).reduce(
+    (acc, [name, hint]) => {
+      const hintName = name as ClientHintNames;
+      if ("transform" in hint) {
+        // @ts-expect-error - this is fine (PRs welcome though)
+        acc[hintName] = hint.transform(
+          getCookieValue(cookieString, hintName) ?? hint.fallback
+        );
+      } else {
+        acc[hintName] = getCookieValue(cookieString, hintName) ?? hint.fallback;
+      }
+      return acc;
+    },
+    {} as {
+      [name in ClientHintNames]: typeof clientHints[name] extends {
+        transform: (value: any) => infer ReturnValue;
+      }
+        ? ReturnValue
+        : typeof clientHints[name]["fallback"];
+    }
+  );
+}
+
+/**
+ * @returns an object with the client hints and their values
+ */
+export function useHints() {
+  const requestInfo = useRequestInfo();
+  return requestInfo.hints;
+}
+
+/**
+ * @returns inline script element that checks for client hints and sets cookies
+ * if they are not set then reloads the page if any cookie was set to an
+ * inaccurate value.
+ */
+export function ClientHintCheck({ nonce }: { nonce: string }) {
+  return (
+    <script
+      nonce={nonce}
+      dangerouslySetInnerHTML={{
+        __html: `
+const cookies = document.cookie.split(';').map(c => c.trim()).reduce((acc, cur) => {
+	const [key, value] = cur.split('=');
+	acc[key] = value;
+	return acc;
+}, {});
+let cookieChanged = false;
+const hints = [
+${Object.values(clientHints)
+  .map((hint) => {
+    const cookieName = JSON.stringify(hint.cookieName);
+    return `{ name: ${cookieName}, actual: String(${hint.getValueCode}), cookie: cookies[${cookieName}] }`;
+  })
+  .join(",\n")}
+];
+for (const hint of hints) {
+	if (decodeURIComponent(hint.cookie) !== hint.actual) {
+		cookieChanged = true;
+		document.cookie = encodeURIComponent(hint.name) + '=' + encodeURIComponent(hint.actual) + ';path=/';
+	}
+}
+// if the cookie changed, reload the page, unless the browser doesn't support
+// cookies (in which case we would enter an infinite loop of reloads)
+if (cookieChanged && navigator.cookieEnabled) {
+	window.location.reload();
+}
+			`,
+      }}
+    />
+  );
+}
+
+/**
+ * Uses the request's accept-language header to determine the user's preferred
+ * locale and the client hint cookies for the user's timeZone returns a
+ * DateTimeFormat object for that locale and timezone.
+ *
+ * All options can be overridden by passing in an options object. By default,
+ * the options are all "numeric" and the timeZone.
+ */
+export function getDateTimeFormat(
+  request: Request,
+  options?: Intl.DateTimeFormatOptions
+) {
+  const locales = parseAcceptLanguage(request.headers.get("accept-language"), {
+    validate: Intl.DateTimeFormat.supportedLocalesOf,
+  });
+  const locale = locales[0] ?? "en-US";
+
+  // change your default options here
+  const defaultOptions: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  };
+
+  options = {
+    ...defaultOptions,
+    ...options,
+    timeZone: options?.timeZone ?? getHints(request).timeZone,
+  };
+  return new Intl.DateTimeFormat(locale, options);
+}

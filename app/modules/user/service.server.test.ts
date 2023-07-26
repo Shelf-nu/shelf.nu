@@ -180,6 +180,7 @@ describe(createUserAccount.name, () => {
         id: USER_ID,
         username: username,
         categories: { create: defaultUserCategories },
+        organizations: { create: [{ name: "Personal" }] },
         roles: {
           connect: {
             name: Roles["USER"],

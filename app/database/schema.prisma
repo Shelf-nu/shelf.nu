@@ -14,11 +14,11 @@ model Image {
   altText     String?
   blob        Bytes
 
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  location  Location?
-  
+  location Location?
+
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 }
@@ -37,15 +37,16 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  assets     Asset[]
-  categories Category[]
-  notes      Note[]
-  qrCodes    Qr[]
-  scans      Scan[]
-  tags       Tag[]
-  roles      Role[]
-  locations  Location[]
-  images     Image[]
+  assets        Asset[]
+  categories    Category[]
+  notes         Note[]
+  qrCodes       Qr[]
+  scans         Scan[]
+  tags          Tag[]
+  roles         Role[]
+  locations     Location[]
+  images        Image[]
+  organizations Organization[]
 
   @@unique([email, username])
 }
@@ -56,23 +57,32 @@ model Asset {
   description         String?
   mainImage           String?
   mainImageExpiration DateTime?
+  status              AssetStatus @default(AVAILABLE)
 
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId     String
-  category   Category? @relation(fields: [categoryId], references: [id])
-  categoryId String?
-  location   Location? @relation(fields: [locationId], references: [id])
-  locationId String?
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId         String
+  organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String?
+  category       Category?    @relation(fields: [categoryId], references: [id])
+  categoryId     String?
+  location       Location?    @relation(fields: [locationId], references: [id])
+  locationId     String?
 
+  custody Custody?
   notes   Note[]
   qrCodes Qr[]
   reports ReportFound[]
   tags    Tag[]
+}
+
+enum AssetStatus {
+  AVAILABLE
+  IN_CUSTODY
 }
 
 model Category {
@@ -191,15 +201,14 @@ model Scan {
   updatedAt DateTime @updatedAt
 }
 
-
 model Location {
   id          String  @id @default(cuid())
   name        String
   description String?
   address     String?
 
-  image       Image?  @relation(fields: [imageId], references: [id])
-  imageId     String? @unique
+  image   Image?  @relation(fields: [imageId], references: [id])
+  imageId String? @unique
 
   // Datetime
   createdAt DateTime @default(now())
@@ -209,15 +218,13 @@ model Location {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 
-  assets  Asset[]
+  assets Asset[]
 }
-
-
 
 // Master data for roles
 model Role {
   id   String @id @unique @default(cuid())
-  name Roles @unique @default(USER)
+  name Roles  @unique @default(USER)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -230,3 +237,46 @@ enum Roles {
   ADMIN
 }
 
+model TeamMember {
+  id   String @id @unique @default(cuid())
+  name String
+
+  organizations Organization[]
+  custodies     Custody[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Custody {
+  id String @id @default(cuid())
+
+  custodian    TeamMember @relation(fields: [teamMemberId], references: [id])
+  teamMemberId String
+
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String @unique
+
+  // DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Organization {
+  id   String           @id @unique @default(cuid())
+  name String           @default("Personal")
+  type OrganizationType @default(PERSONAL)
+
+  owner  User   @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  userId String
+
+  members TeamMember[]
+  assets  Asset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum OrganizationType {
+  PERSONAL
+}

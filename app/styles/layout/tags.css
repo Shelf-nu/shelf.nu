@@ -1,6 +1,6 @@
 .react-tags {
   cursor: text;
-  @apply relative w-full self-start rounded-[8px] border border-gray-300 px-[14px] py-2;
+  @apply relative w-full self-start rounded-[8px] border border-gray-300 px-[14px] py-2 text-[16px];
 }
 
 .react-tags.is-active {

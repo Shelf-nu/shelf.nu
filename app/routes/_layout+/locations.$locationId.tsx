@@ -112,6 +112,7 @@ export async function action({ request, params }: ActionArgs) {
     title: "Location deleted",
     message: "Your location has been deleted successfully",
     icon: { name: "trash", variant: "error" },
+    senderId: authSession.userId,
   });
 
   return redirect(`/locations`, {
