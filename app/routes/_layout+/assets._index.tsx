@@ -1,4 +1,4 @@
-import type { Category, Asset, Tag } from "@prisma/client";
+import type { Category, Asset, Tag, Custody } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
@@ -177,6 +177,7 @@ export default function AssetIndexPage() {
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
+              <Th className="hidden md:table-cell">Custodian</Th>
               <Th className="hidden md:table-cell">Category</Th>
               <Th className="hidden md:table-cell">Tags</Th>
             </>
@@ -193,9 +194,15 @@ const ListAssetContent = ({
   item: Asset & {
     category?: Category;
     tags?: Tag[];
+    custody: Custody & {
+      custodian: {
+        name: string;
+      };
+    };
   };
 }) => {
-  const { category, tags } = item;
+  const { category, tags, custody } = item;
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -228,6 +235,13 @@ const ListAssetContent = ({
             <ChevronRight />
           </button>
         </div>
+      </Td>
+      <Td className="hidden md:table-cell">
+        {custody ? (
+          <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
+            {custody.custodian.name}
+          </span>
+        ) : null}
       </Td>
       <Td className="hidden md:table-cell">
         {category ? (

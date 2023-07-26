@@ -14,6 +14,7 @@ import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
+import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
 import Header from "~/components/layout/header";
@@ -32,13 +33,17 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
-import { assertIsDelete, getRequiredParam, tw } from "~/utils";
+import {
+  assertIsDelete,
+  getRequiredParam,
+  tw,
+  userFriendlyAssetStatus,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
-
-type ShelfLocation = Location;
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -55,13 +60,26 @@ export async function loader({ request, params }: LoaderArgs) {
     ? parseScanData({
         scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
         userId,
+        request,
       })
     : null;
 
   const notes = asset.notes.map((note) => ({
     ...note,
+    dateDisplay: getDateTimeFormat(request).format(note.createdAt),
     content: parseMarkdownToReact(note.content),
   }));
+
+  let custody = null;
+  if (asset.custody) {
+    const date = new Date(asset.custody.createdAt);
+    const dateDisplay = getDateTimeFormat(request).format(date);
+
+    custody = {
+      ...asset.custody,
+      dateDisplay,
+    };
+  }
 
   const header: HeaderData = {
     title: asset.title,
@@ -70,6 +88,7 @@ export async function loader({ request, params }: LoaderArgs) {
   return json({
     asset: {
       ...asset,
+      custody,
       notes,
     },
     lastScan,
@@ -118,13 +137,14 @@ export const links: LinksFunction = () => [
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
+  const assetIsAvailable = asset.status === "AVAILABLE";
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
-  const location = asset?.location as SerializeFrom<ShelfLocation>;
-
+  const location = asset?.location as SerializeFrom<Location>;
   const user = useUserData();
   usePosition();
+
   return (
     <>
       <AssetImage
@@ -136,7 +156,20 @@ export default function AssetDetailsPage() {
         }}
         className="mx-auto mb-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
       />
-      <Header>
+      <Header
+        subHeading={
+          <div className="mt-3 flex gap-2">
+            <Badge color={assetIsAvailable ? "#12B76A" : "#2E90FA"}>
+              {userFriendlyAssetStatus(asset.status)}
+            </Badge>
+            {location ? (
+              <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
+                {location.name}
+              </span>
+            ) : null}
+          </div>
+        }
+      >
         <Button
           to="qr"
           variant="secondary"
@@ -148,6 +181,8 @@ export default function AssetDetailsPage() {
 
         <ActionsDopdown asset={asset} />
       </Header>
+
+      <ContextualModal />
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
           <AssetImage
@@ -165,6 +200,28 @@ export default function AssetDetailsPage() {
           {asset.description ? (
             <Card className="mt-0 rounded-t-none">
               <p className=" text-gray-600">{asset.description}</p>
+            </Card>
+          ) : null}
+
+          {/* We simply check if the asset is available and we can assume that if it't not, there is a custodian assigned */}
+          {!assetIsAvailable && asset?.custody?.createdAt ? (
+            <Card>
+              <div className="flex items-center gap-3">
+                <img
+                  src="/images/default_pfp.jpg"
+                  alt="custodian"
+                  className="h-10 w-10 rounded"
+                />
+                <div>
+                  <p className="">
+                    In custody of{" "}
+                    <span className="font-semibold">
+                      {asset.custody?.custodian.name}
+                    </span>
+                  </p>
+                  <span>Since {asset.custody.dateDisplay}</span>
+                </div>
+              </div>
             </Card>
           ) : null}
 
