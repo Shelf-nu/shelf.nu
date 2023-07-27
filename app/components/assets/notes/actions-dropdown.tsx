@@ -13,7 +13,7 @@ interface Props {
 }
 
 export const ActionsDopdown = ({ note }: Props) => (
-  <DropdownMenu>
+  <DropdownMenu modal={false}>
     <DropdownMenuTrigger>
       <HorizontalDotsIcon />
     </DropdownMenuTrigger>
