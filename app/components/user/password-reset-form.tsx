@@ -17,7 +17,7 @@ export default function PasswordResetForm({ userEmail }: Props) {
 
   return (
     <div>
-      <fetcher.Form method="post" replace className="border-t py-8">
+      <fetcher.Form method="post" className="border-t py-8">
         <div>
           <p>
             Use the link to send yourself a password reset email. You will be

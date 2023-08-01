@@ -5,6 +5,7 @@ const { flatRoutes } = require("remix-flat-routes");
 
 module.exports = {
   ignoredRouteFiles: ["**/.*"],
+  serverModuleFormat: "cjs",
   serverDependenciesToBundle: ["maplibre-gl"],
   routes: async (defineRoutes) => {
     return flatRoutes("routes", defineRoutes);
@@ -13,7 +14,9 @@ module.exports = {
   future: {
     v2_dev: true,
     v2_meta: true,
+    v2_headers: true,
     v2_routeConvention: true,
     v2_errorBoundary: true,
+    v2_normalizeFormMethod: true,
   },
 };
