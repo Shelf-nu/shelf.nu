@@ -11,8 +11,8 @@ export function ContinueWithEmailForm() {
   const { isResend } = useLoaderData();
 
   const sendMagicLink = useTypedFetcher<typeof action>();
-  const { data, state, type } = sendMagicLink;
-  const isSuccessFull = type === "done" && !data?.error;
+  const { data, state } = sendMagicLink;
+  const isSuccessFull = state === "idle" && data != null && !data?.error;
   const isLoading = state === "submitting" || state === "loading";
   const buttonLabel = isLoading
     ? "Sending you a link..."
