@@ -20,7 +20,7 @@ import {
   signInWithEmail,
   ContinueWithEmailForm,
 } from "~/modules/auth";
-import { assertIsPost, isFormProcessing } from "~/utils";
+import { assertIsPost, isFormProcessing, validEmail } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export async function loader({ request }: LoaderArgs) {
@@ -34,8 +34,10 @@ export async function loader({ request }: LoaderArgs) {
 const LoginFormSchema = z.object({
   email: z
     .string()
-    .email("Please enter a valid email.")
-    .transform((email) => email.toLowerCase()),
+    .transform((email) => email.toLowerCase())
+    .refine(validEmail, () => ({
+      message: "Please enter a valid email",
+    })),
   password: z.string().min(8, "Password is too short. Minimum 8 characters."),
   redirectTo: z.string().optional(),
 });
