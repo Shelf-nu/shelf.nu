@@ -42,7 +42,7 @@ const Update = ({
   </div>
 );
 
-const Comment = ({
+export const Comment = ({
   note,
   user,
 }: {

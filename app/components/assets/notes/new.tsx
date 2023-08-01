@@ -1,14 +1,13 @@
 import type { ChangeEvent, FocusEvent } from "react";
 import { useCallback, useEffect, useRef } from "react";
-import { useFetcher, useParams } from "@remix-run/react";
+import type { FetcherWithComponents } from "@remix-run/react";
+import { useParams } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { MarkdownEditor, clearMarkdownAtom } from "~/components/markdown";
 import { Button } from "~/components/shared";
-import { Spinner } from "~/components/shared/spinner";
-import { isFormProcessing } from "~/utils";
 
 export const NewNoteSchema = z.object({
   content: z.string().min(3, "Content is required"),
@@ -16,11 +15,13 @@ export const NewNoteSchema = z.object({
 
 const isEditingAtom = atom(false);
 
-export const NewNote = () => {
+export const NewNote = ({
+  fetcher,
+}: {
+  fetcher: FetcherWithComponents<any>;
+}) => {
   const zo = useZorm("NewQuestionWizardScreen", NewNoteSchema);
-  const fetcher = useFetcher();
   const params = useParams();
-  const disabled = isFormProcessing(fetcher.state);
   const hasError = zo.errors.content()?.message;
   const [isEditing, setIsEditing] = useAtom(isEditingAtom);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -89,13 +90,12 @@ export const NewNote = () => {
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="" disabled={disabled}>
-                {disabled ? <Spinner /> : "Create note"}
+              <Button type="submit" size="sm" className="">
+                Create note
               </Button>
             </div>
             <MarkdownEditor
               label={"note"}
-              disabled={disabled}
               defaultValue={""}
               name={zo.fields.content()}
               placeholder={"Leave a note"}
