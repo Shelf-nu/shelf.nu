@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Fetcher } from "@remix-run/react";
 import { CheckmarkIcon, ImageFileIcon } from "~/components/icons/library";
-import { tw } from "~/utils";
+import { isFormProcessing, tw } from "~/utils";
 import { Spinner } from "../spinner";
 
 export interface StatusMessageProps {
@@ -21,11 +21,12 @@ export function StatusMessage({
   /** Indicates if tehre was a front-end error with the dropzone */
   error: boolean;
 }) {
-  const { data, type } = fetcher;
+  const { data, state } = fetcher;
 
   const isError = data?.error || error;
-  const isPending = ["actionSubmission", "loaderSubmission"].includes(type);
-  const isDone = type === "done";
+  const isPending = isFormProcessing(state);
+
+  const isDone = state === "idle" && data != null;
 
   const styles = useMemo(
     () =>
