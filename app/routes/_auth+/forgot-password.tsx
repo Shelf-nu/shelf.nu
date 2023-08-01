@@ -8,7 +8,7 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 
 import { getAuthSession, sendResetPasswordLink } from "~/modules/auth";
-import { assertIsPost, isFormProcessing, tw } from "~/utils";
+import { assertIsPost, isFormProcessing, tw, validEmail } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export async function loader({ request }: LoaderArgs) {
@@ -24,8 +24,10 @@ export async function loader({ request }: LoaderArgs) {
 const ForgotPasswordSchema = z.object({
   email: z
     .string()
-    .email("Please enter a valid Email address")
-    .transform((email) => email.toLowerCase()),
+    .transform((email) => email.toLowerCase())
+    .refine(validEmail, () => ({
+      message: "Please enter a valid email",
+    })),
 });
 
 export async function action({ request }: ActionArgs) {

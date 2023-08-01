@@ -4,6 +4,7 @@ import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 
 import { sendMagicLink } from "~/modules/auth";
+import { validEmail } from "~/utils";
 import { assertIsPost } from "~/utils/http.server";
 
 export async function action({ request }: ActionArgs) {
@@ -12,10 +13,18 @@ export async function action({ request }: ActionArgs) {
   const formData = await request.formData();
   const result = await z
     .object({
+      /**
+       * .email() has an issue with validating email
+       * addresses where the there is a subdomain and a dash included:
+       * https://github.com/colinhacks/zod/pull/2157
+       * So we use the custom validation
+       *  */
       email: z
         .string()
-        .email("Please enter a valid email.")
-        .transform((email) => email.toLowerCase()),
+        .transform((email) => email.toLowerCase())
+        .refine(validEmail, () => ({
+          message: "Please enter a valid email",
+        })),
     })
     .safeParseAsync(parseFormAny(formData));
 
