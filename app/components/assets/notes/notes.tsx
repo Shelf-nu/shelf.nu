@@ -8,10 +8,13 @@ import { Note } from "./note";
 
 export const Notes = () => {
   const { asset } = useLoaderData();
+  /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
   const hasNotes = asset?.notes.length > 0;
+  /* Importing fetcher here in the parent file so that we can use fetcher's states and to know the status of form processing and form data render the frontend component on the fly (Optimistic UI) and in the new note form this fetcher is passed as a prop */
   const fetcher = useFetcher();
   let onSubmissionContent = "";
+  /* Getting the form data using fetcher and storing the content of form in onSubmissionContent Variable */
   if (fetcher.formData) {
     for (const data of fetcher.formData.entries()) {
       onSubmissionContent = data[1].toString();
@@ -19,7 +22,6 @@ export const Notes = () => {
   }
   return (
     <div>
-      <div>{JSON.stringify(fetcher)}</div>
       <NewNote fetcher={fetcher} />
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
