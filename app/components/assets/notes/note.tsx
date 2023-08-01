@@ -56,7 +56,7 @@ const Comment = ({
         <span className="commentator font-medium text-gray-900">
           {user?.firstName} {user?.lastName}
         </span>{" "}
-        <span className="text-gray-600">{timeAgo(note.dateDisplay)}</span>
+        <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
       </div>
       <ActionsDopdown note={note} />
     </header>
