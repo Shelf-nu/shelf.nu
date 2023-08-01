@@ -11,7 +11,7 @@ export const Notes = () => {
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
   const hasNotes = asset?.notes.length > 0;
-  /* Importing fetcher here in the parent file so that we can use fetcher's states and to know the status of form processing and form data render the frontend component on the fly (Optimistic UI) and in the new note form this fetcher is passed as a prop */
+  /* Importing fetcher here in the parent file such that we can use fetcher's states to know the status of form processing and form data render the frontend component on the fly (Optimistic UI) and in the new note form this fetcher is passed as a prop */
   const fetcher = useFetcher();
   let onSubmissionContent = "";
   /* Getting the form data using fetcher and storing the content of form in onSubmissionContent Variable */
