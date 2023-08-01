@@ -1,23 +1,33 @@
+import type { Qr, User } from "@prisma/client";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, Link } from "@remix-run/react";
 import { Button } from "~/components/shared";
 import { Table, Td, Tr } from "~/components/table";
+import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database";
+import { requireAuthSession } from "~/modules/auth";
 import { generateOrphanedCodes } from "~/modules/qr";
+import { deleteUser } from "~/modules/user";
+import { isDelete } from "~/utils";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { requireAdmin } from "~/utils/roles.servers";
+
+export type UserWithQrCodes = User & {
+  qrCodes: Qr[];
+};
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   requireAdmin(request);
   const userId = params.userId as string;
-  const user = await db.user.findUnique({
+  const user = (await db.user.findUnique({
     where: { id: userId },
     include: {
       qrCodes: {
         orderBy: { createdAt: "desc" },
       },
     },
-  });
+  })) as UserWithQrCodes;
 
   return json({ user });
 };
@@ -27,27 +37,45 @@ export const handle = {
 };
 
 export const action = async ({ request, params }: ActionArgs) => {
+  const authSession = await requireAuthSession(request);
   await requireAdmin(request);
   const formData = await request.formData();
   /** ID of the target user we are generating codes for */
   const userId = params.userId as string;
 
-  await generateOrphanedCodes({
-    userId,
-    amount: Number(formData.get("amount")),
-  });
-  return json({ message: "Generated Orphaned QR codes" });
+  if (isDelete(request)) {
+    await deleteUser(userId);
+
+    sendNotification({
+      title: "User deleted",
+      message: "The user has been deleted successfully",
+      icon: { name: "trash", variant: "error" },
+      senderId: authSession.userId,
+    });
+    return redirect("/admin-dashboard");
+  } else {
+    await generateOrphanedCodes({
+      userId,
+      amount: Number(formData.get("amount")),
+    });
+    return json({ message: "Generated Orphaned QR codes" });
+  }
 };
 
 export default function Area51UserPage() {
   const { user } = useLoaderData<typeof loader>();
-  return (
+  return user ? (
     <div>
       <div>
         <div className="flex justify-between">
           <h1>User: {user?.email}</h1>
-          <div>
-            <Button to={`/api/${user?.id}/orphaned-codes.zip`} reloadDocument>
+          <div className="flex gap-3">
+            <DeleteUser user={user} />
+            <Button
+              to={`/api/${user?.id}/orphaned-codes.zip`}
+              reloadDocument
+              className="whitespace-nowrap"
+            >
               Print orphaned codes
             </Button>
           </div>
@@ -122,5 +150,5 @@ export default function Area51UserPage() {
         </Table>
       </div>
     </div>
-  );
+  ) : null;
 }

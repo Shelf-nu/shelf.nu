@@ -1,5 +1,6 @@
 import { Prisma, Roles } from "@prisma/client";
 import type { Category, User } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { json, type LoaderArgs } from "@remix-run/node";
 import sharp from "sharp";
 import { db } from "~/database";
@@ -318,4 +319,40 @@ export async function updateProfilePicture({
     id: userId,
     profilePicture: getPublicFileURL({ filename: profilePicture }),
   });
+}
+
+export async function deleteUser(id: User["id"]) {
+  if (!id) {
+    throw new Error("User ID is required");
+  }
+
+  try {
+    const user = await db.user.findUnique({
+      where: { id },
+      include: { organizations: true },
+    });
+
+    /** Find the personal org of the user and delete it */
+    const personalOrg = user?.organizations.find(
+      (org) => org.type === "PERSONAL"
+    );
+
+    await db.organization.delete({
+      where: { id: personalOrg?.id },
+    });
+
+    await db.user.delete({ where: { id } });
+  } catch (error) {
+    if (
+      error instanceof PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      // eslint-disable-next-line no-console
+      console.log("User not found, so no need to delete");
+    } else {
+      throw error;
+    }
+  }
+
+  await deleteAuthAccount(id);
 }
