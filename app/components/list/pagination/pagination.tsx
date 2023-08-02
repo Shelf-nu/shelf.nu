@@ -1,17 +1,12 @@
 import { useMemo } from "react";
-import { useLoaderData, useNavigate, useSearchParams } from "@remix-run/react";
-import ReactPaginate from "react-paginate";
+import { useLoaderData } from "@remix-run/react";
+import { Button } from "~/components/shared";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
-import { getParamsValues, mergeSearchParams } from "~/utils";
 
 export const Pagination = () => {
   const { page, totalItems, totalPages, perPage, next, prev } =
     useLoaderData<IndexResponse>();
 
-  const [searchParams] = useSearchParams();
-  const { search, categoriesIds } = getParamsValues(searchParams);
-  const isFiltering = search || categoriesIds;
-  const navigate = useNavigate();
   const { prevDisabled, nextDisabled } = useMemo(
     () => ({
       prevDisabled: totalPages <= 1 || page <= 1,
@@ -20,24 +15,9 @@ export const Pagination = () => {
     [page, totalPages, perPage, totalItems]
   );
 
-  const handlePageClick = (item: { selected: number }) => {
-    const to = isFiltering
-      ? mergeSearchParams(searchParams, { page: item.selected + 1 })
-      : `.?page=${item.selected + 1}`;
-    navigate(to);
-  };
-
   return (
     <div className="flex items-center justify-between  px-6 py-[18px]">
-      <ReactPaginate
-        pageCount={totalPages}
-        nextLabel={"Next >"}
-        previousLabel={"< Previous"}
-        onPageChange={handlePageClick}
-        previousLinkClassName={prevDisabled ? "pointer-events-none" : ""}
-        nextLinkClassName={nextDisabled ? "pointer-events-none" : ""}
-      />
-      {/* <Button variant="secondary" size="sm" to={prev} disabled={prevDisabled}>
+      <Button variant="secondary" size="sm" to={prev} disabled={prevDisabled}>
         {"< Previous"}
       </Button>
 
@@ -49,7 +29,7 @@ export const Pagination = () => {
 
       <Button variant="secondary" size="sm" to={next} disabled={nextDisabled}>
         {"Next >"}
-      </Button> */}
+      </Button>
     </div>
   );
 };

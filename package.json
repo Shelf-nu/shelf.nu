@@ -60,7 +60,6 @@
     "react-dropzone": "^14.2.3",
     "react-map-gl": "^7.1.0",
     "react-microsoft-clarity": "^1.2.0",
-    "react-paginate": "^8.2.0",
     "react-tag-autocomplete": "^7.0.0-rc.8",
     "react-zorm": "^0.6.2",
     "remix-utils": "^6.6.0",
