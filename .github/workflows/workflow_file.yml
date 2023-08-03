@@ -12,7 +12,7 @@ jobs:
         directory: ${{ github.workspace }}
         fail_on_empty: true
         sort_keys: true
-        envkey_FILE_NAME: ${{ secrets.FILE_NAME }}
-        envkey_DIRECTORY: ${{ secrets.DIRECTORY }}
-        envkey_FAIL_ON_EMPTY: ${{ secrets.FAIL_ON_EMPTY }}
-        envkey_SORT_KEYS: ${{ secrets.SORT_KEYS }}
+        file_name: ${{ secrets.FILE_NAME }}
+        directory: ${{ secrets.DIRECTORY }}
+        fail_on_empty: ${{ secrets.FAIL_ON_EMPTY }}
+        sort_keys: ${{ secrets.SORT_KEYS }}
