@@ -1,7 +1,6 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
-import { CrispButton } from "~/components/marketing/crisp";
 
 export const ChatWithAnExpert = () => {
   const { hideSupportBanner } = useLoaderData();
