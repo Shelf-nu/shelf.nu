@@ -1,0 +1,18 @@
+name: Workflow
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up environment
+      uses: SpicyPizza/create-envfile@v2.0
+      with:
+        file_name: .env
+        directory: ${{ github.workspace }}
+        fail_on_empty: true
+        sort_keys: true
+        envkey_FILE_NAME: ${{ secrets.FILE_NAME }}
+        envkey_DIRECTORY: ${{ secrets.DIRECTORY }}
+        envkey_FAIL_ON_EMPTY: ${{ secrets.FAIL_ON_EMPTY }}
+        envkey_SORT_KEYS: ${{ secrets.SORT_KEYS }}
