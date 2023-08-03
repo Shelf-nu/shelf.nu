@@ -23,8 +23,7 @@ export const ChatWithAnExpert = () => {
       </div>
 
       <p className="text-gray-600">
-        We can help you almost instantly with anything related to the Shelf App.
-        Just open up a chat with us.
+        New: Order Asset Labels. We are happy to announce that we have the infrastructure to produce custom branded labels for your business. Affordable rates, fast turnaround, global shipping, various materials.
       </p>
       <img
         src="/images/carlos-support.jpg"
@@ -32,7 +31,7 @@ export const ChatWithAnExpert = () => {
         className="my-4 rounded-lg"
       />
       <p>
-        <CrispButton variant="link">Chat with an expert</CrispButton>
+        <Button variant="link" href="https://www.shelf.nu/blog/introducing-shelfs-sticker-studio">View offer</Button>
       </p>
     </div>
   );
