@@ -11,7 +11,7 @@ export const ChatWithAnExpert = () => {
     <div className="support-banner mb-6 hidden rounded-lg bg-gray-50 px-4 py-5  md:block">
       <div className="flex justify-between align-middle">
         <h5 className="mb-1 font-semibold text-gray-900">
-          Got feedback or need help?
+          New: Order Asset Labels
         </h5>
         <div className="mt-[-6px]">
           <fetcher.Form method="post" action="/api/user/dismiss-support-banner">
@@ -24,7 +24,7 @@ export const ChatWithAnExpert = () => {
       </div>
 
       <p className="text-gray-600">
-        New: Order Asset Labels. We are happy to announce that we have the infrastructure to produce custom branded labels for your business. Affordable rates, fast turnaround, global shipping, various materials.
+        We are happy to announce that we have the infrastructure to produce custom branded labels for your business. Affordable rates, fast turnaround, global shipping, various materials.
       </p>
       <img
         src="/images/carlos-support.jpg"
