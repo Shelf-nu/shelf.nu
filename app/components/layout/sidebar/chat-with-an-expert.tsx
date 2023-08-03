@@ -1,6 +1,5 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { XIcon } from "~/components/icons";
-import { CrispButton } from "~/components/marketing/crisp";
 import { Button } from "~/components/shared";
 
 export const ChatWithAnExpert = () => {
@@ -32,7 +31,7 @@ export const ChatWithAnExpert = () => {
         className="my-4 rounded-lg"
       />
       <p>
-        <Button variant="link" href="https://www.shelf.nu/blog/introducing-shelfs-sticker-studio">View offer</Button>
+        <Button variant="link" to="https://www.shelf.nu/blog/introducing-shelfs-sticker-studio">View offer</Button>
       </p>
     </div>
   );
