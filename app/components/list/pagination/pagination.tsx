@@ -1,21 +1,11 @@
 import { useMemo } from "react";
 import { useLoaderData } from "@remix-run/react";
-import Input from "~/components/forms/input";
-import { Button } from "~/components/shared/button";
+import { Button } from "~/components/shared";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
-import { PageNumber } from "./page-number";
 
 export const Pagination = () => {
   const { page, totalItems, totalPages, perPage, next, prev } =
     useLoaderData<IndexResponse>();
-
-  // const pageNumbers = useMemo(() => {
-  //   const pages = [];
-  //   for (let i = 1; i <= totalPages; i++) {
-  //     pages.push(i);
-  //   }
-  //   return pages;
-  // }, [totalPages]);
 
   const { prevDisabled, nextDisabled } = useMemo(
     () => ({
