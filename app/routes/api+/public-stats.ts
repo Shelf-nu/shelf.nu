@@ -8,9 +8,14 @@ export const loader = async () => {
     db.qr.count(),
   ]);
 
-  return json({
-    totalAssets,
-    totalUsers,
-    totalQrCodes,
-  });
+  return json(
+    { totalAssets, totalUsers, totalQrCodes },
+    {
+      status: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=604800",
+      },
+    }
+  );
 };
