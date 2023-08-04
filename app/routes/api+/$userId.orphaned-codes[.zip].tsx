@@ -3,7 +3,7 @@ import { type LoaderArgs } from "@remix-run/node";
 import JSZip from "jszip";
 import QRCode from "qrcode-generator";
 import { db } from "~/database";
-import { requireAdmin } from "~/utils/roles.servers";
+import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   requireAdmin(request);

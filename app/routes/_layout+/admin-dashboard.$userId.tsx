@@ -11,7 +11,7 @@ import { generateOrphanedCodes } from "~/modules/qr";
 import { deleteUser } from "~/modules/user";
 import { isDelete } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { requireAdmin } from "~/utils/roles.servers";
+import { requireAdmin } from "~/utils/roles.server";
 
 export type UserWithQrCodes = User & {
   qrCodes: Qr[];
