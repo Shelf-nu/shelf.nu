@@ -23,6 +23,7 @@ declare global {
       MAPTILER_TOKEN: string;
       CRISP_WEBSITE_ID: string;
       MICROSOFT_CLARITY_ID: string;
+      STRIPE_SECRET_KEY: string;
     }
   }
 }

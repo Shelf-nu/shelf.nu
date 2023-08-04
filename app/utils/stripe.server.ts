@@ -1,4 +1,11 @@
-import initStripe from "stripe";
+import type { User } from "@prisma/client";
+import Stripe from "stripe";
+import type { PriceWithProduct } from "~/components/subscription/prices";
+
+export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2022-11-15",
+  maxNetworkRetries: 2,
+});
 
 // copied from (https://github.com/kentcdodds/kentcdodds.com/blob/ebb36d82009685e14da3d4b5d0ce4d577ed09c63/app/utils/misc.tsx#L229-L237)
 export function getDomainUrl(request: Request) {
@@ -11,18 +18,20 @@ export function getDomainUrl(request: Request) {
   return `${protocol}://${host}`;
 }
 
-export const getStripeSession = async (
-  priceId: string,
-  domainUrl: string
-): Promise<string> => {
+export const createStripeCheckoutSession = async ({
+  priceId,
+  userId,
+  domainUrl,
+}: {
+  priceId: Stripe.Price["id"];
+  userId: User["id"];
+  domainUrl: string;
+}): Promise<string> => {
+  if (!stripe) return Promise.reject("Stripe not initialized");
   const SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 
   if (!SECRET_KEY) return Promise.reject("Stripe secret key not found");
 
-  const stripe = new initStripe(SECRET_KEY, {
-    apiVersion: "2022-11-15",
-    maxNetworkRetries: 2,
-  });
   const lineItems = [
     {
       price: priceId,
@@ -33,9 +42,38 @@ export const getStripeSession = async (
     mode: "subscription",
     payment_method_types: ["card"],
     line_items: lineItems,
-    success_url: `${domainUrl}/payment/success`,
-    cancel_url: `${domainUrl}/payment/cancel`,
+    success_url: `${domainUrl}/settings/subscription?success=true`,
+    cancel_url: `${domainUrl}/settings/subscription?canceled=true`,
+    client_reference_id: userId,
   });
 
+  // @ts-ignore
   return session.url;
 };
+
+export const getStripePricesAndProducts = async () => {
+  const pricesResponse = await stripe.prices.list({
+    expand: ["data.product"],
+  });
+  const prices = groupPricesByInterval(
+    pricesResponse.data as PriceWithProduct[]
+  );
+  return prices;
+};
+
+// Function to group prices by recurring interval
+function groupPricesByInterval(prices: PriceWithProduct[]) {
+  const groupedPrices: { [key: string]: PriceWithProduct[] } = {};
+
+  for (const price of prices) {
+    if (price?.recurring?.interval) {
+      const interval = price?.recurring?.interval;
+      if (!groupedPrices[interval]) {
+        groupedPrices[interval] = [];
+      }
+      groupedPrices[interval].push(price);
+    }
+  }
+
+  return groupedPrices;
+}
