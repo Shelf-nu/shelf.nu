@@ -32,6 +32,7 @@ export default function SettingsPage() {
   const items = [
     { to: "user", content: "My details" },
     { to: "workspace", content: "Workspace" },
+    { to: "subscription", content: "Subscription" },
   ];
   return (
     <>
