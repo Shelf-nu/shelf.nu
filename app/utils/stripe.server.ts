@@ -1,6 +1,7 @@
 import type { User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
+import { db } from "~/database";
 
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2022-11-15",
@@ -22,10 +23,12 @@ export const createStripeCheckoutSession = async ({
   priceId,
   userId,
   domainUrl,
+  customerId,
 }: {
   priceId: Stripe.Price["id"];
   userId: User["id"];
   domainUrl: string;
+  customerId: string;
 }): Promise<string> => {
   if (!stripe) return Promise.reject("Stripe not initialized");
   const SECRET_KEY = process.env.STRIPE_SECRET_KEY;
@@ -45,6 +48,7 @@ export const createStripeCheckoutSession = async ({
     success_url: `${domainUrl}/settings/subscription?success=true`,
     cancel_url: `${domainUrl}/settings/subscription?canceled=true`,
     client_reference_id: userId,
+    customer: customerId,
   });
 
   // @ts-ignore
@@ -77,3 +81,25 @@ function groupPricesByInterval(prices: PriceWithProduct[]) {
 
   return groupedPrices;
 }
+
+export const createStripeCustomer = async ({
+  name,
+  email,
+  userId,
+}: {
+  name: string;
+  email: User["email"];
+  userId: User["id"];
+}) => {
+  const { id: customerId } = await stripe.customers.create({
+    email,
+    name,
+  });
+
+  await db.user.update({
+    where: { id: userId },
+    data: { customerId },
+  });
+
+  return customerId;
+};

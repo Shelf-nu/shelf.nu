@@ -15,7 +15,7 @@ export const Prices = ({ prices }: { prices: PriceWithProduct[] }) => (
 );
 
 export const Price = ({ price }: { price: PriceWithProduct }) => {
-  console.log(price);
+  // console.log(price);
   return (
     <div key={price.id} className=" bg-gray-100 p-4">
       <div>
