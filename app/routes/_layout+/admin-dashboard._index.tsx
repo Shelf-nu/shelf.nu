@@ -7,7 +7,7 @@ import { Filters, List } from "~/components/list";
 import { Pagination } from "~/components/list/pagination";
 import { Td } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user";
-import { requireAdmin } from "~/utils/roles.servers";
+import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ request }: LoaderArgs) => {
   await requireAdmin(request);
