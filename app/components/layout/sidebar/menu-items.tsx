@@ -1,4 +1,4 @@
-import { NavLink, useLoaderData } from "@remix-run/react";
+import { NavLink, useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
 import {
   AssetsIcon,
@@ -6,6 +6,7 @@ import {
   LocationMarkerIcon,
   QuestionsIcon,
   SettingsIcon,
+  SwitchIcon,
   TagsIcon,
 } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
@@ -48,7 +49,8 @@ const menuItemsBottom = [
 const MenuItems = () => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const { isAdmin } = useLoaderData<typeof loader>();
-
+  const { minimizedSidebar } = useLoaderData();
+  const fetcher = useFetcher();
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-full flex-col justify-between">
@@ -97,7 +99,27 @@ const MenuItems = () => {
             </li>
           ))}
         </ul>
-        <ul className="menu pt-6 md:mt-10">
+        <ChatWithAnExpert />
+        <ul className="menu mb-6">
+          <li key={"support"}>
+            <CrispButton
+              className={tw(
+                "my-1 flex items-center justify-start gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900"
+              )}
+              variant="link"
+              width="full"
+              title="Questions/Feedback"
+            >
+              <span className="flex items-center justify-start gap-3">
+                <i className="icon text-gray-500">
+                  <QuestionsIcon />
+                </i>
+                <span className="text whitespace-nowrap transition duration-200 ease-linear">
+                  Questions/Feedback
+                </span>
+              </span>
+            </CrispButton>
+          </li>
           {menuItemsBottom.map((item) => (
             <li key={item.label}>
               <NavLink
@@ -119,28 +141,30 @@ const MenuItems = () => {
               </NavLink>
             </li>
           ))}
-          <li key={"support"}>
-            <CrispButton
-              className={tw(
-                "my-1 flex items-center justify-start gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900"
-              )}
-              variant="link"
-              width="full"
-              title="Questions/Feedback"
-            >
-              <span className="flex items-center justify-start gap-3">
+          <li>
+            <fetcher.Form method="post" action="/api/user/minimized-sidebar">
+              <input
+                type="hidden"
+                name="minimizeSidebar"
+                value={minimizedSidebar ? "false" : "true"}
+              />
+              <button
+                type="submit"
+                className={tw(
+                  "mt-1 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900"
+                )}
+              >
                 <i className="icon text-gray-500">
-                  <QuestionsIcon />
+                  <SwitchIcon />
                 </i>
                 <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                  Questions/Feedback
+                  Minimize
                 </span>
-              </span>
-            </CrispButton>
+              </button>
+            </fetcher.Form>
           </li>
         </ul>
       </div>
-      <ChatWithAnExpert />
     </div>
   );
 };

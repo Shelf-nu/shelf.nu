@@ -22,6 +22,10 @@
   .collapsed-navigation .bottom {
     @apply border-none;
   }
+
+  .collapsed-navigation .bottom a {
+    @apply hover:bg-transparent;
+  }
   .collapsed-navigation .support-banner {
     @apply hidden transition-all duration-300 ease-in-out;
   }

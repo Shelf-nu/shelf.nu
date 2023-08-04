@@ -36,6 +36,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   return json({
     user,
     hideSupportBanner: cookie.hideSupportBanner,
+    minimizedSidebar: cookie.minimizedSidebar,
     isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
   });
 };
