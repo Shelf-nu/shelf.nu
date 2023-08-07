@@ -19,6 +19,7 @@ export function getDomainUrl(request: Request) {
   return `${protocol}://${host}`;
 }
 
+/** Needed when user has no subscription and wants to buy their first one */
 export const createStripeCheckoutSession = async ({
   priceId,
   userId,
@@ -55,6 +56,7 @@ export const createStripeCheckoutSession = async ({
   return session.url;
 };
 
+/** Fetches prices and products from stripe */
 export const getStripePricesAndProducts = async () => {
   const pricesResponse = await stripe.prices.list({
     expand: ["data.product"],
@@ -82,6 +84,7 @@ function groupPricesByInterval(prices: PriceWithProduct[]) {
   return groupedPrices;
 }
 
+/** Creates customer entry in stripe */
 export const createStripeCustomer = async ({
   name,
   email,
@@ -94,6 +97,9 @@ export const createStripeCustomer = async ({
   const { id: customerId } = await stripe.customers.create({
     email,
     name,
+    metadata: {
+      userId,
+    },
   });
 
   await db.user.update({
@@ -103,3 +109,52 @@ export const createStripeCustomer = async ({
 
   return customerId;
 };
+
+/** Fetches customer based on ID */
+export const getStripeCustomer = async (customerId: string) => {
+  const customer = await stripe.customers.retrieve(customerId, {
+    expand: ["subscriptions"],
+  });
+  return customer;
+};
+
+export async function createBillingPortalSession({
+  customerId,
+}: {
+  customerId: string;
+}) {
+  const { url } = await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: `${process.env.SERVER_URL}/settings/subscription`,
+  });
+
+  return { url };
+}
+
+export function getActiveProduct({
+  prices,
+  priceId,
+}: {
+  prices: {
+    [key: string]: PriceWithProduct[];
+  };
+  priceId: string | null;
+}) {
+  if (!priceId) return null;
+  // Check in the 'year' array
+  for (const priceObj of prices.year) {
+    if (priceObj.id === priceId) {
+      return priceObj.product;
+    }
+  }
+
+  // Check in the 'month' array
+  for (const priceObj of prices.month) {
+    if (priceObj.id === priceId) {
+      return priceObj.product;
+    }
+  }
+
+  // If no match is found, return null or throw an error, depending on your preference
+  return null;
+}

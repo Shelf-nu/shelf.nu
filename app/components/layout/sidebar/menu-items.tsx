@@ -17,11 +17,6 @@ import { ChatWithAnExpert } from "./chat-with-an-expert";
 const menuItemsTop = [
   {
     icon: <AssetsIcon />,
-    to: "buy",
-    label: "Buy",
-  },
-  {
-    icon: <AssetsIcon />,
     to: "assets",
     label: "Assets",
   },

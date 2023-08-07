@@ -8,10 +8,13 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
+import { CurrentPlanDetails } from "~/components/subscription/current-plan-details";
+import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import { Prices } from "~/components/subscription/prices";
 import { db } from "~/database";
 
 import { requireAuthSession } from "~/modules/auth";
+import { getUserByID } from "~/modules/user";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -19,15 +22,57 @@ import {
   getStripePricesAndProducts,
   createStripeCheckoutSession,
   createStripeCustomer,
+  getStripeCustomer,
+  getActiveProduct,
 } from "~/utils/stripe.server";
 
+export type CustomerWithSubscriptions = Stripe.Customer & {
+  subscriptions: Stripe.ApiList<Stripe.Subscription>;
+};
+
 export async function loader({ request }: LoaderArgs) {
-  const { userId, email } = await requireAuthSession(request);
+  const { userId } = await requireAuthSession(request);
+  const user = await getUserByID(userId);
+
+  if (!user) throw new Error("User not found");
+
+  /** Get the Stripe customer */
+  const customer = user.customerId
+    ? ((await getStripeCustomer(user.customerId)) as CustomerWithSubscriptions)
+    : null;
+
+  /** Check if the customer has an active subscription */
+  const activeSubscription =
+    customer?.subscriptions.data.find((sub) => sub.status === "active") || null;
+
+  /* Get the prices and products from Stripe */
+  const prices = await getStripePricesAndProducts();
+
+  let activeProduct = null;
+  if (customer && activeSubscription) {
+    /** Get the active subscription ID */
+
+    activeProduct = getActiveProduct({
+      prices,
+      priceId: activeSubscription?.items.data[0].plan.id,
+    });
+  }
 
   return json({
     title: "Subscription",
     subTitle: "Pick an account plan that fits your workflow.",
-    prices: await getStripePricesAndProducts(),
+    prices,
+    customer,
+    activeSubscription,
+    activeProduct,
+    expiration: {
+      date: new Date(
+        (activeSubscription?.current_period_end as number) * 1000
+      ).toLocaleDateString(),
+      time: new Date(
+        (activeSubscription?.current_period_end as number) * 1000
+      ).toLocaleTimeString(),
+    },
   });
 }
 
@@ -65,7 +110,9 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function UserPage() {
-  const { title, subTitle, prices } = useLoaderData<typeof loader>();
+  const { title, subTitle, prices, activeSubscription } =
+    useLoaderData<typeof loader>();
+
   return (
     <div className=" flex flex-col">
       <div className="mb-6 flex justify-between border-b pb-5">
@@ -73,12 +120,28 @@ export default function UserPage() {
           <h3 className="text-text-lg font-semibold">{title}</h3>
           <p className="text-sm text-gray-600">{subTitle}</p>
         </div>
+        {activeSubscription && <CustomerPortalForm />}
       </div>
 
-      <Tabs defaultValue="month" className="w-full">
-        <TabsList>
+      <div className="mb-6 border p-4">
+        {!activeSubscription ? (
+          <div className="mb-6">
+            You’re currently using the FREE version of Shelf
+          </div>
+        ) : (
+          <CurrentPlanDetails />
+        )}
+      </div>
+
+      <Tabs
+        defaultValue={
+          activeSubscription?.items.data[0]?.plan.interval || "month"
+        }
+        className="flex w-full flex-col"
+      >
+        <TabsList className="center mx-auto">
           <TabsTrigger value="month">Montly</TabsTrigger>
-          <TabsTrigger value="year">Yearly</TabsTrigger>
+          <TabsTrigger value="year">Yearly (2 months free)</TabsTrigger>
         </TabsList>
         <TabsContent value="month">
           <Prices prices={prices["month"]} />
