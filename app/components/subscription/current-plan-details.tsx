@@ -11,7 +11,7 @@ export const CurrentPlanDetails = () => {
         You’re currently using the <b>{activeProduct?.name}</b> version of
         Shelf.
       </p>
-      <p>
+      <div>
         {activeSubscription?.canceled_at ? (
           <>
             <p>
@@ -26,7 +26,7 @@ export const CurrentPlanDetails = () => {
             <b>{expiration.time}</b>
           </p>
         )}
-      </p>
+      </div>
     </div>
   );
 };
