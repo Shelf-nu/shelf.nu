@@ -24,7 +24,6 @@ export const Prices = ({ prices }: { prices: PriceWithProduct[] }) => (
 
 export const Price = ({
   price,
-  // features,
   previousPlanName,
 }: {
   price: {
@@ -33,6 +32,7 @@ export const Price = ({
       name: string;
       metadata: {
         features?: string;
+        slogan?: string;
       };
     };
     unit_amount: number | null;
@@ -51,8 +51,9 @@ export const Price = ({
     <div
       key={price.id}
       className={tw(
-        " w-full bg-gray-100 p-4",
-        activePlan?.id === price.id && "border-2 border-primary-500",
+        " w-full border-2 border-white bg-gray-100 p-4 hover:border-primary-200",
+        activePlan?.id === price.id &&
+          "border-2 border-primary-500 hover:border-primary-500",
         !activeSubscription &&
           price.id === "free" &&
           "border-2 border-primary-500"
@@ -64,11 +65,18 @@ export const Price = ({
       {price.unit_amount != null ? (
         <>
           <div className="text-xl">
-            {price.unit_amount / 100} {price.currency}
+            {price.unit_amount / 100} {price.currency}{" "}
+            {price.recurring ? (
+              <span className="text-[14px]">
+                per {price.recurring.interval}
+              </span>
+            ) : null}
           </div>
-          {price.recurring ? <div>per {price.recurring.interval}</div> : null}
         </>
       ) : null}
+      <div>
+        <i>{price.product.metadata.slogan}</i>
+      </div>
       <div>
         {!activeSubscription && isFreePlan && (
           <Form method="post">
@@ -77,18 +85,21 @@ export const Price = ({
           </Form>
         )}
       </div>
+      <div className="h-4"></div>
       {features ? (
-        <ul className="mt-4">
+        <>
           {isFreePlan ? (
-            <li>
+            <p className="">
               <b>All features from {previousPlanName || "Free"} plan</b>
-            </li>
+            </p>
           ) : null}
 
-          {features.map((feature) => (
-            <li key={feature}>{feature}</li>
-          ))}
-        </ul>
+          <ul className=" list-inside list-disc">
+            {features.map((feature) => (
+              <li key={feature}>{feature}</li>
+            ))}
+          </ul>
+        </>
       ) : null}
     </div>
   );
