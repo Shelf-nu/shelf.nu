@@ -24,16 +24,18 @@ export const Dialog = ({
   return open ? (
     <div className="dialog-backdrop" onClick={handleBackdropClose}>
       <dialog className="dialog" open={true}>
-        <Button
-          to={prevRoute}
-          variant="link"
-          className={
-            "absolute right-4 top-[16px] leading-none text-gray-500 md:right-6 md:top-[26px]"
-          }
-        >
-          <XIcon />
-        </Button>
-        {children}
+        <div className="scrollable-content relative z-10 h-full w-full overflow-y-auto bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded-lg">
+          <Button
+            to={prevRoute}
+            variant="link"
+            className={
+              "absolute right-4 top-[16px] leading-none text-gray-500 md:right-6 md:top-[26px]"
+            }
+          >
+            <XIcon />
+          </Button>
+          {children}
+        </div>
       </dialog>
     </div>
   ) : null;

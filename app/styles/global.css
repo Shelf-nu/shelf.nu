@@ -127,7 +127,19 @@ p {
   @apply fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50;
 }
 dialog {
-  @apply relative z-10 m-0 h-full w-full overflow-y-auto bg-white p-6 shadow-lg md:m-auto md:h-auto md:w-[600px] md:rounded-lg;
+  @apply fixed m-0 h-full w-full bg-transparent p-0 md:relative   md:m-auto md:h-auto md:w-[600px]  md:py-8;
+}
+
+.dialog > .scrollable-content::-webkit-scrollbar {
+  @apply w-1;
+}
+
+.dialog > .scrollable-content::-webkit-scrollbar-thumb {
+  @apply rounded-br-lg rounded-tr-lg bg-[#a0a0a0];
+}
+
+.dialog > .scrollable-content::-webkit-scrollbar-track {
+  @apply rounded-br-lg rounded-tr-lg bg-[#e2e2e2];
 }
 
 .responsive-filters .form-wrapper {
