@@ -14,6 +14,7 @@ import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
+import { AnimatePresence, motion } from "framer-motion";
 
 const menuItemsTop = [
   {
@@ -99,7 +100,17 @@ const MenuItems = () => {
             </li>
           ))}
         </ul>
-        <ChatWithAnExpert />
+
+        {/* ChatWithAnExpert component will be visible when uncollapsed sidebar is selected and hidden when minimizing sidebar form is processing */}
+        {fetcher.state == "idle" ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+          >
+            <ChatWithAnExpert />
+          </motion.div>
+        ) : null}
         <ul className="menu mb-6">
           <li key={"support"}>
             <CrispButton
@@ -146,7 +157,7 @@ const MenuItems = () => {
               <input
                 type="hidden"
                 name="minimizeSidebar"
-                value={minimizedSidebar ? "false" : "true"}
+                value={String(!minimizedSidebar)}
               />
               <button
                 type="submit"
