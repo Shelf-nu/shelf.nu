@@ -1,4 +1,5 @@
 import { NavLink, useFetcher, useLoaderData } from "@remix-run/react";
+import { motion } from "framer-motion";
 import { useAtom } from "jotai";
 import {
   AssetsIcon,
@@ -14,7 +15,6 @@ import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
-import { AnimatePresence, motion } from "framer-motion";
 
 const menuItemsTop = [
   {
