@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { ShelfTypography } from "~/components/icons/library";
 
@@ -13,10 +13,21 @@ import MenuItems from "./menu-items";
 import Overlay from "./overlay";
 
 export default function Sidebar() {
-  const { user } = useLoaderData<typeof loader>();
+  const { user, minimizedSidebar } = useLoaderData<typeof loader>();
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);
-  const { minimizedSidebar } = useLoaderData();
+
+  /** We use optimistic UI for folding of the sidebar
+   * As we are making a request to the server to store the cookie,
+   * we need to use this approach, otherwise the sidebar will close/open
+   * only once the response is received from the server
+   */
+  const sidebarFetcher = useFetcher();
+  let optimisticMinimizedSidebar = minimizedSidebar;
+  if (sidebarFetcher.formData) {
+    optimisticMinimizedSidebar =
+      sidebarFetcher.formData.get("minimizeSidebar") === "true";
+  }
   return (
     <>
       {/* this component is named sidebar as of now but also serves as a mobile navigation header in mobile device */}
@@ -39,7 +50,7 @@ export default function Sidebar() {
         ref={mainNavigationRef}
         className={tw(
           `fixed top-0 z-30 flex h-screen max-h-screen flex-col border-r border-gray-200 bg-white p-4 shadow-[0px_20px_24px_-4px_rgba(16,24,40,0.08),_0px_8px_8px_-4px_rgba(16,24,40,0.03)] transition-all duration-300 ease-linear md:sticky md:left-0 md:px-6 md:py-8 md:shadow-none md:duration-200`,
-          minimizedSidebar
+          optimisticMinimizedSidebar
             ? "collapsed-navigation md:w-[92px] md:overflow-hidden"
             : "md:left-0 md:w-[312px]",
           isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "left-[-100%]"
@@ -77,7 +88,7 @@ export default function Sidebar() {
             </button> */}
           </div>
           <div className="flex-1">
-            <MenuItems />
+            <MenuItems fetcher={sidebarFetcher} />
           </div>
         </div>
 

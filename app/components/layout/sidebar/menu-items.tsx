@@ -1,4 +1,5 @@
-import { NavLink, useFetcher, useLoaderData } from "@remix-run/react";
+import type { FetcherWithComponents } from "@remix-run/react";
+import { NavLink, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { useAtom } from "jotai";
 import {
@@ -47,11 +48,9 @@ const menuItemsBottom = [
   },
 ];
 
-const MenuItems = () => {
+const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
-  const { isAdmin } = useLoaderData<typeof loader>();
-  const { minimizedSidebar } = useLoaderData();
-  const fetcher = useFetcher();
+  const { isAdmin, minimizedSidebar } = useLoaderData<typeof loader>();
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-full flex-col justify-between">
