@@ -7,7 +7,7 @@ export const ChatWithAnExpert = () => {
 
   const fetcher = useFetcher();
   return hideSupportBanner ? null : (
-    <div className="support-banner mb-6 hidden rounded-lg bg-gray-50 px-4 py-5  md:block">
+    <div className="support-banner mb-6 hidden rounded-lg bg-gray-50 px-4 py-5 md:mt-10 md:block">
       <div className="flex justify-between align-middle">
         <h5 className="mb-1 font-semibold text-gray-900">
           New: Order Asset Labels
@@ -23,7 +23,9 @@ export const ChatWithAnExpert = () => {
       </div>
 
       <p className="text-gray-600">
-        We are happy to announce that we have the infrastructure to produce custom branded labels for your business. Affordable rates, fast turnaround, global shipping, various materials.
+        We are happy to announce that we have the infrastructure to produce
+        custom branded labels for your business. Affordable rates, fast
+        turnaround, global shipping, various materials.
       </p>
       <img
         src="/images/carlos-support.jpg"
@@ -31,7 +33,12 @@ export const ChatWithAnExpert = () => {
         className="my-4 rounded-lg"
       />
       <p>
-        <Button variant="link" to="https://www.shelf.nu/blog/introducing-shelfs-sticker-studio">View offer</Button>
+        <Button
+          variant="link"
+          to="https://www.shelf.nu/blog/introducing-shelfs-sticker-studio"
+        >
+          View offer
+        </Button>
       </p>
     </div>
   );
