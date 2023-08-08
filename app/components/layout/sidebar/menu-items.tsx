@@ -156,7 +156,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
               <input
                 type="hidden"
                 name="minimizeSidebar"
-                value={String(!minimizedSidebar)}
+                value={minimizedSidebar ? "close" : "open"}
               />
               <button
                 type="submit"

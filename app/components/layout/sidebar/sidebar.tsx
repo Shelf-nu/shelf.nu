@@ -26,7 +26,7 @@ export default function Sidebar() {
   let optimisticMinimizedSidebar = minimizedSidebar;
   if (sidebarFetcher.formData) {
     optimisticMinimizedSidebar =
-      sidebarFetcher.formData.get("minimizeSidebar") === "true";
+      sidebarFetcher.formData.get("minimizeSidebar") === "open";
   }
   return (
     <>
