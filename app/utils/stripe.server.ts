@@ -3,6 +3,14 @@ import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { db } from "~/database";
 
+export type CustomerWithSubscriptions = Stripe.Customer & {
+  subscriptions: {
+    has_more?: boolean;
+    data: Stripe.Subscription[];
+    total_count?: number;
+  };
+};
+
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2022-11-15",
   maxNetworkRetries: 2,
@@ -113,7 +121,7 @@ export const createStripeCustomer = async ({
 /** Fetches customer based on ID */
 export const getStripeCustomer = async (customerId: string) => {
   const customer = await stripe.customers.retrieve(customerId, {
-    expand: ["subscriptions"],
+    expand: ["subscriptions", "data.price.product"],
   });
   return customer;
 };
@@ -157,4 +165,14 @@ export function getActiveProduct({
 
   // If no match is found, return null or throw an error, depending on your preference
   return null;
+}
+
+export function getCustomerActiveSubscription({
+  customer,
+}: {
+  customer: CustomerWithSubscriptions | null;
+}) {
+  return (
+    customer?.subscriptions.data.find((sub) => sub.status === "active") || null
+  );
 }

@@ -5,7 +5,7 @@ import type {
   LoaderFunction,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Outlet } from "@remix-run/react";
+import { Outlet, useLoaderData } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar/sidebar";
@@ -15,6 +15,11 @@ import { userPrefs } from "~/cookies";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/index.css";
+import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
+import {
+  getCustomerActiveSubscription,
+  getStripeCustomer,
+} from "~/utils/stripe.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -27,6 +32,17 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
         include: { roles: true },
       })
     : undefined;
+
+  let subscription = null;
+  if (user?.customerId) {
+    // Get the Stripe customer
+    const customer = (await getStripeCustomer(
+      user.customerId
+    )) as CustomerWithSubscriptions;
+    /** Find the active subscription for the Stripe customer */
+    subscription = getCustomerActiveSubscription({ customer });
+  }
+
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
   if (!user?.onboarded) {
@@ -35,6 +51,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
 
   return json({
     user,
+    subscription,
     hideSupportBanner: cookie.hideSupportBanner,
     minimizedSidebar: cookie.minimizedSidebar,
     isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
@@ -44,6 +61,8 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
 export default function App() {
   useCrisp();
 
+  const { subscription } = useLoaderData();
+  console.log(subscription);
   return (
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
       <div className="flex flex-col md:flex-row">

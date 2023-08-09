@@ -17,6 +17,7 @@ import { requireAuthSession } from "~/modules/auth";
 import { getUserByID } from "~/modules/user";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getDomainUrl,
   getStripePricesAndProducts,
@@ -24,11 +25,8 @@ import {
   createStripeCustomer,
   getStripeCustomer,
   getActiveProduct,
+  getCustomerActiveSubscription,
 } from "~/utils/stripe.server";
-
-export type CustomerWithSubscriptions = Stripe.Customer & {
-  subscriptions: Stripe.ApiList<Stripe.Subscription>;
-};
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -42,8 +40,7 @@ export async function loader({ request }: LoaderArgs) {
     : null;
 
   /** Check if the customer has an active subscription */
-  const activeSubscription =
-    customer?.subscriptions.data.find((sub) => sub.status === "active") || null;
+  const activeSubscription = getCustomerActiveSubscription({ customer });
 
   /* Get the prices and products from Stripe */
   const prices = await getStripePricesAndProducts();
