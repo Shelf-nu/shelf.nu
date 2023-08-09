@@ -32,8 +32,8 @@ model User {
   profilePicture String?
   onboarded      Boolean @default(false)
   customerId     String? @unique // Stripe customer id
-  // tierId       TierId
-  // tier         Tier          @relation(fields: [tierId], references: [id])
+  tierId       TierId
+  tier         Tier          @relation(fields: [tierId], references: [id])
 
   // Datetime
   createdAt DateTime @default(now())
@@ -321,29 +321,24 @@ enum OrganizationType {
 //   ended
 // }
 
-// // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.
-// // Each product in stripe has a metadata value called `shelf_tier` which holds the value of the enum
-// // Add more tiers if needed
-// enum TierId {
-//   free
-//   tier_1
-//   tier_2
-// }
+// Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.
+// Each product in stripe has a metadata value called `shelf_tier` which holds the value of the enum
+// Add more tiers if needed
+enum TierId {
+  free
+  tier_1
+  tier_2
+}
 
 
-// model Tier {
-//   id            TierId         @id // Used to create Stripe product ID
-//   name          String
-//   active        Boolean        @default(true)
-//   description   String?
-//   featuresList  String[]
-//   subscriptions Subscription[]
-//   subscribers   User[]
-//   // prices        Price[]
-//   // tierLimitId   TierId         @unique
-//   // tierLimit     TierLimit      @relation(fields: [tierLimitId], references: [id])
-//   createdAt     DateTime       @default(now())
-//   updatedAt     DateTime       @updatedAt
+model Tier {
+  id            TierId         @id // Used to create Stripe product ID
+  name          String             // Name coming from Stripe product
+  subscribers   User[]
+  // tierLimitId   TierId         @unique
+  // tierLimit     TierLimit      @relation(fields: [tierLimitId], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
-//   @@map("tiers")
-// }
+  @@map("tiers")
+}
