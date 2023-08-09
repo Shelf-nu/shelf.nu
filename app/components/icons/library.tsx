@@ -837,3 +837,41 @@ export const UserXIcon = (props: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
+
+export const ArrowRightIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="15"
+    height="14"
+    viewBox="0 0 15 14"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M1.66666 7.00008H13.3333M13.3333 7.00008L7.5 1.16675M13.3333 7.00008L7.5 12.8334"
+      stroke="#344054"
+      strokeWidth="1.67"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+export const ArrowLeftIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="15"
+    height="14"
+    viewBox="0 0 15 14"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M13.3333 7.00008H1.66667M1.66667 7.00008L7.5 12.8334M1.66667 7.00008L7.5 1.16675"
+      stroke="#344054"
+      strokeWidth="1.67"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);

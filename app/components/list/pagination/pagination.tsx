@@ -1,7 +1,10 @@
 import { useMemo } from "react";
 import { useLoaderData } from "@remix-run/react";
-import { Button } from "~/components/shared";
+import { ArrowLeftIcon, ArrowRightIcon } from "~/components/icons";
+import { Button } from "~/components/shared/button";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
+import PerPageItemsSelect from "./per-page-items-select";
+import { tw } from "~/utils";
 
 export const Pagination = () => {
   const { page, totalItems, totalPages, perPage, next, prev } =
@@ -16,20 +19,51 @@ export const Pagination = () => {
   );
 
   return (
-    <div className="flex items-center justify-between  px-6 py-[18px]">
-      <Button variant="secondary" size="sm" to={prev} disabled={prevDisabled}>
-        {"< Previous"}
-      </Button>
+    <div className="flex items-center justify-center gap-3 px-6 pb-4 pt-3">
+      <div className="inline-flex items-center rounded-lg border border-gray-300 shadow-[0px_1px_2px_0px_rgba(16,24,40,0.05)]">
+        <Button
+          variant="secondary"
+          size="sm"
+          to={prev}
+          disabled={prevDisabled}
+          className={tw(
+            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-4 py-3",
+            prevDisabled && "opacity-50"
+          )}
+        >
+          <ArrowLeftIcon />
+        </Button>
 
-      <div className="flex items-center gap-2 py-2 text-gray-400">
-        <span>{page === 0 ? 1 : page}</span>
-        <span>/</span>
-        <span>{totalPages}</span>
+        <div className="flex items-center gap-2 px-2.5 py-3 leading-none text-gray-400">
+          <span className="text-[14px] font-semibold text-gray-700">
+            {page === 0 ? 1 : page} -{" "}
+            {perPage > totalItems ? totalItems : perPage}
+          </span>
+          <span className="text-[14px] font-medium text-gray-500">of</span>
+          <span className="text-[14px] font-semibold text-gray-700">
+            {totalItems}
+          </span>
+        </div>
+
+        <Button
+          variant="secondary"
+          size="sm"
+          to={next}
+          disabled={nextDisabled}
+          className={tw(
+            "rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent  px-4 py-3",
+            nextDisabled && "opacity-50"
+          )}
+        >
+          <ArrowRightIcon />
+        </Button>
       </div>
-
-      <Button variant="secondary" size="sm" to={next} disabled={nextDisabled}>
-        {"Next >"}
-      </Button>
+      <div className="flex items-center gap-2">
+        <PerPageItemsSelect />
+        <p className="hidden text-[14px] font-medium text-gray-400 lg:block">
+          Assets per page
+        </p>
+      </div>
     </div>
   );
 };
