@@ -5,7 +5,7 @@ import type {
   LoaderFunction,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Outlet, useLoaderData } from "@remix-run/react";
+import { Outlet } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar/sidebar";
@@ -60,9 +60,6 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
 
 export default function App() {
   useCrisp();
-
-  const { subscription } = useLoaderData();
-  console.log(subscription);
   return (
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
       <div className="flex flex-col md:flex-row">
