@@ -3,8 +3,8 @@ import { useLoaderData } from "@remix-run/react";
 import { ArrowLeftIcon, ArrowRightIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
-import PerPageItemsSelect from "./per-page-items-select";
 import { tw } from "~/utils";
+import PerPageItemsSelect from "./per-page-items-select";
 
 export const Pagination = () => {
   const { page, totalItems, totalPages, perPage, next, prev } =
