@@ -80,43 +80,9 @@ export const action = async ({ request }: ActionArgs) => {
           },
         });
       }
-
-      // case "product.updated": {
-      //   // I believe this runs when the user updates/changes their subscription to a new product
-      //   // Here we need to change the tier
-      //   console.log("product.updated", event.data);
-
-      //   // const { tierId, active, description, name } = await parseData(
-      //   //   event.data.object,
-      //   //   z
-      //   //     .object({
-      //   //       id: z.nativeEnum(TierId),
-      //   //       active: z.boolean(),
-      //   //       name: z.string(),
-      //   //       description: z.string().nullable(),
-      //   //     })
-      //   //     .transform(({ id: tierId, active, name, description }) => ({
-      //   //       tierId,
-      //   //       active,
-      //   //       name,
-      //   //       description,x
-      //   //     })),
-      //   //   `${event.type} payload is malformed`
-      //   // );
-
-      //   // const updatedTier = await updateTier(tierId, {
-      //   //   active,
-      //   //   description,
-      //   //   name,
-      //   // });
-
-      //   // return response.ok(updatedTier, { authSession: null });
-      // }
     }
   } catch (err: any) {
-    console.log(err);
     throw json({ errors: [{ message: err.message }] }, 400);
   }
-  // console.log("event", event);
   return new Response(null, { status: 200 });
 };
