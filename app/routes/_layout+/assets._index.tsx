@@ -141,6 +141,9 @@ export default function AssetIndexPage() {
   return (
     <>
       <Header>
+        <Button to="/export" variant="link" role="link">
+          Export
+        </Button>
         <Button
           to="new"
           role="link"

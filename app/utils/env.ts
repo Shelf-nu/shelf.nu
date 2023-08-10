@@ -24,6 +24,7 @@ declare global {
       CRISP_WEBSITE_ID: string;
       MICROSOFT_CLARITY_ID: string;
       STRIPE_SECRET_KEY: string;
+      STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
     }
   }
 }
@@ -55,6 +56,7 @@ function getEnv(
 export const SERVER_URL = getEnv("SERVER_URL");
 export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
 export const SESSION_SECRET = getEnv("SESSION_SECRET");
+export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY");
 
 /**
  * Shared envs

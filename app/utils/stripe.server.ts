@@ -2,6 +2,7 @@ import type { User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { db } from "~/database";
+import { STRIPE_SECRET_KEY } from "./env";
 
 export type CustomerWithSubscriptions = Stripe.Customer & {
   subscriptions: {
@@ -11,10 +12,21 @@ export type CustomerWithSubscriptions = Stripe.Customer & {
   };
 };
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2022-11-15",
-  maxNetworkRetries: 2,
-});
+let _stripe: Stripe;
+
+function getStripeServerClient() {
+  if (!_stripe) {
+    // Reference : https://github.com/stripe/stripe-node#usage-with-typescript
+    _stripe = new Stripe(STRIPE_SECRET_KEY, {
+      apiVersion: "2022-11-15",
+    });
+  }
+  return _stripe;
+}
+
+export const stripe = getStripeServerClient();
+
+export type StripeEvent = ReturnType<Stripe["webhooks"]["constructEvent"]>;
 
 // copied from (https://github.com/kentcdodds/kentcdodds.com/blob/ebb36d82009685e14da3d4b5d0ce4d577ed09c63/app/utils/misc.tsx#L229-L237)
 export function getDomainUrl(request: Request) {
@@ -67,6 +79,7 @@ export const createStripeCheckoutSession = async ({
 /** Fetches prices and products from stripe */
 export const getStripePricesAndProducts = async () => {
   const pricesResponse = await stripe.prices.list({
+    active: true,
     expand: ["data.product"],
   });
   const prices = groupPricesByInterval(
@@ -121,7 +134,7 @@ export const createStripeCustomer = async ({
 /** Fetches customer based on ID */
 export const getStripeCustomer = async (customerId: string) => {
   const customer = await stripe.customers.retrieve(customerId, {
-    expand: ["subscriptions", "data.price.product"],
+    expand: ["subscriptions"],
   });
   return customer;
 };
@@ -175,4 +188,10 @@ export function getCustomerActiveSubscription({
   return (
     customer?.subscriptions.data.find((sub) => sub.status === "active") || null
   );
+}
+
+export async function fetchStripeSubscription(id: string) {
+  return await stripe.subscriptions.retrieve(id, {
+    expand: ["items.data.plan.product"],
+  });
 }
