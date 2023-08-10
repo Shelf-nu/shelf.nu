@@ -1,4 +1,4 @@
-import type { TierId } from "@prisma/client";
+import { TierId } from "@prisma/client";
 import type { ActionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type Stripe from "stripe";
@@ -68,10 +68,18 @@ export const action = async ({ request }: ActionArgs) => {
         });
       }
 
-      // case "customer.subscription.deleted": {
-      //   //Not sure what we have to do here. Subscriptions just expire, not sure how a user can delete their subscription
-      //   console.log("customer.subscription.deleted", event.data);
-      // }
+      case "customer.subscription.deleted": {
+        // Occurs whenever a customer’s subscription ends.
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
+
+        await db.user.update({
+          where: { customerId },
+          data: {
+            tierId: TierId.free,
+          },
+        });
+      }
 
       // case "product.updated": {
       //   // I believe this runs when the user updates/changes their subscription to a new product
