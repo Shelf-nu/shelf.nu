@@ -295,12 +295,21 @@ enum TierId {
 
 // Tiers correspond to Stripe products
 model Tier {
-  id          TierId   @id // Used to create Stripe product ID
-  name        String // Name coming from Stripe product
-  subscribers User[]
-  // tierLimitId   TierId         @unique
-  // tierLimit     TierLimit      @relation(fields: [tierLimitId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            TierId   @id // Used to create Stripe product ID
+  name          String // Name coming from Stripe product
+  subscribers   User[]
+  tierLimitId   TierId?         @unique
+  tierLimit     TierLimit?      @relation(fields: [tierLimitId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
 
+
+model TierLimit {
+  id               TierId   @id
+  tier             Tier?
+  canImportAssets  Boolean  @default(false)
+  canExportAssets  Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
