@@ -2,8 +2,8 @@ import { getCurrentSearchParams } from "./http.server";
 import { mergeSearchParams } from "./merge-search-params";
 
 export const getParamsValues = (searchParams: URLSearchParams) => ({
-  page: Number(searchParams.get("page") || "0"),
-  perPage: Number(searchParams.get("per_page") || "8"),
+  page: Number(searchParams.get("page") || "1"),
+  perPage: Number(searchParams.get("per_page") || "20"),
   search: searchParams.get("s") || null,
   categoriesIds: searchParams.getAll("category") || [],
   tagsIds: searchParams.getAll("tag") || [],

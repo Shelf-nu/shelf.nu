@@ -27,7 +27,7 @@ export const Pagination = () => {
           to={prev}
           disabled={prevDisabled}
           className={tw(
-            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-4 py-3",
+            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-4 py-3 hover:bg-transparent",
             prevDisabled && "opacity-50"
           )}
         >
@@ -36,8 +36,8 @@ export const Pagination = () => {
 
         <div className="flex items-center gap-2 px-2.5 py-3 leading-none text-gray-400">
           <span className="text-[14px] font-semibold text-gray-700">
-            {page === 0 ? 1 : page} -{" "}
-            {perPage > totalItems ? totalItems : perPage}
+            {(page - 1) * perPage + 1} -{" "}
+            {perPage * page > totalItems ? totalItems : perPage * page}
           </span>
           <span className="text-[14px] font-medium text-gray-500">of</span>
           <span className="text-[14px] font-semibold text-gray-700">
@@ -51,7 +51,7 @@ export const Pagination = () => {
           to={next}
           disabled={nextDisabled}
           className={tw(
-            "rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent  px-4 py-3",
+            "rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-4 py-3 hover:bg-transparent",
             nextDisabled && "opacity-50"
           )}
         >
