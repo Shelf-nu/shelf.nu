@@ -78,7 +78,7 @@ export const CategoryCheckboxDropdown = () => {
             <CategorySelectNoCategories />
           ) : (
             <>
-              <div className="relative">
+              <div className="filters-form relative">
                 <div className="mb-[6px] flex w-full justify-between text-xs text-gray-500">
                   <div>Filter by category</div>
                   {items.length > 0 ? (

@@ -152,6 +152,7 @@ dialog {
   }
 }
 
-.search-form label > span {
+.search-form label > span,
+.filters-form label > span {
   @apply hidden;
 }
