@@ -1,4 +1,4 @@
-import { Form, useSearchParams, useSubmit } from "@remix-run/react";
+import { Form, useNavigate, useSearchParams } from "@remix-run/react";
 import {
   Select,
   SelectTrigger,
@@ -6,18 +6,27 @@ import {
   SelectContent,
   SelectItem,
 } from "~/components/forms";
+import { mergeSearchParams } from "~/utils";
 import { getParamsValues } from "~/utils/list";
 
 export default function PerPageItemsSelect() {
   const perPageValues = [20, 50, 100];
-  const submit = useSubmit();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { perPage } = getParamsValues(searchParams);
+
   return (
     <div className="relative">
       <Form
         onChange={(e) => {
-          submit(e.currentTarget);
+          const formData = new FormData(e.currentTarget);
+          const perPage = formData.get("per_page") as string;
+
+          navigate(
+            Array.from(searchParams.entries()).length > 0
+              ? mergeSearchParams(searchParams, { per_page: perPage })
+              : `.?per_page=${perPage}`
+          );
         }}
       >
         <Select
