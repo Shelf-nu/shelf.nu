@@ -27,7 +27,7 @@ export const SearchForm = () => {
         disabled={isSearching}
         hideLabel
         hasAttachedButton
-        className="search-input w-full md:w-auto"
+        className="w-full md:w-auto"
       />
       <Button
         icon={isSearching ? "spinner" : "search"}
