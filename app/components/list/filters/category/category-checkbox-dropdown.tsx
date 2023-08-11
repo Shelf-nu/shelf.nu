@@ -64,7 +64,7 @@ export const CategoryCheckboxDropdown = () => {
           />
         ))}
       </div>
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger className="inline-flex items-center gap-2 font-normal text-gray-500">
           Categories <ChevronRight className="hidden rotate-90 md:inline" />{" "}
           {items.length > 0 && (
@@ -73,7 +73,10 @@ export const CategoryCheckboxDropdown = () => {
             </div>
           )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-[290px] md:w-[350px]">
+        <DropdownMenuContent
+          align="end"
+          className="max-h-[300px] w-[290px] overflow-y-auto md:w-[350px]"
+        >
           {!hasCategories && !isSearchingCategories ? (
             <CategorySelectNoCategories />
           ) : (
