@@ -6,6 +6,7 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
+import { usePosition } from "~/hooks";
 import { getAsset } from "~/modules/asset";
 import { getQr } from "~/modules/qr";
 import { createReport, sendReportEmails } from "~/modules/report-found";
@@ -69,6 +70,8 @@ export default function ContactOwner() {
   const data = useActionData();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+  usePosition();
+
   return (
     <>
       <div className="flex-1 py-8">
