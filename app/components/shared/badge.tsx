@@ -15,7 +15,7 @@ export const Badge = ({
       color: `${color}`, // 90%
       mixBlendMode: "multiply",
     }}
-    className="inline-flex items-center gap-1 rounded-2xl py-[2px] pl-[6px] pr-2 text-[12px] font-medium"
+    className="inline-flex items-center gap-1 rounded-2xl py-[1px] pl-[6px] pr-2 text-[12px] font-medium"
   >
     {withDot ? (
       <div
