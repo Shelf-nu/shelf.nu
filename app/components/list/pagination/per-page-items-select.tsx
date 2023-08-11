@@ -1,4 +1,4 @@
-import { Form, useNavigate, useSearchParams } from "@remix-run/react";
+import { Form, useSearchParams, useSubmit } from "@remix-run/react";
 import {
   Select,
   SelectTrigger,
@@ -6,33 +6,29 @@ import {
   SelectContent,
   SelectItem,
 } from "~/components/forms";
-import { mergeSearchParams } from "~/utils";
-import { getParamsValues } from "~/utils/list";
 
 export default function PerPageItemsSelect() {
   const perPageValues = [20, 50, 100];
-  const navigate = useNavigate();
+  const submit = useSubmit();
   const [searchParams] = useSearchParams();
-  const { perPage } = getParamsValues(searchParams);
 
   return (
     <div className="relative">
       <Form
         onChange={(e) => {
-          const formData = new FormData(e.currentTarget);
-          const perPage = formData.get("per_page") as string;
-
-          navigate(
-            Array.from(searchParams.entries()).length > 0
-              ? mergeSearchParams(searchParams, { per_page: perPage })
-              : `.?per_page=${perPage}`
-          );
+          submit(e.currentTarget);
         }}
       >
+        {/* Get all the existing params and add them as hidden fields. Skip per_page as that is being added by the select field */}
+        {Array.from(searchParams.entries()).map(([key, value]) =>
+          key !== "per_page" ? (
+            <input type="hidden" name={key} value={value} key={key} />
+          ) : null
+        )}
         <Select
           name="per_page"
           defaultValue={
-            perPageValues.includes(perPage) ? perPage.toString() : "20"
+            searchParams.get("per_page") || perPageValues[0].toString()
           }
         >
           <SelectTrigger className="px-3.5 py-3">
