@@ -2,6 +2,11 @@
 import { PrismaClient } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 
+import { createUser } from "~/modules/user";
+import {
+  createAdminRole,
+  createUserRole,
+} from "./manual-migrations/master-data/seed-role.server";
 import { SUPABASE_SERVICE_ROLE, SUPABASE_URL } from "../utils/env";
 
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, {
@@ -47,17 +52,34 @@ async function seed() {
   try {
     const id = await getUserId();
 
+    const userRole = await createUserRole();
+    if (userRole) {
+      console.log(`User role created.`);
+    } else {
+      console.log(`User role already exists. Skipping...`);
+    }
+
+    const adminRole = await createAdminRole();
+    if (adminRole) {
+      console.log(`Admin role created.`);
+    } else {
+      console.log(`Admin role already exists. Skipping...`);
+    }
+
     // cleanup the existing database
     await prisma.user.delete({ where: { email } }).catch(() => {
       // no worries if it doesn't exist yet
     });
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        id,
-      },
+    const user = await createUser({
+      email,
+      userId: id,
+      username: "supabase",
     });
+
+    if (!user) {
+      throw new Error("Unable to create user");
+    }
 
     console.log(`Database has been seeded. 🌱\n`);
     console.log(
