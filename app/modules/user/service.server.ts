@@ -81,7 +81,7 @@ export async function getUserByID(id: User["id"]) {
   return db.user.findUnique({ where: { id } });
 }
 
-async function createUser({
+export async function createUser({
   email,
   userId,
   username,

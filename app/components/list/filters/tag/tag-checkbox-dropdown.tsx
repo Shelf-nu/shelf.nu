@@ -60,7 +60,7 @@ export const TagCheckboxDropdown = () => {
           />
         ))}
       </div>
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
           Tags <ChevronRight className="hidden rotate-90 md:inline" />{" "}
           {items.length > 0 && (
@@ -69,7 +69,10 @@ export const TagCheckboxDropdown = () => {
             </div>
           )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-[290px] md:w-[350px]">
+        <DropdownMenuContent
+          align="end"
+          className="max-h-[300px] w-[290px] overflow-y-auto md:w-[350px]"
+        >
           {!hasTags && !isSearchingTags ? (
             <div>
               You don't seem to have any tags yet.{" "}
@@ -79,7 +82,7 @@ export const TagCheckboxDropdown = () => {
             </div>
           ) : (
             <>
-              <div className="relative">
+              <div className="filters-form relative">
                 <div className="mb-[6px] flex w-full justify-between text-xs text-gray-500">
                   <div>Filter by tag</div>
                   {items.length > 0 ? (

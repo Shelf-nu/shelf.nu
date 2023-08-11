@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { CuboidIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
+import { usePosition } from "~/hooks";
 
 export const loader = ({ params }: LoaderArgs) => {
   const qrId = params.qrId as string;
@@ -12,6 +13,8 @@ export const loader = ({ params }: LoaderArgs) => {
 export default function QrNotLoggedIn() {
   const [searchParams] = useSearchParams();
   const { qrId } = useLoaderData<typeof loader>();
+  usePosition();
+
   return (
     <>
       <div className="flex flex-1 justify-center py-8">
