@@ -4,7 +4,7 @@ import { PrismaClient, Roles } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const createUserRole = async () => {
+export const createUserRole = async () => {
   const existingRole = await prisma.role.findFirst({
     where: {
       name: Roles["USER"],
@@ -20,7 +20,7 @@ const createUserRole = async () => {
   });
 };
 
-const createAdminRole = async () => {
+export const createAdminRole = async () => {
   const existingRole = await prisma.role.findFirst({
     where: {
       name: Roles["ADMIN"],
