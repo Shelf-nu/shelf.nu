@@ -1,5 +1,10 @@
 import { useRef, type ReactNode, useEffect } from "react";
-import { Form, useLoaderData, useSubmit } from "@remix-run/react";
+import {
+  Form,
+  useLoaderData,
+  useSearchParams,
+  useSubmit,
+} from "@remix-run/react";
 import { useAtom } from "jotai";
 
 import { tw } from "~/utils";
@@ -17,6 +22,8 @@ export const Filters = ({
   className?: string;
 }) => {
   const { search } = useLoaderData();
+  const [searchParams] = useSearchParams();
+  const perPageParam = searchParams.get("per_page");
 
   const [isFilteringCategories, toggleIsFilteringCategories] = useAtom(
     toggleIsFilteringCategoriesAtom
@@ -62,6 +69,9 @@ export const Filters = ({
       )}
     >
       <Form ref={formRef} className="w-full">
+        {perPageParam ? (
+          <input type="hidden" name="per_page" value={perPageParam} />
+        ) : null}
         <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
           <div className="flex items-center gap-5">
             <SearchForm />
