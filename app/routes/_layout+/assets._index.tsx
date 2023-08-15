@@ -160,8 +160,9 @@ export default function AssetIndexPage() {
           to="new"
           role="link"
           aria-label={`new asset`}
-          icon="plus"
+          icon="asset"
           data-test-id="createNewAsset"
+          variant="secondary"
         >
           New Asset
         </Button>
