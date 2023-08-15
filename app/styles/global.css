@@ -151,3 +151,8 @@ dialog {
     word-break: break-word;
   }
 }
+
+.search-form label > span,
+.filters-form label > span {
+  @apply hidden;
+}
