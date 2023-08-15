@@ -11,3 +11,9 @@ SELECT t.id,
        END AS "canExportAssets",
        CURRENT_TIMESTAMP AS updatedAt
 FROM "Tier" AS t;
+
+-- Update relationships in Tier table
+UPDATE "Tier"
+SET "tierLimitId" = t.id
+FROM "TierLimit" AS t
+WHERE "Tier"."id" = t.id;

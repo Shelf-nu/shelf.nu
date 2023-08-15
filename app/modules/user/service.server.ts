@@ -356,3 +356,20 @@ export async function deleteUser(id: User["id"]) {
 
   await deleteAuthAccount(id);
 }
+
+export async function getUserTierLimit(id: User["id"]) {
+  try {
+    const { tier } = await db.user.findUniqueOrThrow({
+      where: { id },
+      select: {
+        tier: {
+          include: { tierLimit: true },
+        },
+      },
+    });
+
+    return tier?.tierLimit;
+  } catch (cause) {
+    throw new Error("Something went wrong while fetching user tier limit");
+  }
+}
