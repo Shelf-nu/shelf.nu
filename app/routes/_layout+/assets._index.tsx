@@ -85,9 +85,6 @@ export async function loader({ request }: LoaderArgs) {
     userId,
   });
 
-  console.log(page);
-  console.log(totalPages);
-
   if (totalPages !== 0 && page > totalPages) {
     return redirect("/assets");
   }

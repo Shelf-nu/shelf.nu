@@ -7,8 +7,9 @@ import { tw } from "~/utils";
 import PerPageItemsSelect from "./per-page-items-select";
 
 export const Pagination = () => {
-  const { page, totalItems, totalPages, perPage, next, prev } =
+  const { page, totalItems, totalPages, perPage, next, prev, modelName } =
     useLoaderData<IndexResponse>();
+  const { singular, plural } = modelName;
 
   const { prevDisabled, nextDisabled } = useMemo(
     () => ({
@@ -61,7 +62,10 @@ export const Pagination = () => {
       <div className="flex items-center gap-2">
         <PerPageItemsSelect />
         <p className="hidden text-[14px] font-medium text-gray-400 lg:block">
-          Assets per page
+          <span className="capitalize">
+            {totalItems > 1 ? plural : singular}
+          </span>{" "}
+          per page
         </p>
       </div>
     </div>
