@@ -728,7 +728,7 @@ export function QuestionsIcon(props: SVGProps<SVGSVGElement>) {
       {...props}
     >
       <path
-        stroke="#667085"
+        stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={2}
