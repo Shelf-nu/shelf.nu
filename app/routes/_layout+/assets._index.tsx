@@ -96,7 +96,7 @@ export async function loader({ request }: LoaderArgs) {
     userId,
   });
 
-  if (page > totalPages) {
+  if (totalPages !== 0 && page > totalPages) {
     return redirect("/assets");
   }
 
