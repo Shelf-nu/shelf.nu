@@ -62,10 +62,7 @@ export const Pagination = () => {
       <div className="flex items-center gap-2">
         <PerPageItemsSelect />
         <p className="hidden text-[14px] font-medium text-gray-400 lg:block">
-          <span className="capitalize">
-            {totalItems > 1 ? plural : singular}
-          </span>{" "}
-          per page
+          <span className="capitalize">{plural}</span> per page
         </p>
       </div>
     </div>
