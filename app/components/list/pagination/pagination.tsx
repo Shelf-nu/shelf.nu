@@ -9,7 +9,6 @@ import PerPageItemsSelect from "./per-page-items-select";
 export const Pagination = () => {
   const { page, totalItems, totalPages, perPage, next, prev, modelName } =
     useLoaderData<IndexResponse>();
-  const { singular, plural } = modelName;
 
   const { prevDisabled, nextDisabled } = useMemo(
     () => ({
@@ -62,7 +61,7 @@ export const Pagination = () => {
       <div className="flex items-center gap-2">
         <PerPageItemsSelect />
         <p className="hidden text-[14px] font-medium text-gray-400 lg:block">
-          <span className="capitalize">{plural}</span> per page
+          <span className="capitalize">{modelName.plural}</span> per page
         </p>
       </div>
     </div>
