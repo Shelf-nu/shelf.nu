@@ -49,9 +49,9 @@ export default function Sidebar() {
         id="main-navigation"
         ref={mainNavigationRef}
         className={tw(
-          `fixed top-0 z-30 flex h-screen max-h-screen flex-col border-r border-gray-200 bg-white p-4 shadow-[0px_20px_24px_-4px_rgba(16,24,40,0.08),_0px_8px_8px_-4px_rgba(16,24,40,0.03)] transition-all duration-300 ease-linear md:sticky md:left-0 md:px-6 md:py-8 md:shadow-none md:duration-200`,
+          `main-navigation fixed top-0 z-30 flex h-screen max-h-screen flex-col border-r border-gray-200 bg-white p-4 shadow-[0px_20px_24px_-4px_rgba(16,24,40,0.08),_0px_8px_8px_-4px_rgba(16,24,40,0.03)] transition-all duration-300 ease-linear md:sticky md:left-0 md:px-4 md:py-8 md:shadow-none md:duration-200`,
           optimisticMinimizedSidebar
-            ? "collapsed-navigation md:w-[92px] md:overflow-hidden"
+            ? "collapsed-navigation md:w-[82px] md:overflow-hidden"
             : "md:left-0 md:w-[312px]",
           isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "left-[-100%]"
         )}
@@ -61,7 +61,7 @@ export default function Sidebar() {
             <Link
               to="."
               title="Home"
-              className="flex items-center"
+              className="logo flex items-center"
               onClick={toggleMobileNav}
             >
               <img

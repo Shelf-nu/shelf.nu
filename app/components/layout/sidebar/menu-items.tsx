@@ -54,14 +54,14 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-full flex-col justify-between">
-        <ul className="menu mt-6 md:mt-10">
+        <ul className="menu mt-6">
           {isAdmin ? (
             <li>
               <NavLink
                 className={({ isActive }) =>
                   tw(
-                    "my-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900",
-                    isActive ? "bg-gray-100 text-gray-900" : ""
+                    "my-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                    isActive ? "active bg-primary-50 text-primary-600" : ""
                   )
                 }
                 to={"/admin-dashboard"}
@@ -82,8 +82,8 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
               <NavLink
                 className={({ isActive }) =>
                   tw(
-                    "my-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900",
-                    isActive ? "bg-gray-100 text-gray-900" : ""
+                    "my-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                    isActive ? "active bg-primary-50 text-primary-600" : ""
                   )
                 }
                 to={item.to}
@@ -100,80 +100,82 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
           ))}
         </ul>
 
-        {/* ChatWithAnExpert component will be visible when uncollapsed sidebar is selected and hidden when minimizing sidebar form is processing */}
-        {fetcher.state == "idle" ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            <ChatWithAnExpert />
-          </motion.div>
-        ) : null}
-        <ul className="menu mb-6">
-          <li key={"support"}>
-            <CrispButton
-              className={tw(
-                "my-1 flex items-center justify-start gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900"
-              )}
-              variant="link"
-              width="full"
-              title="Questions/Feedback"
+        <div className="lower-menu">
+          {/* ChatWithAnExpert component will be visible when uncollapsed sidebar is selected and hidden when minimizing sidebar form is processing */}
+          {fetcher.state == "idle" ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
             >
-              <span className="flex items-center justify-start gap-3">
-                <i className="icon text-gray-500">
-                  <QuestionsIcon />
-                </i>
-                <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                  Questions/Feedback
-                </span>
-              </span>
-            </CrispButton>
-          </li>
-          {menuItemsBottom.map((item) => (
-            <li key={item.label}>
-              <NavLink
-                className={({ isActive }) =>
-                  tw(
-                    "my-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900",
-                    isActive ? "bg-gray-100 text-gray-900" : ""
-                  )
-                }
-                to={item.to}
-                data-test-id={`${item.label.toLowerCase()}SidebarMenuItem`}
-                onClick={toggleMobileNav}
-                title={item.label}
-              >
-                <i className="icon text-gray-500">{item.icon}</i>
-                <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                  {item.label}
-                </span>
-              </NavLink>
-            </li>
-          ))}
-          <li>
-            <fetcher.Form method="post" action="/api/user/minimized-sidebar">
-              <input
-                type="hidden"
-                name="minimizeSidebar"
-                value={minimizedSidebar ? "close" : "open"}
-              />
-              <button
-                type="submit"
+              <ChatWithAnExpert />
+            </motion.div>
+          ) : null}
+          <ul className="menu mb-6">
+            <li key={"support"}>
+              <CrispButton
                 className={tw(
-                  "mt-1 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-gray-100 hover:text-gray-900"
+                  "my-1 flex items-center justify-start gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600"
                 )}
+                variant="link"
+                width="full"
+                title="Questions/Feedback"
               >
-                <i className="icon text-gray-500">
-                  <SwitchIcon />
-                </i>
-                <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                  Minimize
+                <span className="flex items-center justify-start gap-3">
+                  <i className="icon text-gray-500">
+                    <QuestionsIcon />
+                  </i>
+                  <span className="text whitespace-nowrap transition duration-200 ease-linear">
+                    Questions/Feedback
+                  </span>
                 </span>
-              </button>
-            </fetcher.Form>
-          </li>
-        </ul>
+              </CrispButton>
+            </li>
+            {menuItemsBottom.map((item) => (
+              <li key={item.label}>
+                <NavLink
+                  className={({ isActive }) =>
+                    tw(
+                      "my-1 flex items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                      isActive ? "active bg-primary-50 text-primary-600" : ""
+                    )
+                  }
+                  to={item.to}
+                  data-test-id={`${item.label.toLowerCase()}SidebarMenuItem`}
+                  onClick={toggleMobileNav}
+                  title={item.label}
+                >
+                  <i className="icon text-gray-500">{item.icon}</i>
+                  <span className="text whitespace-nowrap transition duration-200 ease-linear">
+                    {item.label}
+                  </span>
+                </NavLink>
+              </li>
+            ))}
+            <li>
+              <fetcher.Form method="post" action="/api/user/minimized-sidebar">
+                <input
+                  type="hidden"
+                  name="minimizeSidebar"
+                  value={minimizedSidebar ? "close" : "open"}
+                />
+                <button
+                  type="submit"
+                  className={tw(
+                    "crisp-btn mt-1 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600"
+                  )}
+                >
+                  <i className="icon text-gray-500">
+                    <SwitchIcon />
+                  </i>
+                  <span className="text whitespace-nowrap transition duration-200 ease-linear">
+                    Minimize
+                  </span>
+                </button>
+              </fetcher.Form>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
   );
