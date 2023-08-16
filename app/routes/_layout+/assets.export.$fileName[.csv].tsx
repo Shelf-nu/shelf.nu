@@ -36,6 +36,8 @@ export const loader = async ({ request }: LoaderArgs) => {
         case "location":
         case "category":
         case "notes":
+        case "tags":
+        case "qrCodes":
           toExport.push(JSON.stringify(value));
           break;
         case "custody":

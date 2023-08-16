@@ -579,5 +579,21 @@ export const fetchAssetsForExport = async ({
           },
         },
       },
+      tags: {
+        select: {
+          name: true,
+          description: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+      qrCodes: {
+        select: {
+          version: true,
+          errorCorrection: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
     },
   });
