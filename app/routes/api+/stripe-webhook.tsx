@@ -37,7 +37,6 @@ export const action = async ({ request }: ActionArgs) => {
         /* get the string with the customer id */
         const customerId = subscription.customer as string;
         const tierId = product?.metadata?.shelf_tier;
-
         if (!tierId) throw new Error("No tier ID found");
         /** Update the user's tier in the database */
         await db.user.update({
@@ -46,6 +45,8 @@ export const action = async ({ request }: ActionArgs) => {
             tierId: tierId as TierId,
           },
         });
+
+        return new Response(null, { status: 200 });
       }
 
       case "customer.subscription.updated": {
@@ -66,6 +67,7 @@ export const action = async ({ request }: ActionArgs) => {
             tierId: tierId as TierId,
           },
         });
+        return new Response(null, { status: 200 });
       }
 
       case "customer.subscription.deleted": {
@@ -79,6 +81,7 @@ export const action = async ({ request }: ActionArgs) => {
             tierId: TierId.free,
           },
         });
+        return new Response(null, { status: 200 });
       }
     }
   } catch (err: any) {

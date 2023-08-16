@@ -532,3 +532,52 @@ export const createLocationChangeNote = async ({
     assetId,
   });
 };
+
+/** Fetches assets with the data needed for exporting to CSV */
+export const fetchAssetsForExport = async ({
+  userId,
+}: {
+  userId: User["id"];
+}) =>
+  await db.asset.findMany({
+    where: {
+      userId,
+    },
+    include: {
+      category: {
+        select: {
+          name: true,
+          description: true,
+          color: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+      location: {
+        select: {
+          name: true,
+          description: true,
+          address: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+      notes: {
+        select: {
+          content: true,
+          type: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+      custody: {
+        select: {
+          custodian: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });

@@ -27,7 +27,6 @@ import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { getUserByID } from "~/modules/user";
 import { notFound } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 

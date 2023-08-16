@@ -11,7 +11,12 @@ export const ExportButton = ({
   canExportAssets: boolean;
 }) =>
   canExportAssets ? (
-    <Button to="/export" variant="link" role="link">
+    <Button
+      to={`export/assets-${new Date().toISOString().slice(0, 10)}.csv`}
+      reloadDocument
+      variant="secondary"
+      role="link"
+    >
       Export
     </Button>
   ) : (
