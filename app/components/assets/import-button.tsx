@@ -11,7 +11,7 @@ export const ImportButton = ({
   canImportAssets: boolean;
 }) =>
   canImportAssets ? (
-    <Button to="/import" variant="link" role="link">
+    <Button to="import" variant="link" role="link">
       Import
     </Button>
   ) : (

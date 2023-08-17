@@ -1,4 +1,3 @@
-import type { Category, Location } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { fetchAssetsForExport } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
@@ -25,7 +24,7 @@ export const loader = async ({ request }: LoaderArgs) => {
 
     /** Itterate over the values to create teh export object */
     Object.entries(asset).forEach(([key, value]) => {
-      /** Skip keys that are not needed */
+      /** Skip keys that are not needed. These are foreign keys for the related entries */
       if (keysToSkip.includes(key)) return;
 
       /** If the value is null, push an empty string */
