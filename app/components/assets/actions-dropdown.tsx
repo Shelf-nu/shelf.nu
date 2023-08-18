@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { Asset } from "@prisma/client";
 import { ChevronRight } from "~/components/icons";
 import {
@@ -15,12 +16,27 @@ interface Props {
     mainImage: Asset["mainImage"];
     status: Asset["status"];
   };
+  isQr: boolean;
 }
 
-export const ActionsDopdown = ({ asset }: Props) => {
+export const ActionsDopdown = ({ asset, isQr }: Props) => {
   const assetIsAvailable = asset.status === "AVAILABLE";
+  var isMobileScreen;
+
+  useEffect(() => {
+    if (window.innerWidth <= 768) {
+      isMobileScreen = true;
+    } else {
+      isMobileScreen = false;
+    }
+  }, []);
+
+  console.log("from actions-dropdown.tsx: ");
+  console.log("isMobileScreen: ", isMobileScreen);
+  console.log("isQr: ", isQr);
+
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu modal={false} defaultOpen={isQr && isMobileScreen}>
       <DropdownMenuTrigger className="asset-actions">
         <Button variant="secondary" to="#" data-test-id="assetActionsButton">
           <span className="flex items-center gap-2">

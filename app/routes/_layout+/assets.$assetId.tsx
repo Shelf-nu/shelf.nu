@@ -7,7 +7,7 @@ import type {
   V2_MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useLocation } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { ActionsDopdown } from "~/components/assets/actions-dropdown";
@@ -136,6 +136,11 @@ export const links: LinksFunction = () => [
 ];
 
 export default function AssetDetailsPage() {
+  const queryLocation = useLocation();
+  const queryParams = new URLSearchParams(queryLocation.search);
+  const ref = queryParams.get("ref");
+  const isQr = ref === "qr";
+
   const { asset } = useLoaderData<typeof loader>();
   const assetIsAvailable = asset.status === "AVAILABLE";
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
@@ -179,7 +184,7 @@ export default function AssetDetailsPage() {
           View QR code
         </Button>
 
-        <ActionsDopdown asset={asset} />
+        <ActionsDopdown asset={asset} isQr={isQr} />
       </Header>
 
       <ContextualModal />
