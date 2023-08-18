@@ -20,9 +20,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 export const action = async ({ request }: ActionArgs) => {
   const { userId } = await requireAuthSession(request);
   const intent = (await request.clone().formData()).get("intent") as string;
-  // const clonedRequest = request.clone();
-  // const formData = await clonedRequest.formData();
-  // const intent = formData.get("intent") as string;
 
   try {
     const csvData = await csvDataFromRequest({ request });
@@ -40,41 +37,51 @@ export const action = async ({ request }: ActionArgs) => {
           Object.fromEntries(
             entry.map((value, index) => {
               switch (keys[index]) {
-                case "tags":
-                  // return [keys[index], value.split(",")];
-                  return [
-                    keys[index],
-                    value.split(",").map((tag) => ({
-                      connectOrCreate: {
-                        where: {
-                          name: tag,
-                        },
-                        create: {
-                          name: tag,
-                        },
-                      },
-                    })),
-                  ];
-                default:
+                case "title":
+                case "description":
                   return [keys[index], value];
+
+                // case "tags":
+                //   // return [keys[index], value.split(",")];
+                //   return [
+                //     keys[index],
+                //     value.split(",").map((tag) => ({
+                //       connectOrCreate: {
+                //         where: {
+                //           name: tag,
+                //         },
+                //         create: {
+                //           name: tag,
+                //         },
+                //       },
+                //     })),
+                //   ];
+                // case "category":
+                // case "location":
+                // case "custodian":
+                //   return [];
+
+                default:
+                  return ["", ""];
+                // return [keys[index], value];
               }
             })
           )
         );
-        console.log(data[0].tags);
+        console.log(data);
 
-        const u = await db.user.update({
-          where: {
-            id: userId,
-          },
-          data: {
-            assets: {
-              createMany: {
-                data,
-              },
-            },
-          },
-        });
+      // const u = await db.user.update({
+      //   where: {
+      //     id: userId,
+      //   },
+      //   data: {
+      //     assets: {
+      //       createMany: {
+      //         data,
+      //       },
+      //     },
+      //   },
+      // });
 
       // console.log(assets);
     }
