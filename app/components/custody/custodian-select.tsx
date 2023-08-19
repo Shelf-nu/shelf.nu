@@ -15,10 +15,10 @@ export default function CustodianSelect() {
   return (
     <div className="relative w-full">
       <Select name="custodian">
+        UserIcon
         <SelectTrigger>
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>
-
         <div>
           <SelectContent className="w-[352px]" position="popper" align="start">
             {teamMembers.length > 0 ? (
