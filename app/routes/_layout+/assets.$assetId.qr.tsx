@@ -17,7 +17,7 @@ export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
   const { assetId } = params as { assetId: string };
   const searchParams = getCurrentSearchParams(request);
-  const size = (searchParams.get("size") || "medium") as SizeKeys;
+  const size = (searchParams.get("size") || "large") as SizeKeys;
 
   let qr = await getQrByAssetId({ assetId });
   if (!qr) {
