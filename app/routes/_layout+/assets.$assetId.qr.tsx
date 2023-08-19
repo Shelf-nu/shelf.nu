@@ -4,6 +4,7 @@ import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
 import { XIcon } from "~/components/icons";
+import { ImagePreview } from "~/components/qr/image-preview";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
@@ -66,7 +67,8 @@ export default function QRPreview() {
           </h6>
         </div>
         <figure className="qr-code flex  justify-center">
-          <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
+          {/* <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} /> */}
+          <ImagePreview qr={data.qr.src} size={data.qr.size} />
         </figure>
         <div className="text-center">
           <span className="block text-[12px] text-gray-600">{data.qr.id}</span>

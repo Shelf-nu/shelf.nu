@@ -29,7 +29,7 @@ const sizeClasses: {
 };
 
 export default function IconHug({ size = "sm", children, className }: Props) {
-  /** 
+  /**
    * Classes that will add the correct class based on the size passed to the hug
    * The value corresponds to rem, related to sizes of untitled ui
    */

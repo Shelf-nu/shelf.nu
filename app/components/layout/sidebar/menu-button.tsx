@@ -2,7 +2,6 @@ import { useAtom } from "jotai";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 
-
 const MenuButton = () => {
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   return (
