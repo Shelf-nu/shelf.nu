@@ -1,6 +1,12 @@
-import { useEffect } from "react";
+import { useState } from "react";
 import type { Asset } from "@prisma/client";
-import { ChevronRight } from "~/components/icons";
+import {
+  ChevronRight,
+  TrashIcon,
+  PenIcon,
+  UserIcon,
+  UserXIcon,
+} from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,24 +25,13 @@ interface Props {
   isQr: boolean;
 }
 
-export const ActionsDopdown = ({ asset, isQr }: Props) => {
+const ActionsDopdown = ({ asset, isQr }: Props) => {
   const assetIsAvailable = asset.status === "AVAILABLE";
-  var isMobileScreen;
-
-  useEffect(() => {
-    if (window.innerWidth <= 768) {
-      isMobileScreen = true;
-    } else {
-      isMobileScreen = false;
-    }
-  }, []);
-
-  console.log("from actions-dropdown.tsx: ");
-  console.log("isMobileScreen: ", isMobileScreen);
-  console.log("isQr: ", isQr);
+  const defaultOpen = window.innerWidth <= 640 && isQr;
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <DropdownMenu modal={false} defaultOpen={isQr && isMobileScreen}>
+    <DropdownMenu modal={false} defaultOpen={open}>
       <DropdownMenuTrigger className="asset-actions">
         <Button variant="secondary" to="#" data-test-id="assetActionsButton">
           <span className="flex items-center gap-2">
@@ -46,7 +41,7 @@ export const ActionsDopdown = ({ asset, isQr }: Props) => {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="order w-[180px] rounded-md bg-white p-0 text-right "
+        className="order relative w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]"
       >
         <DropdownMenuItem className="border-b px-6 py-3">
           {!assetIsAvailable ? (
@@ -57,7 +52,9 @@ export const ActionsDopdown = ({ asset, isQr }: Props) => {
               className="justify-start text-gray-700 hover:text-gray-700"
               width="full"
             >
-              Release Custody
+              <span className="flex items-center gap-2">
+                <UserXIcon /> Release Custody
+              </span>
             </Button>
           ) : (
             <Button
@@ -67,7 +64,9 @@ export const ActionsDopdown = ({ asset, isQr }: Props) => {
               className="justify-start text-gray-700 hover:text-gray-700"
               width="full"
             >
-              Give Custody
+              <span className="flex items-center gap-2">
+                <UserIcon /> Give Custody
+              </span>
             </Button>
           )}
         </DropdownMenuItem>
@@ -79,11 +78,39 @@ export const ActionsDopdown = ({ asset, isQr }: Props) => {
             className="justify-start text-gray-700 hover:text-gray-700"
             width="full"
           >
-            Edit
+            <span className="flex items-center gap-2">
+              <PenIcon /> Edit
+            </span>
           </Button>
         </DropdownMenuItem>
-        <DeleteAsset asset={asset} />
+        <DropdownMenuItem className="px-6 py-3">
+          <Button
+            to="#"
+            role="link"
+            variant="link"
+            className="justify-start text-gray-700 hover:text-gray-700"
+            width="full"
+          >
+            <span className="flex items-center gap-0">
+              <TrashIcon /> <DeleteAsset asset={asset} />
+            </span>
+          </Button>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem className="border-t px-6 py-3 md:hidden">
+          <Button
+            role="button"
+            variant="secondary"
+            className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+            width="full"
+            onClick={() => setOpen(false)}
+          >
+            Close
+          </Button>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 };
+
+export default ActionsDopdown;

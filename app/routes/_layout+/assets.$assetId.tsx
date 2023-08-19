@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import type { Location } from "@prisma/client";
 import type {
   ActionArgs,
@@ -10,7 +11,6 @@ import { redirect, json } from "@remix-run/node";
 import { useLoaderData, useLocation } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
-import { ActionsDopdown } from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
@@ -44,6 +44,10 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
+
+const ActionsDopdown = lazy(
+  () => import("~/components/assets/actions-dropdown")
+);
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -184,7 +188,9 @@ export default function AssetDetailsPage() {
           View QR code
         </Button>
 
-        <ActionsDopdown asset={asset} isQr={isQr} />
+        <Suspense fallback={null}>
+          <ActionsDopdown asset={asset} isQr={isQr} />
+        </Suspense>
       </Header>
 
       <ContextualModal />
