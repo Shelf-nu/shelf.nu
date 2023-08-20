@@ -1,14 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import {
-  Form,
-  Link,
-  useFetcher,
-  useLoaderData,
-  useSubmit,
-} from "@remix-run/react";
+import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { XIcon } from "~/components/icons";
 import {
@@ -20,7 +14,6 @@ import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
 import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
 import { getCurrentSearchParams, slugify } from "~/utils";
-import { FileDropzone } from "~/components/shared/file-dropzone";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
@@ -66,12 +59,21 @@ export default function QRPreview() {
     submit(formRef.current);
   };
 
+  const downloadQr = useCallback(() => {
+    const imageData = imagePreviewRef.current?.exportToPNG();
+    if (!imageData) return;
+    const link = document.createElement("a");
+    link.download = `${slugify(asset?.title ?? "")}-${
+      data.qr.size
+    }-shelf-qr-code-${data.qr.id}.png`;
+    link.href = imageData;
+    link.click();
+  }, [asset?.title, data.qr.id, data.qr.size]);
+
   useEffect(() => {
     if (logoInput) {
       const reader = new FileReader();
-      reader.onload = () => {
-        setLogo(reader.result as string);
-      };
+      reader.onload = () => setLogo(reader.result as string);
       reader.readAsDataURL(logoInput);
     }
   }, [logoInput]);
@@ -154,10 +156,7 @@ export default function QRPreview() {
       </ul>
       <Button
         icon="barcode"
-        to={imagePreviewRef.current?.exportToPNG()}
-        download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
-          data.qr.id
-        }.png`}
+        onClick={() => downloadQr()}
         variant="secondary"
         className="w-full"
       >

@@ -8,8 +8,8 @@ import {
 
 export interface ImagePreviewProps {
   qr: string;
-  size: "cable" | "small" | "medium" | "large";
   logo: string;
+  size: "cable" | "small" | "medium" | "large";
 }
 
 export interface ImagePreviewState {
@@ -25,7 +25,8 @@ export interface ImagePreviewRef {
 }
 
 // NOTE: Do not trim the space at the end.
-const PROPERTY_OF = "Property of ";
+// It used for spacing between the logo and the text.
+const PROPERTY_OF = "Property of  ";
 const FONT_SIZE_MAP = {
   cable: 0,
   small: 12,
@@ -65,7 +66,7 @@ export const ImagePreview = forwardRef<ImagePreviewRef, ImagePreviewProps>(
 
     useImperativeHandle(
       ref,
-      (): ImagePreviewRef => ({
+      () => ({
         exportToPNG() {
           const canvas = canvasRef.current;
           return canvas?.toDataURL("image/png") ?? "";
@@ -75,16 +76,17 @@ export const ImagePreview = forwardRef<ImagePreviewRef, ImagePreviewProps>(
     );
 
     useEffect(() => {
-      const loadImages = Promise.all([loadImage(qr), loadImage(logo)]);
-
+      const loadImages = Promise.all([qr, logo].map(loadImage));
       loadImages.then(([qrImg, logoImg]) => {
+        if (!qrImg) return;
+
         size === "cable" || !logo
           ? setState({
               qrImg,
               logoImg,
               fontSize: 0,
               logoSize: 0,
-              canvasSize: qrImg!.naturalHeight,
+              canvasSize: qrImg.naturalHeight,
             })
           : setState({
               qrImg,
@@ -92,7 +94,7 @@ export const ImagePreview = forwardRef<ImagePreviewRef, ImagePreviewProps>(
               fontSize: FONT_SIZE_MAP[size],
               logoSize: LOGO_SIZE_MAP[size],
               canvasSize:
-                qrImg!.naturalHeight + (15 / 100) * qrImg!.naturalHeight,
+                qrImg.naturalHeight + (16 / 100) * qrImg.naturalHeight,
             });
       });
     }, [qr, size, logo]);
@@ -101,16 +103,12 @@ export const ImagePreview = forwardRef<ImagePreviewRef, ImagePreviewProps>(
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext("2d");
       const negativeMargin = -10;
-      const logoSize = state.logoSize;
-      const fontSize = state.fontSize;
-      const qrImg = state.qrImg;
-      const logoImg = state.logoImg;
+      const { logoSize, fontSize, qrImg, logoImg } = state;
 
       if (!ctx || !qrImg) return;
 
       ctx.fillStyle = "#fff";
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
       ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
       if (state.canvasSize === qrImg.naturalHeight || !logoImg) {
@@ -145,7 +143,6 @@ export const ImagePreview = forwardRef<ImagePreviewRef, ImagePreviewProps>(
 
     return (
       <canvas
-        style={{ border: "1.5px solid black" }}
         ref={canvasRef}
         height={state.canvasSize}
         width={state.canvasSize}
