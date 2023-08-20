@@ -1,12 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  forwardRef,
+} from "react";
 
-interface ImagePreviewProps {
+export interface ImagePreviewProps {
   qr: string;
   size: "cable" | "small" | "medium" | "large";
+  logo: string;
+}
+
+export interface ImagePreviewState {
+  fontSize: number;
+  canvasSize: number;
+  logoSize: number;
+  qrImg: HTMLImageElement | null;
+  logoImg: HTMLImageElement | null;
+}
+
+export interface ImagePreviewRef {
+  exportToPNG(): string;
 }
 
 // NOTE: Do not trim the space at the end.
-// It is used for spacing.
 const PROPERTY_OF = "Property of ";
 const FONT_SIZE_MAP = {
   cable: 0,
@@ -21,101 +39,117 @@ const LOGO_SIZE_MAP = {
   large: 32,
 };
 
-const loadImage = (src: string): Promise<HTMLImageElement> =>
+const loadImage = (src: string): Promise<HTMLImageElement | null> =>
   new Promise((resolve, reject) => {
-    const img = new Image();
-    img.src = src;
-    img.onload = () => {
-      resolve(img);
-    };
-    img.onerror = reject;
-  });
-
-export const ImagePreview = ({ qr, size }: ImagePreviewProps) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [state, setState] = useState({
-    fontSize: 15,
-    canvasSize: 190,
-    img: null,
-  } as {
-    fontSize: number;
-    canvasSize: number;
-    logoSize: number;
-    img: HTMLImageElement | null;
-  });
-
-  useEffect(() => {
-    loadImage(qr).then((img) => {
-      size === "cable"
-        ? setState({
-            img,
-            canvasSize: img.naturalHeight,
-            fontSize: 0,
-            logoSize: 0,
-          })
-        : setState({
-            img,
-            canvasSize: img.naturalHeight + (15 / 100) * img.naturalHeight,
-            fontSize: FONT_SIZE_MAP[size],
-            logoSize: LOGO_SIZE_MAP[size],
-          });
-    });
-  }, [qr, size]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    const negativeMargin = -10;
-    const logoSize = state.logoSize;
-    const fontSize = state.fontSize;
-    const img = state.img;
-
-    if (!ctx || !img) return;
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-
-    // NOTE: We don't add text for cable size
-    if (state.canvasSize === img.naturalHeight) {
-      ctx.drawImage(img, 0, 0);
-      return;
+    if (src) {
+      const img = new Image();
+      img.src = src;
+      img.onload = () => {
+        resolve(img);
+      };
+      img.onerror = reject;
+    } else {
+      resolve(null);
     }
+  });
 
-    const ctxHalfWidth = ctx.canvas.width / 2;
-    ctx.drawImage(img, ctxHalfWidth - img.naturalWidth / 2, 0);
+export const ImagePreview = forwardRef<ImagePreviewRef, ImagePreviewProps>(
+  function ImagePreview({ qr, size, logo }: ImagePreviewProps, ref) {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [state, setState] = useState({
+      fontSize: 15,
+      canvasSize: 190,
+      qrImg: null,
+      logoImg: null,
+    } as ImagePreviewState);
 
-    ctx.fillStyle = "#999";
-    ctx.font = `bold ${fontSize}px Inter`;
-    let metrics = ctx.measureText(PROPERTY_OF);
-    let textHeight =
-      metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
-    let textWidth = metrics.width;
-    let halfTextWidth = textWidth / 2;
-    let textX = ctxHalfWidth - halfTextWidth - logoSize / 2;
-    let textY = img.naturalHeight + logoSize / 2;
-    textY += logoSize / 2 - textHeight / 2;
-    textY += negativeMargin;
-    ctx.fillText(PROPERTY_OF, textX, textY);
-
-    loadImage("https://www.kirupa.com/canvas/images/orange.svg").then(
-      (logo) => {
-        ctx.drawImage(
-          logo,
-          textX + textWidth,
-          img.naturalHeight + negativeMargin,
-          logoSize,
-          logoSize
-        );
-      }
+    useImperativeHandle(
+      ref,
+      (): ImagePreviewRef => ({
+        exportToPNG() {
+          const canvas = canvasRef.current;
+          return canvas?.toDataURL("image/png") ?? "";
+        },
+      }),
+      [canvasRef]
     );
-  }, [state]);
 
-  return (
-    <canvas
-      style={{ border: "1.5px solid black" }}
-      ref={canvasRef}
-      height={state.canvasSize}
-      width={state.canvasSize}
-    />
-  );
-};
+    useEffect(() => {
+      const loadImages = Promise.all([loadImage(qr), loadImage(logo)]);
+
+      loadImages.then(([qrImg, logoImg]) => {
+        size === "cable" || !logo
+          ? setState({
+              qrImg,
+              logoImg,
+              fontSize: 0,
+              logoSize: 0,
+              canvasSize: qrImg!.naturalHeight,
+            })
+          : setState({
+              qrImg,
+              logoImg,
+              fontSize: FONT_SIZE_MAP[size],
+              logoSize: LOGO_SIZE_MAP[size],
+              canvasSize:
+                qrImg!.naturalHeight + (15 / 100) * qrImg!.naturalHeight,
+            });
+      });
+    }, [qr, size, logo]);
+
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      const negativeMargin = -10;
+      const logoSize = state.logoSize;
+      const fontSize = state.fontSize;
+      const qrImg = state.qrImg;
+      const logoImg = state.logoImg;
+
+      if (!ctx || !qrImg) return;
+
+      ctx.fillStyle = "#fff";
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+      if (state.canvasSize === qrImg.naturalHeight || !logoImg) {
+        ctx.drawImage(qrImg, 0, 0);
+        return;
+      }
+
+      const ctxHalfWidth = ctx.canvas.width / 2;
+      ctx.drawImage(qrImg, ctxHalfWidth - qrImg.naturalWidth / 2, 0);
+
+      ctx.fillStyle = "#9ba5b5";
+      ctx.font = `bold ${fontSize}px Inter`;
+      let metrics = ctx.measureText(PROPERTY_OF);
+      let textHeight =
+        metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+      let textWidth = metrics.width;
+      let halfTextWidth = textWidth / 2;
+      let textX = ctxHalfWidth - halfTextWidth - logoSize / 2;
+      let textY = qrImg.naturalHeight + logoSize / 2;
+      textY += logoSize / 2 - textHeight / 2;
+      textY += negativeMargin;
+      ctx.fillText(PROPERTY_OF, textX, textY);
+
+      ctx.drawImage(
+        logoImg,
+        textX + textWidth,
+        qrImg.naturalHeight + negativeMargin,
+        logoSize,
+        logoSize
+      );
+    }, [state]);
+
+    return (
+      <canvas
+        style={{ border: "1.5px solid black" }}
+        ref={canvasRef}
+        height={state.canvasSize}
+        width={state.canvasSize}
+      />
+    );
+  }
+);

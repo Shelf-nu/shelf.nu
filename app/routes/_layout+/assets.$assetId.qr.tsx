@@ -1,15 +1,26 @@
-import { useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
+import {
+  Form,
+  Link,
+  useFetcher,
+  useLoaderData,
+  useSubmit,
+} from "@remix-run/react";
+import Input from "~/components/forms/input";
 import { XIcon } from "~/components/icons";
-import { ImagePreview } from "~/components/qr/image-preview";
+import {
+  ImagePreview,
+  type ImagePreviewRef,
+} from "~/components/qr/image-preview";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
 import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
 import { getCurrentSearchParams, slugify } from "~/utils";
+import { FileDropzone } from "~/components/shared/file-dropzone";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
@@ -43,6 +54,9 @@ export async function loader({ request, params }: LoaderArgs) {
 export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
   const formRef = useRef<HTMLFormElement>(null);
+  const [logo, setLogo] = useState<string>("");
+  const [logoInput, setLogoInput] = useState<File | null>(null);
+  const imagePreviewRef = useRef<ImagePreviewRef>(null);
   const submit = useSubmit();
   const asset = useMatchesData<{ asset: Asset }>(
     "routes/_layout+/assets.$assetId"
@@ -51,6 +65,16 @@ export default function QRPreview() {
   const handleChange = () => {
     submit(formRef.current);
   };
+
+  useEffect(() => {
+    if (logoInput) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setLogo(reader.result as string);
+      };
+      reader.readAsDataURL(logoInput);
+    }
+  }, [logoInput]);
 
   return asset ? (
     <div className="">
@@ -67,8 +91,12 @@ export default function QRPreview() {
           </h6>
         </div>
         <figure className="qr-code flex  justify-center">
-          {/* <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} /> */}
-          <ImagePreview qr={data.qr.src} size={data.qr.size} />
+          <ImagePreview
+            ref={imagePreviewRef}
+            qr={data.qr.src}
+            size={data.qr.size}
+            logo={logo}
+          />
         </figure>
         <div className="text-center">
           <span className="block text-[12px] text-gray-600">{data.qr.id}</span>
@@ -102,6 +130,21 @@ export default function QRPreview() {
         </li>
         <li className="mb-4 flex justify-between text-gray-600">
           <span className="key max-w-[120px] break-words font-medium">
+            Logo
+          </span>
+          <span className="value max-w-[190px] break-words font-semibold">
+            <Input
+              name="logo"
+              label=""
+              type="file"
+              accept="image/png,image/webp,image/svg"
+              className="w-full"
+              onChange={(e) => setLogoInput((e.target as any).files?.[0])}
+            />
+          </span>
+        </li>
+        <li className="mb-4 flex justify-between text-gray-600">
+          <span className="key max-w-[120px] break-words font-medium">
             File
           </span>
           <span className="value max-w-[190px] break-words font-semibold">
@@ -111,7 +154,7 @@ export default function QRPreview() {
       </ul>
       <Button
         icon="barcode"
-        to={data.qr.src}
+        to={imagePreviewRef.current?.exportToPNG()}
         download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
           data.qr.id
         }.png`}
