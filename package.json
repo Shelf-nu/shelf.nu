@@ -50,6 +50,7 @@
     "@supabase/supabase-js": "^2.26.0",
     "cookie": "^0.5.0",
     "crisp-sdk-web": "^1.0.19",
+    "csv-parse": "^5.4.0",
     "framer-motion": "^9.1.7",
     "intl-parse-accept-language": "^1.0.0",
     "isbot": "^3.6.12",

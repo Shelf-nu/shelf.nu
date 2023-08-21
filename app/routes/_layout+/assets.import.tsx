@@ -12,12 +12,86 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
+import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
+import { csvDataFromRequest } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const action = async ({ request }: ActionArgs) => {
-  console.log(request);
-  return null;
+  const { userId } = await requireAuthSession(request);
+  const intent = (await request.clone().formData()).get("intent") as string;
+
+  try {
+    const csvData = await csvDataFromRequest({ request });
+    if (csvData.length < 2) {
+      throw new Error("CSV file is empty");
+    }
+
+    switch (intent) {
+      case "backup":
+        break;
+      case "content":
+        const keys = csvData[0] as string[];
+        const values = csvData.slice(1) as string[][];
+        const data = values.map((entry) =>
+          Object.fromEntries(
+            entry.map((value, index) => {
+              switch (keys[index]) {
+                case "title":
+                case "description":
+                  return [keys[index], value];
+
+                // case "tags":
+                //   // return [keys[index], value.split(",")];
+                //   return [
+                //     keys[index],
+                //     value.split(",").map((tag) => ({
+                //       connectOrCreate: {
+                //         where: {
+                //           name: tag,
+                //         },
+                //         create: {
+                //           name: tag,
+                //         },
+                //       },
+                //     })),
+                //   ];
+                // case "category":
+                // case "location":
+                // case "custodian":
+                //   return [];
+
+                default:
+                  return ["", ""];
+                // return [keys[index], value];
+              }
+            })
+          )
+        );
+        console.log(data);
+
+      // const u = await db.user.update({
+      //   where: {
+      //     id: userId,
+      //   },
+      //   data: {
+      //     assets: {
+      //       createMany: {
+      //         data,
+      //       },
+      //     },
+      //   },
+      // });
+
+      // console.log(assets);
+    }
+
+    return json({ csvData });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid CSV file";
+
+    return json({ error: { message } }, { status: 400 });
+  }
 };
 
 export const loader = async ({ request }: LoaderArgs) => {
@@ -25,7 +99,7 @@ export const loader = async ({ request }: LoaderArgs) => {
 
   return json({
     header: {
-      title: "Import assets",
+      title: "Import assets (beta)",
     },
   });
 };
