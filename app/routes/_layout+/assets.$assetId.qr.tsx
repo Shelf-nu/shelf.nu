@@ -5,10 +5,8 @@ import { json } from "@remix-run/node";
 import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { XIcon } from "~/components/icons";
-import {
-  ImagePreview,
-  type ImagePreviewRef,
-} from "~/components/qr/image-preview";
+import { ImagePreview } from "~/components/qr/image-preview";
+import type { ImagePreviewRef } from "~/components/qr/types";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
@@ -47,8 +45,6 @@ export async function loader({ request, params }: LoaderArgs) {
 export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
   const formRef = useRef<HTMLFormElement>(null);
-  const [logo, setLogo] = useState<string>("");
-  const [logoInput, setLogoInput] = useState<File | null>(null);
   const imagePreviewRef = useRef<ImagePreviewRef>(null);
   const submit = useSubmit();
   const asset = useMatchesData<{ asset: Asset }>(
@@ -70,14 +66,6 @@ export default function QRPreview() {
     link.click();
   }, [asset?.title, data.qr.id, data.qr.size]);
 
-  useEffect(() => {
-    if (logoInput) {
-      const reader = new FileReader();
-      reader.onload = () => setLogo(reader.result as string);
-      reader.readAsDataURL(logoInput);
-    }
-  }, [logoInput]);
-
   return asset ? (
     <div className="">
       <header className="mb-6 flex items-center justify-between leading-7">
@@ -97,7 +85,7 @@ export default function QRPreview() {
             ref={imagePreviewRef}
             qr={data.qr.src}
             size={data.qr.size}
-            logo={logo}
+            logo="/images/shelf-symbol.png"
           />
         </figure>
         <div className="text-center">
@@ -128,21 +116,6 @@ export default function QRPreview() {
                 ))}
               </select>
             </Form>
-          </span>
-        </li>
-        <li className="mb-4 flex justify-between text-gray-600">
-          <span className="key max-w-[120px] break-words font-medium">
-            Logo
-          </span>
-          <span className="value max-w-[190px] break-words font-semibold">
-            <Input
-              name="logo"
-              label=""
-              type="file"
-              accept="image/png,image/webp,image/svg"
-              className="w-full"
-              onChange={(e) => setLogoInput((e.target as any).files?.[0])}
-            />
           </span>
         </li>
         <li className="mb-4 flex justify-between text-gray-600">
