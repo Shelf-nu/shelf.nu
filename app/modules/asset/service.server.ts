@@ -7,8 +7,10 @@ import type {
   Asset,
   User,
   Tag,
+  Organization,
+  TeamMember,
 } from "@prisma/client";
-import { ErrorCorrection } from "@prisma/client";
+import { AssetStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { db } from "~/database";
 import {
@@ -19,9 +21,11 @@ import {
   oneDayFromNow,
 } from "~/utils";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
-import { getAllCategories } from "../category";
+import { createCategoriesIfNotExists, getAllCategories } from "../category";
+import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
 import { getAllTags } from "../tag";
+import { createTeamMemberIfNotExists } from "../team-member";
 
 export async function getAsset({
   userId,
@@ -144,10 +148,12 @@ export async function createAsset({
   locationId,
   qrId,
   tags,
+  custodian,
 }: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
+  custodian?: TeamMember["id"];
 }) {
   /** User connction data */
   const user = {
@@ -217,11 +223,29 @@ export async function createAsset({
     });
   }
 
+  /** If a custodian is passed, create a Custody relation with that asset
+   * `custodian` represents the id of a {@link TeamMember}. */
+  if (custodian) {
+    Object.assign(data, {
+      custody: {
+        create: {
+          custodian: {
+            connect: {
+              id: custodian,
+            },
+          },
+        },
+      },
+      status: AssetStatus.IN_CUSTODY,
+    });
+  }
+
   return db.asset.create({
     data,
     include: {
       location: true,
       user: true,
+      custody: true,
     },
   });
 }
@@ -597,3 +621,52 @@ export const fetchAssetsForExport = async ({
       },
     },
   });
+
+export const createAssetsFromContentImport = async ({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) => {
+  const categories = await createCategoriesIfNotExists({
+    data,
+    userId,
+  });
+
+  const locations = await createLocationsIfNotExists({
+    data,
+    userId,
+  });
+
+  const teamMembers = await createTeamMemberIfNotExists({
+    data,
+    organizationId,
+  });
+
+  // console.log("teamMembers", teamMembers);
+
+  data.map(async (asset) => {
+    const newAssset = await createAsset({
+      title: asset.title,
+      description: asset.description || "",
+      userId,
+      categoryId: asset.category ? categories[asset.category] : null,
+      locationId: asset.location ? locations[asset.location] : undefined,
+      custodian: asset.custodian ? teamMembers[asset.custodian] : undefined,
+    });
+    console.log("newAssset", newAssset);
+  });
+};
+
+export interface CreateAssetFromContentImportPayload
+  extends Record<string, any> {
+  title: string;
+  description?: string;
+  category?: string;
+  tags: string[];
+  location?: string;
+  custodian?: string;
+}

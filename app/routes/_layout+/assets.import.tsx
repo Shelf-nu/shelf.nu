@@ -1,3 +1,4 @@
+import { OrganizationType } from "@prisma/client";
 import type { ActionArgs, V2_MetaFunction, LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
@@ -13,6 +14,7 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { db } from "~/database";
+import { createAssetsFromContentImport } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { csvDataFromRequest } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -20,6 +22,16 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 export const action = async ({ request }: ActionArgs) => {
   const { userId } = await requireAuthSession(request);
   const intent = (await request.clone().formData()).get("intent") as string;
+
+  const personalOrg = await db.organization.findFirst({
+    where: {
+      userId,
+      type: OrganizationType.PERSONAL,
+    },
+    select: {
+      id: true,
+    },
+  });
 
   try {
     const csvData = await csvDataFromRequest({ request });
@@ -37,53 +49,20 @@ export const action = async ({ request }: ActionArgs) => {
           Object.fromEntries(
             entry.map((value, index) => {
               switch (keys[index]) {
-                case "title":
-                case "description":
-                  return [keys[index], value];
-
-                // case "tags":
-                //   // return [keys[index], value.split(",")];
-                //   return [
-                //     keys[index],
-                //     value.split(",").map((tag) => ({
-                //       connectOrCreate: {
-                //         where: {
-                //           name: tag,
-                //         },
-                //         create: {
-                //           name: tag,
-                //         },
-                //       },
-                //     })),
-                //   ];
-                // case "category":
-                // case "location":
-                // case "custodian":
-                //   return [];
-
+                case "tags":
+                  return [keys[index], value.split(",")];
                 default:
-                  return ["", ""];
-                // return [keys[index], value];
+                  return [keys[index], value];
               }
             })
           )
         );
-        console.log(data);
 
-      // const u = await db.user.update({
-      //   where: {
-      //     id: userId,
-      //   },
-      //   data: {
-      //     assets: {
-      //       createMany: {
-      //         data,
-      //       },
-      //     },
-      //   },
-      // });
-
-      // console.log(assets);
+        const result = await createAssetsFromContentImport({
+          data,
+          userId,
+          organizationId: personalOrg?.id || "",
+        });
     }
 
     return json({ csvData });

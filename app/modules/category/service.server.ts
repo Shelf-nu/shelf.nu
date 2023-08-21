@@ -1,5 +1,7 @@
 import type { Category, Prisma, User } from "@prisma/client";
 import { db } from "~/database";
+import { getRandomColor } from "~/utils";
+import type { CreateAssetFromContentImportPayload } from "../asset";
 
 export async function createCategory({
   name,
@@ -80,4 +82,47 @@ export async function deleteCategory({
 
 export async function getAllCategories({ userId }: { userId: User["id"] }) {
   return await db.category.findMany({ where: { userId } });
+}
+
+export async function createCategoriesIfNotExists({
+  data,
+  userId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+}): Promise<Record<string, Category["id"]>> {
+  // first we get all the categories from the assets and make then into an object where the category is the key and the value is an empty string
+  const categories = new Map(
+    data
+      .filter((asset) => asset.category !== "")
+      .map((asset) => [asset.category, ""])
+  );
+
+  // now we loop through the categories and check if they exist
+  for (const [category, _] of categories) {
+    const existingCategory = await db.category.findFirst({
+      where: { name: category, userId },
+    });
+
+    if (!existingCategory) {
+      // if the category doesn't exist, we create a new one
+      const newCategory = await db.category.create({
+        data: {
+          name: (category as string).trim(),
+          color: getRandomColor(),
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
+        },
+      });
+      categories.set(category, newCategory.id);
+    } else {
+      // if the category exists, we just update the id
+      categories.set(category, existingCategory.id);
+    }
+  }
+
+  return Object.fromEntries(Array.from(categories));
 }
