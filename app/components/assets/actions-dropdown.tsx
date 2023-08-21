@@ -1,12 +1,6 @@
 import { useState } from "react";
 import type { Asset } from "@prisma/client";
-import {
-  ChevronRight,
-  TrashIcon,
-  PenIcon,
-  UserIcon,
-  UserXIcon,
-} from "~/components/icons";
+import { ChevronRight, PenIcon, UserIcon, UserXIcon } from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
