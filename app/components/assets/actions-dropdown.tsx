@@ -83,20 +83,7 @@ const ActionsDopdown = ({ asset, isQr }: Props) => {
             </span>
           </Button>
         </DropdownMenuItem>
-        <DropdownMenuItem className="px-6 py-3">
-          <Button
-            to="#"
-            role="link"
-            variant="link"
-            className="justify-start text-gray-700 hover:text-gray-700"
-            width="full"
-          >
-            <span className="flex items-center gap-0">
-              <TrashIcon /> <DeleteAsset asset={asset} />
-            </span>
-          </Button>
-        </DropdownMenuItem>
-
+        <DeleteAsset asset={asset} />
         <DropdownMenuItem className="border-t px-6 py-3 md:hidden">
           <Button
             role="button"
