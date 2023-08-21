@@ -11,6 +11,7 @@ import {
   SingleLayerIcon,
 } from "../icons";
 import { Button } from "../shared";
+import { shortenIntervalString } from "~/utils/shorten-interval-string";
 
 export type PriceWithProduct = Stripe.Price & {
   product: Stripe.Product;
@@ -63,15 +64,6 @@ export const Price = ({
     tier_2: <MultiLayerIcon />,
   };
 
-  function shortenIntervalString(str: string): string {
-    // Using a regular expression to replace 'year' with 'yr' and 'month' with 'mo'
-    return str.replace(/\b(year|month)\b/g, (match: string) => {
-      if (match === "year") return "yr";
-      else if (match === "month") return "mo";
-      else return str;
-    });
-  }
-
   return (
     <div className="subscription-plan mb-12 w-full">
       <div
@@ -105,9 +97,11 @@ export const Price = ({
           </div>
           {price.unit_amount != null ? (
             <div className=" mb-3 text-4xl font-semibold text-gray-900">
-              {price.currency === "usd"
-                ? "$" + price.unit_amount / 100
-                : price.unit_amount / 100 + " " + price.currency}
+              {(price.unit_amount / 100).toLocaleString("en-US", {
+                style: "currency",
+                currency: price.currency,
+                maximumFractionDigits: 0,
+              })}
               {price.recurring ? (
                 <span>/{shortenIntervalString(price.recurring.interval)}</span>
               ) : null}

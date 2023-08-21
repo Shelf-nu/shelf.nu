@@ -1,18 +1,18 @@
 import { useCallback } from "react";
-import { useNavigate, useSearchParams } from "@remix-run/react";
+import { useSearchParams } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
 import { Button } from "../shared/button";
 
 export default function SuccessfulSubscriptionModal() {
-  const [params] = useSearchParams();
-  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const success = params.get("success") || false;
   const handleBackdropClose = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.target !== e.currentTarget) return;
-      navigate("/settings/subscription");
+      params.delete("success");
+      setParams(params);
     },
-    [navigate]
+    [params]
   );
   return (
     <AnimatePresence>
