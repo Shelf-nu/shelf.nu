@@ -18,7 +18,7 @@ export type PriceWithProduct = Stripe.Price & {
 };
 
 export const Prices = ({ prices }: { prices: PriceWithProduct[] }) => (
-  <div className="gap-8 xl:flex">
+  <div className="gap-8 xl:flex xl:justify-between">
     <Price key={FREE_PLAN.id} price={FREE_PLAN} />
     {prices.map((price, index) => (
       <Price
@@ -65,7 +65,7 @@ export const Price = ({
   };
 
   return (
-    <div className="subscription-plan mb-12 w-full">
+    <div className="subscription-plan mb-12 w-full xl:mb-0 xl:max-w-[410px]">
       <div
         className={tw(
           "mb-8 rounded-2xl border p-8",
