@@ -1,4 +1,3 @@
-import { Suspense, lazy } from "react";
 import type { Location } from "@prisma/client";
 import type {
   ActionArgs,
@@ -8,9 +7,10 @@ import type {
   V2_MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData, useLocation } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
@@ -44,10 +44,6 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
-
-const ActionsDopdown = lazy(
-  () => import("~/components/assets/actions-dropdown")
-);
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -140,11 +136,6 @@ export const links: LinksFunction = () => [
 ];
 
 export default function AssetDetailsPage() {
-  const queryLocation = useLocation();
-  const queryParams = new URLSearchParams(queryLocation.search);
-  const ref = queryParams.get("ref");
-  const isQr = ref === "qr";
-
   const { asset } = useLoaderData<typeof loader>();
   const assetIsAvailable = asset.status === "AVAILABLE";
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
@@ -187,10 +178,7 @@ export default function AssetDetailsPage() {
         >
           View QR code
         </Button>
-
-        <Suspense fallback={null}>
-          <ActionsDopdown asset={asset} isQr={isQr} />
-        </Suspense>
+        <ActionsDopdown asset={asset} />
       </Header>
 
       <ContextualModal />
