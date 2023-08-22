@@ -5,6 +5,12 @@
   @apply flex justify-between border-t border-t-slate-400 pt-6;
 }
 
+.main-navigation .menu li a:hover .icon,
+.main-navigation .menu li button:hover .icon,
+.main-navigation .menu li .active .icon {
+  @apply text-primary-500;
+}
+
 @media (min-width: 768px) {
   .collapsed-navigation .navigation-header .logo-text,
   /* .collapsed-navigation .navigation-header button, */
@@ -15,12 +21,25 @@
     pointer-events: none;
   }
 
+  .collapsed-navigation .menu li a,
+  .collapsed-navigation .menu li button {
+    @apply py-3;
+  }
+  .collapsed-navigation .menu li a .icon,
+  .collapsed-navigation .menu li button .icon {
+    @apply ml-0.5;
+  }
+
   .collapsed-navigation .logout-btn form {
     pointer-events: all;
   }
 
   .collapsed-navigation .bottom {
     @apply border-none;
+  }
+
+  .collapsed-navigation img {
+    @apply ml-2;
   }
 
   .collapsed-navigation .bottom a {
