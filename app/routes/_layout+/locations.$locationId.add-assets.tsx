@@ -1,7 +1,7 @@
 import type { Asset } from "@prisma/client";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useMatches, useParams } from "@remix-run/react";
+import { useLoaderData, useParams } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
 import { List, Filters } from "~/components/list";
 import { AddAssetForm } from "~/components/location/add-asset-form";

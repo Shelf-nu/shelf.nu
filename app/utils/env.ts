@@ -83,6 +83,7 @@ export const MICROSOFT_CLARITY_ID = getEnv("MICROSOFT_CLARITY_ID", {
 
 export function getBrowserEnv() {
   return {
+    NODE_ENV,
     SUPABASE_URL,
     SUPABASE_ANON_PUBLIC,
     MAPTILER_TOKEN,

@@ -1,6 +1,6 @@
 import { OrganizationType } from "@prisma/client";
 import type { ActionArgs, V2_MetaFunction, LoaderArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import {
   ImportBackup,
@@ -16,6 +16,7 @@ import {
 import { db } from "~/database";
 import { createAssetsFromContentImport } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
+import { assetUserCanImportAssets, getUserTierLimit } from "~/modules/tier";
 import { csvDataFromRequest } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -23,17 +24,32 @@ export const action = async ({ request }: ActionArgs) => {
   const { userId } = await requireAuthSession(request);
   const intent = (await request.clone().formData()).get("intent") as string;
 
-  const personalOrg = await db.organization.findFirst({
-    where: {
-      userId,
-      type: OrganizationType.PERSONAL,
-    },
-    select: {
-      id: true,
-    },
-  });
-
   try {
+    /* Get the user by selecting the org and tierLimit */
+    const user = await db.user.findUnique({
+      where: {
+        id: userId,
+      },
+      select: {
+        organizations: {
+          select: {
+            id: true,
+            type: true,
+          },
+        },
+        tier: {
+          include: { tierLimit: true },
+        },
+      },
+    });
+
+    if (user?.tier?.tierLimit && !user.tier.tierLimit.canImportAssets) {
+      throw new Error("You don't have the required plan to import assets.");
+    }
+
+    const personalOrg = user?.organizations.find(
+      (org) => org.type === OrganizationType.PERSONAL
+    );
     const csvData = await csvDataFromRequest({ request });
     if (csvData.length < 2) {
       throw new Error("CSV file is empty");
@@ -74,7 +90,14 @@ export const action = async ({ request }: ActionArgs) => {
 };
 
 export const loader = async ({ request }: LoaderArgs) => {
-  await requireAuthSession(request);
+  const { userId } = await requireAuthSession(request);
+  await assetUserCanImportAssets({ userId });
+
+  // const tierLimit = await getUserTierLimit({ userId });
+
+  // if (tierLimit && !tierLimit.canImportAssets) {
+  //   return redirect("/assets");
+  // }
 
   return json({
     header: {

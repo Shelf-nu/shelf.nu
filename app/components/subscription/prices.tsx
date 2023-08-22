@@ -2,6 +2,7 @@ import { Form, useLoaderData } from "@remix-run/react";
 import type Stripe from "stripe";
 import type { loader } from "~/routes/_layout+/settings.subscription";
 import { tw } from "~/utils";
+import { shortenIntervalString } from "~/utils/shorten-interval-string";
 import { CustomerPortalForm } from "./customer-portal-form";
 import { FREE_PLAN } from "./helpers";
 import {
@@ -11,14 +12,13 @@ import {
   SingleLayerIcon,
 } from "../icons";
 import { Button } from "../shared";
-import { shortenIntervalString } from "~/utils/shorten-interval-string";
 
 export type PriceWithProduct = Stripe.Price & {
   product: Stripe.Product;
 };
 
 export const Prices = ({ prices }: { prices: PriceWithProduct[] }) => (
-  <div className="gap-8 xl:flex xl:justify-between">
+  <div className="gap-8 xl:flex xl:justify-center">
     <Price key={FREE_PLAN.id} price={FREE_PLAN} />
     {prices.map((price, index) => (
       <Price
@@ -113,8 +113,10 @@ export const Price = ({
         </div>
       </div>
       <div className="mb-8">
-        {price.id === "free" ? null : activePlan?.id === price.id ? (
-          <CustomerPortalForm />
+        {price.id === "free" ? null : activeSubscription ? (
+          <CustomerPortalForm
+            buttonText={activeSubscription ? "Manage subscription" : undefined}
+          />
         ) : (
           <Form method="post">
             <input type="hidden" name="priceId" value={price.id} />

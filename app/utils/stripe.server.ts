@@ -186,7 +186,7 @@ export function getCustomerActiveSubscription({
   customer: CustomerWithSubscriptions | null;
 }) {
   return (
-    customer?.subscriptions.data.find((sub) => sub.status === "active") || null
+    customer?.subscriptions?.data.find((sub) => sub.status === "active") || null
   );
 }
 

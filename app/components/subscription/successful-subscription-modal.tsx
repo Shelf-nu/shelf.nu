@@ -12,7 +12,7 @@ export default function SuccessfulSubscriptionModal() {
       params.delete("success");
       setParams(params);
     },
-    [params]
+    [params, setParams]
   );
   return (
     <AnimatePresence>
