@@ -28,7 +28,11 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <DropdownMenu modal={true} defaultOpen={open}>
+    <DropdownMenu
+      modal={true}
+      onOpenChange={(open) => setOpen(open)}
+      open={open}
+    >
       <DropdownMenuTrigger className="asset-actions">
         <Button variant="secondary" to="#" data-test-id="assetActionsButton">
           <span className="flex items-center gap-2">
@@ -36,67 +40,91 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
           </span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        asChild
-        align="end"
-        className="order static w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]"
-      >
-        <div className="order fixed bottom-0 left-0 w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]">
-          <DropdownMenuItem className="border-b px-6 py-3">
-            {!assetIsAvailable ? (
-              <Button
-                to="release-custody"
-                role="link"
-                variant="link"
-                className="justify-start whitespace-nowrap
+      <figure>
+        {open && (
+          <style
+            dangerouslySetInnerHTML={{
+              __html: `@media (max-width: 640px) {
+                [data-radix-popper-content-wrapper] {
+                  transform: none !important;
+              }
+          }`,
+            }}
+          ></style>
+        )}
+        <DropdownMenuContent
+          asChild
+          align="end"
+          className="order actions-dropdown static w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]"
+        >
+          <div className="order fixed bottom-0 left-0 w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]">
+            <DropdownMenuItem className="border-b px-6 py-3">
+              {!assetIsAvailable ? (
+                <Button
+                  to="release-custody"
+                  role="link"
+                  variant="link"
+                  className="justify-start whitespace-nowrap
                 text-gray-700 hover:text-gray-700"
-                width="full"
-              >
-                <span className="flex items-center gap-1">
-                  <UserXIcon /> Release Custody
-                </span>
-              </Button>
-            ) : (
+                  width="full"
+                >
+                  <span
+                    className="flex items-center gap-1"
+                    onClick={() => setOpen(false)}
+                  >
+                    <UserXIcon /> Release Custody
+                  </span>
+                </Button>
+              ) : (
+                <Button
+                  to="give-custody"
+                  role="link"
+                  variant="link"
+                  className="justify-start text-gray-700 hover:text-gray-700"
+                  width="full"
+                >
+                  <span
+                    className="flex items-center gap-2"
+                    onClick={() => setOpen(false)}
+                  >
+                    <UserIcon /> Give Custody
+                  </span>
+                </Button>
+              )}
+            </DropdownMenuItem>
+            <DropdownMenuItem className="px-6 py-3">
               <Button
-                to="give-custody"
+                to="edit"
                 role="link"
                 variant="link"
                 className="justify-start text-gray-700 hover:text-gray-700"
                 width="full"
               >
-                <span className="flex items-center gap-2">
-                  <UserIcon /> Give Custody
+                <span
+                  className="flex items-center gap-2"
+                  onClick={() => setOpen(false)}
+                >
+                  <PenIcon /> Edit
                 </span>
               </Button>
-            )}
-          </DropdownMenuItem>
-          <DropdownMenuItem className="px-6 py-3">
-            <Button
-              to="edit"
-              role="link"
-              variant="link"
-              className="justify-start text-gray-700 hover:text-gray-700"
-              width="full"
-            >
-              <span className="flex items-center gap-2">
-                <PenIcon /> Edit
-              </span>
-            </Button>
-          </DropdownMenuItem>
-          <DeleteAsset asset={asset} />
-          <DropdownMenuItem className="border-t px-6 py-3 md:hidden">
-            <Button
-              role="button"
-              variant="secondary"
-              className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-              width="full"
-              onClick={() => setOpen(false)}
-            >
-              Close
-            </Button>
-          </DropdownMenuItem>
-        </div>
-      </DropdownMenuContent>
+            </DropdownMenuItem>
+            <div onClick={() => setOpen(false)}>
+              <DeleteAsset asset={asset} />
+            </div>
+            <DropdownMenuItem className="border-t px-6 py-3 md:hidden">
+              <Button
+                role="button"
+                variant="secondary"
+                className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                width="full"
+                onClick={() => setOpen(false)}
+              >
+                Close
+              </Button>
+            </DropdownMenuItem>
+          </div>
+        </DropdownMenuContent>
+      </figure>
     </DropdownMenu>
   );
 };
@@ -111,7 +139,11 @@ const ActionsDopdown = ({ asset }: Props) => {
         </span>
       </Button>
     );
-  return <ConditionalActionsDropdown asset={asset} />;
+  return (
+    <div className="actions-dropdown">
+      <ConditionalActionsDropdown asset={asset} />
+    </div>
+  );
 };
 
 export default ActionsDopdown;

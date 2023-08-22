@@ -5,9 +5,3 @@
 .asset-actions[data-state="open"] .chev {
   @apply -rotate-90;
 }
-
-@media (max-width: 640px) {
-  [data-radix-popper-content-wrapper] {
-    transform: none !important;
-  }
-}
