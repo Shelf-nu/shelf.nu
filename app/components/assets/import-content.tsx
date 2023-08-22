@@ -13,6 +13,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../shared/modal";
+import { isFormProcessing } from "~/utils";
+import { M } from "msw/lib/glossary-de6278a9";
 
 export const ImportBackup = () => (
   <>
@@ -90,6 +92,8 @@ export const ImportContent = () => (
 const FileForm = ({ intent }: { intent: string }) => {
   const formRef = useRef<HTMLFormElement>(null);
   const fetcher = useFetcher();
+  const disabled = isFormProcessing(fetcher.state);
+  const isSuccessful = fetcher.data?.success;
 
   /** We use a controlled field for the file, because of the confirmation dialog we have.
    * That way we can disabled the confirmation dialog button until a file is selected
@@ -147,19 +151,35 @@ const FileForm = ({ intent }: { intent: string }) => {
             </div>
           ) : null}
 
+          {fetcher.data?.success ? (
+            <div>
+              <b className="text-green-500">Success!</b>
+              <p>Your assets have been imported.</p>
+            </div>
+          ) : null}
+
           <AlertDialogFooter>
-            <AlertDialogCancel asChild>
-              <Button variant="secondary">Cancel</Button>
-            </AlertDialogCancel>
-            <Button
-              type="submit"
-              onClick={() => {
-                // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
-                fetcher.submit(formRef.current);
-              }}
-            >
-              Import
-            </Button>
+            {isSuccessful ? (
+              <Button to="/assets" width="full">
+                View your newly created assets
+              </Button>
+            ) : (
+              <>
+                <AlertDialogCancel asChild>
+                  <Button variant="secondary">Cancel</Button>
+                </AlertDialogCancel>
+                <Button
+                  type="submit"
+                  onClick={() => {
+                    // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
+                    fetcher.submit(formRef.current);
+                  }}
+                  disabled={disabled}
+                >
+                  Import
+                </Button>
+              </>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

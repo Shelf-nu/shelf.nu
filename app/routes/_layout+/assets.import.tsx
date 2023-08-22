@@ -1,7 +1,8 @@
+import type { Asset } from "@prisma/client";
 import { OrganizationType } from "@prisma/client";
 import type { ActionArgs, V2_MetaFunction, LoaderArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { Link, useActionData } from "@remix-run/react";
 import {
   ImportBackup,
   ImportContent,
@@ -22,6 +23,8 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const action = async ({ request }: ActionArgs) => {
   const { userId } = await requireAuthSession(request);
+  await assetUserCanImportAssets({ userId });
+
   const intent = (await request.clone().formData()).get("intent") as string;
 
   try {
@@ -66,7 +69,10 @@ export const action = async ({ request }: ActionArgs) => {
             entry.map((value, index) => {
               switch (keys[index]) {
                 case "tags":
-                  return [keys[index], value.split(",")];
+                  return [
+                    keys[index],
+                    value.split(",").map((tag) => tag.trim()),
+                  ];
                 default:
                   return [keys[index], value];
               }
@@ -74,14 +80,14 @@ export const action = async ({ request }: ActionArgs) => {
           )
         );
 
-        const result = await createAssetsFromContentImport({
+        await createAssetsFromContentImport({
           data,
           userId,
           organizationId: personalOrg?.id || "",
         });
     }
 
-    return json({ csvData });
+    return json({ success: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid CSV file";
 
@@ -92,12 +98,6 @@ export const action = async ({ request }: ActionArgs) => {
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
   await assetUserCanImportAssets({ userId });
-
-  // const tierLimit = await getUserTierLimit({ userId });
-
-  // if (tierLimit && !tierLimit.canImportAssets) {
-  //   return redirect("/assets");
-  // }
 
   return json({
     header: {
@@ -115,6 +115,7 @@ export const handle = {
 };
 
 export default function AssetsImport() {
+  const data = useActionData<typeof action>();
   return (
     <div className="h-full">
       <Header />

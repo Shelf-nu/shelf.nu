@@ -652,19 +652,22 @@ export const createAssetsFromContentImport = async ({
   });
 
   data.map(async (asset) => {
-    console.log("asset.tags", asset.tags);
-    console.log("tags", tags);
-    console.log("set", { set: asset.tags.map((t) => ({ id: tags[t] })) });
-    // const newAssset = await createAsset({
-    //   title: asset.title,
-    //   description: asset.description || "",
-    //   userId,
-    //   categoryId: asset.category ? categories[asset.category] : null,
-    //   locationId: asset.location ? locations[asset.location] : undefined,
-    //   custodian: asset.custodian ? teamMembers[asset.custodian] : undefined,
-    //    tags: asset.tags.length > 0 ? { set: asset.tags.map((t) => ({ id: t })) } : undefined,
-    // });
-    // console.log("newAssset", newAssset);
+    await createAsset({
+      title: asset.title,
+      description: asset.description || "",
+      userId,
+      categoryId: asset.category ? categories[asset.category] : null,
+      locationId: asset.location ? locations[asset.location] : undefined,
+      custodian: asset.custodian ? teamMembers[asset.custodian] : undefined,
+      tags:
+        asset.tags.length > 0
+          ? {
+              set: asset.tags
+                .filter((t) => tags[t])
+                .map((t) => ({ id: tags[t] })),
+            }
+          : undefined,
+    });
   });
 };
 
