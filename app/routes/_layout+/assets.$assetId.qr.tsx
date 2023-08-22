@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
-import Input from "~/components/forms/input";
 import { XIcon } from "~/components/icons";
 import { ImagePreview } from "~/components/qr/image-preview";
 import type { ImagePreviewRef } from "~/components/qr/types";
@@ -86,6 +85,7 @@ export default function QRPreview() {
             qr={data.qr.src}
             size={data.qr.size}
             logo="/images/shelf-symbol.png"
+            // logo="/images/shelf-icon-28x.png"
           />
         </figure>
         <div className="text-center">
