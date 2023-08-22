@@ -48,10 +48,11 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
                 to="release-custody"
                 role="link"
                 variant="link"
-                className="justify-start text-gray-700 hover:text-gray-700"
+                className="justify-start whitespace-nowrap
+                text-gray-700 hover:text-gray-700"
                 width="full"
               >
-                <span className="flex items-center gap-2">
+                <span className="flex items-center gap-1">
                   <UserXIcon /> Release Custody
                 </span>
               </Button>
