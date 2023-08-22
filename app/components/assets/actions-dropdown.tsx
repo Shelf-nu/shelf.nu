@@ -1,5 +1,8 @@
+import { useState } from "react";
 import type { Asset } from "@prisma/client";
-import { ChevronRight } from "~/components/icons";
+import { useSearchParams } from "@remix-run/react";
+import { useHydrated } from "remix-utils";
+import { ChevronRight, PenIcon, UserIcon, UserXIcon } from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,10 +20,15 @@ interface Props {
   };
 }
 
-export const ActionsDopdown = ({ asset }: Props) => {
+const ConditionalActionsDropdown = ({ asset }: Props) => {
   const assetIsAvailable = asset.status === "AVAILABLE";
+  let [searchParams] = useSearchParams();
+  const refIsQrScan = searchParams.get("ref") === "qr";
+  const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu modal={true} defaultOpen={open}>
       <DropdownMenuTrigger className="asset-actions">
         <Button variant="secondary" to="#" data-test-id="assetActionsButton">
           <span className="flex items-center gap-2">
@@ -29,45 +37,80 @@ export const ActionsDopdown = ({ asset }: Props) => {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
+        asChild
         align="end"
-        className="order w-[180px] rounded-md bg-white p-0 text-right "
+        className="order static w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]"
       >
-        <DropdownMenuItem className="border-b px-6 py-3">
-          {!assetIsAvailable ? (
+        <div className="order fixed bottom-0 left-0 w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]">
+          <DropdownMenuItem className="border-b px-6 py-3">
+            {!assetIsAvailable ? (
+              <Button
+                to="release-custody"
+                role="link"
+                variant="link"
+                className="justify-start text-gray-700 hover:text-gray-700"
+                width="full"
+              >
+                <span className="flex items-center gap-2">
+                  <UserXIcon /> Release Custody
+                </span>
+              </Button>
+            ) : (
+              <Button
+                to="give-custody"
+                role="link"
+                variant="link"
+                className="justify-start text-gray-700 hover:text-gray-700"
+                width="full"
+              >
+                <span className="flex items-center gap-2">
+                  <UserIcon /> Give Custody
+                </span>
+              </Button>
+            )}
+          </DropdownMenuItem>
+          <DropdownMenuItem className="px-6 py-3">
             <Button
-              to="release-custody"
+              to="edit"
               role="link"
               variant="link"
               className="justify-start text-gray-700 hover:text-gray-700"
               width="full"
             >
-              Release Custody
+              <span className="flex items-center gap-2">
+                <PenIcon /> Edit
+              </span>
             </Button>
-          ) : (
+          </DropdownMenuItem>
+          <DeleteAsset asset={asset} />
+          <DropdownMenuItem className="border-t px-6 py-3 md:hidden">
             <Button
-              to="give-custody"
-              role="link"
-              variant="link"
-              className="justify-start text-gray-700 hover:text-gray-700"
+              role="button"
+              variant="secondary"
+              className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
               width="full"
+              onClick={() => setOpen(false)}
             >
-              Give Custody
+              Close
             </Button>
-          )}
-        </DropdownMenuItem>
-        <DropdownMenuItem className="px-6 py-3">
-          <Button
-            to="edit"
-            role="link"
-            variant="link"
-            className="justify-start text-gray-700 hover:text-gray-700"
-            width="full"
-          >
-            Edit
-          </Button>
-        </DropdownMenuItem>
-        <DeleteAsset asset={asset} />
+          </DropdownMenuItem>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 };
+
+const ActionsDopdown = ({ asset }: Props) => {
+  const isHydrated = useHydrated();
+  if (!isHydrated)
+    return (
+      <Button variant="secondary" to="#" data-test-id="assetActionsButton">
+        <span className="flex items-center gap-2">
+          Actions <ChevronRight className="chev" />
+        </span>
+      </Button>
+    );
+  return <ConditionalActionsDropdown asset={asset} />;
+};
+
+export default ActionsDopdown;

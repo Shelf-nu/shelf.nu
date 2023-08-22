@@ -18,7 +18,6 @@ export default function CustodianSelect() {
         <SelectTrigger>
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>
-
         <div>
           <SelectContent className="w-[352px]" position="popper" align="start">
             {teamMembers.length > 0 ? (
