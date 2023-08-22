@@ -156,3 +156,7 @@ dialog {
 .filters-form label > span {
   @apply hidden;
 }
+
+.subscription-plan button {
+  @apply w-full max-w-full;
+}

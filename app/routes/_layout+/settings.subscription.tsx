@@ -2,6 +2,7 @@ import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import type Stripe from "stripe";
+import { InfoIcon } from "~/components/icons";
 import {
   Tabs,
   TabsContent,
@@ -11,6 +12,7 @@ import {
 import { CurrentPlanDetails } from "~/components/subscription/current-plan-details";
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import { Prices } from "~/components/subscription/prices";
+import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import { db } from "~/database";
 
 import { requireAuthSession } from "~/modules/auth";
@@ -111,42 +113,49 @@ export default function UserPage() {
     useLoaderData<typeof loader>();
 
   return (
-    <div className=" flex flex-col">
-      <div className="mb-6 flex justify-between border-b pb-5">
-        <div>
-          <h3 className="text-text-lg font-semibold">{title}</h3>
-          <p className="text-sm text-gray-600">{subTitle}</p>
-        </div>
-        {activeSubscription && <CustomerPortalForm />}
-      </div>
-
-      <div className="mb-6 border p-4">
-        {!activeSubscription ? (
-          <div className="mb-6">
-            You’re currently using the FREE version of Shelf
+    <>
+      <div className=" flex flex-col">
+        <div className="mb-8 mt-3 flex items-center gap-3 rounded-lg border border-gray-300 p-4">
+          <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+            <InfoIcon />
           </div>
-        ) : (
-          <CurrentPlanDetails />
-        )}
-      </div>
+          {!activeSubscription ? (
+            <p className="text-[14px] font-medium text-gray-700">
+              You’re currently using the{" "}
+              <span className="font-semibold">FREE</span> version of Shelf
+            </p>
+          ) : (
+            <CurrentPlanDetails />
+          )}
+        </div>
 
-      <Tabs
-        defaultValue={
-          activeSubscription?.items.data[0]?.plan.interval || "month"
-        }
-        className="flex w-full flex-col"
-      >
-        <TabsList className="center mx-auto">
-          <TabsTrigger value="month">Montly</TabsTrigger>
-          <TabsTrigger value="year">Yearly (2 months free)</TabsTrigger>
-        </TabsList>
-        <TabsContent value="month">
-          <Prices prices={prices["month"]} />
-        </TabsContent>
-        <TabsContent value="year">
-          <Prices prices={prices["year"]} />
-        </TabsContent>
-      </Tabs>
-    </div>
+        <div className="mb-8 justify-between border-b pb-5 lg:flex">
+          <div className="mb-8 lg:mb-0">
+            <h3 className="text-text-lg font-semibold">{title}</h3>
+            <p className="text-sm text-gray-600">{subTitle}</p>
+          </div>
+          {activeSubscription && <CustomerPortalForm />}
+        </div>
+
+        <Tabs
+          defaultValue={
+            activeSubscription?.items.data[0]?.plan.interval || "month"
+          }
+          className="flex w-full flex-col"
+        >
+          <TabsList className="center mx-auto mb-8">
+            <TabsTrigger value="month">Montly</TabsTrigger>
+            <TabsTrigger value="year">Yearly (2 months free)</TabsTrigger>
+          </TabsList>
+          <TabsContent value="month">
+            <Prices prices={prices["month"]} />
+          </TabsContent>
+          <TabsContent value="year">
+            <Prices prices={prices["year"]} />
+          </TabsContent>
+        </Tabs>
+      </div>
+      <SuccessfulSubscriptionModal />
+    </>
   );
 }
