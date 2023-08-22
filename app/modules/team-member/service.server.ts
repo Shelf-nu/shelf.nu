@@ -22,14 +22,12 @@ export async function createTeamMemberIfNotExists({
 
   // now we loop through the categories and check if they exist
   for (const [teamMember, _] of teamMembers) {
-    console.log("teamMember", teamMember);
     const existingTeamMember = await db.teamMember.findFirst({
       where: {
         name: teamMember,
         organizations: { some: { id: organizationId } },
       },
     });
-    console.log("existingTeamMember", existingTeamMember);
 
     if (!existingTeamMember) {
       // if the teamMember doesn't exist, we create a new one
