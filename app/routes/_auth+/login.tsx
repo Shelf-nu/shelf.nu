@@ -137,7 +137,7 @@ export default function IndexLoginForm() {
             error={zo.errors.password()?.message || data?.errors?.email}
           />
           <span
-            className="absolute bottom-2  right-2 flex h-7 w-7 cursor-pointer flex-col items-end justify-center"
+            className="absolute bottom-2  right-2 flex h-6 w-6 cursor-pointer flex-col items-end justify-center"
             onClick={togglePasswordVisibility}
           >
             {showPassword ? (
