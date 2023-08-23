@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import { useState } from "react";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
@@ -98,6 +99,12 @@ export default function IndexLoginForm() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  const [showPassword, setShowPassword] = useState(false);
+
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
   return (
     <div className="w-full max-w-md">
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
@@ -117,20 +124,28 @@ export default function IndexLoginForm() {
           />
         </div>
 
-        <div>
+        <div className="relative">
           <Input
             label="Password"
             placeholder="**********"
             data-test-id="password"
             name={zo.fields.password()}
-            type="password"
+            type={showPassword ? "text" : "password"}
             autoComplete="new-password"
             disabled={disabled}
             inputClassName="w-full"
             error={zo.errors.password()?.message || data?.errors?.email}
           />
-          <EyeIcon />
-          <EyeOffIcon />
+          <span
+            className="absolute bottom-2  right-2 flex h-7 w-7 cursor-pointer flex-col items-end justify-center"
+            onClick={togglePasswordVisibility}
+          >
+            {showPassword ? (
+              <EyeOffIcon className="h-full w-full" />
+            ) : (
+              <EyeIcon className="h-full w-full" />
+            )}
+          </span>
         </div>
 
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />

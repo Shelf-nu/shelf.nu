@@ -878,8 +878,8 @@ export const ArrowLeftIcon = (props: SVGProps<SVGSVGElement>) => (
 
 export const EyeIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    width=" 10%"
-    height=" 10%"
+    width=" 8%"
+    height=" 8%"
     viewBox="0 0 24 24"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
@@ -904,8 +904,8 @@ export const EyeIcon = (props: SVGProps<SVGSVGElement>) => (
 
 export const EyeOffIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    width=" 5%"
-    height=" 5%"
+    width=" 8%"
+    height=" 8%"
     viewBox="0 0 24 24"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
