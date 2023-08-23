@@ -6,7 +6,7 @@
 ✨ Open Source Asset Management Infrastructure for everyone. ✨
 </h4>
 <p align="center" >
-Shelf 🏷️ Asset Management infrastructure for absolutely everyone (open source).<br/> 
+Shelf 🏷️ Asset Management infrastructure for absolutely everyone (open source).<br/> <br/>
 Shelf is a simple and visual asset management and location tracking system that allows people to track their physical assets with ease.
 </p>
 
