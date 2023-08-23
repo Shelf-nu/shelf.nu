@@ -84,8 +84,7 @@ export default function QRPreview() {
             ref={imagePreviewRef}
             qr={data.qr.src}
             size={data.qr.size}
-            logo="/images/shelf-symbol.png"
-            // logo="/images/shelf-icon-28x.png"
+            logo="/images/shelf-icon-28x.png"
           />
         </figure>
         <div className="text-center">
