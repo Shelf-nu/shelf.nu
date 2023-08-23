@@ -33,15 +33,16 @@ const CANVAS_DIMENSIONS_MAP = {
   medium: 113.38,
   large: 151.18,
 };
-const QR_DIMENSIONS_MAP = {
-  cable: 0,
-  small: 52.91,
-  medium: 79.37,
-  large: 105.82,
-};
+const QR_DIMENSIONS_MAP = Object.keys(CANVAS_DIMENSIONS_MAP).reduce(
+  (acc, size) => ({
+    [size]: CANVAS_DIMENSIONS_MAP[size as never] * 0.95,
+    ...acc,
+  }),
+  {} as typeof CANVAS_DIMENSIONS_MAP
+);
 
 const drawQr = (ctx: CanvasRenderingContext2D, state: ImagePreviewState) => {
-  const negativeMargin = -10;
+  const negativeMargin = -1 * ctx.canvas.width * 0.05;
   const { logoSize, fontSize, qrSize, qrImg, logoImg } = state;
 
   if (!qrImg) return;
@@ -56,7 +57,11 @@ const drawQr = (ctx: CanvasRenderingContext2D, state: ImagePreviewState) => {
   }
 
   const ctxHalfWidth = ctx.canvas.width / 2;
-  ctx.drawImage(qrImg, ctxHalfWidth - qrSize / 2, 0, qrSize, qrSize);
+  ctx.roundRect(ctxHalfWidth - qrSize / 2, ctxHalfWidth - qrSize / 2, qrSize, qrSize, 4);
+  ctx.save();
+  ctx.clip();
+  ctx.drawImage(qrImg, ctxHalfWidth - qrSize / 2, ctxHalfWidth - qrSize / 2, qrSize, qrSize);
+  ctx.restore();
 
   ctx.fillStyle = "#9ba5b5";
   ctx.font = `${fontSize}px Inter`;
