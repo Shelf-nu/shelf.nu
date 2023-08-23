@@ -40,61 +40,47 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
           </span>
         </Button>
       </DropdownMenuTrigger>
-      <figure>
-        {open && (
-          <style
-            dangerouslySetInnerHTML={{
-              __html: `@media (max-width: 640px) {
+
+      {open && (
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `@media (max-width: 640px) {
                 [data-radix-popper-content-wrapper] {
                   transform: none !important;
               }
           }`,
-            }}
-          ></style>
-        )}
-        <DropdownMenuContent
-          asChild
-          align="end"
-          className="order actions-dropdown static w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]"
-        >
-          <div className="order fixed bottom-0 left-0 w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]">
-            <DropdownMenuItem className="border-b px-6 py-3">
-              {!assetIsAvailable ? (
-                <Button
-                  to="release-custody"
-                  role="link"
-                  variant="link"
-                  className="justify-start whitespace-nowrap
-                text-gray-700 hover:text-gray-700"
-                  width="full"
-                >
-                  <span
-                    className="flex items-center gap-1"
-                    onClick={() => setOpen(false)}
-                  >
-                    <UserXIcon /> Release Custody
-                  </span>
-                </Button>
-              ) : (
-                <Button
-                  to="give-custody"
-                  role="link"
-                  variant="link"
-                  className="justify-start text-gray-700 hover:text-gray-700"
-                  width="full"
-                >
-                  <span
-                    className="flex items-center gap-2"
-                    onClick={() => setOpen(false)}
-                  >
-                    <UserIcon /> Give Custody
-                  </span>
-                </Button>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuItem className="px-6 py-3">
+          }} // is a hack to fix the dropdown menu not being in the right place on mobile
+          // can not target [data-radix-popper-content-wrapper] for this file only with css
+          // so we have to use dangerouslySetInnerHTML
+          // PR : https://github.com/Shelf-nu/shelf.nu/pull/304
+        ></style>
+      )}
+      <DropdownMenuContent
+        asChild
+        align="end"
+        className="order actions-dropdown static w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]"
+      >
+        <div className="order fixed bottom-0 left-0 w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]">
+          <DropdownMenuItem className="border-b px-6 py-3">
+            {!assetIsAvailable ? (
               <Button
-                to="edit"
+                to="release-custody"
+                role="link"
+                variant="link"
+                className="justify-start whitespace-nowrap
+                text-gray-700 hover:text-gray-700"
+                width="full"
+              >
+                <span
+                  className="flex items-center gap-1"
+                  onClick={() => setOpen(false)}
+                >
+                  <UserXIcon /> Release Custody
+                </span>
+              </Button>
+            ) : (
+              <Button
+                to="give-custody"
                 role="link"
                 variant="link"
                 className="justify-start text-gray-700 hover:text-gray-700"
@@ -104,27 +90,43 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
                   className="flex items-center gap-2"
                   onClick={() => setOpen(false)}
                 >
-                  <PenIcon /> Edit
+                  <UserIcon /> Give Custody
                 </span>
               </Button>
-            </DropdownMenuItem>
-            <div onClick={() => setOpen(false)}>
-              <DeleteAsset asset={asset} />
-            </div>
-            <DropdownMenuItem className="border-t px-6 py-3 md:hidden">
-              <Button
-                role="button"
-                variant="secondary"
-                className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                width="full"
+            )}
+          </DropdownMenuItem>
+          <DropdownMenuItem className="px-6 py-3">
+            <Button
+              to="edit"
+              role="link"
+              variant="link"
+              className="justify-start text-gray-700 hover:text-gray-700"
+              width="full"
+            >
+              <span
+                className="flex items-center gap-2"
                 onClick={() => setOpen(false)}
               >
-                Close
-              </Button>
-            </DropdownMenuItem>
+                <PenIcon /> Edit
+              </span>
+            </Button>
+          </DropdownMenuItem>
+          <div onClick={() => setOpen(false)}>
+            <DeleteAsset asset={asset} />
           </div>
-        </DropdownMenuContent>
-      </figure>
+          <DropdownMenuItem className="border-t px-6 py-3 md:hidden">
+            <Button
+              role="button"
+              variant="secondary"
+              className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+              width="full"
+              onClick={() => setOpen(false)}
+            >
+              Close
+            </Button>
+          </DropdownMenuItem>
+        </div>
+      </DropdownMenuContent>
     </DropdownMenu>
   );
 };
