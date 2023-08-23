@@ -16,11 +16,11 @@ With Shelf, you can take a picture of any item you own and store it in your own 
 
 <div align="center">
 
-[![Shelf.nu Discord](https://dcbadge.vercel.app/api/server/fjBugmvzZP)](https://discord.gg/BZ6ATKK2)
+[![Shelf.nu Discord](https://dcbadge.vercel.app/api/server/BZ6ATKK2)](https://discord.gg/BZ6ATKK2)
 
 <p align="center">
     <a href="https://www.shelf.nu/"><b>Website</b></a> •
-    <a href=""><b>Documentation</b></a> •
+    <a href="https://github.com/Shelf-nu/shelf.nu"><b>Documentation</b></a> •
     <a href="https://discord.gg/BZ6ATKK2"><b>Chat with us</b></a> • 
     <a href="https://twitter.com/ShelfQR"><b>Twitter</b></a>
 </p>
