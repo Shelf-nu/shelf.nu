@@ -324,7 +324,5 @@ To do that navigate to Authentication > URL configiration and add the folowing v
 - https://live-domain.com/reset-password
 
 
-[![Last commit](https://img.shields.io/github/last-commit/rowyio/rowy/rc)](https://github.com/rowyio/rowy/commits/rc)
-[![GitHub stars](https://img.shields.io/github/stars/rowyio/rowy)](https://github.com/rowyio/rowy/stargazers/)
 
 </div>
