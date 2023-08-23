@@ -12,6 +12,7 @@ import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
 import Input from "~/components/forms/input";
+import { EyeIcon, EyeOffIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -128,6 +129,8 @@ export default function IndexLoginForm() {
             inputClassName="w-full"
             error={zo.errors.password()?.message || data?.errors?.email}
           />
+          <EyeIcon />
+          <EyeOffIcon />
         </div>
 
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
