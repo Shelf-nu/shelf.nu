@@ -10,7 +10,7 @@ import { redirect, json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
-import { ActionsDopdown } from "~/components/assets/actions-dropdown";
+import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
@@ -178,7 +178,6 @@ export default function AssetDetailsPage() {
         >
           View QR code
         </Button>
-
         <ActionsDopdown asset={asset} />
       </Header>
 
