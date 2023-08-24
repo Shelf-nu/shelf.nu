@@ -27,8 +27,17 @@ export const loader = async ({ request }: LoaderArgs) => {
       /** Skip keys that are not needed. These are foreign keys for the related entries */
       if (keysToSkip.includes(key)) return;
 
-      /** If the value is null, push an empty string */
-      if (value === null) return toExport.push("");
+      /** If the value is null, push an empty string
+       * We have a bit of a special case, for the relations that are objects, we need to push an empty object instead of an empty string.
+       * This way we prevent the import from failing when importing the file again due to "Invalid JSON"
+       * This needs to be done for all one-to-one relations
+       */
+      if (value === null) {
+        if (["custody", "location", "category"].includes(key)) {
+          return toExport.push("{}");
+        }
+        return toExport.push("");
+      }
 
       /** Special handling for category and location */
       switch (key) {
@@ -37,11 +46,19 @@ export const loader = async ({ request }: LoaderArgs) => {
         case "notes":
         case "tags":
         case "qrCodes":
-          toExport.push(JSON.stringify(value));
-          break;
         case "custody":
+        case "organization":
+        case "reports":
           toExport.push(
-            (value as { custodian: { name: string } }).custodian.name
+            JSON.stringify(value, (_key, value) => {
+              /** Custom replacer function.
+               * We do this to ensure that in the result we have emtpy strings instead of null values
+               */
+              if (value === null) {
+                return "";
+              }
+              return value;
+            })
           );
           break;
         default:

@@ -1,6 +1,7 @@
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 import { useFetcher } from "@remix-run/react";
+import { isFormProcessing } from "~/utils";
 import Input from "../forms/input";
 import { Button } from "../shared";
 import {
@@ -13,8 +14,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../shared/modal";
-import { isFormProcessing } from "~/utils";
-import { M } from "msw/lib/glossary-de6278a9";
 
 export const ImportBackup = () => (
   <>
@@ -30,15 +29,11 @@ export const ImportBackup = () => (
       <li>Assets will be imported with all their relationships</li>
       <li>
         Assets will not be merged with existing ones. A asset with a new ID will
-        be created for each one
+        be created for each row in your CSV export
       </li>
       <li>
         If you have modified the exported file, there is the possibility of the
         import failing due to broken data
-      </li>
-      <li>
-        <b>IMPORTANT:</b> The first row of the sheet will be ignored. Use it to
-        describe the columns.
       </li>
     </ul>
 
@@ -105,6 +100,8 @@ const FileForm = ({ intent }: { intent: string }) => {
       setSelectedFile(selectedFile);
     }
   };
+
+  console.log(fetcher.data);
 
   return (
     <fetcher.Form

@@ -1,8 +1,7 @@
-import type { Asset } from "@prisma/client";
 import { OrganizationType } from "@prisma/client";
 import type { ActionArgs, V2_MetaFunction, LoaderArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { Link, useActionData } from "@remix-run/react";
+import { json } from "@remix-run/node";
+import { Link } from "@remix-run/react";
 import {
   ImportBackup,
   ImportContent,
@@ -15,11 +14,18 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { db } from "~/database";
-import { createAssetsFromContentImport } from "~/modules/asset";
+import {
+  createAssetsFromBackupImport,
+  createAssetsFromContentImport,
+} from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { assetUserCanImportAssets, getUserTierLimit } from "~/modules/tier";
+import { assetUserCanImportAssets } from "~/modules/tier";
 import { csvDataFromRequest } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import {
+  extractCSVDataFromBackupImport,
+  extractCSVDataFromContentImport,
+} from "~/utils/import.server";
 
 export const action = async ({ request }: ActionArgs) => {
   const { userId } = await requireAuthSession(request);
@@ -60,34 +66,23 @@ export const action = async ({ request }: ActionArgs) => {
 
     switch (intent) {
       case "backup":
-        break;
-      case "content":
-        const keys = csvData[0] as string[];
-        const values = csvData.slice(1) as string[][];
-        const data = values.map((entry) =>
-          Object.fromEntries(
-            entry.map((value, index) => {
-              switch (keys[index]) {
-                case "tags":
-                  return [
-                    keys[index],
-                    value.split(",").map((tag) => tag.trim()),
-                  ];
-                default:
-                  return [keys[index], value];
-              }
-            })
-          )
-        );
-
-        await createAssetsFromContentImport({
-          data,
+        const backupData = extractCSVDataFromBackupImport(csvData);
+        await createAssetsFromBackupImport({
+          data: backupData,
           userId,
           organizationId: personalOrg?.id || "",
         });
-    }
+        return null;
+      case "content":
+        const contentData = extractCSVDataFromContentImport(csvData);
 
-    return json({ success: true });
+        await createAssetsFromContentImport({
+          data: contentData,
+          userId,
+          organizationId: personalOrg?.id || "",
+        });
+        return json({ success: true });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid CSV file";
 
@@ -115,7 +110,6 @@ export const handle = {
 };
 
 export default function AssetsImport() {
-  const data = useActionData<typeof action>();
   return (
     <div className="h-full">
       <Header />

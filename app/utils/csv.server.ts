@@ -13,8 +13,10 @@ export const parseCsv = (csvData: string) => {
   return new Promise((resolve, reject) => {
     const parser = parse({
       delimiter: ";", // Set delimiter to ; as this allows for commas in the data
-      quote: '"', // Set quote to " as this allows for commas in the data
+      // quote: '"', // Set quote to " as this allows for commas in the data
       escape: "\\", // Set escape to \ as this allows for commas in the data
+      ltrim: true, // Trim whitespace from left side of cell
+      relax_quotes: true, // Allow quotes to be ignored if the character inside the quotes is not a quote
     })
       .on("data", (data) => {
         // Process each row of data as it is parsed

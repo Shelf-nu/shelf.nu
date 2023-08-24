@@ -568,55 +568,20 @@ export const fetchAssetsForExport = async ({
       userId,
     },
     include: {
-      category: {
-        select: {
-          name: true,
-          description: true,
-          color: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      },
-      location: {
-        select: {
-          name: true,
-          description: true,
-          address: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      },
-      notes: {
-        select: {
-          content: true,
-          type: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      },
+      category: true,
+      location: true,
+      notes: true,
+      organization: true,
+      reports: true,
       custody: {
-        select: {
-          custodian: {
-            select: {
-              name: true,
-            },
-          },
+        include: {
+          custodian: true,
         },
       },
-      tags: {
-        select: {
-          name: true,
-          description: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      },
+      tags: true,
       qrCodes: {
-        select: {
-          version: true,
-          errorCorrection: true,
-          createdAt: true,
-          updatedAt: true,
+        include: {
+          scans: true,
         },
       },
     },
@@ -680,3 +645,58 @@ export interface CreateAssetFromContentImportPayload
   location?: string;
   custodian?: string;
 }
+
+export const createAssetsFromBackupImport = async ({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromBackupImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) => {
+  console.log(data);
+};
+
+export interface CreateAssetFromBackupImportPayload
+  extends Record<string, any> {
+  id: string;
+  title: string;
+  description?: string;
+  category?: string;
+  tags: {
+    name: string;
+  }[];
+  location?: {
+    name: string;
+    description?: string;
+    address?: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+}
+
+// id: "cllovk4390002omoml1be6cha";
+// title: "AMD Radeon RX 6800 XT";
+// description: "GPU from my new home PC.";
+// status: "IN_CUSTODY";
+// createdAt: "Thu Aug 24 2023 11:01:09 GMT+0300 (Eastern European Summer Time)";
+// updatedAt: "Thu Aug 24 2023 11:01:09 GMT+0300 (Eastern European Summer Time)";
+// category: {
+//   name: "PC Components";
+//   description: "";
+//   color: "#9c5301";
+//   createdAt: "2023-08-21T15:46:06.172Z";
+//   updatedAt: "2023-08-21T15:46:06.172Z";
+// };
+// location: {
+//   name: "Storage room 2";
+//   description: "";
+//   address: "";
+//   createdAt: "2023-08-21T15:46:06.542Z";
+//   updatedAt: "2023-08-21T15:46:06.542Z";
+// };
+// custody: "Some guy";
+// tags: [[Object], [Object]];
+// qrCodes: [[Object]];
+// }
