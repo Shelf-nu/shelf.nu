@@ -5,9 +5,7 @@ We have decided to give RemixJS a try.
 
 For the purpose of shipping asap, we have opted into using a template: https://github.com/rphlmr/supa-fly-stack
 
-### Getting started with Shelf
 
-# Remix Supa Fly Stack
 
 > This Readme will be re-written soon
 
@@ -32,7 +30,7 @@ npx create-remix --template rphlmr/supa-fly-stack
 - Linting with [ESLint](https://eslint.org)
 - Static Types with [TypeScript](https://typescriptlang.org)
 
-Not a fan of bits of the stack? Fork it, change it, and use `npx create-remix --template your/repo`! Make it your own.
+
 
 ## Development
 

@@ -24,7 +24,7 @@ With Shelf, you can take a picture of any item you own and store it in your own 
 
 <p align="center">
     <a href="https://www.shelf.nu/?ref=github" target="_blank"><b>Website</b></a> •
-    <a href="https://github.com/Shelf-nu/shelf.nu" target="_blank"><b>Documentation</b></a> •
+    <a href="https://github.com/Shelf-nu/shelf.nu/docs" target="_blank"><b>Documentation</b></a> •
     <a href="https://discord.gg/vUz8cVsV" target="_blank"><b>Chat with us</b></a> • 
     <a href="https://twitter.com/ShelfQR/?ref=github" target="_blank"><b>Twitter</b></a>
 </p>
