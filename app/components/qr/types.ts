@@ -5,6 +5,7 @@ export interface ImagePreviewProps {
 }
 
 export interface ImagePreviewState {
+  size: "cable" | "small" | "medium" | "large";
   fontSize: number;
   canvasSize: number;
   qrSize: number;
