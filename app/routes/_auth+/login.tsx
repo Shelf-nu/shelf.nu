@@ -12,6 +12,7 @@ import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
 import Input from "~/components/forms/input";
+import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -115,20 +116,16 @@ export default function IndexLoginForm() {
             error={zo.errors.email()?.message}
           />
         </div>
-
-        <div>
-          <Input
-            label="Password"
-            placeholder="**********"
-            data-test-id="password"
-            name={zo.fields.password()}
-            type="password"
-            autoComplete="new-password"
-            disabled={disabled}
-            inputClassName="w-full"
-            error={zo.errors.password()?.message || data?.errors?.email}
-          />
-        </div>
+        <PasswordInput
+          label="Password"
+          placeholder="**********"
+          data-test-id="password"
+          name={zo.fields.password()}
+          autoComplete="new-password"
+          disabled={disabled}
+          inputClassName="w-full"
+          error={zo.errors.password()?.message || data?.errors?.email}
+        />
 
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
         <Button
