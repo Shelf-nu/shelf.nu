@@ -16,6 +16,8 @@ Shelf is a simple and visual asset management and location tracking system that 
 
 With Shelf, you can take a picture of any item you own and store it in your own database. From there, you can generate a printable code (QR) that you can tag onto the item, making it easy to identify and locate in the future. Shelf has a handy code printing area where you can add as many QR codes as you can on an A4 sticker paper sheet. You can also add detailed information about the item, including its purchase date, purchase price, warranty information, and more.
 
+
+
 <div align="left">
 
 
@@ -26,6 +28,13 @@ With Shelf, you can take a picture of any item you own and store it in your own 
     <a href="https://discord.gg/vUz8cVsV"><b>Chat with us</b></a> • 
     <a href="https://twitter.com/ShelfQR/?ref=github"><b>Twitter</b></a>
 </p>
+
+<div align = "center">
+    
+[![Shelf.nu Discord](https://dcbadge.vercel.app/api/server/BZ6ATKK2)](https://discord.gg/BZ6ATKK2)
+
+</div>
+
 
 ### Once your assets are online, you will be able to:
 
