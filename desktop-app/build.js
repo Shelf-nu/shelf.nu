@@ -57,6 +57,8 @@ async function buildWindows() {
       { env: { NATIVEFIER_APPS_DIR } }
     );
     await electronInstaller.createWindowsInstaller({
+      title: 'Shelf',
+      name:'Shelf',
       appDirectory: "./dist/Shelf-win32-x64",
       outputDirectory: "./binaries",
       authors: "Shelf",
