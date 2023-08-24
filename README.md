@@ -40,3 +40,8 @@ With Shelf, you can take a picture of any item you own and store it in your own 
 - What gear does X have currently?
 - Which assets did we appoint to our team member abroad?
 - What do we have in our storage facility now?
+
+
+### Looking for contributing in Shelf?
+
+- check out our [contributing guidelines](https://github.com/hrutik7/shelf.nu/blob/docs_improvement/docs/get-started.md)

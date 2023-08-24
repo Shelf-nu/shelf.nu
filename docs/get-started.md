@@ -1,10 +1,4 @@
 
-## Shelf's vision and ambition
-
-To enable and facilitate the tagging of 1 Billion assets by 2023. Shelf therefore allows users to create unlimited assets on their environments. We will fund the growth and further development of the tool by releasing premium features. However, Shelf core will be forever free for individuals.
-
----
-
 ### Shelf's current stack
 
 We have decided to give RemixJS a try.
