@@ -23,5 +23,5 @@ test-results/
 /playwright-report/
 /playwright/.cache/
 /playwright-report/*
-desktop-app/dist
-desktop-app/binaries
+desktop-app/shelf-installer
+desktop-app/portable

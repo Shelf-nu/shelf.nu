@@ -1,13 +1,18 @@
 const createDMG = require("electron-installer-dmg");
 const { signAsync } = require("@electron/osx-sign");
 const electronInstaller = require("electron-winstaller");
-const {execa} = require("@esm2cjs/execa");
+const { execa } = require("@esm2cjs/execa");
+const fs = require('fs');
+const path = require('path');
 
-const NATIVEFIER_APPS_DIR = "./dist";
 const URL = "https://app.shelf.nu";
-const NAME = "Shelf";
-const ICON_MAC = "../public/images/shelf-symbol-desktop.png";
-const ICON_WINDOWS = "../public/images/shelf-symbol-desktop.ico";
+const APP_NAME = "Shelf";
+const APP_ICON = "../public/images/shelf-symbol-desktop";
+const NATIVEFIER_APPS_DIR = "./portable";
+const OUT_DIR_MAC = `./${NATIVEFIER_APPS_DIR}/Shelf-darwin-universal/Shelf.app`
+const OUT_DIR_WINDOWS = `./${NATIVEFIER_APPS_DIR}/Shelf-win32-x64`
+const INSTALL_DIR = "./shelf-installer"
+
 
 async function buildMac() {
   try {
@@ -15,8 +20,8 @@ async function buildMac() {
       "nativefier",
       [
         URL,
-        "--name",NAME, 
-        "--icon", ICON_MAC,
+        "--name", APP_NAME,
+        "--icon", `${APP_ICON}.png`,
         "--platform", "osx",
         "--arch", "universal",
       ],
@@ -25,18 +30,18 @@ async function buildMac() {
     console.log("Mac build successful");
 
     await signAsync({
-      app: "./dist/Shelf-darwin-universal/Shelf.app",
+      app: OUT_DIR_MAC,
       platform: "darwin",
       type: "distribution",
     });
     console.log("Signed macOS App successfully");
 
     await createDMG({
-      appPath: "./dist/Shelf-darwin-universal/Shelf.app",
-      name: "Shelf",
+      appPath: OUT_DIR_MAC,
+      name: APP_NAME,
       icon: "../public/images/shelf-symbol-desktop.png",
       overwrite: true,
-      out: "./binaries",
+      out: INSTALL_DIR,
     });
     console.log("Succesfully packaged Mac App");
   } catch (error) {
@@ -49,20 +54,20 @@ async function buildWindows() {
     await execa(
       "nativefier",
       [
-        URL, 
-        "--name", NAME, 
-        "--icon", ICON_WINDOWS, 
+        URL,
+        "--name", APP_NAME,
+        "--icon", `${APP_ICON}.ico`,
         "--platform", "windows"
       ],
       { env: { NATIVEFIER_APPS_DIR } }
     );
     await electronInstaller.createWindowsInstaller({
-      title: 'Shelf',
-      name:'Shelf',
-      appDirectory: "./dist/Shelf-win32-x64",
-      outputDirectory: "./binaries",
-      authors: "Shelf",
-      exe: "Shelf.exe",
+      title: APP_NAME,
+      name: APP_NAME,
+      appDirectory: OUT_DIR_WINDOWS,
+      outputDirectory: INSTALL_DIR,
+      authors: APP_NAME,
+      exe: `${APP_NAME}.exe`,
     });
     console.log("Windows build successful");
   } catch (error) {
@@ -71,6 +76,18 @@ async function buildWindows() {
 };
 
 (async () => {
-  await buildMac()
-  await buildWindows()
+  if (process.argv.includes('--mac')) return await buildMac()
+  if (process.argv.includes('--windows')) {
+    await buildWindows();
+    fs.readdir(INSTALL_DIR, (err, files) => {
+      if (err) throw err;
+      for (const file of files) {
+        if(path.extname(file) !== '.exe') {
+          fs.unlink(path.join(INSTALL_DIR, file), err => {
+            if (err) throw err;
+          });
+        }
+      }
+    });
+  } 
 })();
