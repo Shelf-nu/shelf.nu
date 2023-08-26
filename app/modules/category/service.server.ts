@@ -81,3 +81,37 @@ export async function deleteCategory({
 export async function getAllCategories({ userId }: { userId: User["id"] }) {
   return await db.category.findMany({ where: { userId } });
 }
+
+export async function getCategoryById({ id }: Pick<Category, "id">){
+  return db.category.findUnique({
+    where: { 
+      id
+     }
+  })
+}
+
+export async function updateCategoryById({
+  id,
+  name,
+  description,
+  color,
+  userId,
+}: Pick<Category, "id" | "description" | "name" | "color"> & {
+  userId: User["id"];
+}) {
+  return db.category.update({
+    where: {
+      id
+    },
+    data: {
+      name,
+      description,
+      color,
+      user: {
+        connect: {
+          id: userId,
+        },
+      },
+    },
+  });
+}
