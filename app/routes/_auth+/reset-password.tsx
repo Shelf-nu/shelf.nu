@@ -5,8 +5,8 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
-import Input from "~/components/forms/input";
 
+import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { supabaseClient } from "~/integrations/supabase";
 
@@ -138,28 +138,24 @@ export default function ResetPassword() {
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full max-w-md px-8">
         <Form ref={zo.ref} method="post" className="space-y-6" replace>
-          <div>
-            <Input
-              label="Password"
-              data-test-id="password"
-              name={zo.fields.password()}
-              type="password"
-              autoComplete="new-password"
-              disabled={disabled}
-              error={zo.errors.password()?.message}
-            />
-          </div>
-          <div>
-            <Input
-              label="Confirm password"
-              data-test-id="confirmPassword"
-              name={zo.fields.confirmPassword()}
-              type="password"
-              autoComplete="new-password"
-              disabled={disabled}
-              error={zo.errors.confirmPassword()?.message}
-            />
-          </div>
+          <PasswordInput
+            label="Password"
+            data-test-id="password"
+            name={zo.fields.password()}
+            type="password"
+            autoComplete="new-password"
+            disabled={disabled}
+            error={zo.errors.password()?.message}
+          />
+          <PasswordInput
+            label="Confirm password"
+            data-test-id="confirmPassword"
+            name={zo.fields.confirmPassword()}
+            type="password"
+            autoComplete="new-password"
+            disabled={disabled}
+            error={zo.errors.confirmPassword()?.message}
+          />
 
           <input
             type="hidden"

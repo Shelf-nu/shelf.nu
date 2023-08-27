@@ -1,5 +1,3 @@
-
-
 # Shelf.nu  
 <a href="https://www.shelf.nu/" target="_blank">
 <img width="100%" src="https://cdn.discordapp.com/attachments/1143882281069592658/1143949082017153044/Frame_102.jpg" />
