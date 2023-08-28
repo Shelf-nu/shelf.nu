@@ -50,6 +50,7 @@ model User {
   locations     Location[]
   images        Image[]
   organizations Organization[]
+  customFields  CustomField[]
 
   @@unique([email, username])
 }
@@ -76,11 +77,12 @@ model Asset {
   location       Location?     @relation(fields: [locationId], references: [id])
   locationId     String?
 
-  custody Custody?
-  notes   Note[]
-  qrCodes Qr[]
-  reports ReportFound[]
-  tags    Tag[]
+  custody      Custody?
+  notes        Note[]
+  qrCodes      Qr[]
+  reports      ReportFound[]
+  tags         Tag[]
+  customFields AssetCustomFieldValue[]
 }
 
 enum AssetStatus {
@@ -276,8 +278,9 @@ model Organization {
   members TeamMember[]
   assets  Asset[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  customFields CustomField[]
 }
 
 enum OrganizationType {
@@ -295,21 +298,63 @@ enum TierId {
 
 // Tiers correspond to Stripe products
 model Tier {
-  id            TierId   @id // Used to create Stripe product ID
-  name          String // Name coming from Stripe product
-  subscribers   User[]
-  tierLimitId   TierId?         @unique
-  tierLimit     TierLimit?      @relation(fields: [tierLimitId], references: [id])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          TierId     @id // Used to create Stripe product ID
+  name        String // Name coming from Stripe product
+  subscribers User[]
+  tierLimitId TierId?    @unique
+  tierLimit   TierLimit? @relation(fields: [tierLimitId], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 }
 
-
 model TierLimit {
-  id               TierId   @id
-  tier             Tier?
-  canImportAssets  Boolean  @default(false)
-  canExportAssets  Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              TierId   @id
+  tier            Tier?
+  canImportAssets Boolean  @default(false)
+  canExportAssets Boolean  @default(false)
+  maxCustomFields Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model CustomField {
+  id       String  @id @unique @default(cuid())
+  name     String
+  helpText String?
+  required Boolean @default(false)
+
+  type CustomFieldType @default(TEXT)
+
+  // Relationships
+  organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
+
+  createdBy User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId    String
+
+  // Datetime
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+  assetCustomFieldsValues AssetCustomFieldValue[]
+}
+
+enum CustomFieldType {
+  TEXT
+}
+
+model AssetCustomFieldValue {
+  id String @id @default(cuid())
+
+  value String
+
+  // Relationships
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
+
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  customFieldId String
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
