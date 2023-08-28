@@ -126,3 +126,28 @@ export async function createCategoriesIfNotExists({
 
   return Object.fromEntries(Array.from(categories));
 }
+export async function getCategory({ id }: Pick<Category, "id">) {
+  return db.category.findUnique({
+    where: {
+      id,
+    },
+  });
+}
+
+export async function updateCategory({
+  id,
+  name,
+  description,
+  color,
+}: Pick<Category, "id" | "description" | "name" | "color">) {
+  return db.category.update({
+    where: {
+      id,
+    },
+    data: {
+      name,
+      description,
+      color,
+    },
+  });
+}
