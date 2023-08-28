@@ -8,3 +8,5 @@ Use either of those options depending on your prefferred os:
 or
 
 `npm run build:windows`
+
+To download the already existing apps check our our [desktop-apps](https://github.com/Shelf-nu/desktop-apps) repository
