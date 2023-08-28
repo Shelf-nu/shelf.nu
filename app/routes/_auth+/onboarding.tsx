@@ -4,6 +4,7 @@ import { Form, useLoaderData } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
+import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getUserByID, updateUser } from "~/modules/user";
@@ -128,29 +129,27 @@ export default function Onboarding() {
             inputClassName="flex-1"
           />
         </div>
-        <div>
-          <Input
-            label="Password"
-            placeholder="********"
-            data-test-id="password"
-            name={zo.fields.password()}
-            type="password"
-            autoComplete="new-password"
-            inputClassName="w-full"
-            error={zo.errors.password()?.message}
-          />
-        </div>
-        <div>
-          <Input
-            label="Confirm password"
-            data-test-id="confirmPassword"
-            placeholder="********"
-            name={zo.fields.confirmPassword()}
-            type="password"
-            autoComplete="new-password"
-            error={zo.errors.confirmPassword()?.message}
-          />
-        </div>
+
+        <PasswordInput
+          label="Password"
+          placeholder="********"
+          data-test-id="password"
+          name={zo.fields.password()}
+          type="password"
+          autoComplete="new-password"
+          inputClassName="w-full"
+          error={zo.errors.password()?.message}
+        />
+
+        <PasswordInput
+          label="Confirm password"
+          data-test-id="confirmPassword"
+          placeholder="********"
+          name={zo.fields.confirmPassword()}
+          type="password"
+          autoComplete="new-password"
+          error={zo.errors.confirmPassword()?.message}
+        />
         <div>
           <Button data-test-id="onboard" type="submit" width="full">
             Submit
