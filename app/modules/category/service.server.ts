@@ -82,7 +82,7 @@ export async function getAllCategories({ userId }: { userId: User["id"] }) {
   return await db.category.findMany({ where: { userId } });
 }
 
-export async function getCategoryById({ id }: Pick<Category, "id">){
+export async function getCategory({ id }: Pick<Category, "id">){
   return db.category.findUnique({
     where: { 
       id
@@ -90,15 +90,13 @@ export async function getCategoryById({ id }: Pick<Category, "id">){
   })
 }
 
-export async function updateCategoryById({
+export async function updateCategory({
   id,
   name,
   description,
-  color,
-  userId,
-}: Pick<Category, "id" | "description" | "name" | "color"> & {
-  userId: User["id"];
-}) {
+  color
+}: Pick<Category, "id" | "description" | "name" | "color"> 
+) {
   return db.category.update({
     where: {
       id
@@ -106,12 +104,7 @@ export async function updateCategoryById({
     data: {
       name,
       description,
-      color,
-      user: {
-        connect: {
-          id: userId,
-        },
-      },
+      color
     },
   });
 }

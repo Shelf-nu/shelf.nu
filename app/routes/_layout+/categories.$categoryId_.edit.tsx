@@ -10,7 +10,7 @@ import { useState } from 'react'
 import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { getCategoryById, updateCategoryById } from "~/modules/category";
+import { getCategory, updateCategory } from "~/modules/category";
 import { assertIsPost, isFormProcessing, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -27,7 +27,7 @@ export async function loader({ request, params }: LoaderArgs) {
   await requireAuthSession(request);
 
   const id = getRequiredParam(params, "categoryId");
-  const category = await getCategoryById({ id })
+  const category = await getCategory({ id })
 
   const colorFromServer = category?.color;
 
@@ -60,10 +60,9 @@ export async function action({ request, params }: LoaderArgs) {
     );
   }
 
-  await updateCategoryById({
+  await updateCategory({
     ...result.data,
-    id,
-    userId: authSession.userId,
+    id
   });
 
   sendNotification({
@@ -80,7 +79,7 @@ export async function action({ request, params }: LoaderArgs) {
   });
 }
 
-export default function NewCategory() {
+export default function EditCategory() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateCategoryFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
