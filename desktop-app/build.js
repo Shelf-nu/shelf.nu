@@ -1,9 +1,10 @@
-const createDMG = require("electron-installer-dmg");
-const { signAsync } = require("@electron/osx-sign");
-const electronInstaller = require("electron-winstaller");
-const { execa } = require("@esm2cjs/execa");
+/* eslint-disable no-console */
 const fs = require('fs');
 const path = require('path');
+const { signAsync } = require("@electron/osx-sign");
+const { execa } = require("@esm2cjs/execa");
+const createDMG = require("electron-installer-dmg");
+const electronInstaller = require("electron-winstaller");
 
 const URL = "https://app.shelf.nu";
 const APP_NAME = "Shelf";
@@ -66,6 +67,7 @@ async function buildWindows() {
       name: APP_NAME,
       appDirectory: OUT_DIR_WINDOWS,
       outputDirectory: INSTALL_DIR,
+      description: 'Install Shelf',
       authors: APP_NAME,
       exe: `${APP_NAME}.exe`,
     });
