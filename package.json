@@ -4,6 +4,8 @@
   "sideEffects": false,
   "scripts": {
     "build": "remix build",
+    "build:mac": "cd desktop-app/ && node build.js --mac",
+    "build:windows": "cd desktop-app/ && node build.js --windows",
     "db:prepare-migration": "prisma migrate dev --create-only --skip-seed",
     "db:deploy-migration": "prisma migrate deploy",
     "dev": "remix dev",
@@ -30,6 +32,8 @@
   },
   "prettier": {},
   "dependencies": {
+    "@electron/osx-sign": "^1.0.5",
+    "@esm2cjs/execa": "^6.1.1-cjs.1",
     "@markdoc/markdoc": "^0.2.2",
     "@metronome-sh/express": "^6.0.1",
     "@metronome-sh/react": "^6.0.1",
@@ -46,6 +50,8 @@
     "@supabase/supabase-js": "^2.26.0",
     "cookie": "^0.5.0",
     "crisp-sdk-web": "^1.0.19",
+    "electron-installer-dmg": "^4.0.0",
+    "electron-winstaller": "^5.1.0",
     "framer-motion": "^9.1.7",
     "intl-parse-accept-language": "^1.0.0",
     "isbot": "^3.6.12",
@@ -93,6 +99,7 @@
     "eslint-plugin-tailwindcss": "^3.13.0",
     "happy-dom": "^10.0.3",
     "msw": "^1.2.2",
+    "nativefier": "^51.0.1",
     "nodemailer-mock": "^2.0.1",
     "npm-run-all": "^4.1.5",
     "prettier": "2.7.1",
@@ -114,5 +121,8 @@
   "prisma": {
     "schema": "app/database/schema.prisma",
     "seed": "ts-node --require tsconfig-paths/register app/database/seed.server.ts"
+  },
+  "optionalDependencies": {
+    "appdmg": "^0.6.6"
   }
 }
