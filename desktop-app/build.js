@@ -68,7 +68,7 @@ async function buildWindows() {
       appDirectory: OUT_DIR_WINDOWS,
       outputDirectory: INSTALL_DIR,
       description: 'Install Shelf',
-      setupIcon: `resources/app/icon.ico`,
+      setupIcon: `${OUT_DIR_WINDOWS}/resources/app/icon.ico`,
       authors: APP_NAME,
       exe: `${APP_NAME}.exe`,
     });
