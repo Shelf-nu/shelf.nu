@@ -1,0 +1,16 @@
+# Contribute to Shelf
+
+We really appreciate your interest to contribute to Shelf! Any kind of contribution is highly appreciated, not only coding ☺️.
+
+**Prerequisites:** Node 16 (or newer) installed in your computer.
+
+1. Fork this [repository](https://github.com/Shelf-nu/shelf.nu) and clone your fork.
+2. Follow the [Get started guide](/docs/get-started.md) to setup your local repository.
+3. Make any changes you consider to the project.
+4. Make sure tests pass by running `npm run validate`
+6. Commit and push to your fork.
+7. Open a Pull Request detailing the changes.
+8. Request a review from someone in the shelf team
+
+
+If you get stuck on any of these steps, open an issue or join us in our [Discord](https://discord.gg/BZ6ATKK2) for some extra help.
