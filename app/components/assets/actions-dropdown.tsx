@@ -29,7 +29,7 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
 
   return (
     <DropdownMenu
-      modal={true}
+      modal={false}
       onOpenChange={(open) => setOpen(open)}
       open={open}
     >
