@@ -126,6 +126,17 @@ const CategoryItem = ({
       {item.description}
     </Td>
     <Td>
+      <Button
+        to={`${item.id}/edit`}
+        role="link"
+        aria-label={`edit category`}
+        variant="secondary"
+        size="sm"
+        className=" mx-2 text-[12px]"
+        icon={"write"}
+        title={"Edit"}
+        data-test-id="editCategoryButton"
+       />
       <DeleteCategory category={item} />
     </Td>
   </>
