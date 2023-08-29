@@ -2,3 +2,5 @@
 /public/build
 *.config*
 /test/
+/desktop-app/shelf-installer/*
+/desktop-app/portable/*
