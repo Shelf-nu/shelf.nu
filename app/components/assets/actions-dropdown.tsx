@@ -108,9 +108,14 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
               </span>
             </Button>
           </DropdownMenuItem>
-          <div>
+          <DropdownMenuItem
+            className="p-3"
+            onSelect={(e) => {
+              e.preventDefault();
+            }}
+          >
             <DeleteAsset asset={asset} />
-          </div>
+          </DropdownMenuItem>
           <DropdownMenuItem className="border-t p-3 md:hidden">
             <Button
               role="button"
