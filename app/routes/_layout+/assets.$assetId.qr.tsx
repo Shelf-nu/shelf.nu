@@ -52,21 +52,31 @@ export default function QRPreview() {
   };
 
   return asset ? (
-    <div className="">
+    <div className="w-max">
       <header className="mb-6 flex items-center justify-between leading-7">
         <h3>Download QR Code</h3>
         <Link to=".." className="text-gray-400">
           <XIcon />
         </Link>
       </header>
-      <div className="mb-4 w-full rounded-xl border border-solid p-6">
+      <div className="mb-4 border border-solid p-6">
         <div className="text-center">
           <h6 className="mb-1 font-semibold leading-5 text-gray-700">
             {asset.title}
           </h6>
         </div>
-        <figure className="qr-code flex  justify-center">
-          <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
+        <figure className="qr-code mx-auto flex h-max bg-gray-100 p-1.5">
+          <div className="bg-white">
+            <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
+            <div className="flex justify-center">
+              <span className="text-[.7rem] text-gray-600">Powered by</span>
+              <img
+                src="/images/shelf-icon-28px.png"
+                alt="Shelf Logo"
+                className="h-4 w-4"
+              />
+            </div>
+          </div>
         </figure>
         <div className="text-center">
           <span className="block text-[12px] text-gray-600">{data.qr.id}</span>
