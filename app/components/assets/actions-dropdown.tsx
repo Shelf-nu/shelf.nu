@@ -29,7 +29,7 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
 
   return (
     <DropdownMenu
-      modal={true}
+      modal={false}
       onOpenChange={(open) => setOpen(open)}
       open={open}
     >
@@ -61,7 +61,7 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
         className="order actions-dropdown static w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]"
       >
         <div className="order fixed bottom-0 left-0 w-screen rounded-lg bg-white p-0 text-right md:static md:w-[180px]">
-          <DropdownMenuItem className="border-b px-6 py-3">
+          <DropdownMenuItem className="border-b p-3">
             {!assetIsAvailable ? (
               <Button
                 to="release-custody"
@@ -95,7 +95,7 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
               </Button>
             )}
           </DropdownMenuItem>
-          <DropdownMenuItem className="px-6 py-3">
+          <DropdownMenuItem className="p-3">
             <Button
               to="edit"
               role="link"
@@ -103,18 +103,20 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
               className="justify-start text-gray-700 hover:text-gray-700"
               width="full"
             >
-              <span
-                className="flex items-center gap-2"
-                onClick={() => setOpen(false)}
-              >
+              <span className="flex items-center gap-2">
                 <PenIcon /> Edit
               </span>
             </Button>
           </DropdownMenuItem>
-          <div onClick={() => setOpen(false)}>
+          <DropdownMenuItem
+            className="p-3"
+            onSelect={(e) => {
+              e.preventDefault();
+            }}
+          >
             <DeleteAsset asset={asset} />
-          </div>
-          <DropdownMenuItem className="border-t px-6 py-3 md:hidden">
+          </DropdownMenuItem>
+          <DropdownMenuItem className="border-t p-3 md:hidden">
             <Button
               role="button"
               variant="secondary"
