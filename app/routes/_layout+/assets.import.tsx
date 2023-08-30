@@ -19,7 +19,7 @@ import {
   createAssetsFromContentImport,
 } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { assetUserCanImportAssets } from "~/modules/tier";
+import { assertUserCanImportAssets } from "~/modules/tier";
 import { csvDataFromRequest } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -29,33 +29,11 @@ import {
 
 export const action = async ({ request }: ActionArgs) => {
   const { userId } = await requireAuthSession(request);
-  await assetUserCanImportAssets({ userId });
-
-  const intent = (await request.clone().formData()).get("intent") as string;
 
   try {
-    /* Get the user by selecting the org and tierLimit */
-    const user = await db.user.findUnique({
-      where: {
-        id: userId,
-      },
-      select: {
-        organizations: {
-          select: {
-            id: true,
-            type: true,
-          },
-        },
-        tier: {
-          include: { tierLimit: true },
-        },
-      },
-    });
+    const { user } = await assertUserCanImportAssets({ userId });
 
-    if (user?.tier?.tierLimit && !user.tier.tierLimit.canImportAssets) {
-      throw new Error("You don't have the required plan to import assets.");
-    }
-
+    const intent = (await request.clone().formData()).get("intent") as string;
     const personalOrg = user?.organizations.find(
       (org) => org.type === OrganizationType.PERSONAL
     );
@@ -73,6 +51,7 @@ export const action = async ({ request }: ActionArgs) => {
           organizationId: personalOrg?.id || "",
         });
         return null;
+      // return json({ success: true });
       case "content":
         const contentData = extractCSVDataFromContentImport(csvData);
 
@@ -92,7 +71,7 @@ export const action = async ({ request }: ActionArgs) => {
 
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
-  await assetUserCanImportAssets({ userId });
+  await assertUserCanImportAssets({ userId });
 
   return json({
     header: {
