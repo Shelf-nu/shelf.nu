@@ -1,4 +1,4 @@
-import type { Qr, User } from "@prisma/client";
+import type { Asset, Qr, User } from "@prisma/client";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, Link } from "@remix-run/react";
@@ -13,8 +13,14 @@ import { isDelete } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { requireAdmin } from "~/utils/roles.server";
 
+export type QrCodeWithAsset = Qr & {
+  asset: {
+    title: Asset["title"];
+  };
+};
+
 export type UserWithQrCodes = User & {
-  qrCodes: Qr[];
+  qrCodes: QrCodeWithAsset[];
 };
 
 export const loader = async ({ request, params }: LoaderArgs) => {
@@ -25,6 +31,13 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     include: {
       qrCodes: {
         orderBy: { createdAt: "desc" },
+        include: {
+          asset: {
+            select: {
+              title: true,
+            },
+          },
+        },
       },
     },
   })) as UserWithQrCodes;
@@ -138,6 +151,9 @@ export default function Area51UserPage() {
                 Asset id
               </th>
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                Asset name
+              </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 Created At
               </th>
             </tr>
@@ -157,7 +173,8 @@ export default function Area51UserPage() {
                     {qrCode.id}
                   </Link>
                 </Td>
-                <Td>{qrCode.assetId ? qrCode.assetId : "Orphaned"}</Td>
+                <Td>{qrCode?.assetId || "Orphaned"}</Td>
+                <Td>{qrCode?.asset?.title || "Orphaned"}</Td>
                 <Td>{qrCode.createdAt}</Td>
               </Tr>
             ))}
