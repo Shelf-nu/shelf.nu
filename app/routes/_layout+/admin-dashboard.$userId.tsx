@@ -71,13 +71,6 @@ export default function Area51UserPage() {
           <h1>User: {user?.email}</h1>
           <div className="flex gap-3">
             <DeleteUser user={user} />
-            <Button
-              to={`/api/${user?.id}/orphaned-codes.zip`}
-              reloadDocument
-              className="whitespace-nowrap"
-            >
-              Print orphaned codes
-            </Button>
           </div>
         </div>
         <ul className="mt-5">
@@ -98,19 +91,41 @@ export default function Area51UserPage() {
             <h2>QR Codes</h2>
             <span>{user?.qrCodes.length} total codes</span>
           </div>
-          <Form method="post">
-            <input
-              type="number"
-              max={1000}
-              min={1}
-              name="amount"
-              required
-              defaultValue={10}
-            />
-            <Button type="submit" to={""}>
-              Generate Orphaned QR codes
-            </Button>
-          </Form>
+          <div className="flex flex-col justify-end gap-3">
+            <Form method="post">
+              <input
+                type="number"
+                max={1000}
+                min={1}
+                name="amount"
+                required
+                defaultValue={10}
+              />
+              <Button type="submit" to={""} variant="secondary">
+                Generate Orphaned QR codes
+              </Button>
+            </Form>
+            <div className="flex justify-end gap-3">
+              <Button
+                to={`/api/${user?.id}/qr-codes.zip?${new URLSearchParams({
+                  orphaned: "true",
+                })}`}
+                reloadDocument
+                className="whitespace-nowrap"
+                variant="secondary"
+              >
+                Print orphaned codes
+              </Button>
+              <Button
+                to={`/api/${user?.id}/qr-codes.zip`}
+                reloadDocument
+                className="whitespace-nowrap"
+                variant="secondary"
+              >
+                Print non-orphaned codes
+              </Button>
+            </div>
+          </div>
         </div>
         <Table className="mt-5">
           <thead className="bg-gray-100">
