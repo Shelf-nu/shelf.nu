@@ -571,7 +571,6 @@ export const fetchAssetsForExport = async ({
       category: true,
       location: true,
       notes: true,
-      organization: true,
       reports: true,
       custody: {
         include: {
@@ -579,11 +578,7 @@ export const fetchAssetsForExport = async ({
         },
       },
       tags: true,
-      qrCodes: {
-        include: {
-          scans: true,
-        },
-      },
+      qrCodes: true,
     },
   });
 
@@ -655,7 +650,115 @@ export const createAssetsFromBackupImport = async ({
   userId: User["id"];
   organizationId: Organization["id"];
 }) => {
-  console.log(data);
+  // console.log(data);
+
+  data.map(async (asset) => {
+    const d = {
+      data: {
+        title: asset.title,
+        description: asset.description || null,
+        mainImage: asset.mainImage || null,
+        mainImageExpiration: oneDayFromNow(),
+        userId,
+        organizationId,
+        status: asset.status,
+        createdAt: new Date(asset.createdAt),
+        updatedAt: new Date(asset.updatedAt),
+      },
+    };
+
+    /** Category */
+    if (asset.category && Object.keys(asset?.category).length > 0) {
+      const category = asset.category as Category;
+
+      const existingCat = await db.category.findFirst({
+        where: {
+          userId,
+          name: category.name,
+        },
+      });
+
+      /** If it doesnt exist, create a new one */
+      if (!existingCat) {
+        const newCat = await db.category.create({
+          data: {
+            name: category.name,
+            description: category.description || "",
+            color: category.color,
+            userId,
+            createdAt: new Date(category.createdAt),
+            updatedAt: new Date(category.updatedAt),
+          },
+        });
+        /** Add it to the data for creating the asset */
+        Object.assign(d.data, {
+          categoryId: newCat.id,
+        });
+      } else {
+        /** Add it to the data for creating the asset */
+        Object.assign(d.data, {
+          categoryId: existingCat.id,
+        });
+      }
+    }
+
+    /** Location */
+    if (asset.location && Object.keys(asset?.location).length > 0) {
+      const location = asset.location as Location;
+
+      const existingLoc = await db.location.findFirst({
+        where: {
+          userId,
+          name: location.name,
+        },
+      });
+
+      /** If it doesnt exist, create a new one */
+      if (!existingLoc) {
+        const newLoc = await db.location.create({
+          data: {
+            name: location.name,
+            description: location.description || "",
+            address: location.address || "",
+            userId,
+            createdAt: new Date(location.createdAt),
+            updatedAt: new Date(location.updatedAt),
+          },
+        });
+        /** Add it to the data for creating the asset */
+        Object.assign(d.data, {
+          locationId: newLoc.id,
+        });
+      } else {
+        /** Add it to the data for creating the asset */
+        Object.assign(d.data, {
+          locationId: existingLoc.id,
+        });
+      }
+    }
+
+    /** Organization
+     *
+     */
+
+    /** Create the Asset */
+    // @TODO this needs to be replaced with the createAsset function
+    const { id: assetId } = await db.asset.create(d);
+
+    /** Create notes */
+    if (asset?.notes?.length > 0) {
+      await db.note.createMany({
+        data: asset.notes.map((note: Note) => ({
+          content: note.content,
+          type: note.type,
+          assetId,
+          userId,
+          createdAt: new Date(note.createdAt),
+          updatedAt: new Date(note.updatedAt),
+        })),
+      });
+    }
+  });
 };
 
 export interface CreateAssetFromBackupImportPayload
@@ -663,17 +766,29 @@ export interface CreateAssetFromBackupImportPayload
   id: string;
   title: string;
   description?: string;
-  category?: string;
+  category:
+    | {
+        id: string;
+        name: string;
+        description: string;
+        color: string;
+        createdAt: string;
+        updatedAt: string;
+        userId: string;
+      }
+    | {};
   tags: {
     name: string;
   }[];
-  location?: {
-    name: string;
-    description?: string;
-    address?: string;
-    createdAt: string;
-    updatedAt: string;
-  };
+  location:
+    | {
+        name: string;
+        description?: string;
+        address?: string;
+        createdAt: string;
+        updatedAt: string;
+      }
+    | {};
 }
 
 // id: "cllovk4390002omoml1be6cha";
