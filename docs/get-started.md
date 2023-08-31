@@ -1,11 +1,8 @@
-
 ### Shelf's current stack
 
 We have decided to give RemixJS a try.
 
 For the purpose of shipping asap, we have opted into using a template: https://github.com/rphlmr/supa-fly-stack
-
-
 
 > This Readme will be re-written soon
 
@@ -29,8 +26,6 @@ npx create-remix --template rphlmr/supa-fly-stack
 - Code formatting with [Prettier](https://prettier.io)
 - Linting with [ESLint](https://eslint.org)
 - Static Types with [TypeScript](https://typescriptlang.org)
-
-
 
 ## Development
 
@@ -272,7 +267,3 @@ To do that navigate to Authentication > URL configiration and add the folowing v
 
 - https://live-domain.com/oauth/callback
 - https://live-domain.com/reset-password
-
-
-
-

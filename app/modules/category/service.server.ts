@@ -82,29 +82,28 @@ export async function getAllCategories({ userId }: { userId: User["id"] }) {
   return await db.category.findMany({ where: { userId } });
 }
 
-export async function getCategory({ id }: Pick<Category, "id">){
+export async function getCategory({ id }: Pick<Category, "id">) {
   return db.category.findUnique({
-    where: { 
-      id
-     }
-  })
+    where: {
+      id,
+    },
+  });
 }
 
 export async function updateCategory({
   id,
   name,
   description,
-  color
-}: Pick<Category, "id" | "description" | "name" | "color"> 
-) {
+  color,
+}: Pick<Category, "id" | "description" | "name" | "color">) {
   return db.category.update({
     where: {
-      id
+      id,
     },
     data: {
       name,
       description,
-      color
+      color,
     },
   });
 }

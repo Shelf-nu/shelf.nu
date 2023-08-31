@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState } from "react";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
@@ -27,7 +27,7 @@ export async function loader({ request, params }: LoaderArgs) {
   await requireAuthSession(request);
 
   const id = getRequiredParam(params, "categoryId");
-  const category = await getCategory({ id })
+  const category = await getCategory({ id });
 
   const colorFromServer = category?.color;
 
@@ -62,7 +62,7 @@ export async function action({ request, params }: LoaderArgs) {
 
   await updateCategory({
     ...result.data,
-    id
+    id,
   });
 
   sendNotification({
@@ -86,13 +86,16 @@ export default function EditCategory() {
   const { colorFromServer, category } = useLoaderData();
 
   const [formData, setFormData] = useState({
-    name: category.name, 
-    description: category.description, 
-  })
+    name: category.name,
+    description: category.description,
+  });
 
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, field: string) => {
-    setFormData(form => ({ ...form, [field]: event.target.value }))
-  }
+  const handleInputChange = (
+    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+    field: string
+  ) => {
+    setFormData((form) => ({ ...form, [field]: event.target.value }));
+  };
 
   return (
     <>
@@ -112,7 +115,7 @@ export default function EditCategory() {
             hideErrorText
             autoFocus
             value={formData.name}
-            onChange={e => handleInputChange(e, 'name')}
+            onChange={(e) => handleInputChange(e, "name")}
           />
           <Input
             label="Description"
@@ -122,7 +125,7 @@ export default function EditCategory() {
             data-test-id="categoryDescription"
             className="mb-4 lg:mb-0"
             value={formData.description}
-            onChange={e => handleInputChange(e, 'description')}
+            onChange={(e) => handleInputChange(e, "description")}
           />
           <div className="mb-6 lg:mb-0">
             <ColorInput

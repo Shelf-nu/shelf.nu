@@ -1,6 +1,6 @@
 # Shelf.nu documentation
 
-Here you can find the documentation for shelf. 
+Here you can find the documentation for shelf.
 
 # Top Pages
 

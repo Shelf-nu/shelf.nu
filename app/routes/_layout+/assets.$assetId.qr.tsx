@@ -4,8 +4,6 @@ import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
 import { XIcon } from "~/components/icons";
-import { ImagePreview } from "~/components/qr/image-preview";
-import type { ImagePreviewRef } from "~/components/qr/types";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";

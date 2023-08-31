@@ -136,7 +136,7 @@ const CategoryItem = ({
         icon={"write"}
         title={"Edit"}
         data-test-id="editCategoryButton"
-       />
+      />
       <DeleteCategory category={item} />
     </Td>
   </>
