@@ -9,7 +9,7 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { createTag, getTag, updateTag } from "~/modules/tag";
+import { getTag, updateTag } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
