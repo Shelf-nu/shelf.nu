@@ -1,3 +1,4 @@
+import type { CustomField } from "@prisma/client";
 import { Form } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
@@ -13,7 +14,7 @@ import {
 } from "~/components/shared/modal";
 import { TrashIcon } from "../icons";
 
-export const DeleteField = () => (
+export const DeleteField = ({ customField }: { customField: CustomField }) => (
   <AlertDialog>
     <AlertDialogTrigger asChild>
       <Button
@@ -47,6 +48,7 @@ export const DeleteField = () => (
           </AlertDialogCancel>
 
           <Form method="delete">
+            <input type="hidden" name="customFieldId" value={customField.id} />
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               type="submit"

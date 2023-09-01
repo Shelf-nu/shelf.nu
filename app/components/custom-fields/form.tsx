@@ -1,8 +1,10 @@
+import { CustomFieldType, type CustomField } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/custom-fields.new";
+import { useOrganizationId } from "~/hooks/use-organization-id";
 import { isFormProcessing } from "~/utils";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -18,19 +20,24 @@ import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
 
 export const NewCustomFieldFormSchema = z.object({
-  title: z.string().min(2, "Title is required"),
-  helpText: z.string(),
-  type: z.string(),
-  required: z.boolean(),
+  name: z.string().min(2, "Name is required"),
+  helpText: z.string().optional(),
+  type: z.nativeEnum(CustomFieldType),
+  required: z
+    .string()
+    .transform((val) => (val === "on" ? true : false))
+    .optional(),
+  organizationId: z.string(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
-  title?: string;
-  helpText?: string;
+  name?: CustomField["name"];
+  helpText?: CustomField["helpText"];
+  required?: CustomField["required"];
 }
 
-export const CustomFieldForm = ({ title, helpText }: Props) => {
+export const CustomFieldForm = ({ name, helpText, required }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -38,6 +45,7 @@ export const CustomFieldForm = ({ title, helpText }: Props) => {
 
   const [, updateTitle] = useAtom(updateTitleAtom);
 
+  const organizationId = useOrganizationId();
   return (
     <Form
       ref={zo.ref}
@@ -49,13 +57,13 @@ export const CustomFieldForm = ({ title, helpText }: Props) => {
         <Input
           label="Name"
           hideLabel
-          name={zo.fields.title()}
+          name={zo.fields.name()}
           disabled={disabled}
-          error={zo.errors.title()?.message}
+          error={zo.errors.name()?.message}
           autoFocus
           onChange={updateTitle}
           className="w-full"
-          defaultValue={title || ""}
+          defaultValue={name || ""}
           placeholder="Choose a field name"
         />
       </FormRow>
@@ -63,7 +71,7 @@ export const CustomFieldForm = ({ title, helpText }: Props) => {
       <div>
         <label className="lg:hidden">Type</label>
         <FormRow rowLabel={"Type"} className="border-b-0 pb-[10px] pt-[6px]">
-          <Select name="type" defaultValue="Text">
+          <Select name="type" defaultValue="Text" disabled={disabled}>
             <SelectTrigger
               className="px-3.5 py-3"
               placeholder="Choose a field type"
@@ -88,10 +96,13 @@ export const CustomFieldForm = ({ title, helpText }: Props) => {
           </Select>
         </FormRow>
       </div>
-
       <FormRow rowLabel="" className="border-b-0 pt-2">
         <div className="flex items-center gap-3">
-          <Switch name={zo.fields.required()} />
+          <Switch
+            name={zo.fields.required()}
+            disabled={disabled}
+            defaultValue={required ? "on" : "off"}
+          />
           <label className="text-base font-medium text-gray-700">
             Required
           </label>
@@ -121,6 +132,13 @@ export const CustomFieldForm = ({ title, helpText }: Props) => {
           />
         </FormRow>
       </div>
+
+      {/* hidden field organization Id to get the organization Id on each form submission to link custom fields and its value is loaded using useOrganizationId hook */}
+      <input
+        type="hidden"
+        name={zo.fields.organizationId()}
+        value={organizationId}
+      />
 
       <div className="text-right">
         <Button type="submit" disabled={disabled}>

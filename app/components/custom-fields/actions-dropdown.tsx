@@ -1,3 +1,4 @@
+import type { CustomField } from "@prisma/client";
 import { VerticalDotsIcon } from "~/components/icons";
 import {
   DropdownMenu,
@@ -6,7 +7,7 @@ import {
 } from "~/components/shared/dropdown";
 import { DeleteField } from "./delete-field";
 
-export function ActionsDropdown() {
+export function ActionsDropdown({ customField }: { customField: CustomField }) {
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger className="outline-none focus-visible:border-0">
@@ -18,7 +19,7 @@ export function ActionsDropdown() {
         align="end"
         className="order w-[180px] rounded-md bg-white p-0 text-right "
       >
-        <DeleteField />
+        <DeleteField customField={customField} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

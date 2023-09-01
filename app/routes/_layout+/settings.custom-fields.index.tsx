@@ -1,42 +1,75 @@
-import { json, type V2_MetaFunction } from "@remix-run/node";
+import type { CustomField } from "@prisma/client";
+import { json, redirect } from "@remix-run/node";
+import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import { ErrorBoundryComponent } from "~/components/errors";
+import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
+import { db } from "~/database";
+import { requireAuthSession } from "~/modules/auth";
+import { getCustomFields } from "~/modules/custom-field";
+import {
+  getCurrentSearchParams,
+  getParamsValues,
+  generatePageMeta,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: data ? appendToMetaTitle(data.title) : "" },
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
-export const loader = async () => {
-  const modelName = {
-    singular: "Custom Field",
-    plural: "Custom Fields",
-  };
+export async function loader({ request }: LoaderArgs) {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPage, search } = getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
 
-  const items = [
-    { id: 1, name: "Field1", type: "text" },
-    { id: 2, name: "Field2", type: "text" },
-    { id: 3, name: "Field3", type: "text" },
-    { id: 4, name: "Field4", type: "text" },
-    { id: 5, name: "Field5", type: "text" },
-  ];
-
-  return json({
-    items,
-    page: 1,
-    totalItems: items.length,
-    perPage: 8,
-    totalPages: 1,
-    next: "",
-    prev: "",
-    modelName,
-    title: "Custom Fields",
+  const organizationId = "clk9p2zh10001g7k8uyuyfk4c";
+  const { customFields, totalCustomFields } = await getCustomFields({
+    organizationId,
+    page,
+    perPage,
+    search,
   });
+  const totalPages = Math.ceil(totalCustomFields / perPage);
+
+  const header: HeaderData = {
+    title: "Custom Fields",
+  };
+  const modelName = {
+    singular: "custom fields",
+    plural: "custom Fields",
+  };
+  return json({
+    header,
+    items: customFields,
+    search,
+    page,
+    totalItems: totalCustomFields,
+    totalPages,
+    perPage,
+    prev,
+    next,
+    modelName,
+  });
+}
+
+export const action = async ({ request }: ActionArgs) => {
+  await requireAuthSession(request);
+
+  const formData = await request.formData();
+  const customFieldId = formData.get("customFieldId") as string;
+
+  await db.customField.delete({
+    where: {
+      id: customFieldId,
+    },
+  });
+  return redirect(`/settings/custom-fields`);
 };
 
 export default function CustomFieldsIndexPage() {
@@ -58,11 +91,7 @@ export default function CustomFieldsIndexPage() {
     </>
   );
 }
-function TeamMemberRow({
-  item,
-}: {
-  item: { id: string; name: string; type: string };
-}) {
+function TeamMemberRow({ item }: { item: CustomField }) {
   return (
     <>
       <Td className="w-full">
@@ -73,7 +102,7 @@ function TeamMemberRow({
             </p>
             <span className="text-gray-600">{item.type}</span>
           </div>
-          <ActionsDropdown />
+          <ActionsDropdown customField={item} />
         </div>
       </Td>
     </>
