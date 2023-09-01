@@ -21,12 +21,15 @@ import { Spinner } from "../shared/spinner";
 
 export const NewCustomFieldFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
-  helpText: z.string().optional(),
+  helpText: z
+    .string()
+    .optional()
+    .transform((val) => val || null), // Transforming undefined to fit prismas null constraint
   type: z.nativeEnum(CustomFieldType),
   required: z
     .string()
-    .transform((val) => (val === "on" ? true : false))
-    .optional(),
+    .optional()
+    .transform((val) => (val === "on" ? true : false)),
   organizationId: z.string(),
 });
 

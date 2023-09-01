@@ -1,4 +1,4 @@
-import type { CustomField } from "@prisma/client";
+import { OrganizationType, type CustomField } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
@@ -10,6 +10,7 @@ import { Td } from "~/components/table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import { getCustomFields } from "~/modules/custom-field";
+import { getOrganizationByUserId } from "~/modules/organization";
 import {
   getCurrentSearchParams,
   getParamsValues,
@@ -24,13 +25,21 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export async function loader({ request }: LoaderArgs) {
+  const { userId } = await requireAuthSession(request);
   const searchParams = getCurrentSearchParams(request);
   const { page, perPage, search } = getParamsValues(searchParams);
   const { prev, next } = generatePageMeta(request);
+  const organization = await getOrganizationByUserId({
+    userId,
+    orgType: OrganizationType.PERSONAL,
+  });
 
-  const organizationId = "clk9p2zh10001g7k8uyuyfk4c";
+  if (!organization) {
+    throw new Error("Organization not found");
+  }
+
   const { customFields, totalCustomFields } = await getCustomFields({
-    organizationId,
+    organizationId: organization.id,
     page,
     perPage,
     search,
