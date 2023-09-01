@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { OrganizationType } from "@prisma/client";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -18,6 +19,7 @@ import {
 } from "~/modules/asset";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -25,8 +27,18 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
+  const organization = await getOrganizationByUserId({
+    userId,
+    orgType: OrganizationType.PERSONAL,
+  });
+
+  if (!organization) {
+    throw new Error("Organization not found");
+  }
+
   const { categories, tags, locations } = await getAllRelatedEntries({
     userId,
+    organizationId: organization.id,
   });
 
   const id = getRequiredParam(params, "assetId");
