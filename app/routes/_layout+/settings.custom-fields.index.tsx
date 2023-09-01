@@ -15,6 +15,7 @@ import {
   getCurrentSearchParams,
   getParamsValues,
   generatePageMeta,
+  isDelete,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -70,15 +71,17 @@ export async function loader({ request }: LoaderArgs) {
 export const action = async ({ request }: ActionArgs) => {
   await requireAuthSession(request);
 
-  const formData = await request.formData();
-  const customFieldId = formData.get("customFieldId") as string;
+  if (isDelete(request)) {
+    const formData = await request.formData();
+    const customFieldId = formData.get("customFieldId") as string;
 
-  await db.customField.delete({
-    where: {
-      id: customFieldId,
-    },
-  });
-  return redirect(`/settings/custom-fields`);
+    await db.customField.delete({
+      where: {
+        id: customFieldId,
+      },
+    });
+    return redirect(`/settings/custom-fields`);
+  }
 };
 
 export default function CustomFieldsIndexPage() {

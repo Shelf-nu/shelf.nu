@@ -9,6 +9,7 @@ import type {
   Tag,
   Organization,
   TeamMember,
+  CustomField,
 } from "@prisma/client";
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
@@ -456,10 +457,17 @@ export async function deleteNote({
 /** Fetches all related entries required for creating a new asset */
 export async function getAllRelatedEntries({
   userId,
+  organizationId,
 }: {
   userId: User["id"];
-}): Promise<{ categories: Category[]; tags: Tag[]; locations: Location[] }> {
-  const [categories, tags, locations] = await db.$transaction([
+  organizationId: Organization["id"];
+}): Promise<{
+  categories: Category[];
+  tags: Tag[];
+  locations: Location[];
+  customFields: CustomField[];
+}> {
+  const [categories, tags, locations, customFields] = await db.$transaction([
     /** Get the categories */
     db.category.findMany({ where: { userId } }),
 
@@ -468,8 +476,11 @@ export async function getAllRelatedEntries({
 
     /** Get the locations */
     db.location.findMany({ where: { userId } }),
+
+    /** Get the custom fields */
+    db.customField.findMany({ where: { organizationId } }),
   ]);
-  return { categories, tags, locations };
+  return { categories, tags, locations, customFields };
 }
 
 export const getPaginatedAndFilterableAssets = async ({
