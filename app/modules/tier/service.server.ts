@@ -15,7 +15,7 @@ export async function getUserTierLimit({ userId }: { userId: User["id"] }) {
   return user?.tier?.tierLimit || null;
 }
 
-export async function assetUserCanImportAssets({
+export async function assertUserCanImportAssets({
   userId,
 }: {
   userId: User["id"];
@@ -28,11 +28,17 @@ export async function assetUserCanImportAssets({
       tier: {
         include: { tierLimit: true },
       },
+      organizations: {
+        select: {
+          id: true,
+          type: true,
+        },
+      },
     },
   });
 
   if (!user?.tier?.tierLimit || !user?.tier?.tierLimit?.canImportAssets) {
     throw new Error("User cannot import assets");
   }
-  return true;
+  return { user };
 }
