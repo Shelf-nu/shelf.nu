@@ -26,7 +26,7 @@ With Shelf, you can take a picture of any item you own and store it in your own 
 
 <div align = "center">
     
-[![Shelf.nu Discord](https://dcbadge.vercel.app/api/server/BZ6ATKK2)](https://discord.gg/gdPMsSzqCS)
+[![Shelf.nu Discord](https://dcbadge.vercel.app/api/server/gdPMsSzqCS)](https://discord.gg/gdPMsSzqCS)
 
 </div>
 
