@@ -8,11 +8,17 @@ import { requireAdmin } from "~/utils/roles.server";
 export const loader = async ({ request, params }: LoaderArgs) => {
   requireAdmin(request);
   const { userId } = params;
+  const url = new URL(request.url);
+  const onlyOrphaned = url.searchParams.get("orphaned");
 
   const codes = await db.qr.findMany({
     where: {
       userId,
-      assetId: null,
+      assetId: onlyOrphaned
+        ? null
+        : {
+            not: null,
+          },
     },
   });
   const zip = new JSZip();
