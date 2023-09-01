@@ -109,7 +109,7 @@ function TeamMemberRow({ item }: { item: CustomField }) {
             <p className="text-text-sm font-medium text-gray-900">
               {item.name}
             </p>
-            <span className="text-gray-600">{item.type}</span>
+            <span className="lowercase text-gray-600">{item.type}</span>
           </div>
           <ActionsDropdown customField={item} />
         </div>

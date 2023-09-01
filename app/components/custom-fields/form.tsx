@@ -44,7 +44,7 @@ export const CustomFieldForm = ({ name, helpText, required }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
   const disabled = isFormProcessing(navigation.state);
-  const fieldTypes = ["Text"];
+  const fieldTypes = CustomFieldType;
 
   const [, updateTitle] = useAtom(updateTitleAtom);
 
@@ -74,7 +74,7 @@ export const CustomFieldForm = ({ name, helpText, required }: Props) => {
       <div>
         <label className="lg:hidden">Type</label>
         <FormRow rowLabel={"Type"} className="border-b-0 pb-[10px] pt-[6px]">
-          <Select name="type" defaultValue="Text" disabled={disabled}>
+          <Select name="type" defaultValue="TEXT" disabled={disabled}>
             <SelectTrigger
               className="px-3.5 py-3"
               placeholder="Choose a field type"
@@ -87,10 +87,10 @@ export const CustomFieldForm = ({ name, helpText, required }: Props) => {
               align="start"
             >
               <div className=" max-h-[320px] overflow-auto">
-                {fieldTypes.map((value) => (
+                {Object.values(fieldTypes).map((value) => (
                   <SelectItem value={value} key={value}>
                     <span className="mr-4 text-[14px] text-gray-700">
-                      {value}
+                      {value.toLowerCase()}
                     </span>
                   </SelectItem>
                 ))}
