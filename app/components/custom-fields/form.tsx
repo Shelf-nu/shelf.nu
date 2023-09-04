@@ -38,9 +38,10 @@ interface Props {
   name?: CustomField["name"];
   helpText?: CustomField["helpText"];
   required?: CustomField["required"];
+  type?: CustomField["type"];
 }
 
-export const CustomFieldForm = ({ name, helpText, required }: Props) => {
+export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -74,7 +75,7 @@ export const CustomFieldForm = ({ name, helpText, required }: Props) => {
       <div>
         <label className="lg:hidden">Type</label>
         <FormRow rowLabel={"Type"} className="border-b-0 pb-[10px] pt-[6px]">
-          <Select name="type" defaultValue="TEXT" disabled={disabled}>
+          <Select name="type" defaultValue={type || "TEXT"} disabled={disabled}>
             <SelectTrigger
               className="px-3.5 py-3"
               placeholder="Choose a field type"
@@ -104,7 +105,7 @@ export const CustomFieldForm = ({ name, helpText, required }: Props) => {
           <Switch
             name={zo.fields.required()}
             disabled={disabled}
-            defaultValue={required ? "on" : "off"}
+            defaultChecked={required}
           />
           <label className="text-base font-medium text-gray-700">
             Required

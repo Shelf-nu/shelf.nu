@@ -77,3 +77,40 @@ export async function getCustomFields({
 
   return { customFields, totalCustomFields };
 }
+
+export async function getCustomField({
+  organizationId,
+  id,
+}: Pick<CustomField, "id"> & {
+  organizationId: Organization["id"];
+}) {
+  const [customField] = await db.$transaction([
+    /** Get the item */
+    db.customField.findFirst({
+      where: { id, organizationId },
+    }),
+  ]);
+
+  return { customField };
+}
+
+export async function updateCustomField(payload: {
+  id: CustomField["id"];
+  name?: CustomField["name"];
+  helpText?: CustomField["helpText"];
+  type?: CustomField["type"];
+  required?: CustomField["required"];
+}) {
+  const { id, name, helpText, type, required } = payload;
+  const data = {
+    name,
+    type,
+    helpText,
+    required,
+  };
+
+  return await db.customField.update({
+    where: { id },
+    data: data,
+  });
+}

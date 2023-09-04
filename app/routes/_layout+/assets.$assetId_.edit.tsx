@@ -36,10 +36,11 @@ export async function loader({ request, params }: LoaderArgs) {
     throw new Error("Organization not found");
   }
 
-  const { categories, tags, locations } = await getAllRelatedEntries({
-    userId,
-    organizationId: organization.id,
-  });
+  const { categories, tags, locations, customFields } =
+    await getAllRelatedEntries({
+      userId,
+      organizationId: organization.id,
+    });
 
   const id = getRequiredParam(params, "assetId");
 
@@ -59,6 +60,7 @@ export async function loader({ request, params }: LoaderArgs) {
     categories,
     tags,
     locations,
+    customFields,
   });
 }
 
