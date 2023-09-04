@@ -87,3 +87,28 @@ export const buildTagsSet = (tags: string | undefined) =>
         set: tags?.split(",").map((t) => ({ id: t })) || [],
       }
     : { set: [] };
+
+    export async function getTag({ id }: Pick<Tag, "id">){
+      return db.tag.findUnique({
+        where: { 
+          id
+         }
+      })
+    }
+    
+    export async function updateTag({
+      id,
+      name,
+      description
+    }: Pick<Tag, "id" | "name" | "description" > 
+    ) {
+      return db.tag.update({
+        where: {
+          id
+        },
+        data: {
+          name,
+          description
+        },
+      });
+    }

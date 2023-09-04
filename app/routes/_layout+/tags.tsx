@@ -103,6 +103,7 @@ export default function CategoriesPage() {
           ItemComponent={TagItem}
           headerChildren={
             <>
+              <Th>Description</Th>
               <Th>Actions</Th>
             </>
           }
@@ -118,10 +119,24 @@ const TagItem = ({
   item: Pick<Tag, "id" | "description" | "name">;
 }) => (
   <>
-    <Td className="w-full text-left" title={`Tag: ${item.name}`}>
+    <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
       <TagBadge>{item.name}</TagBadge>
     </Td>
+    <Td className="w-3/4 text-gray-500" title="Description">
+      {item.description}
+    </Td>
     <Td className="text-left">
+      <Button
+          to={`${item.id}/edit`}
+          role="link"
+          aria-label={`edit tags`}
+          variant="secondary"
+          size="sm"
+          className=" mx-2 text-[12px]"
+          icon={"write"}
+          title={"Edit"}
+          data-test-id="editTagsButton"
+        />
       <DeleteTag tag={item} />
     </Td>
   </>
