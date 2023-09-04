@@ -11,7 +11,7 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategory, updateCategory } from "~/modules/category";
-import { assertIsPost, isFormProcessing, getRequiredParam } from "~/utils";
+import { assertIsPost, isFormProcessing, getRequiredParam, handleInputChange } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
@@ -85,14 +85,10 @@ export default function EditCategory() {
   const disabled = isFormProcessing(navigation.state);
   const { colorFromServer, category } = useLoaderData();
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{ [key: string]: any }>({
     name: category.name, 
     description: category.description, 
   })
-
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, field: string) => {
-    setFormData(form => ({ ...form, [field]: event.target.value }))
-  }
 
   return (
     <>
@@ -112,7 +108,7 @@ export default function EditCategory() {
             hideErrorText
             autoFocus
             value={formData.name}
-            onChange={e => handleInputChange(e, 'name')}
+            onChange={e => handleInputChange(e, setFormData, 'name')}
           />
           <Input
             label="Description"
@@ -122,7 +118,7 @@ export default function EditCategory() {
             data-test-id="categoryDescription"
             className="mb-4 lg:mb-0"
             value={formData.description}
-            onChange={e => handleInputChange(e, 'description')}
+            onChange={e => handleInputChange(e, setFormData, 'description')}
           />
           <div className="mb-6 lg:mb-0">
             <ColorInput

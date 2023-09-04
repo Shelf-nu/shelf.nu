@@ -10,7 +10,7 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getTag, updateTag } from "~/modules/tag";
-import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
+import { assertIsPost, getRequiredParam, isFormProcessing, handleInputChange } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
@@ -80,14 +80,10 @@ export default function EditTag() {
   const disabled = isFormProcessing(navigation.state);
   const { tag } = useLoaderData();
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{ [key: string]: any}>({
     name: tag.name, 
     description: tag.description, 
   })
-
-  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, field: string) => {
-    setFormData(form => ({ ...form, [field]: event.target.value }))
-  }
 
   return (
     <>
@@ -107,7 +103,7 @@ export default function EditTag() {
             hideErrorText
             autoFocus
             value={formData.name}
-            onChange={e => handleInputChange(e, 'name')}
+            onChange={e => handleInputChange(e, setFormData, 'name')}
           />
           <Input
             label="Description"
@@ -117,7 +113,7 @@ export default function EditTag() {
             data-test-id="tagDescription"
             className="mb-4 lg:mb-0"
             value={formData.description}
-            onChange={e => handleInputChange(e, 'description')}
+            onChange={e => handleInputChange(e, setFormData, 'description')}
           />
         </div>
 
