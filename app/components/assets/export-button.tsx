@@ -27,7 +27,7 @@ export const ExportButton = ({
       <HoverCardContent>
         <p>
           Exporting is not available on the free tier of shelf. Please{" "}
-          <Button to="/settings/subscription" variant="link">
+          <Button to="/settings/subscription" variant="secondary">
             upgrade to a paid plan
           </Button>
           .
