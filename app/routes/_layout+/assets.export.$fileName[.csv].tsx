@@ -45,10 +45,8 @@ export const loader = async ({ request }: LoaderArgs) => {
         case "category":
         case "notes":
         case "tags":
-        case "qrCodes":
         case "custody":
         case "organization":
-        case "reports":
           toExport.push(
             JSON.stringify(value, (_key, value) => {
               /** Custom replacer function.

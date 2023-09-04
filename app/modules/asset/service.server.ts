@@ -571,14 +571,12 @@ export const fetchAssetsForExport = async ({
       category: true,
       location: true,
       notes: true,
-      reports: true,
       custody: {
         include: {
           custodian: true,
         },
       },
       tags: true,
-      qrCodes: true,
     },
   });
 
@@ -653,6 +651,7 @@ export const createAssetsFromBackupImport = async ({
   // console.log(data);
 
   data.map(async (asset) => {
+    /** Base data from asset */
     const d = {
       data: {
         title: asset.title,
@@ -664,6 +663,15 @@ export const createAssetsFromBackupImport = async ({
         status: asset.status,
         createdAt: new Date(asset.createdAt),
         updatedAt: new Date(asset.updatedAt),
+        qrCodes: {
+          create: [
+            {
+              version: 0,
+              errorCorrection: ErrorCorrection["L"],
+              userId,
+            },
+          ],
+        },
       },
     };
 
@@ -737,12 +745,96 @@ export const createAssetsFromBackupImport = async ({
       }
     }
 
-    /** Organization
-     *
-     */
+    /** Custody */
+    if (asset.custody && Object.keys(asset?.custody).length > 0) {
+      const { custodian } = asset.custody;
+
+      const existingCustodian = await db.teamMember.findFirst({
+        where: {
+          organizations: {
+            some: {
+              id: organizationId,
+            },
+          },
+          name: custodian.name,
+        },
+      });
+
+      if (!existingCustodian) {
+        const newCustodian = await db.teamMember.create({
+          data: {
+            name: custodian.name,
+            organizations: {
+              connect: {
+                id: organizationId,
+              },
+            },
+            createdAt: new Date(custodian.createdAt),
+            updatedAt: new Date(custodian.updatedAt),
+          },
+        });
+
+        Object.assign(d.data, {
+          custody: {
+            create: {
+              teamMemberId: newCustodian.id,
+            },
+          },
+        });
+      } else {
+        Object.assign(d.data, {
+          custody: {
+            create: {
+              teamMemberId: existingCustodian.id,
+            },
+          },
+        });
+      }
+    }
+
+    /** Tags */
+    if (asset.tags && asset.tags.length > 0) {
+      const tagsNames = asset.tags.map((t) => t.name);
+      // now we loop through the categories and check if they exist
+      let tags: Record<string, string> = {};
+      for (const tag of tagsNames) {
+        const existingTag = await db.tag.findFirst({
+          where: {
+            name: tag,
+            userId,
+          },
+        });
+
+        if (!existingTag) {
+          // if the tag doesn't exist, we create a new one
+          const newTag = await db.tag.create({
+            data: {
+              name: tag as string,
+              user: {
+                connect: {
+                  id: userId,
+                },
+              },
+            },
+          });
+          tags[tag] = newTag.id;
+        } else {
+          // if the tag exists, we just update the id
+          tags[tag] = existingTag.id;
+        }
+      }
+
+      Object.assign(d.data, {
+        tags:
+          asset.tags.length > 0
+            ? {
+                connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
+              }
+            : undefined,
+      });
+    }
 
     /** Create the Asset */
-    // @TODO this needs to be replaced with the createAsset function
     const { id: assetId } = await db.asset.create(d);
 
     /** Create notes */
