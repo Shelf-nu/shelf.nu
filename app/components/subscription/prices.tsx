@@ -12,6 +12,7 @@ import {
   SingleLayerIcon,
 } from "../icons";
 import { Button } from "../shared";
+import { PriceCta } from "./price-cta";
 
 export type PriceWithProduct = Stripe.Price & {
   product: Stripe.Product;
@@ -30,26 +31,29 @@ export const Prices = ({ prices }: { prices: PriceWithProduct[] }) => (
   </div>
 );
 
+export interface Price {
+  id: string;
+  product: {
+    name: string;
+    metadata: {
+      features?: string;
+      slogan?: string;
+      shelf_tier?: string;
+    };
+  };
+  unit_amount: number | null;
+  currency: string;
+  recurring?: {
+    interval: string;
+  } | null;
+}
+
+
 export const Price = ({
   price,
   previousPlanName,
 }: {
-  price: {
-    id: string;
-    product: {
-      name: string;
-      metadata: {
-        features?: string;
-        slogan?: string;
-        shelf_tier?: string;
-      };
-    };
-    unit_amount: number | null;
-    currency: string;
-    recurring?: {
-      interval: string;
-    } | null;
-  };
+  price: Price
   previousPlanName?: string;
 }) => {
   const { activeSubscription } = useLoaderData<typeof loader>();
@@ -113,18 +117,7 @@ export const Price = ({
         </div>
       </div>
       <div className="mb-8">
-        {price.id === "free" ? null : activeSubscription ? (
-          <CustomerPortalForm
-            buttonText={activeSubscription ? "Manage subscription" : undefined}
-          />
-        ) : (
-          <Form method="post">
-            <input type="hidden" name="priceId" value={price.id} />
-            <Button type="submit" width="full">
-              Upgrade to {price.product.name}
-            </Button>
-          </Form>
-        )}
+        <PriceCta price={price} activeSubscription={activeSubscription}/>
       </div>
       {features ? (
         <>

@@ -1,4 +1,4 @@
-import type { Qr, User } from "@prisma/client";
+import type { Asset, Qr, User } from "@prisma/client";
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, Link } from "@remix-run/react";
@@ -13,8 +13,14 @@ import { isDelete } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { requireAdmin } from "~/utils/roles.server";
 
+export type QrCodeWithAsset = Qr & {
+  asset: {
+    title: Asset["title"];
+  };
+};
+
 export type UserWithQrCodes = User & {
-  qrCodes: Qr[];
+  qrCodes: QrCodeWithAsset[];
 };
 
 export const loader = async ({ request, params }: LoaderArgs) => {
@@ -25,6 +31,13 @@ export const loader = async ({ request, params }: LoaderArgs) => {
     include: {
       qrCodes: {
         orderBy: { createdAt: "desc" },
+        include: {
+          asset: {
+            select: {
+              title: true,
+            },
+          },
+        },
       },
     },
   })) as UserWithQrCodes;
@@ -71,13 +84,6 @@ export default function Area51UserPage() {
           <h1>User: {user?.email}</h1>
           <div className="flex gap-3">
             <DeleteUser user={user} />
-            <Button
-              to={`/api/${user?.id}/orphaned-codes.zip`}
-              reloadDocument
-              className="whitespace-nowrap"
-            >
-              Print orphaned codes
-            </Button>
           </div>
         </div>
         <ul className="mt-5">
@@ -98,19 +104,41 @@ export default function Area51UserPage() {
             <h2>QR Codes</h2>
             <span>{user?.qrCodes.length} total codes</span>
           </div>
-          <Form method="post">
-            <input
-              type="number"
-              max={1000}
-              min={1}
-              name="amount"
-              required
-              defaultValue={10}
-            />
-            <Button type="submit" to={""}>
-              Generate Orphaned QR codes
-            </Button>
-          </Form>
+          <div className="flex flex-col justify-end gap-3">
+            <Form method="post">
+              <input
+                type="number"
+                max={1000}
+                min={1}
+                name="amount"
+                required
+                defaultValue={10}
+              />
+              <Button type="submit" to={""} variant="secondary">
+                Generate Orphaned QR codes
+              </Button>
+            </Form>
+            <div className="flex justify-end gap-3">
+              <Button
+                to={`/api/${user?.id}/qr-codes.zip?${new URLSearchParams({
+                  orphaned: "true",
+                })}`}
+                reloadDocument
+                className="whitespace-nowrap"
+                variant="secondary"
+              >
+                Print orphaned codes
+              </Button>
+              <Button
+                to={`/api/${user?.id}/qr-codes.zip`}
+                reloadDocument
+                className="whitespace-nowrap"
+                variant="secondary"
+              >
+                Print non-orphaned codes
+              </Button>
+            </div>
+          </div>
         </div>
         <Table className="mt-5">
           <thead className="bg-gray-100">
@@ -121,6 +149,9 @@ export default function Area51UserPage() {
               </th>
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 Asset id
+              </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                Asset name
               </th>
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 Created At
@@ -142,7 +173,8 @@ export default function Area51UserPage() {
                     {qrCode.id}
                   </Link>
                 </Td>
-                <Td>{qrCode.assetId ? qrCode.assetId : "Orphaned"}</Td>
+                <Td>{qrCode?.assetId || "Orphaned"}</Td>
+                <Td>{qrCode?.asset?.title || "Orphaned"}</Td>
                 <Td>{qrCode.createdAt}</Td>
               </Tr>
             ))}

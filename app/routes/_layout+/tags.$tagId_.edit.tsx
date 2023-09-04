@@ -4,38 +4,34 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
-import { ColorInput } from "~/components/forms/color-input";
 import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { getCategory, updateCategory } from "~/modules/category";
-import { assertIsPost, isFormProcessing, getRequiredParam, handleInputChange } from "~/utils";
+import { getTag, updateTag } from "~/modules/tag";
+import { assertIsPost, getRequiredParam, isFormProcessing, handleInputChange } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export const UpdateCategoryFormSchema = z.object({
+export const UpdateTagFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
   description: z.string(),
-  color: z.string().regex(/^#/).min(7),
 });
 
-const title = "Edit category";
+const title = "Edit Tag";
 
 export async function loader({ request, params }: LoaderArgs) {
   await requireAuthSession(request);
 
-  const id = getRequiredParam(params, "categoryId");
-  const category = await getCategory({ id })
-
-  const colorFromServer = category?.color;
+  const id = getRequiredParam(params, "tagId");
+  const tag = await getTag({ id })
 
   const header = {
     title,
   };
 
-  return json({ header, colorFromServer, category });
+  return json({ header, tag });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -46,10 +42,9 @@ export async function action({ request, params }: LoaderArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
   const formData = await request.formData();
-  const result = await UpdateCategoryFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
-  const id = getRequiredParam(params, "categoryId");
+  const result = await UpdateTagFormSchema.safeParseAsync(parseFormAny(formData));
+
+  const id = getRequiredParam(params, "tagId");
 
   if (!result.success) {
     return json(
@@ -60,34 +55,34 @@ export async function action({ request, params }: LoaderArgs) {
     );
   }
 
-  await updateCategory({
+  await updateTag({
     ...result.data,
     id
   });
 
   sendNotification({
-    title: "Category Updated",
-    message: "Your category has been updated successfully",
+    title: "Tag Updated",
+    message: "Your tag has been updated successfully",
     icon: { name: "success", variant: "success" },
     senderId: authSession.userId,
   });
 
-  return redirect(`/categories`, {
+  return redirect(`/tags`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
   });
 }
 
-export default function EditCategory() {
-  const zo = useZorm("NewQuestionWizardScreen", UpdateCategoryFormSchema);
+export default function EditTag() {
+  const zo = useZorm("NewQuestionWizardScreen", UpdateTagFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  const { colorFromServer, category } = useLoaderData();
+  const { tag } = useLoaderData();
 
-  const [formData, setFormData] = useState<{ [key: string]: any }>({
-    name: category.name, 
-    description: category.description, 
+  const [formData, setFormData] = useState<{ [key: string]: any}>({
+    name: tag.name, 
+    description: tag.description, 
   })
 
   return (
@@ -100,7 +95,7 @@ export default function EditCategory() {
         <div className="gap-3 lg:flex lg:items-end">
           <Input
             label="Name"
-            placeholder="Category name"
+            placeholder="Tag name"
             className="mb-4 lg:mb-0 lg:max-w-[180px]"
             name={zo.fields.name()}
             disabled={disabled}
@@ -115,24 +110,15 @@ export default function EditCategory() {
             placeholder="Description (optional)"
             name={zo.fields.description()}
             disabled={disabled}
-            data-test-id="categoryDescription"
+            data-test-id="tagDescription"
             className="mb-4 lg:mb-0"
             value={formData.description}
             onChange={e => handleInputChange(e, setFormData, 'description')}
           />
-          <div className="mb-6 lg:mb-0">
-            <ColorInput
-              name={zo.fields.color()}
-              disabled={disabled}
-              error={zo.errors.color()?.message}
-              hideErrorText
-              colorFromServer={colorFromServer}
-            />
-          </div>
         </div>
 
         <div className="flex gap-1">
-          <Button variant="secondary" to="/categories" size="sm">
+          <Button variant="secondary" to="/tags" size="sm">
             Cancel
           </Button>
           <Button type="submit" size="sm">

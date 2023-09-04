@@ -11,7 +11,7 @@ export const ImportButton = ({
   canImportAssets: boolean;
 }) =>
   canImportAssets ? (
-    <Button to="import" variant="link" role="link">
+    <Button to="import" variant="secondary" role="link">
       Import
     </Button>
   ) : (
@@ -22,7 +22,7 @@ export const ImportButton = ({
       <HoverCardContent>
         <p>
           Importing is not available on the free tier of shelf. Please{" "}
-          <Button to="/settings/subscription" variant="link">
+          <Button to="/settings/subscription" variant="secondary">
             upgrade to a paid plan
           </Button>
           .

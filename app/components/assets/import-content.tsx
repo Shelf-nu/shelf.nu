@@ -35,6 +35,11 @@ export const ImportBackup = () => (
         If you have modified the exported file, there is the possibility of the
         import failing due to broken data
       </li>
+      <li>
+        A new QR code will be created for all the imported assets. If you want
+        to use an existing physical code, you will need to re-link it to a new
+        asset manually
+      </li>
     </ul>
 
     <FileForm intent={"backup"} />

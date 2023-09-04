@@ -54,8 +54,8 @@ export function extractCSVDataFromBackupImport(data: string[][]): any[] {
             case "category":
             case "location":
             case "tags":
-            case "qrCodes":
             case "notes":
+            case "custody":
               return [keys[index], JSON.parse(value)];
             default:
               return [keys[index], value];
