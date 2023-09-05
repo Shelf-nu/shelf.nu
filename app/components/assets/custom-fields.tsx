@@ -42,8 +42,8 @@ export default function AssetCustomFields({
               hideLabel
               type={field.type.toLowerCase()}
               label={field.name}
-              name={`${field.id}`}
-              error={zo.errors[field.id]()?.message}
+              name={`cf-${field.id}`}
+              error={zo.errors[`cf-${field.id}`]()?.message}
               defaultValue={
                 customFieldsValues?.find((cf) => cf.id === field.id)?.value ||
                 ""

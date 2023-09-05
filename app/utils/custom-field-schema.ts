@@ -48,9 +48,12 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
 
   fields.forEach((field) => {
     let fieldSchema: ZodObject<any, any> = z.object({
-      [field.id]: getSchema({
+      [`cf-${field.id}`]: getSchema({
         params: {
           description: field.helpText,
+          required_error: field.name
+            ? `${field.name} is required`
+            : `This field is required`,
         },
         field_name: field.name,
         required: field.required,
@@ -73,4 +76,24 @@ export const mergedSchema = ({
   const CustomSchema = buildSchema(customFields);
 
   return baseSchema.merge(CustomSchema);
+};
+
+/** Takes the result of zod's safeParseAsync and extracts custom fields values from it
+ * Custom fields need to be prefixed with `cf-`
+ */
+export const extractCustomFieldValuesFromResults = ({
+  result,
+}: {
+  result: { [key: string]: any };
+}) => {
+  /** Get the custom fields keys and values */
+  const customFieldsKeys = Object.keys(result.data).filter((key) =>
+    key.startsWith("cf-")
+  );
+
+  return customFieldsKeys.map((key) => {
+    const id = key.split("-")[1];
+    const value = result.data[key];
+    return { id, value };
+  });
 };

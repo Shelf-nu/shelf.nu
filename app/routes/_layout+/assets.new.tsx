@@ -21,7 +21,10 @@ import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { mergedSchema } from "~/utils/custom-field-schema";
+import {
+  extractCustomFieldValuesFromResults,
+  mergedSchema,
+} from "~/utils/custom-field-schema";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Asset";
@@ -104,6 +107,9 @@ export async function action({ request }: LoaderArgs) {
   }
 
   const { title, description, category, qrId, newLocationId } = result.data;
+
+  const customFieldsValues = extractCustomFieldValuesFromResults({ result });
+
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
 
@@ -115,6 +121,7 @@ export async function action({ request }: LoaderArgs) {
     locationId: newLocationId,
     qrId,
     tags,
+    customFieldsValues,
   });
 
   // Not sure how to handle this failing as the asset is already created

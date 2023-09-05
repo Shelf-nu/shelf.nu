@@ -163,11 +163,13 @@ export async function createAsset({
   qrId,
   tags,
   custodian,
+  customFieldsValues,
 }: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
+  customFieldsValues?: { id: string; value: string | undefined }[];
 }) {
   /** User connction data */
   const user = {
@@ -251,6 +253,21 @@ export async function createAsset({
         },
       },
       status: AssetStatus.IN_CUSTODY,
+    });
+  }
+
+  /** If custom fields are passed, create them */
+  if (customFieldsValues && customFieldsValues.length > 0) {
+    Object.assign(data, {
+      /** Custom fields here refers to the values, check the Schema for more info */
+      customFields: {
+        create: customFieldsValues?.map(
+          (cf: { id: string; value: string | undefined }) => ({
+            value: cf?.value || "",
+            customFieldId: cf.id,
+          })
+        ),
+      },
     });
   }
 

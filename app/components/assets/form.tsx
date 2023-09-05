@@ -6,7 +6,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/assets.new";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
-import { isFormProcessing, slugify } from "~/utils";
+import { isFormProcessing } from "~/utils";
 import { mergedSchema } from "~/utils/custom-field-schema";
 import AssetCustomFields from "./custom-fields";
 import { CategorySelect } from "../category/category-select";
