@@ -55,7 +55,7 @@ export const AssetForm = ({
     baseSchema: NewAssetFormSchema,
     customFields: customFields.map((cf: CustomField) => ({
       id: cf.id,
-      name: slugify(cf.name),
+      name: cf.name,
       helpText: cf?.helpText || "",
       required: cf.required,
       type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",

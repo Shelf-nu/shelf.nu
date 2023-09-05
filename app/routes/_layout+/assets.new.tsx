@@ -89,8 +89,6 @@ export async function action({ request }: LoaderArgs) {
   });
   const result = await FormSchema.safeParseAsync(parseFormAny(formData));
 
-  // console.log(result);
-
   if (!result.success) {
     return json(
       {
