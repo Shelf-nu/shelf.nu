@@ -1,8 +1,7 @@
-import { item } from "@markdoc/markdoc/dist/src/schema";
 import { OrganizationType, type CustomField } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import { Link } from "@remix-run/react";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -87,7 +86,6 @@ export const action = async ({ request }: ActionArgs) => {
 };
 
 export default function CustomFieldsIndexPage() {
-  const navigate = useNavigate();
   return (
     <>
       <div className="mb-2.5 flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
@@ -102,10 +100,7 @@ export default function CustomFieldsIndexPage() {
           New Custom Field
         </Button>
       </div>
-      <List
-        ItemComponent={TeamMemberRow}
-        navigate={(itemId) => navigate(`${itemId}/edit`)}
-      />
+      <List ItemComponent={TeamMemberRow} />
     </>
   );
 }
@@ -115,9 +110,12 @@ function TeamMemberRow({ item }: { item: CustomField }) {
       <Td className="w-full">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-text-sm font-medium text-gray-900">
+            <Link
+              to={`${item.id}/edit`}
+              className="block text-text-sm font-medium text-gray-900"
+            >
               {item.name}
-            </p>
+            </Link>
             <span className="lowercase text-gray-600">{item.type}</span>
           </div>
           <ActionsDropdown customField={item} />
