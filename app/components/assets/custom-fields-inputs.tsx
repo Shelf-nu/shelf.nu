@@ -1,8 +1,9 @@
 import type { CustomField } from "@prisma/client";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData, useNavigation } from "@remix-run/react";
 import type { Zorm } from "react-zorm";
 import type { z } from "zod";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
+import { isFormProcessing } from "~/utils";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { SearchIcon } from "../icons";
@@ -18,6 +19,9 @@ export default function AssetCustomFields({
 
   const { customFields: customFieldsValues } =
     useLoaderData<typeof loader>()?.asset || [];
+
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
 
   return (
     <div className="border-b pb-6">
@@ -44,9 +48,11 @@ export default function AssetCustomFields({
               label={field.name}
               name={`cf-${field.id}`}
               error={zo.errors[`cf-${field.id}`]()?.message}
+              disabled={disabled}
               defaultValue={
-                customFieldsValues?.find((cf) => cf.id === field.id)?.value ||
-                ""
+                customFieldsValues?.find(
+                  (cfv) => cfv.customFieldId === field.id
+                )?.value || ""
               }
               className="w-full"
             />

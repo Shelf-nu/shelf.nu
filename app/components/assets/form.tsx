@@ -8,7 +8,7 @@ import { updateTitleAtom } from "~/atoms/assets.new";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { isFormProcessing } from "~/utils";
 import { mergedSchema } from "~/utils/custom-field-schema";
-import AssetCustomFields from "./custom-fields";
+import AssetCustomFields from "./custom-fields-inputs";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";

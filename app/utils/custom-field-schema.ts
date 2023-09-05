@@ -1,4 +1,3 @@
-import type { ZodObject } from "zod";
 import { z } from "zod";
 
 /** Returns the schema depending on the field type.
@@ -44,10 +43,10 @@ type CustomFieldZodSchema = {
 };
 
 function buildSchema(fields: CustomFieldZodSchema[]) {
-  let schema: ZodObject<any, any> = z.object({});
+  let schema = z.object({});
 
   fields.forEach((field) => {
-    let fieldSchema: ZodObject<any, any> = z.object({
+    let fieldSchema = z.object({
       [`cf-${field.id}`]: getSchema({
         params: {
           description: field.helpText,

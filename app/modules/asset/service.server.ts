@@ -292,6 +292,7 @@ interface UpdateAssetPayload {
   mainImageExpiration?: Asset["mainImageExpiration"];
   tags?: { set: { id: string }[] };
   userId?: User["id"];
+  customFieldsValues?: { id: string; value: string | undefined }[];
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
@@ -306,6 +307,7 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     newLocationId,
     currentLocationId,
     userId,
+    customFieldsValues: customFieldsValuesFromForm,
   } = payload;
   const isChangingLocation =
     newLocationId && currentLocationId && newLocationId !== currentLocationId;
@@ -343,6 +345,42 @@ export async function updateAsset(payload: UpdateAssetPayload) {
   if (tags && tags?.set) {
     Object.assign(data, {
       tags,
+    });
+  }
+
+  /** If custom fields are passed, create/update them */
+  if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
+    /** We get the current values. We need this in order to co-relate the correct fields to update as we dont have the id's of the values */
+    const currentCustomFieldsValues = await db.assetCustomFieldValue.findMany({
+      where: {
+        assetId: id,
+      },
+      select: {
+        id: true,
+        customFieldId: true,
+      },
+    });
+
+    Object.assign(data, {
+      customFields: {
+        upsert: customFieldsValuesFromForm?.map(
+          (cf: { id: string; value: string | undefined }) => ({
+            where: {
+              id:
+                currentCustomFieldsValues.find(
+                  (ccfv) => ccfv.customFieldId === cf.id
+                )?.id || "",
+            },
+            update: {
+              value: cf?.value || "",
+            },
+            create: {
+              value: cf?.value || "",
+              customFieldId: cf.id,
+            },
+          })
+        ),
+      },
     });
   }
 
@@ -923,28 +961,3 @@ export interface CreateAssetFromBackupImportPayload
       }
     | {};
 }
-
-// id: "cllovk4390002omoml1be6cha";
-// title: "AMD Radeon RX 6800 XT";
-// description: "GPU from my new home PC.";
-// status: "IN_CUSTODY";
-// createdAt: "Thu Aug 24 2023 11:01:09 GMT+0300 (Eastern European Summer Time)";
-// updatedAt: "Thu Aug 24 2023 11:01:09 GMT+0300 (Eastern European Summer Time)";
-// category: {
-//   name: "PC Components";
-//   description: "";
-//   color: "#9c5301";
-//   createdAt: "2023-08-21T15:46:06.172Z";
-//   updatedAt: "2023-08-21T15:46:06.172Z";
-// };
-// location: {
-//   name: "Storage room 2";
-//   description: "";
-//   address: "";
-//   createdAt: "2023-08-21T15:46:06.542Z";
-//   updatedAt: "2023-08-21T15:46:06.542Z";
-// };
-// custody: "Some guy";
-// tags: [[Object], [Object]];
-// qrCodes: [[Object]];
-// }
