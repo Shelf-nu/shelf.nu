@@ -1,13 +1,23 @@
 import type { CustomField } from "@prisma/client";
 import { Link, useLoaderData } from "@remix-run/react";
+import type { Zorm } from "react-zorm";
+import type { z } from "zod";
+import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { SearchIcon } from "../icons";
 import { Button } from "../shared";
 
-export default function AssetCustomFields() {
+export default function AssetCustomFields({
+  zo,
+}: {
+  zo: Zorm<z.ZodObject<any, any, any>>;
+}) {
   /** Get the custom fields from the loader */
   const { customFields } = useLoaderData();
+
+  const { customFields: customFieldsValues } =
+    useLoaderData<typeof loader>()?.asset || [];
 
   return (
     <div className="border-b pb-6">
@@ -30,9 +40,14 @@ export default function AssetCustomFields() {
           >
             <Input
               hideLabel
-              type={field.type}
+              type={field.type.toLowerCase()}
               label={field.name}
-              name={field.name}
+              name={`${field.id}`}
+              error={zo.errors[field.id]()?.message}
+              defaultValue={
+                customFieldsValues?.find((cf) => cf.id === field.id)?.value ||
+                ""
+              }
               className="w-full"
             />
           </FormRow>

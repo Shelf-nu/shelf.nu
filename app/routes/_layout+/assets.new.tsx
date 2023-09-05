@@ -8,6 +8,7 @@ import { titleAtom } from "~/atoms/assets.new";
 
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
+import { db } from "~/database";
 
 import {
   createAsset,
@@ -18,8 +19,9 @@ import {
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { buildTagsSet } from "~/modules/tag";
-import { assertIsPost } from "~/utils";
+import { assertIsPost, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { mergedSchema } from "~/utils/custom-field-schema";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Asset";
@@ -68,9 +70,26 @@ export async function action({ request }: LoaderArgs) {
   const clonedRequest = request.clone();
 
   const formData = await clonedRequest.formData();
-  const result = await NewAssetFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+
+  const customFields = await db.customField.findMany({
+    where: {
+      userId: authSession.userId,
+    },
+  });
+
+  const FormSchema = mergedSchema({
+    baseSchema: NewAssetFormSchema,
+    customFields: customFields.map((cf) => ({
+      id: cf.id,
+      name: slugify(cf.name),
+      helpText: cf?.helpText || "",
+      required: cf.required,
+      type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+    })),
+  });
+  const result = await FormSchema.safeParseAsync(parseFormAny(formData));
+
+  // console.log(result);
 
   if (!result.success) {
     return json(

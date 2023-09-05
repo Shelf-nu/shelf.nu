@@ -50,6 +50,19 @@ export async function getAsset({
           custodian: true,
         },
       },
+      customFields: {
+        include: {
+          customField: {
+            select: {
+              id: true,
+              name: true,
+              helpText: true,
+              required: true,
+              type: true,
+            },
+          },
+        },
+      },
     },
   });
 

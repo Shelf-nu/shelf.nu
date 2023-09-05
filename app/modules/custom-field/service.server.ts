@@ -32,7 +32,7 @@ export async function createCustomField({
   });
 }
 
-export async function getCustomFields({
+export async function getFilteredAndPaginatedCustomFields({
   organizationId,
   page = 1,
   perPage = 8,

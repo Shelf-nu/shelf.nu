@@ -10,7 +10,7 @@ import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
-import { getCustomFields } from "~/modules/custom-field";
+import { getFilteredAndPaginatedCustomFields } from "~/modules/custom-field";
 import { getOrganizationByUserId } from "~/modules/organization";
 import {
   getCurrentSearchParams,
@@ -40,12 +40,13 @@ export async function loader({ request }: LoaderArgs) {
     throw new Error("Organization not found");
   }
 
-  const { customFields, totalCustomFields } = await getCustomFields({
-    organizationId: organization.id,
-    page,
-    perPage,
-    search,
-  });
+  const { customFields, totalCustomFields } =
+    await getFilteredAndPaginatedCustomFields({
+      organizationId: organization.id,
+      page,
+      perPage,
+      search,
+    });
   const totalPages = Math.ceil(totalCustomFields / perPage);
 
   const header: HeaderData = {

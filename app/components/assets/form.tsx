@@ -1,12 +1,13 @@
-import type { Asset, Qr } from "@prisma/client";
-import { Form, Link, useNavigation } from "@remix-run/react";
+import type { Asset, CustomField, Qr } from "@prisma/client";
+import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/assets.new";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing, slugify } from "~/utils";
+import { mergedSchema } from "~/utils/custom-field-schema";
 import AssetCustomFields from "./custom-fields";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
@@ -47,7 +48,22 @@ export const AssetForm = ({
   tags,
 }: Props) => {
   const navigation = useNavigation();
-  const zo = useZorm("NewQuestionWizardScreen", NewAssetFormSchema);
+
+  const { customFields } = useLoaderData();
+
+  const FormSchema = mergedSchema({
+    baseSchema: NewAssetFormSchema,
+    customFields: customFields.map((cf: CustomField) => ({
+      id: cf.id,
+      name: slugify(cf.name),
+      helpText: cf?.helpText || "",
+      required: cf.required,
+      type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+    })),
+  });
+
+  const zo = useZorm("NewQuestionWizardScreen", FormSchema);
+
   const disabled = isFormProcessing(navigation.state);
 
   const fileError = useAtomValue(fileErrorAtom);
@@ -165,7 +181,7 @@ export const AssetForm = ({
         </FormRow>
       </div>
 
-      <AssetCustomFields />
+      <AssetCustomFields zo={zo} />
 
       <div className="pt-6 text-right">
         <Button type="submit" disabled={disabled}>
