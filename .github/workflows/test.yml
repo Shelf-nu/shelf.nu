@@ -6,6 +6,7 @@ on:
       - main
       - dev
   pull_request_target:
+  workflow_call:
 
 jobs:
   authorize:
