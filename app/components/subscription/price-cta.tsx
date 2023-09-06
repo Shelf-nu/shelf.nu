@@ -23,4 +23,6 @@ export const PriceCta = ({
       />
     );
   }
+
+  return null;
 };

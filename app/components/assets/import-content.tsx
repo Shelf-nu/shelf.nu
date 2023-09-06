@@ -106,8 +106,6 @@ const FileForm = ({ intent }: { intent: string }) => {
     }
   };
 
-  console.log(fetcher.data);
-
   return (
     <fetcher.Form
       className="mt-4"

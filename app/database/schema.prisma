@@ -322,6 +322,7 @@ model CustomField {
   name     String
   helpText String?
   required Boolean @default(false)
+  active Boolean @default(true)
 
   type CustomFieldType @default(TEXT)
 
@@ -351,7 +352,7 @@ model AssetCustomFieldValue {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
 
-  customField   CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onUpdate: Cascade)
   customFieldId String
 
   // Datetime
