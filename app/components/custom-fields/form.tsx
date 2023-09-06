@@ -55,7 +55,8 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
   const [, updateTitle] = useAtom(updateTitleAtom);
 
   // keeping text field type by default selected
-  const [selectedFieldType, setSelectedFieldType] = useState("TEXT");
+  const [selectedFieldType, setSelectedFieldType] =
+    useState<CustomFieldType>("TEXT");
 
   const organizationId = useOrganizationId();
   return (
@@ -87,7 +88,7 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
             name="type"
             defaultValue={type || selectedFieldType}
             disabled={disabled}
-            onValueChange={(val) => setSelectedFieldType(val)}
+            onValueChange={(val: CustomFieldType) => setSelectedFieldType(val)}
           >
             <SelectTrigger
               className="px-3.5 py-3"
@@ -113,9 +114,7 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
           </Select>
 
           <div className="mt-2 flex-1 rounded-xl border px-6 py-5 text-[14px] text-gray-600">
-            <p>
-              {FIELD_TYPE_DESCRIPTION[selectedFieldType as CustomFieldType]}
-            </p>
+            <p>{FIELD_TYPE_DESCRIPTION[selectedFieldType]}</p>
           </div>
         </FormRow>
       </div>
