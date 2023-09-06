@@ -42,6 +42,10 @@ interface Props {
   type?: CustomField["type"];
 }
 
+const FIELD_TYPE_DESCRIPTION = {
+  TEXT: "A place to store short information for your asset. For instance: Serial numbers, notes or anything you wish. No input validation. Any text is acceptable.",
+};
+
 export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
@@ -52,9 +56,6 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
 
   // keeping text field type by default selected
   const [selectedFieldType, setSelectedFieldType] = useState("TEXT");
-  const fieldTypeDescription = {
-    TEXT: "A place to store short information for your asset. For instance: Serial numbers, notes or anything you wish. No input validation. Any text is acceptable.",
-  };
 
   const organizationId = useOrganizationId();
   return (
@@ -112,7 +113,9 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
           </Select>
 
           <div className="mt-2 flex-1 rounded-xl border px-6 py-5 text-[14px] text-gray-600">
-            <p>{fieldTypeDescription[selectedFieldType as CustomFieldType]}</p>
+            <p>
+              {FIELD_TYPE_DESCRIPTION[selectedFieldType as CustomFieldType]}
+            </p>
           </div>
         </FormRow>
       </div>
