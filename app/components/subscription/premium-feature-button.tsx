@@ -44,7 +44,7 @@ const HoverMessage = ({
 }) => (
   <HoverCard>
     <HoverCardTrigger className="disabled inline-flex cursor-not-allowed items-center justify-center border-none p-0 text-text-sm font-semibold text-primary-700 hover:text-primary-800">
-      <Button variant={buttonContent.variant || "primary"}>
+      <Button variant={buttonContent.variant || "primary"} disabled>
         {buttonContent.title}
       </Button>
     </HoverCardTrigger>

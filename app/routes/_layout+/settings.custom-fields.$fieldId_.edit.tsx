@@ -14,12 +14,15 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getCustomField, updateCustomField } from "~/modules/custom-field";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
+
+  await assertUserCanCreateMoreCustomFields({ userId });
 
   const id = getRequiredParam(params, "fieldId");
 
@@ -60,6 +63,8 @@ export const handle = {
 export async function action({ request, params }: ActionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  await assertUserCanCreateMoreCustomFields({ userId: authSession.userId });
+
   const id = getRequiredParam(params, "fieldId");
   const formData = await request.formData();
   const result = await NewCustomFieldFormSchema.safeParseAsync(

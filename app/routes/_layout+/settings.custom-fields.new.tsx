@@ -12,6 +12,7 @@ import Header from "~/components/layout/header";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createCustomField } from "~/modules/custom-field";
+import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 
 import { assertIsPost } from "~/utils";
 
@@ -21,7 +22,9 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 const title = "New Custom Field";
 
 export async function loader({ request }: LoaderArgs) {
-  await requireAuthSession(request);
+  const { userId } = await requireAuthSession(request);
+
+  await assertUserCanCreateMoreCustomFields({ userId });
 
   const header = {
     title,
@@ -33,7 +36,7 @@ export async function loader({ request }: LoaderArgs) {
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
-  { title: data ? appendToMetaTitle(data.header.title) : "" },
+  { title: data ? appendToMetaTitle(data?.header?.title) : "" },
 ];
 
 export const handle = {
@@ -43,6 +46,8 @@ export const handle = {
 export async function action({ request }: LoaderArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
+  await assertUserCanCreateMoreCustomFields({ userId: authSession.userId });
+
   const formData = await request.formData();
   const result = await NewCustomFieldFormSchema.safeParseAsync(
     parseFormAny(formData)
