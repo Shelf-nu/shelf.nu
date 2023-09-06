@@ -1,3 +1,4 @@
+import type { ZodRawShape } from "zod";
 import { z } from "zod";
 
 /** Returns the schema depending on the field type.
@@ -65,11 +66,11 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
   return schema;
 }
 
-export const mergedSchema = ({
+export const mergedSchema = <T extends ZodRawShape>({
   baseSchema,
   customFields,
 }: {
-  baseSchema: z.ZodObject<any, any>;
+  baseSchema: z.ZodObject<T, any>;
   customFields: CustomFieldZodSchema[];
 }) => {
   const CustomSchema = buildSchema(customFields);
