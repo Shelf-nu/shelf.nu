@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { CustomFieldType, type CustomField } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
@@ -48,6 +49,11 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
   const fieldTypes = CustomFieldType;
 
   const [, updateTitle] = useAtom(updateTitleAtom);
+  const fieldTypeDefaultValue = "TEXT";
+
+  const [hintTextVisibility, setHintTextVisibility] = useState(
+    fieldTypeDefaultValue === "TEXT" || type === "TEXT" ? true : false
+  );
 
   const organizationId = useOrganizationId();
   return (
@@ -75,7 +81,16 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
       <div>
         <label className="lg:hidden">Type</label>
         <FormRow rowLabel={"Type"} className="border-b-0 pb-[10px] pt-[6px]">
-          <Select name="type" defaultValue={type || "TEXT"} disabled={disabled}>
+          <Select
+            name="type"
+            defaultValue={type || fieldTypeDefaultValue}
+            disabled={disabled}
+            onValueChange={(val) =>
+              val == "TEXT"
+                ? setHintTextVisibility(true)
+                : setHintTextVisibility(false)
+            }
+          >
             <SelectTrigger
               className="px-3.5 py-3"
               placeholder="Choose a field type"
@@ -98,6 +113,15 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
               </div>
             </SelectContent>
           </Select>
+          {hintTextVisibility && (
+            <div className="mt-2 flex-1 rounded-xl border px-6 py-5 text-[14px] text-gray-600">
+              <p>
+                A place to store short information for your asset. For instance:
+                Serial numbers, notes or anything you wish. No input validation.
+                Any text is acceptable.
+              </p>
+            </div>
+          )}
         </FormRow>
       </div>
       <FormRow rowLabel="" className="border-b-0 pt-2">
