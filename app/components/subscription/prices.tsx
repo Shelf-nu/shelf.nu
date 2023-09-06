@@ -46,6 +46,12 @@ export interface Price {
   } | null;
 }
 
+const plansIconsMap: { [key: string]: JSX.Element } = {
+  free: <SingleLayerIcon />,
+  tier_1: <DoubleLayerIcon />,
+  tier_2: <MultiLayerIcon />,
+};
+
 export const Price = ({
   price,
   previousPlanName,
@@ -59,11 +65,6 @@ export const Price = ({
   const features = price.product.metadata.features?.split(",") || [];
 
   // icons to be mapped with different plans
-  const plansIconsMap: { [key: string]: JSX.Element } = {
-    free: <SingleLayerIcon />,
-    tier_1: <DoubleLayerIcon />,
-    tier_2: <MultiLayerIcon />,
-  };
 
   return (
     <div className="subscription-plan mb-12 w-full xl:mb-0 xl:max-w-[410px]">

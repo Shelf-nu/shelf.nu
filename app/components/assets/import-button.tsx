@@ -1,32 +1,20 @@
-import { Button } from "../shared";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "../shared/hover-card";
+import { PremiumFeatureButton } from "../subscription/premium-feature-button";
 
 export const ImportButton = ({
   canImportAssets,
 }: {
   canImportAssets: boolean;
-}) =>
-  canImportAssets ? (
-    <Button to="import" variant="secondary" role="link">
-      Import
-    </Button>
-  ) : (
-    <HoverCard>
-      <HoverCardTrigger className="disabled inline-flex cursor-not-allowed items-center justify-center border-none p-0 text-text-sm font-semibold text-primary-700 hover:text-primary-800">
-        Import
-      </HoverCardTrigger>
-      <HoverCardContent>
-        <p>
-          Importing is not available on the free tier of shelf. Please{" "}
-          <Button to="/settings/subscription" variant="secondary">
-            upgrade to a paid plan
-          </Button>
-          .
-        </p>
-      </HoverCardContent>
-    </HoverCard>
-  );
+}) => (
+  <PremiumFeatureButton
+    canUseFeature={canImportAssets}
+    buttonContent={{
+      title: "Import",
+      message: "Importing is not available on the free tier of shelf.",
+    }}
+    buttonProps={{
+      to: `import`,
+      variant: "secondary",
+      role: "link",
+    }}
+  />
+);

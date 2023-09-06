@@ -1,7 +1,9 @@
 import type { LoaderArgs } from "@remix-run/node";
 import { fetchAssetsForExport } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { getUserTierLimit } from "~/modules/user";
+import { getUserTierLimit } from "~/modules/tier";
+
+import { canExportAssets } from "~/utils/subscription";
 
 /* There are some keys that need to be skipped and require special handling */
 const keysToSkip = ["userId", "organizationId", "categoryId", "locationId"];
@@ -11,7 +13,8 @@ export const loader = async ({ request }: LoaderArgs) => {
 
   /** Get the tier limit and check if they can export */
   const tierLimit = await getUserTierLimit(userId);
-  if (!tierLimit?.canExportAssets) {
+
+  if (!canExportAssets(tierLimit)) {
     return new Response("Unauthorized", {
       status: 401,
     });

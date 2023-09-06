@@ -1,4 +1,4 @@
-import type { Category, Asset, Tag, Custody, TierLimit } from "@prisma/client";
+import type { Category, Asset, Tag, Custody } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
@@ -29,6 +29,7 @@ import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { notFound } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */
@@ -125,7 +126,8 @@ export async function loader({ request }: LoaderArgs) {
     next,
     prev,
     modelName,
-    tierLimit: user?.tier.tierLimit,
+    canExportAssets: canExportAssets(user?.tier?.tierLimit),
+    canImportAssets: canImportAssets(user?.tier?.tierLimit),
   });
 }
 
@@ -135,7 +137,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
-  const { tierLimit } = useLoaderData<{ tierLimit: TierLimit }>();
+  const { canExportAssets, canImportAssets } = useLoaderData<typeof loader>();
   const selectedCategories = useAtomValue(selectedCategoriesAtom);
   const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
 
@@ -153,8 +155,8 @@ export default function AssetIndexPage() {
   return (
     <>
       <Header>
-        <ExportButton canExportAssets={tierLimit.canExportAssets} />
-        <ImportButton canImportAssets={tierLimit.canImportAssets} />
+        <ExportButton canExportAssets={canExportAssets} />
+        <ImportButton canImportAssets={canImportAssets} />
         <Button
           to="new"
           role="link"

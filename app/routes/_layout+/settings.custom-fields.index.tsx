@@ -1,17 +1,19 @@
 import { OrganizationType, type CustomField } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
-import { Button } from "~/components/shared/button";
+import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
 import { Td } from "~/components/table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import { getFilteredAndPaginatedCustomFields } from "~/modules/custom-field";
 import { getOrganizationByUserId } from "~/modules/organization";
+import { getUserTierLimit } from "~/modules/tier";
+
 import {
   getCurrentSearchParams,
   getParamsValues,
@@ -19,6 +21,7 @@ import {
   isDelete,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { canCreateMoreCustomFields } from "~/utils/subscription";
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -47,6 +50,9 @@ export async function loader({ request }: LoaderArgs) {
       perPage,
       search,
     });
+
+  const tierLimit = await getUserTierLimit(userId);
+
   const totalPages = Math.ceil(totalCustomFields / perPage);
 
   const header: HeaderData = {
@@ -67,6 +73,10 @@ export async function loader({ request }: LoaderArgs) {
     prev,
     next,
     modelName,
+    canCreateMoreCustomFields: canCreateMoreCustomFields({
+      tierLimit,
+      totalCustomFields,
+    }),
   });
 }
 
@@ -87,19 +97,27 @@ export const action = async ({ request }: ActionArgs) => {
 };
 
 export default function CustomFieldsIndexPage() {
+  const { canCreateMoreCustomFields } = useLoaderData<typeof loader>();
   return (
     <>
       <div className="mb-2.5 flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
         <h2 className=" text-lg text-gray-900">Custom Fields</h2>
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new custom field`}
-          icon="plus"
-          data-test-id="createNewCustomField"
-        >
-          New Custom Field
-        </Button>
+        <PremiumFeatureButton
+          canUseFeature={canCreateMoreCustomFields}
+          buttonContent={{
+            title: "New Custom Field",
+            message:
+              "You cannot create more custom fields wihin your subscription plan.",
+          }}
+          buttonProps={{
+            to: "new",
+            role: "link",
+            icon: "plus",
+            "aria-label": `new custom field`,
+            "data-test-id": "createNewCustomField",
+            variant: "primary",
+          }}
+        />
       </div>
       <List ItemComponent={TeamMemberRow} />
     </>

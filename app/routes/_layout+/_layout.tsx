@@ -15,6 +15,7 @@ import { userPrefs } from "~/cookies";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/index.css";
+import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getCustomerActiveSubscription,
@@ -63,6 +64,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
     user,
     organizationId: user?.organizations[0].id,
     subscription,
+    enablePremium: ENABLE_PREMIUM_FEATURES,
     hideSupportBanner: cookie.hideSupportBanner,
     minimizedSidebar: cookie.minimizedSidebar,
     isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),

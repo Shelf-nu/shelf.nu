@@ -1,3 +1,4 @@
+import { Form } from "@remix-run/react";
 import type Stripe from "stripe";
 import { CustomerPortalForm } from "./customer-portal-form";
 import type { Price } from "./prices";
@@ -24,5 +25,10 @@ export const PriceCta = ({
     );
   }
 
-  return null;
+  return (
+    <Form method="post">
+      <input type="hidden" name="priceId" value={price.id} />
+      <Button type="submit">Upgrade to {price.product.name}</Button>
+    </Form>
+  );
 };

@@ -9,8 +9,10 @@ import {
   NewCustomFieldFormSchema,
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
+
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createCustomField } from "~/modules/custom-field";
+
 import { assertIsPost } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -18,12 +20,16 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Custom Field";
 
-export async function loader() {
+export async function loader({ request }: LoaderArgs) {
+  await requireAuthSession(request);
+
   const header = {
     title,
   };
 
-  return json({ header });
+  return json({
+    header,
+  });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
