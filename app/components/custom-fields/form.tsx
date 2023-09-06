@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { CustomFieldType, type CustomField } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
@@ -41,6 +42,10 @@ interface Props {
   type?: CustomField["type"];
 }
 
+const FIELD_TYPE_DESCRIPTION = {
+  TEXT: "A place to store short information for your asset. For instance: Serial numbers, notes or anything you wish. No input validation. Any text is acceptable.",
+};
+
 export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
@@ -48,6 +53,10 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
   const fieldTypes = CustomFieldType;
 
   const [, updateTitle] = useAtom(updateTitleAtom);
+
+  // keeping text field type by default selected
+  const [selectedFieldType, setSelectedFieldType] =
+    useState<CustomFieldType>("TEXT");
 
   const organizationId = useOrganizationId();
   return (
@@ -75,7 +84,12 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
       <div>
         <label className="lg:hidden">Type</label>
         <FormRow rowLabel={"Type"} className="border-b-0 pb-[10px] pt-[6px]">
-          <Select name="type" defaultValue={type || "TEXT"} disabled={disabled}>
+          <Select
+            name="type"
+            defaultValue={type || selectedFieldType}
+            disabled={disabled}
+            onValueChange={(val: CustomFieldType) => setSelectedFieldType(val)}
+          >
             <SelectTrigger
               className="px-3.5 py-3"
               placeholder="Choose a field type"
@@ -98,6 +112,10 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
               </div>
             </SelectContent>
           </Select>
+
+          <div className="mt-2 flex-1 rounded-xl border px-6 py-5 text-[14px] text-gray-600">
+            <p>{FIELD_TYPE_DESCRIPTION[selectedFieldType]}</p>
+          </div>
         </FormRow>
       </div>
       <FormRow rowLabel="" className="border-b-0 pt-2">
