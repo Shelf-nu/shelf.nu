@@ -9,6 +9,7 @@ import type {
   Tag,
   Organization,
   TeamMember,
+  CustomField,
 } from "@prisma/client";
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
@@ -47,6 +48,19 @@ export async function getAsset({
         select: {
           createdAt: true,
           custodian: true,
+        },
+      },
+      customFields: {
+        include: {
+          customField: {
+            select: {
+              id: true,
+              name: true,
+              helpText: true,
+              required: true,
+              type: true,
+            },
+          },
         },
       },
     },
@@ -149,11 +163,13 @@ export async function createAsset({
   qrId,
   tags,
   custodian,
+  customFieldsValues,
 }: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
+  customFieldsValues?: { id: string; value: string | undefined }[];
 }) {
   /** User connction data */
   const user = {
@@ -240,6 +256,21 @@ export async function createAsset({
     });
   }
 
+  /** If custom fields are passed, create them */
+  if (customFieldsValues && customFieldsValues.length > 0) {
+    Object.assign(data, {
+      /** Custom fields here refers to the values, check the Schema for more info */
+      customFields: {
+        create: customFieldsValues?.map(
+          (cf: { id: string; value: string | undefined }) => ({
+            value: cf?.value || "",
+            customFieldId: cf.id,
+          })
+        ),
+      },
+    });
+  }
+
   return db.asset.create({
     data,
     include: {
@@ -261,6 +292,7 @@ interface UpdateAssetPayload {
   mainImageExpiration?: Asset["mainImageExpiration"];
   tags?: { set: { id: string }[] };
   userId?: User["id"];
+  customFieldsValues?: { id: string; value: string | undefined }[];
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
@@ -275,6 +307,7 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     newLocationId,
     currentLocationId,
     userId,
+    customFieldsValues: customFieldsValuesFromForm,
   } = payload;
   const isChangingLocation =
     newLocationId && currentLocationId && newLocationId !== currentLocationId;
@@ -312,6 +345,42 @@ export async function updateAsset(payload: UpdateAssetPayload) {
   if (tags && tags?.set) {
     Object.assign(data, {
       tags,
+    });
+  }
+
+  /** If custom fields are passed, create/update them */
+  if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
+    /** We get the current values. We need this in order to co-relate the correct fields to update as we dont have the id's of the values */
+    const currentCustomFieldsValues = await db.assetCustomFieldValue.findMany({
+      where: {
+        assetId: id,
+      },
+      select: {
+        id: true,
+        customFieldId: true,
+      },
+    });
+
+    Object.assign(data, {
+      customFields: {
+        upsert: customFieldsValuesFromForm?.map(
+          (cf: { id: string; value: string | undefined }) => ({
+            where: {
+              id:
+                currentCustomFieldsValues.find(
+                  (ccfv) => ccfv.customFieldId === cf.id
+                )?.id || "",
+            },
+            update: {
+              value: cf?.value || "",
+            },
+            create: {
+              value: cf?.value || "",
+              customFieldId: cf.id,
+            },
+          })
+        ),
+      },
     });
   }
 
@@ -456,10 +525,17 @@ export async function deleteNote({
 /** Fetches all related entries required for creating a new asset */
 export async function getAllRelatedEntries({
   userId,
+  organizationId,
 }: {
   userId: User["id"];
-}): Promise<{ categories: Category[]; tags: Tag[]; locations: Location[] }> {
-  const [categories, tags, locations] = await db.$transaction([
+  organizationId: Organization["id"];
+}): Promise<{
+  categories: Category[];
+  tags: Tag[];
+  locations: Location[];
+  customFields: CustomField[];
+}> {
+  const [categories, tags, locations, customFields] = await db.$transaction([
     /** Get the categories */
     db.category.findMany({ where: { userId } }),
 
@@ -468,8 +544,11 @@ export async function getAllRelatedEntries({
 
     /** Get the locations */
     db.location.findMany({ where: { userId } }),
+
+    /** Get the custom fields */
+    db.customField.findMany({ where: { organizationId } }),
   ]);
-  return { categories, tags, locations };
+  return { categories, tags, locations, customFields };
 }
 
 export const getPaginatedAndFilterableAssets = async ({
@@ -882,28 +961,3 @@ export interface CreateAssetFromBackupImportPayload
       }
     | {};
 }
-
-// id: "cllovk4390002omoml1be6cha";
-// title: "AMD Radeon RX 6800 XT";
-// description: "GPU from my new home PC.";
-// status: "IN_CUSTODY";
-// createdAt: "Thu Aug 24 2023 11:01:09 GMT+0300 (Eastern European Summer Time)";
-// updatedAt: "Thu Aug 24 2023 11:01:09 GMT+0300 (Eastern European Summer Time)";
-// category: {
-//   name: "PC Components";
-//   description: "";
-//   color: "#9c5301";
-//   createdAt: "2023-08-21T15:46:06.172Z";
-//   updatedAt: "2023-08-21T15:46:06.172Z";
-// };
-// location: {
-//   name: "Storage room 2";
-//   description: "";
-//   address: "";
-//   createdAt: "2023-08-21T15:46:06.542Z";
-//   updatedAt: "2023-08-21T15:46:06.542Z";
-// };
-// custody: "Some guy";
-// tags: [[Object], [Object]];
-// qrCodes: [[Object]];
-// }

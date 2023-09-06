@@ -1,4 +1,4 @@
-import { Roles } from "@prisma/client";
+import { OrganizationType, Roles } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderArgs,
@@ -25,14 +25,24 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   const authSession = await requireAuthSession(request);
-
+  // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
     ? await db.user.findUnique({
         where: { email: authSession.email.toLowerCase() },
-        include: { roles: true },
+        include: {
+          roles: true,
+          organizations: {
+            where: {
+              // This is default for now. Will need to be adjusted when we have more org types and teams functionality is active
+              type: OrganizationType.PERSONAL,
+            },
+            select: {
+              id: true,
+            },
+          },
+        },
       })
     : undefined;
-
   let subscription = null;
   if (user?.customerId) {
     // Get the Stripe customer
@@ -51,6 +61,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
 
   return json({
     user,
+    organizationId: user?.organizations[0].id,
     subscription,
     hideSupportBanner: cookie.hideSupportBanner,
     minimizedSidebar: cookie.minimizedSidebar,

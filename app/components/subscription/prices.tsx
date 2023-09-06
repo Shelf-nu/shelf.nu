@@ -1,18 +1,16 @@
-import { Form, useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import type Stripe from "stripe";
 import type { loader } from "~/routes/_layout+/settings.subscription";
 import { tw } from "~/utils";
 import { shortenIntervalString } from "~/utils/shorten-interval-string";
-import { CustomerPortalForm } from "./customer-portal-form";
 import { FREE_PLAN } from "./helpers";
+import { PriceCta } from "./price-cta";
 import {
   AltCheckmarkIcon,
   DoubleLayerIcon,
   MultiLayerIcon,
   SingleLayerIcon,
 } from "../icons";
-import { Button } from "../shared";
-import { PriceCta } from "./price-cta";
 
 export type PriceWithProduct = Stripe.Price & {
   product: Stripe.Product;
@@ -48,12 +46,11 @@ export interface Price {
   } | null;
 }
 
-
 export const Price = ({
   price,
   previousPlanName,
 }: {
-  price: Price
+  price: Price;
   previousPlanName?: string;
 }) => {
   const { activeSubscription } = useLoaderData<typeof loader>();
@@ -117,7 +114,7 @@ export const Price = ({
         </div>
       </div>
       <div className="mb-8">
-        <PriceCta price={price} activeSubscription={activeSubscription}/>
+        <PriceCta price={price} activeSubscription={activeSubscription} />
       </div>
       {features ? (
         <>

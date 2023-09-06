@@ -1,5 +1,5 @@
 import { OrganizationType } from "@prisma/client";
-import type { Prisma, Organization } from "@prisma/client";
+import type { Prisma, Organization, User } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { db } from "~/database";
 import {
@@ -140,3 +140,26 @@ export async function getTeamMembers({
 
   return { teamMembers, totalTeamMembers };
 }
+
+export const getOrganizationByUserId = async ({
+  userId,
+  orgType,
+}: {
+  userId: User["id"];
+  orgType: OrganizationType;
+}) =>
+  await db.organization.findFirst({
+    where: {
+      owner: {
+        is: {
+          id: userId,
+        },
+      },
+      type: orgType,
+    },
+    select: {
+      id: true,
+      name: true,
+      type: true,
+    },
+  });

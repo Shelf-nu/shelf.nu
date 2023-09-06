@@ -13,7 +13,6 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
-import { db } from "~/database";
 import {
   createAssetsFromBackupImport,
   createAssetsFromContentImport,
@@ -50,8 +49,7 @@ export const action = async ({ request }: ActionArgs) => {
           userId,
           organizationId: personalOrg?.id || "",
         });
-        return null;
-      // return json({ success: true });
+        return json({ success: true });
       case "content":
         const contentData = extractCSVDataFromContentImport(csvData);
 

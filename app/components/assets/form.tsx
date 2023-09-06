@@ -1,5 +1,5 @@
-import type { Asset, Qr } from "@prisma/client";
-import { Form, Link, useNavigation } from "@remix-run/react";
+import type { Asset, CustomField, Qr } from "@prisma/client";
+import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
@@ -7,6 +7,8 @@ import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/assets.new";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { isFormProcessing } from "~/utils";
+import { mergedSchema } from "~/utils/custom-field-schema";
+import AssetCustomFields from "./custom-fields-inputs";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -46,7 +48,22 @@ export const AssetForm = ({
   tags,
 }: Props) => {
   const navigation = useNavigation();
-  const zo = useZorm("NewQuestionWizardScreen", NewAssetFormSchema);
+
+  const { customFields } = useLoaderData();
+
+  const FormSchema = mergedSchema({
+    baseSchema: NewAssetFormSchema,
+    customFields: customFields.map((cf: CustomField) => ({
+      id: cf.id,
+      name: cf.name,
+      helpText: cf?.helpText || "",
+      required: cf.required,
+      type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+    })),
+  });
+
+  const zo = useZorm("NewQuestionWizardScreen", FormSchema);
+
   const disabled = isFormProcessing(navigation.state);
 
   const fileError = useAtomValue(fileErrorAtom);
@@ -149,6 +166,7 @@ export const AssetForm = ({
               asset’s overview page. You can always change it.
             </p>
           }
+          className="border-b-0"
         >
           <Input
             inputType="textarea"
@@ -163,7 +181,9 @@ export const AssetForm = ({
         </FormRow>
       </div>
 
-      <div className="text-right">
+      <AssetCustomFields zo={zo} />
+
+      <div className="pt-6 text-right">
         <Button type="submit" disabled={disabled}>
           {disabled ? <Spinner /> : "Save"}
         </Button>
