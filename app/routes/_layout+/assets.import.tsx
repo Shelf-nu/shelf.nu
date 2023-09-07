@@ -49,6 +49,7 @@ export const action = async ({ request }: ActionArgs) => {
           userId,
           organizationId: personalOrg?.id || "",
         });
+        // return null;
         return json({ success: true });
       case "content":
         const contentData = extractCSVDataFromContentImport(csvData);

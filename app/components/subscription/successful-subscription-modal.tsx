@@ -1,6 +1,7 @@
 import { useCallback } from "react";
-import { useSearchParams } from "@remix-run/react";
+import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
+import type { loader } from "~/routes/_layout+/settings.subscription";
 import { Button } from "../shared/button";
 
 export default function SuccessfulSubscriptionModal() {
@@ -14,6 +15,9 @@ export default function SuccessfulSubscriptionModal() {
     },
     [params, setParams]
   );
+
+  const { activeProduct } = useLoaderData<typeof loader>();
+
   return (
     <AnimatePresence>
       {success ? (
@@ -40,7 +44,7 @@ export default function SuccessfulSubscriptionModal() {
                   You are now subscribed!
                 </h4>
                 <p className="text-gray-600">
-                  Thank you, all Plus and Team features are unlocked.
+                  Thank you, all {activeProduct?.name} features are unlocked.
                 </p>
               </div>
               <Button width="full" to="/assets" variant="primary">
