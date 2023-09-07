@@ -10,6 +10,9 @@ permissions:
   contents: read
 
 jobs:
+  tests:
+    uses: ./.github/workflows/test.yml
+    
   lint:
     name: ⬣ ESLint
     runs-on: ubuntu-latest
