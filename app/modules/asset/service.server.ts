@@ -25,6 +25,7 @@ import {
 import { processCustomFields } from "~/utils/import.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import { createCategoriesIfNotExists, getAllCategories } from "../category";
+import { createCustomFieldsIfNotExists } from "../custom-field";
 import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
 import { createTagsIfNotExists, getAllTags } from "../tag";
@@ -695,6 +696,12 @@ export const createAssetsFromContentImport = async ({
     userId,
   });
 
+  const customFields = await createCustomFieldsIfNotExists({
+    data,
+    organizationId,
+    userId,
+  });
+
   data.map(async (asset) => {
     await createAsset({
       title: asset.title,
@@ -711,6 +718,13 @@ export const createAssetsFromContentImport = async ({
                 .map((t) => ({ id: tags[t] })),
             }
           : undefined,
+      // customFieldsValues:
+      //   asset?.customFields?.length > 0
+      //     ? asset.customFields.map((cf: AssetCustomFieldValue) => ({
+      //         id: customFields[cf.value].id,
+      //         value: cf.value,
+      //       }))
+      //     : undefined,
     });
   });
 };

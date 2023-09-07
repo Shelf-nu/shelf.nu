@@ -53,13 +53,13 @@ export const action = async ({ request }: ActionArgs) => {
         return json({ success: true });
       case "content":
         const contentData = extractCSVDataFromContentImport(csvData);
-
         await createAssetsFromContentImport({
           data: contentData,
           userId,
           organizationId: personalOrg?.id || "",
         });
-        return json({ success: true });
+        return null;
+      // return json({ success: true });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid CSV file";

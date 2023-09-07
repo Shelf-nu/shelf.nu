@@ -1,5 +1,12 @@
-import type { CustomField, Organization, Prisma, User } from "@prisma/client";
+import {
+  CustomFieldType,
+  type CustomField,
+  type Organization,
+  type Prisma,
+  type User,
+} from "@prisma/client";
 import { db } from "~/database";
+import type { CreateAssetFromContentImportPayload } from "../asset";
 
 export async function createCustomField({
   name,
@@ -113,4 +120,52 @@ export async function updateCustomField(payload: {
     where: { id },
     data: data,
   });
+}
+
+export async function createCustomFieldsIfNotExists({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}): Promise<Record<string, CustomField>> {
+  // This is the list of all the custom fields keys
+  // It should have only unique entries
+  const customFieldsKeys = data
+    .map((item) => Object.keys(item).filter((k) => k.startsWith("cf:")))
+    .flat()
+    .filter((v, i, a) => a.indexOf(v) === i);
+
+  /** Based on those keys we need to check if custom fields with those names exist */
+  const customFields = {};
+
+  for (const customFieldName of customFieldsKeys) {
+    const name = customFieldName.replace("cf:", "").trim();
+    const value = data[0][customFieldName];
+    const existingCustomField = await db.customField.findFirst({
+      where: {
+        name: name,
+        organizationId,
+      },
+    });
+
+    if (!existingCustomField) {
+      const newCustomField = await createCustomField({
+        organizationId,
+        userId,
+        name,
+        type: CustomFieldType.TEXT,
+        required: false,
+        helpText: "",
+      });
+
+      Object.assign(customFields, { [value]: newCustomField });
+    } else {
+      Object.assign(customFields, { [value]: existingCustomField });
+    }
+  }
+
+  return customFields;
 }
