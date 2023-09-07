@@ -31,6 +31,10 @@ export const NewCustomFieldFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "on" ? true : false)),
+  active: z
+    .string()
+    .optional()
+    .transform((val) => (val === "on" ? true : false)),
   organizationId: z.string(),
 });
 
@@ -40,13 +44,20 @@ interface Props {
   helpText?: CustomField["helpText"];
   required?: CustomField["required"];
   type?: CustomField["type"];
+  active?: CustomField["active"];
 }
 
 const FIELD_TYPE_DESCRIPTION = {
   TEXT: "A place to store short information for your asset. For instance: Serial numbers, notes or anything you wish. No input validation. Any text is acceptable.",
 };
 
-export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
+export const CustomFieldForm = ({
+  name,
+  helpText,
+  required,
+  type,
+  active,
+}: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -128,6 +139,26 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
           <label className="text-base font-medium text-gray-700">
             Required
           </label>
+        </div>
+      </FormRow>
+
+      <FormRow rowLabel="" className="border-b-0 pt-2">
+        <div className="flex items-center gap-3">
+          <Switch
+            name={zo.fields.active()}
+            disabled={disabled}
+            defaultChecked={true}
+            checked={active}
+          />
+          <div>
+            <label className="text-base font-medium text-gray-700">
+              Active
+            </label>
+            <p className="text-[14px] text-gray-600">
+              Deactivating a field will no longer show it on the asset form and
+              page
+            </p>
+          </div>
         </div>
       </FormRow>
 

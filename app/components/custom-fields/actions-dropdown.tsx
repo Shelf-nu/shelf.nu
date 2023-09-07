@@ -6,7 +6,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import { DeleteField } from "./delete-field";
 import { Button } from "../shared/button";
 
 export function ActionsDropdown({ customField }: { customField: CustomField }) {
@@ -34,7 +33,6 @@ export function ActionsDropdown({ customField }: { customField: CustomField }) {
             Edit
           </Button>
         </DropdownMenuItem>
-        <DeleteField customField={customField} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

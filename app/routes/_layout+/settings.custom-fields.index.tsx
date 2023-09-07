@@ -1,14 +1,14 @@
 import { OrganizationType, type CustomField } from "@prisma/client";
-import { json, redirect } from "@remix-run/node";
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
+import { Badge } from "~/components/shared";
 import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
 import { Td } from "~/components/table";
-import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import { getFilteredAndPaginatedCustomFields } from "~/modules/custom-field";
 import { getOrganizationByUserId } from "~/modules/organization";
@@ -18,7 +18,6 @@ import {
   getCurrentSearchParams,
   getParamsValues,
   generatePageMeta,
-  isDelete,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
@@ -79,7 +78,8 @@ export async function loader({ request }: LoaderArgs) {
     }),
   });
 }
-
+/*
+* disabling delete functionality for now
 export const action = async ({ request }: ActionArgs) => {
   await requireAuthSession(request);
 
@@ -95,6 +95,7 @@ export const action = async ({ request }: ActionArgs) => {
     return redirect(`/settings/custom-fields`);
   }
 };
+*/
 
 export default function CustomFieldsIndexPage() {
   const { canCreateMoreCustomFields } = useLoaderData<typeof loader>();
@@ -128,14 +129,21 @@ function TeamMemberRow({ item }: { item: CustomField }) {
     <>
       <Td className="w-full">
         <div className="flex items-center justify-between">
-          <div>
-            <Link
-              to={`${item.id}/edit`}
-              className="block text-text-sm font-medium text-gray-900"
-            >
-              {item.name}
-            </Link>
-            <span className="lowercase text-gray-600">{item.type}</span>
+          <div className="flex items-start gap-3">
+            <div>
+              <Link
+                to={`${item.id}/edit`}
+                className="block text-text-sm font-medium text-gray-900"
+              >
+                {item.name}
+              </Link>
+              <span className="lowercase text-gray-600">{item.type}</span>
+            </div>
+            {!item.active && (
+              <Badge color="#dc2626" withDot={false}>
+                inactive
+              </Badge>
+            )}
           </div>
           <ActionsDropdown customField={item} />
         </div>

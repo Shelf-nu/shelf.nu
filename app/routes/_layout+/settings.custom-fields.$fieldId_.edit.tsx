@@ -82,13 +82,14 @@ export async function action({ request, params }: ActionArgs) {
     );
   }
 
-  const { name, helpText, type, required } = result.data;
+  const { name, helpText, type, active, required } = result.data;
 
   await updateCustomField({
     id,
     name,
     helpText,
     type,
+    active,
     required,
   });
 
@@ -124,6 +125,7 @@ export default function AssetEditPage() {
           helpText={customField.helpText}
           required={customField.required}
           type={customField.type}
+          active={customField.active}
         />
       </div>
     </>

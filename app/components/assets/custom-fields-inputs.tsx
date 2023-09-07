@@ -35,29 +35,35 @@ export default function AssetCustomFields({
         </Link>
       </div>
       {customFields.length > 0 ? (
-        customFields.map((field: CustomField) => (
-          <FormRow
-            key={field.id}
-            rowLabel={field.name}
-            subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
-            className="border-b-0"
-          >
-            <Input
-              hideLabel
-              type={field.type.toLowerCase()}
-              label={field.name}
-              name={`cf-${field.id}`}
-              error={zo.errors[`cf-${field.id}`]()?.message}
-              disabled={disabled}
-              defaultValue={
-                customFieldsValues?.find(
-                  (cfv) => cfv.customFieldId === field.id
-                )?.value || ""
-              }
-              className="w-full"
-            />
-          </FormRow>
-        ))
+        customFields.map((field: CustomField) => {
+          if (field.active) {
+            return (
+              <FormRow
+                key={field.id}
+                rowLabel={field.name}
+                subHeading={
+                  field.helpText ? <p>{field.helpText}</p> : undefined
+                }
+                className="border-b-0"
+              >
+                <Input
+                  hideLabel
+                  type={field.type.toLowerCase()}
+                  label={field.name}
+                  name={`cf-${field.id}`}
+                  error={zo.errors[`cf-${field.id}`]()?.message}
+                  disabled={disabled}
+                  defaultValue={
+                    customFieldsValues?.find(
+                      (cfv) => cfv.customFieldId === field.id
+                    )?.value || ""
+                  }
+                  className="w-full"
+                />
+              </FormRow>
+            );
+          } else return null;
+        })
       ) : (
         <div>
           <div className=" mx-auto max-w-[640px] rounded-xl border border-gray-300 bg-white px-5 py-10 text-center">

@@ -7,8 +7,9 @@ export async function createCustomField({
   type,
   required,
   organizationId,
+  active,
   userId,
-}: Pick<CustomField, "helpText" | "name" | "type" | "required"> & {
+}: Pick<CustomField, "helpText" | "name" | "type" | "required" | "active"> & {
   organizationId: Organization["id"];
   userId: User["id"];
 }) {
@@ -18,6 +19,7 @@ export async function createCustomField({
       helpText,
       type,
       required,
+      active,
       organization: {
         connect: {
           id: organizationId,
@@ -68,7 +70,7 @@ export async function getFilteredAndPaginatedCustomFields({
       skip,
       take,
       where,
-      orderBy: { updatedAt: "desc" },
+      orderBy: [{ active: "desc" }, { updatedAt: "desc" }],
     }),
 
     /** Count them */
@@ -100,13 +102,15 @@ export async function updateCustomField(payload: {
   helpText?: CustomField["helpText"];
   type?: CustomField["type"];
   required?: CustomField["required"];
+  active?: CustomField["active"];
 }) {
-  const { id, name, helpText, type, required } = payload;
+  const { id, name, helpText, type, required, active } = payload;
   const data = {
     name,
     type,
     helpText,
     required,
+    active,
   };
 
   return await db.customField.update({
