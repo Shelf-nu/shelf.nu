@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef } from "react";
 import { CustomFieldType, type CustomField } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
@@ -66,12 +66,9 @@ export const CustomFieldForm = ({
   const [, updateTitle] = useAtom(updateTitleAtom);
 
   // keeping text field type by default selected
-  const [selectedFieldType, setSelectedFieldType] =
-    useState<CustomFieldType>("TEXT");
-
+  const selectedFieldTypeRef = useRef<CustomFieldType>("TEXT");
   const organizationId = useOrganizationId();
 
-  const [isActive, setIsActive] = useState(active);
   return (
     <Form
       ref={zo.ref}
@@ -99,9 +96,11 @@ export const CustomFieldForm = ({
         <FormRow rowLabel={"Type"} className="border-b-0 pb-[10px] pt-[6px]">
           <Select
             name="type"
-            defaultValue={type || selectedFieldType}
+            defaultValue={type || selectedFieldTypeRef.current}
             disabled={disabled}
-            onValueChange={(val: CustomFieldType) => setSelectedFieldType(val)}
+            onValueChange={(val: CustomFieldType) =>
+              (selectedFieldTypeRef.current = val)
+            }
           >
             <SelectTrigger
               className="px-3.5 py-3"
@@ -127,7 +126,7 @@ export const CustomFieldForm = ({
           </Select>
 
           <div className="mt-2 flex-1 rounded-xl border px-6 py-5 text-[14px] text-gray-600">
-            <p>{FIELD_TYPE_DESCRIPTION[selectedFieldType]}</p>
+            <p>{FIELD_TYPE_DESCRIPTION[selectedFieldTypeRef.current]}</p>
           </div>
         </FormRow>
       </div>
@@ -149,9 +148,7 @@ export const CustomFieldForm = ({
           <Switch
             name={zo.fields.active()}
             disabled={disabled}
-            defaultChecked={true}
-            checked={isActive}
-            onCheckedChange={(checked) => setIsActive(checked)}
+            defaultChecked={active === undefined || active}
           />
           <div>
             <label className="text-base font-medium text-gray-700">

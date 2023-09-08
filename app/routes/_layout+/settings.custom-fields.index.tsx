@@ -78,24 +78,6 @@ export async function loader({ request }: LoaderArgs) {
     }),
   });
 }
-/*
-* disabling delete functionality for now
-export const action = async ({ request }: ActionArgs) => {
-  await requireAuthSession(request);
-
-  if (isDelete(request)) {
-    const formData = await request.formData();
-    const customFieldId = formData.get("customFieldId") as string;
-
-    await db.customField.delete({
-      where: {
-        id: customFieldId,
-      },
-    });
-    return redirect(`/settings/custom-fields`);
-  }
-};
-*/
 
 export default function CustomFieldsIndexPage() {
   const { canCreateMoreCustomFields } = useLoaderData<typeof loader>();
