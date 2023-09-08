@@ -10,6 +10,7 @@ import type {
   Organization,
   TeamMember,
   CustomField,
+  AssetCustomFieldValue,
 } from "@prisma/client";
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
@@ -21,8 +22,10 @@ import {
   getParamsValues,
   oneDayFromNow,
 } from "~/utils";
+import { processCustomFields } from "~/utils/import.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import { createCategoriesIfNotExists, getAllCategories } from "../category";
+import { createCustomFieldsIfNotExists } from "../custom-field";
 import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
 import { createTagsIfNotExists, getAllTags } from "../tag";
@@ -658,6 +661,11 @@ export const fetchAssetsForExport = async ({
         },
       },
       tags: true,
+      customFields: {
+        include: {
+          customField: true,
+        },
+      },
     },
   });
 
@@ -690,6 +698,12 @@ export const createAssetsFromContentImport = async ({
     userId,
   });
 
+  const customFields = await createCustomFieldsIfNotExists({
+    data,
+    organizationId,
+    userId,
+  });
+
   data.map(async (asset) => {
     await createAsset({
       title: asset.title,
@@ -706,6 +720,13 @@ export const createAssetsFromContentImport = async ({
                 .map((t) => ({ id: tags[t] })),
             }
           : undefined,
+      // customFieldsValues:
+      //   asset?.customFields?.length > 0
+      //     ? asset.customFields.map((cf: AssetCustomFieldValue) => ({
+      //         id: customFields[cf.value].id,
+      //         value: cf.value,
+      //       }))
+      //     : undefined,
     });
   });
 };
@@ -915,6 +936,28 @@ export const createAssetsFromBackupImport = async ({
       });
     }
 
+    /** Custom fields */
+    if (asset.customFields && asset.customFields.length > 0) {
+      /** we need to check if custom fields exist and create them
+       * Then we need to also create the values for the asset.customFields
+       */
+
+      const cfIds = await processCustomFields({
+        asset,
+        organizationId,
+        userId,
+      });
+
+      Object.assign(d.data, {
+        customFields: {
+          create: asset.customFields.map((cf) => ({
+            value: cf.value,
+            customFieldId: cfIds[cf.customField.name],
+          })),
+        },
+      });
+    }
+
     /** Create the Asset */
     const { id: assetId } = await db.asset.create(d);
 
@@ -962,4 +1005,9 @@ export interface CreateAssetFromBackupImportPayload
         updatedAt: string;
       }
     | {};
+  customFields: AssetCustomFieldsValuesWithFields[];
 }
+
+export type AssetCustomFieldsValuesWithFields = AssetCustomFieldValue & {
+  customField: CustomField;
+};

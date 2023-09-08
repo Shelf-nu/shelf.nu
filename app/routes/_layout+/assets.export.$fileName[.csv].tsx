@@ -2,9 +2,16 @@ import type { LoaderArgs } from "@remix-run/node";
 import { fetchAssetsForExport } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { assertUserCanExportAssets } from "~/modules/tier";
+import { buildCsvDataFromAssets } from "~/utils";
 
 /* There are some keys that need to be skipped and require special handling */
-const keysToSkip = ["userId", "organizationId", "categoryId", "locationId"];
+const keysToSkip = [
+  "userId",
+  "organizationId",
+  "categoryId",
+  "locationId",
+  "customFieldId",
+];
 
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
@@ -13,52 +20,9 @@ export const loader = async ({ request }: LoaderArgs) => {
 
   const assets = await fetchAssetsForExport({ userId });
 
-  const csvData = assets.map((asset) => {
-    const toExport: string[] = [];
-
-    /** Itterate over the values to create teh export object */
-    Object.entries(asset).forEach(([key, value]) => {
-      /** Skip keys that are not needed. These are foreign keys for the related entries */
-      if (keysToSkip.includes(key)) return;
-
-      /** If the value is null, push an empty string
-       * We have a bit of a special case, for the relations that are objects, we need to push an empty object instead of an empty string.
-       * This way we prevent the import from failing when importing the file again due to "Invalid JSON"
-       * This needs to be done for all one-to-one relations
-       */
-      if (value === null) {
-        if (["custody", "location", "category"].includes(key)) {
-          return toExport.push("{}");
-        }
-        return toExport.push("");
-      }
-
-      /** Special handling for category and location */
-      switch (key) {
-        case "location":
-        case "category":
-        case "notes":
-        case "tags":
-        case "custody":
-        case "organization":
-          toExport.push(
-            JSON.stringify(value, (_key, value) => {
-              /** Custom replacer function.
-               * We do this to ensure that in the result we have emtpy strings instead of null values
-               */
-              if (value === null) {
-                return "";
-              }
-              return value;
-            })
-          );
-          break;
-        default:
-          toExport.push(String(value));
-      }
-    });
-
-    return toExport;
+  const csvData = buildCsvDataFromAssets({
+    assets,
+    keysToSkip,
   });
 
   if (!csvData) return null;
