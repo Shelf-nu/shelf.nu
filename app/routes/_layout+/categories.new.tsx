@@ -13,6 +13,7 @@ import { createCategory } from "~/modules/category";
 import { assertIsPost, getRandomColor, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { zodFieldIsRequired } from "~/utils/zod";
 
 export const NewCategoryFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
@@ -97,6 +98,7 @@ export default function NewCategory() {
             error={zo.errors.name()?.message}
             hideErrorText
             autoFocus
+            required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
           />
           <Input
             label="Description"
@@ -105,6 +107,9 @@ export default function NewCategory() {
             disabled={disabled}
             data-test-id="categoryDescription"
             className="mb-4 lg:mb-0"
+            required={zodFieldIsRequired(
+              NewCategoryFormSchema.shape.description
+            )}
           />
           <div className="mb-6 lg:mb-0">
             <ColorInput
@@ -113,6 +118,7 @@ export default function NewCategory() {
               error={zo.errors.color()?.message}
               hideErrorText
               colorFromServer={colorFromServer}
+              required={zodFieldIsRequired(NewCategoryFormSchema.shape.color)}
             />
           </div>
         </div>

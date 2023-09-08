@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState } from "react";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
@@ -10,9 +10,15 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getTag, updateTag } from "~/modules/tag";
-import { assertIsPost, getRequiredParam, isFormProcessing, handleInputChange } from "~/utils";
+import {
+  assertIsPost,
+  getRequiredParam,
+  isFormProcessing,
+  handleInputChange,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateTagFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
@@ -25,7 +31,7 @@ export async function loader({ request, params }: LoaderArgs) {
   await requireAuthSession(request);
 
   const id = getRequiredParam(params, "tagId");
-  const tag = await getTag({ id })
+  const tag = await getTag({ id });
 
   const header = {
     title,
@@ -42,7 +48,9 @@ export async function action({ request, params }: LoaderArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
   const formData = await request.formData();
-  const result = await UpdateTagFormSchema.safeParseAsync(parseFormAny(formData));
+  const result = await UpdateTagFormSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
 
   const id = getRequiredParam(params, "tagId");
 
@@ -57,7 +65,7 @@ export async function action({ request, params }: LoaderArgs) {
 
   await updateTag({
     ...result.data,
-    id
+    id,
   });
 
   sendNotification({
@@ -80,10 +88,10 @@ export default function EditTag() {
   const disabled = isFormProcessing(navigation.state);
   const { tag } = useLoaderData();
 
-  const [formData, setFormData] = useState<{ [key: string]: any}>({
-    name: tag.name, 
-    description: tag.description, 
-  })
+  const [formData, setFormData] = useState<{ [key: string]: any }>({
+    name: tag.name,
+    description: tag.description,
+  });
 
   return (
     <>
@@ -103,7 +111,8 @@ export default function EditTag() {
             hideErrorText
             autoFocus
             value={formData.name}
-            onChange={e => handleInputChange(e, setFormData, 'name')}
+            onChange={(e) => handleInputChange(e, setFormData, "name")}
+            required={zodFieldIsRequired(UpdateTagFormSchema.shape.name)}
           />
           <Input
             label="Description"
@@ -113,7 +122,8 @@ export default function EditTag() {
             data-test-id="tagDescription"
             className="mb-4 lg:mb-0"
             value={formData.description}
-            onChange={e => handleInputChange(e, setFormData, 'description')}
+            onChange={(e) => handleInputChange(e, setFormData, "description")}
+            required={zodFieldIsRequired(UpdateTagFormSchema.shape.description)}
           />
         </div>
 

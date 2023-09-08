@@ -8,6 +8,7 @@ interface Props {
   children: React.ReactNode;
   className?: string;
   subHeading?: string | JSX.Element;
+  required?: boolean;
 }
 
 export default function FormRow({
@@ -15,6 +16,7 @@ export default function FormRow({
   rowLabel,
   subHeading,
   className,
+  required = false,
 }: Props) {
   return (
     <div
@@ -24,7 +26,14 @@ export default function FormRow({
       )}
     >
       <div className="hidden lg:block lg:basis-[280px]">
-        <div className="text-text-sm font-medium text-gray-700">{rowLabel}</div>
+        <div
+          className={tw(
+            "text-text-sm font-medium text-gray-700",
+            required && "required-input-label"
+          )}
+        >
+          {rowLabel}
+        </div>
         <SubHeading className="text-xs text-gray-600">{subHeading}</SubHeading>
       </div>
 
