@@ -70,6 +70,8 @@ export const CustomFieldForm = ({
     useState<CustomFieldType>("TEXT");
 
   const organizationId = useOrganizationId();
+
+  const [isActive, setIsActive] = useState(active);
   return (
     <Form
       ref={zo.ref}
@@ -148,7 +150,8 @@ export const CustomFieldForm = ({
             name={zo.fields.active()}
             disabled={disabled}
             defaultChecked={true}
-            checked={active}
+            checked={isActive}
+            onCheckedChange={(checked) => setIsActive(checked)}
           />
           <div>
             <label className="text-base font-medium text-gray-700">

@@ -118,7 +118,6 @@ export default function AssetEditPage() {
   return (
     <>
       <Header title={hasName ? name : customField.name} />
-      <div>{name}</div>
       <div className=" items-top flex justify-between">
         <CustomFieldForm
           name={customField.name || name}
