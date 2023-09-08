@@ -128,24 +128,24 @@ function TeamMemberRow({ item }: { item: CustomField }) {
   return (
     <>
       <Td className="w-full">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex-1">
+            <Link
+              to={`${item.id}/edit`}
+              className="block text-text-sm font-medium text-gray-900"
+            >
+              {item.name}
+            </Link>
+            <span className="lowercase text-gray-600">{item.type}</span>
+          </div>
           <div className="flex items-start gap-3">
-            <div>
-              <Link
-                to={`${item.id}/edit`}
-                className="block text-text-sm font-medium text-gray-900"
-              >
-                {item.name}
-              </Link>
-              <span className="lowercase text-gray-600">{item.type}</span>
-            </div>
             {!item.active && (
               <Badge color="#dc2626" withDot={false}>
                 inactive
               </Badge>
             )}
+            <ActionsDropdown customField={item} />
           </div>
-          <ActionsDropdown customField={item} />
         </div>
       </Td>
     </>
