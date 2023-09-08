@@ -143,7 +143,7 @@ export async function createCustomFieldsIfNotExists({
 
   for (const customFieldName of customFieldsKeys) {
     const name = customFieldName.replace("cf:", "").trim();
-    const value = data[0][customFieldName];
+
     const existingCustomField = await db.customField.findFirst({
       where: {
         name: name,
@@ -160,10 +160,25 @@ export async function createCustomFieldsIfNotExists({
         required: false,
         helpText: "",
       });
-
-      Object.assign(customFields, { [value]: newCustomField });
+      // Assign the new custom field to all values associated with the name
+      for (const item of data) {
+        if (item.hasOwnProperty(customFieldName)) {
+          const value = item[customFieldName];
+          if (value !== "") {
+            Object.assign(customFields, { [value]: newCustomField });
+          }
+        }
+      }
     } else {
-      Object.assign(customFields, { [value]: existingCustomField });
+      // Assign the existing custom field to all values associated with the name
+      for (const item of data) {
+        if (item.hasOwnProperty(customFieldName)) {
+          const value = item[customFieldName];
+          if (value !== "") {
+            Object.assign(customFields, { [value]: existingCustomField });
+          }
+        }
+      }
     }
   }
 

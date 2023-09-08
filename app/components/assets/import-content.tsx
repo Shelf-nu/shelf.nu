@@ -125,7 +125,11 @@ const FileForm = ({ intent }: { intent: string }) => {
 
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button title={"Confirm asset import"} disabled={!selectedFile}>
+          <Button
+            title={"Confirm asset import"}
+            disabled={!selectedFile}
+            className="mt-4"
+          >
             Confirm asset import
           </Button>
         </AlertDialogTrigger>
@@ -176,7 +180,7 @@ const FileForm = ({ intent }: { intent: string }) => {
                   }}
                   disabled={disabled}
                 >
-                  Import
+                  {disabled ? "Importing..." : "Import"}
                 </Button>
               </>
             )}

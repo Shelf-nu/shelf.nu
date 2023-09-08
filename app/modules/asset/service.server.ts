@@ -172,7 +172,7 @@ export async function createAsset({
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
-  customFieldsValues?: { id: string; value: string | undefined }[];
+  customFieldsValues?: ({ id: string; value: string | undefined } | null)[];
 }) {
   /** User connction data */
   const user = {
@@ -265,10 +265,11 @@ export async function createAsset({
       /** Custom fields here refers to the values, check the Schema for more info */
       customFields: {
         create: customFieldsValues?.map(
-          (cf: { id: string; value: string | undefined }) => ({
-            value: cf?.value || "",
-            customFieldId: cf.id,
-          })
+          (cf: { id: string; value: string | undefined } | null) =>
+            cf !== null && {
+              value: cf?.value || "",
+              customFieldId: cf.id,
+            }
         ),
       },
     });
@@ -702,7 +703,11 @@ export const createAssetsFromContentImport = async ({
     userId,
   });
 
-  data.map(async (asset) => {
+  for (const asset of data) {
+    const assetCustomFieldsValues = Object.entries(asset)
+      .map(([key, value]) => (key.startsWith("cf:") ? value : null))
+      .filter((v) => v !== null);
+
     await createAsset({
       title: asset.title,
       description: asset.description || "",
@@ -718,15 +723,21 @@ export const createAssetsFromContentImport = async ({
                 .map((t) => ({ id: tags[t] })),
             }
           : undefined,
-      // customFieldsValues:
-      //   asset?.customFields?.length > 0
-      //     ? asset.customFields.map((cf: AssetCustomFieldValue) => ({
-      //         id: customFields[cf.value].id,
-      //         value: cf.value,
-      //       }))
-      //     : undefined,
+      customFieldsValues:
+        assetCustomFieldsValues?.length > 0
+          ? assetCustomFieldsValues
+              .map((v: string) =>
+                customFields[v]?.id
+                  ? {
+                      id: customFields[v].id,
+                      value: v || "",
+                    }
+                  : null
+              )
+              .filter((v) => v !== null)
+          : undefined,
     });
-  });
+  }
 };
 
 export interface CreateAssetFromContentImportPayload
