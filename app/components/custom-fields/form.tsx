@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef } from "react";
 import { CustomFieldType, type CustomField } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
@@ -31,6 +31,10 @@ export const NewCustomFieldFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "on" ? true : false)),
+  active: z
+    .string()
+    .optional()
+    .transform((val) => (val === "on" ? true : false)),
   organizationId: z.string(),
 });
 
@@ -40,13 +44,20 @@ interface Props {
   helpText?: CustomField["helpText"];
   required?: CustomField["required"];
   type?: CustomField["type"];
+  active?: CustomField["active"];
 }
 
 const FIELD_TYPE_DESCRIPTION = {
   TEXT: "A place to store short information for your asset. For instance: Serial numbers, notes or anything you wish. No input validation. Any text is acceptable.",
 };
 
-export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
+export const CustomFieldForm = ({
+  name,
+  helpText,
+  required,
+  type,
+  active,
+}: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -55,10 +66,9 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
   const [, updateTitle] = useAtom(updateTitleAtom);
 
   // keeping text field type by default selected
-  const [selectedFieldType, setSelectedFieldType] =
-    useState<CustomFieldType>("TEXT");
-
+  const selectedFieldTypeRef = useRef<CustomFieldType>("TEXT");
   const organizationId = useOrganizationId();
+
   return (
     <Form
       ref={zo.ref}
@@ -86,9 +96,11 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
         <FormRow rowLabel={"Type"} className="border-b-0 pb-[10px] pt-[6px]">
           <Select
             name="type"
-            defaultValue={type || selectedFieldType}
+            defaultValue={type || selectedFieldTypeRef.current}
             disabled={disabled}
-            onValueChange={(val: CustomFieldType) => setSelectedFieldType(val)}
+            onValueChange={(val: CustomFieldType) =>
+              (selectedFieldTypeRef.current = val)
+            }
           >
             <SelectTrigger
               className="px-3.5 py-3"
@@ -114,7 +126,7 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
           </Select>
 
           <div className="mt-2 flex-1 rounded-xl border px-6 py-5 text-[14px] text-gray-600">
-            <p>{FIELD_TYPE_DESCRIPTION[selectedFieldType]}</p>
+            <p>{FIELD_TYPE_DESCRIPTION[selectedFieldTypeRef.current]}</p>
           </div>
         </FormRow>
       </div>
@@ -128,6 +140,25 @@ export const CustomFieldForm = ({ name, helpText, required, type }: Props) => {
           <label className="text-base font-medium text-gray-700">
             Required
           </label>
+        </div>
+      </FormRow>
+
+      <FormRow rowLabel="" className="border-b-0 pt-2">
+        <div className="flex items-center gap-3">
+          <Switch
+            name={zo.fields.active()}
+            disabled={disabled}
+            defaultChecked={active === undefined || active}
+          />
+          <div>
+            <label className="text-base font-medium text-gray-700">
+              Active
+            </label>
+            <p className="text-[14px] text-gray-600">
+              Deactivating a field will no longer show it on the asset form and
+              page
+            </p>
+          </div>
         </div>
       </FormRow>
 

@@ -82,13 +82,14 @@ export async function action({ request, params }: ActionArgs) {
     );
   }
 
-  const { name, helpText, type, required } = result.data;
+  const { name, helpText, type, active, required } = result.data;
 
   await updateCustomField({
     id,
     name,
     helpText,
     type,
+    active,
     required,
   });
 
@@ -117,13 +118,13 @@ export default function AssetEditPage() {
   return (
     <>
       <Header title={hasName ? name : customField.name} />
-      <div>{name}</div>
       <div className=" items-top flex justify-between">
         <CustomFieldForm
           name={customField.name || name}
           helpText={customField.helpText}
           required={customField.required}
           type={customField.type}
+          active={customField.active}
         />
       </div>
     </>

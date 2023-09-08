@@ -550,7 +550,9 @@ export async function getAllRelatedEntries({
     db.location.findMany({ where: { userId } }),
 
     /** Get the custom fields */
-    db.customField.findMany({ where: { organizationId } }),
+    db.customField.findMany({
+      where: { organizationId, active: { equals: true } },
+    }),
   ]);
   return { categories, tags, locations, customFields };
 }

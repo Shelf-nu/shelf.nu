@@ -1,3 +1,5 @@
+import { tw } from "~/utils";
+
 export const Badge = ({
   children,
   color,
@@ -15,7 +17,10 @@ export const Badge = ({
       color: `${color}`, // 90%
       mixBlendMode: "multiply",
     }}
-    className="inline-flex items-center gap-1 rounded-2xl py-[1px] pl-[6px] pr-2 text-[12px] font-medium"
+    className={tw(
+      "inline-flex items-center rounded-2xl py-[1px] pl-[6px] text-[12px] font-medium",
+      withDot ? " gap-1 pr-2" : "px-2"
+    )}
   >
     {withDot ? (
       <div

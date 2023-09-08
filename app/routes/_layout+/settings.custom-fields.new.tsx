@@ -67,13 +67,15 @@ export async function action({ request }: LoaderArgs) {
     );
   }
 
-  const { name, helpText, required, type, organizationId } = result.data;
+  const { name, helpText, required, type, active, organizationId } =
+    result.data;
 
   await createCustomField({
     name,
     helpText,
     required,
     type,
+    active,
     organizationId,
     userId: authSession.userId,
   });
