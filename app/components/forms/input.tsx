@@ -43,6 +43,8 @@ export interface InputProps
 
   /** Sometimes you want to append a button to the input field. Set this to true to manage the style */
   hasAttachedButton?: boolean;
+
+  required?: boolean;
 }
 
 const Input = forwardRef(function Input(
@@ -58,6 +60,7 @@ const Input = forwardRef(function Input(
     addOn,
     onChange,
     icon,
+    required = false,
     ...rest
   }: InputProps,
   ref
@@ -106,9 +109,11 @@ const Input = forwardRef(function Input(
     <label className={tw("relative flex flex-col", className)}>
       {/* Label */}
       <span
-        className={`mb-[6px] text-text-sm font-medium text-gray-700 ${
-          hideLabel && "lg:hidden"
-        }`}
+        className={tw(
+          `mb-[6px] text-text-sm font-medium text-gray-700`,
+          hideLabel && "lg:hidden",
+          required && "required-input-label"
+        )}
       >
         {label}
       </span>

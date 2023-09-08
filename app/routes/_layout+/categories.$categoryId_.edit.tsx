@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState } from "react";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
@@ -11,9 +11,15 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategory, updateCategory } from "~/modules/category";
-import { assertIsPost, isFormProcessing, getRequiredParam, handleInputChange } from "~/utils";
+import {
+  assertIsPost,
+  isFormProcessing,
+  getRequiredParam,
+  handleInputChange,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateCategoryFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
@@ -27,7 +33,7 @@ export async function loader({ request, params }: LoaderArgs) {
   await requireAuthSession(request);
 
   const id = getRequiredParam(params, "categoryId");
-  const category = await getCategory({ id })
+  const category = await getCategory({ id });
 
   const colorFromServer = category?.color;
 
@@ -62,7 +68,7 @@ export async function action({ request, params }: LoaderArgs) {
 
   await updateCategory({
     ...result.data,
-    id
+    id,
   });
 
   sendNotification({
@@ -86,9 +92,9 @@ export default function EditCategory() {
   const { colorFromServer, category } = useLoaderData();
 
   const [formData, setFormData] = useState<{ [key: string]: any }>({
-    name: category.name, 
-    description: category.description, 
-  })
+    name: category.name,
+    description: category.description,
+  });
 
   return (
     <>
@@ -108,7 +114,8 @@ export default function EditCategory() {
             hideErrorText
             autoFocus
             value={formData.name}
-            onChange={e => handleInputChange(e, setFormData, 'name')}
+            onChange={(e) => handleInputChange(e, setFormData, "name")}
+            required={zodFieldIsRequired(UpdateCategoryFormSchema.shape.name)}
           />
           <Input
             label="Description"
@@ -118,7 +125,10 @@ export default function EditCategory() {
             data-test-id="categoryDescription"
             className="mb-4 lg:mb-0"
             value={formData.description}
-            onChange={e => handleInputChange(e, setFormData, 'description')}
+            onChange={(e) => handleInputChange(e, setFormData, "description")}
+            required={zodFieldIsRequired(
+              UpdateCategoryFormSchema.shape.description
+            )}
           />
           <div className="mb-6 lg:mb-0">
             <ColorInput
@@ -127,6 +137,9 @@ export default function EditCategory() {
               error={zo.errors.color()?.message}
               hideErrorText
               colorFromServer={colorFromServer}
+              required={zodFieldIsRequired(
+                UpdateCategoryFormSchema.shape.color
+              )}
             />
           </div>
         </div>

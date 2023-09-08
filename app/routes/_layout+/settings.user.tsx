@@ -29,6 +29,7 @@ import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateFormSchema = z.object({
   email: z
@@ -156,7 +157,11 @@ export default function UserPage() {
         replace
         encType="multipart/form-data"
       >
-        <FormRow rowLabel={"Full name"} className="border-t-[1px]">
+        <FormRow
+          rowLabel={"Full name"}
+          className="border-t-[1px]"
+          required={zodFieldIsRequired(UpdateFormSchema.shape.firstName)}
+        >
           <div className="flex gap-6">
             <Input
               label="First name"
@@ -164,6 +169,7 @@ export default function UserPage() {
               name={zo.fields.firstName()}
               defaultValue={user?.firstName || undefined}
               error={zo.errors.firstName()?.message}
+              required={zodFieldIsRequired(UpdateFormSchema.shape.firstName)}
             />
             <Input
               label="Last name"
@@ -171,11 +177,17 @@ export default function UserPage() {
               name={zo.fields.lastName()}
               defaultValue={user?.lastName || undefined}
               error={zo.errors.lastName()?.message}
+              required={zodFieldIsRequired(UpdateFormSchema.shape.lastName)}
             />
           </div>
         </FormRow>
 
-        <FormRow rowLabel="Email address">
+        <FormRow
+          rowLabel="Email address"
+          required={zodFieldIsRequired(
+            UpdateFormSchema.shape.email._def.schema
+          )}
+        >
           {/* Actial field used for resetting pwd and updating user */}
           <input
             type="hidden"
@@ -194,10 +206,16 @@ export default function UserPage() {
             className="w-full"
             disabled={true}
             title="To change your email address, please contact support."
+            required={zodFieldIsRequired(
+              UpdateFormSchema.shape.email._def.schema
+            )}
           />
         </FormRow>
 
-        <FormRow rowLabel="Username">
+        <FormRow
+          rowLabel="Username"
+          required={zodFieldIsRequired(UpdateFormSchema.shape.username)}
+        >
           <Input
             label="Username"
             hideLabel={true}
@@ -208,6 +226,7 @@ export default function UserPage() {
             error={zo.errors.username()?.message || data?.errors?.username}
             className="w-full"
             inputClassName="flex-1"
+            required={zodFieldIsRequired(UpdateFormSchema.shape.username)}
           />
         </FormRow>
 

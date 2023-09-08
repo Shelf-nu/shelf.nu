@@ -12,6 +12,7 @@ import { createTag } from "~/modules/tag";
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { zodFieldIsRequired } from "~/utils/zod";
 
 export const NewTagFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
@@ -90,6 +91,7 @@ export default function NewTag() {
             error={zo.errors.name()?.message}
             hideErrorText
             autoFocus
+            required={zodFieldIsRequired(NewTagFormSchema.shape.name)}
           />
           <Input
             label="Description"
@@ -98,6 +100,7 @@ export default function NewTag() {
             disabled={disabled}
             data-test-id="tagDescription"
             className="mb-4 lg:mb-0"
+            required={zodFieldIsRequired(NewTagFormSchema.shape.description)}
           />
         </div>
 

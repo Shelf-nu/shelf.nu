@@ -7,6 +7,7 @@ import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/assets.new";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { isFormProcessing } from "~/utils";
+import { zodFieldIsRequired } from "~/utils/zod";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -63,7 +64,11 @@ export const AssetForm = ({
       {qrId ? (
         <input type="hidden" name={zo.fields.qrId()} value={qrId} />
       ) : null}
-      <FormRow rowLabel={"Name"} className="border-b-0 pb-[10px]">
+      <FormRow
+        rowLabel={"Name"}
+        className="border-b-0 pb-[10px]"
+        required={zodFieldIsRequired(NewAssetFormSchema.shape.title)}
+      >
         <Input
           label="Name"
           hideLabel
@@ -74,6 +79,7 @@ export const AssetForm = ({
           onChange={updateTitle}
           className="w-full"
           defaultValue={title || ""}
+          required={zodFieldIsRequired(NewAssetFormSchema.shape.title)}
         />
       </FormRow>
 
@@ -105,6 +111,7 @@ export const AssetForm = ({
           </p>
         }
         className="border-b-0 pb-[10px]"
+        required={zodFieldIsRequired(NewAssetFormSchema.shape.category)}
       >
         <CategorySelect defaultValue={category || undefined} />
       </FormRow>
@@ -120,6 +127,7 @@ export const AssetForm = ({
           </p>
         }
         className="border-b-0 py-[10px]"
+        required={zodFieldIsRequired(NewAssetFormSchema.shape.tags)}
       >
         <TagsAutocomplete existingTags={tags || []} />
       </FormRow>
@@ -136,6 +144,7 @@ export const AssetForm = ({
           </p>
         }
         className="pt-[10px]"
+        required={zodFieldIsRequired(NewAssetFormSchema.shape.newLocationId)}
       >
         <LocationSelect />
       </FormRow>
@@ -149,6 +158,7 @@ export const AssetForm = ({
               asset’s overview page. You can always change it.
             </p>
           }
+          required={zodFieldIsRequired(NewAssetFormSchema.shape.description)}
         >
           <Input
             inputType="textarea"
@@ -159,6 +169,7 @@ export const AssetForm = ({
             disabled={disabled}
             data-test-id="assetDescription"
             className="w-full"
+            required={zodFieldIsRequired(NewAssetFormSchema.shape.description)}
           />
         </FormRow>
       </div>

@@ -156,3 +156,9 @@ dialog {
 .filters-form label > span {
   @apply hidden;
 }
+
+.required-input-label:after {
+  color: #e32;
+  content: " *";
+  display: inline;
+}

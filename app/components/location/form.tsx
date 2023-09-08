@@ -6,6 +6,7 @@ import { z } from "zod";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { updateTitleAtom } from "~/atoms/locations.new";
 import { isFormProcessing } from "~/utils";
+import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Button } from "../shared";
@@ -40,7 +41,11 @@ export const LocationForm = ({ name, address, description }: Props) => {
       className="flex w-full flex-col gap-2"
       encType="multipart/form-data"
     >
-      <FormRow rowLabel={"Name"} className="border-b-0 pb-[10px]">
+      <FormRow
+        rowLabel={"Name"}
+        className="border-b-0 pb-[10px]"
+        required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
+      >
         <Input
           label="Name"
           hideLabel
@@ -52,6 +57,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
           className="w-full"
           defaultValue={name || undefined}
           placeholder="Storage room"
+          required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
         />
       </FormRow>
 
@@ -84,6 +90,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
           </p>
         }
         className="pt-[10px]"
+        required={zodFieldIsRequired(NewLocationFormSchema.shape.address)}
       >
         <Input
           label="Address"
@@ -93,6 +100,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
           error={zo.errors.address()?.message}
           className="w-full"
           defaultValue={address || undefined}
+          required={zodFieldIsRequired(NewLocationFormSchema.shape.address)}
         />
       </FormRow>
 
@@ -105,6 +113,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
               location page. You can always change it.
             </p>
           }
+          required={zodFieldIsRequired(NewLocationFormSchema.shape.description)}
         >
           <Input
             inputType="textarea"
@@ -115,6 +124,9 @@ export const LocationForm = ({ name, address, description }: Props) => {
             disabled={disabled}
             data-test-id="locationDescription"
             className="w-full"
+            required={zodFieldIsRequired(
+              NewLocationFormSchema.shape.description
+            )}
           />
         </FormRow>
       </div>
