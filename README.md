@@ -49,3 +49,5 @@ With Shelf, you can take a picture of any item you own and store it in your own 
 ### Looking for contributing in Shelf?
 
 - check out our [contributing guidelines](https://github.com/hrutik7/shelf.nu/blob/docs_improvement/docs/get-started.md)
+
+
