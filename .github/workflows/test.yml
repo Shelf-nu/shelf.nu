@@ -1,19 +1,29 @@
 name: 🧪 Test PR from fork
 
 on: 
-  push:
-    branches:
-      - main
-      - dev
   pull_request_target:
   workflow_call:
+    secrets:
+      SESSION_SECRET:
+        required: true
+      SUPABASE_ANON_PUBLIC:
+        required: true
+      SUPABASE_SERVICE_ROLE:
+        required: true
+      SUPABASE_URL:
+        required: true
+      SERVER_URL:
+        required: true
+      DATABASE_URL:
+        required: true
+
 
 jobs:
   authorize:
     environment: 
       ${{ github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
-      'external' || 'internal' }}
+      'external' || '' }}
 
     runs-on: ubuntu-latest
     steps:
