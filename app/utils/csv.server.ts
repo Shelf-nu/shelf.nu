@@ -1,3 +1,4 @@
+import type { Asset } from "@prisma/client";
 import {
   unstable_composeUploadHandlers,
   unstable_createMemoryUploadHandler,
@@ -52,3 +53,59 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
 export const memoryUploadHandler = unstable_composeUploadHandlers(
   unstable_createMemoryUploadHandler()
 );
+
+export const buildCsvDataFromAssets = ({
+  assets,
+  keysToSkip,
+}: {
+  assets: Asset[];
+  keysToSkip: string[];
+}) =>
+  assets.map((asset) => {
+    const toExport: string[] = [];
+
+    /** Itterate over the values to create teh export object */
+    Object.entries(asset).forEach(([key, value]) => {
+      /** Skip keys that are not needed. These are foreign keys for the related entries */
+      if (keysToSkip.includes(key)) return;
+
+      /** If the value is null, push an empty string
+       * We have a bit of a special case, for the relations that are objects, we need to push an empty object instead of an empty string.
+       * This way we prevent the import from failing when importing the file again due to "Invalid JSON"
+       * This needs to be done for all one-to-one relations
+       */
+      if (value === null) {
+        if (["custody", "location", "category"].includes(key)) {
+          return toExport.push("{}");
+        }
+        return toExport.push("");
+      }
+
+      /** Special handling for category and location */
+      switch (key) {
+        case "location":
+        case "category":
+        case "notes":
+        case "tags":
+        case "custody":
+        case "organization":
+        case "customFields":
+          toExport.push(
+            JSON.stringify(value, (_key, value) => {
+              /** Custom replacer function.
+               * We do this to ensure that in the result we have emtpy strings instead of null values
+               */
+              if (value === null) {
+                return "";
+              }
+              return value;
+            })
+          );
+          break;
+        default:
+          toExport.push(String(value));
+      }
+    });
+
+    return toExport;
+  });
