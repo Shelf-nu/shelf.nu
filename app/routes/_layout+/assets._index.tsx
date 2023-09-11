@@ -115,6 +115,11 @@ export async function loader({ request }: LoaderArgs) {
     next,
     prev,
     modelName,
+    searchFieldLabel: "Search assets",
+    searchFieldTooltip: {
+      title: "Search your asset database",
+      text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+    },
   });
 }
 

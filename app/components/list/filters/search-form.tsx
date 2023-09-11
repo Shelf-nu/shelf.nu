@@ -6,29 +6,36 @@ import {
 
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { SearchFieldTooltip } from "./search-field-tooltip";
 
 export const SearchForm = () => {
   const [params] = useSearchParams();
-  const { search, modelName } = useLoaderData();
+
+  const { search, modelName, searchFieldLabel } = useLoaderData();
   const { singular } = modelName;
   const state = useNavigation().state;
   const isSearching =
     state === "loading" && (params.has("s") || params.has("category"));
+
+  const label = searchFieldLabel
+    ? searchFieldLabel
+    : `Search by ${singular} name`;
 
   return (
     <div className="relative flex w-full md:w-auto">
       <Input
         type="text"
         name="s"
-        label={`Search by ${singular} name`}
-        aria-label={`Search by ${singular} name`}
-        placeholder={`Search by ${singular} name`}
+        label={label}
+        aria-label={label}
+        placeholder={label}
         defaultValue={search}
         disabled={isSearching}
         hideLabel
         hasAttachedButton
         className="w-full md:w-auto"
       />
+      <SearchFieldTooltip />
       <Button
         icon={isSearching ? "spinner" : "search"}
         type="submit"
