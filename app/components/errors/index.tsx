@@ -14,7 +14,7 @@ export const ErrorBoundryComponent = ({
 }: ErrorContentProps) => {
   const error = useRouteError();
   /** 404 ERROR */
-  if (isRouteErrorResponse(error))
+  if (isRouteErrorResponse(error)) {
     switch (error.status) {
       case 404:
         return (
@@ -36,22 +36,42 @@ export const ErrorBoundryComponent = ({
             showReload={false}
           />
         );
+      default:
+        /** 500 error */
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+        return (
+          <ErrorContent
+            title={title ? title : "Oops, something went wrong"}
+            message={
+              NODE_ENV === "development" ? (
+                <pre>{errorMessage}</pre>
+              ) : message ? (
+                message
+              ) : (
+                "Please try again and if the issue persists, contact support"
+              )
+            }
+          />
+        );
     }
-
-  /** 500 error */
-  const errorMessage = error instanceof Error ? error.message : "Unknown error";
-  return (
-    <ErrorContent
-      title={title ? title : "Oops, something went wrong"}
-      message={
-        NODE_ENV === "development" ? (
-          <pre>{errorMessage}</pre>
-        ) : message ? (
-          message
-        ) : (
-          "Please try again and if the issue persists, contact support"
-        )
-      }
-    />
-  );
+  } else if (error instanceof Error) {
+    return (
+      <ErrorContent
+        title={title ? title : "Oops, something went wrong"}
+        message={
+          NODE_ENV === "development"
+            ? error.message
+            : "Please try again and if the issue persists, contact support"
+        }
+      />
+    );
+  } else {
+    return (
+      <ErrorContent
+        title={"Unknown error"}
+        message={"Please try again and if the issue persists, contact support"}
+      />
+    );
+  }
 };

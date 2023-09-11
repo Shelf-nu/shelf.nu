@@ -31,6 +31,9 @@ model User {
   lastName       String?
   profilePicture String?
   onboarded      Boolean @default(false)
+  customerId     String? @unique // Stripe customer id
+  tierId         TierId  @default(free)
+  tier           Tier    @relation(fields: [tierId], references: [id])
 
   // Datetime
   createdAt DateTime @default(now())
@@ -47,12 +50,13 @@ model User {
   locations     Location[]
   images        Image[]
   organizations Organization[]
+  customFields  CustomField[]
 
   @@unique([email, username])
 }
 
 model Asset {
-  id                  String    @id @default(cuid())
+  id                  String      @id @default(cuid())
   title               String
   description         String?
   mainImage           String?
@@ -64,20 +68,21 @@ model Asset {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId         String
   organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String?
-  category       Category?    @relation(fields: [categoryId], references: [id])
+  category       Category?     @relation(fields: [categoryId], references: [id])
   categoryId     String?
-  location       Location?    @relation(fields: [locationId], references: [id])
+  location       Location?     @relation(fields: [locationId], references: [id])
   locationId     String?
 
-  custody Custody?
-  notes   Note[]
-  qrCodes Qr[]
-  reports ReportFound[]
-  tags    Tag[]
+  custody      Custody?
+  notes        Note[]
+  qrCodes      Qr[]
+  reports      ReportFound[]
+  tags         Tag[]
+  customFields AssetCustomFieldValue[]
 }
 
 enum AssetStatus {
@@ -273,10 +278,84 @@ model Organization {
   members TeamMember[]
   assets  Asset[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  customFields CustomField[]
 }
 
 enum OrganizationType {
   PERSONAL
+}
+
+// Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.
+// Each product in stripe has a metadata value called `shelf_tier` which holds the value of the enum
+// Add more tiers if needed
+enum TierId {
+  free
+  tier_1
+  tier_2
+}
+
+// Tiers correspond to Stripe products
+model Tier {
+  id          TierId     @id // Used to create Stripe product ID
+  name        String // Name coming from Stripe product
+  subscribers User[]
+  tierLimitId TierId?    @unique
+  tierLimit   TierLimit? @relation(fields: [tierLimitId], references: [id])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model TierLimit {
+  id              TierId   @id
+  tier            Tier?
+  canImportAssets Boolean  @default(false)
+  canExportAssets Boolean  @default(false)
+  maxCustomFields Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model CustomField {
+  id       String  @id @unique @default(cuid())
+  name     String
+  helpText String?
+  required Boolean @default(false)
+  active Boolean @default(true)
+
+  type CustomFieldType @default(TEXT)
+
+  // Relationships
+  organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
+
+  createdBy User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId    String
+
+  // Datetime
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+  assetCustomFieldsValues AssetCustomFieldValue[]
+}
+
+enum CustomFieldType {
+  TEXT
+}
+
+model AssetCustomFieldValue {
+  id String @id @default(cuid())
+
+  value String
+
+  // Relationships
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String
+
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onUpdate: Cascade)
+  customFieldId String
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

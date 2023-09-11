@@ -1,6 +1,6 @@
 import type { Prisma, User, Location } from "@prisma/client";
 import { db } from "~/database";
-// import { blobFromBuffer } from "~/utils/blob-from-buffer";
+import type { CreateAssetFromContentImportPayload } from "../asset";
 
 export async function getLocation({
   userId,
@@ -208,4 +208,46 @@ export async function updateLocation(payload: {
     where: { id },
     data: data,
   });
+}
+
+export async function createLocationsIfNotExists({
+  data,
+  userId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+}): Promise<Record<string, Location["id"]>> {
+  // first we get all the locations from the assets and make then into an object where the category is the key and the value is an empty string
+  const locations = new Map(
+    data
+      .filter((asset) => asset.location !== "")
+      .map((asset) => [asset.location, ""])
+  );
+
+  // now we loop through the locations and check if they exist
+  for (const [location, _] of locations) {
+    const existingCategory = await db.location.findFirst({
+      where: { name: location, userId },
+    });
+
+    if (!existingCategory) {
+      // if the location doesn't exist, we create a new one
+      const newLocation = await db.location.create({
+        data: {
+          name: (location as string).trim(),
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
+        },
+      });
+      locations.set(location, newLocation.id);
+    } else {
+      // if the location exists, we just update the id
+      locations.set(location, existingCategory.id);
+    }
+  }
+
+  return Object.fromEntries(Array.from(locations));
 }
