@@ -9,9 +9,9 @@ import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { isFormProcessing } from "~/utils";
 
 import { mergedSchema } from "~/utils/custom-field-schema";
+import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
 
-import { zodFieldIsRequired } from "~/utils/zod";
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -177,7 +177,6 @@ export const AssetForm = ({
               asset’s overview page. You can always change it.
             </p>
           }
-
           className="border-b-0"
           required={zodFieldIsRequired(NewAssetFormSchema.shape.description)}
         >

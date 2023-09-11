@@ -2,7 +2,7 @@ import type { User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { db } from "~/database";
-import { STRIPE_SECRET_KEY } from "./env";
+import { ENABLE_PREMIUM_FEATURES, STRIPE_SECRET_KEY } from "./env";
 
 export type CustomerWithSubscriptions = Stripe.Customer & {
   subscriptions: {
@@ -15,7 +15,12 @@ export type CustomerWithSubscriptions = Stripe.Customer & {
 let _stripe: Stripe;
 
 function getStripeServerClient() {
-  if (!_stripe) {
+  if (
+    !_stripe &&
+    ENABLE_PREMIUM_FEATURES &&
+    STRIPE_SECRET_KEY !== "" &&
+    typeof STRIPE_SECRET_KEY === "string"
+  ) {
     // Reference : https://github.com/stripe/stripe-node#usage-with-typescript
     _stripe = new Stripe(STRIPE_SECRET_KEY, {
       apiVersion: "2022-11-15",
@@ -52,7 +57,7 @@ export const createStripeCheckoutSession = async ({
   customerId: string;
 }): Promise<string> => {
   if (!stripe) return Promise.reject("Stripe not initialized");
-  const SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+  const SECRET_KEY = STRIPE_SECRET_KEY;
 
   if (!SECRET_KEY) return Promise.reject("Stripe secret key not found");
 

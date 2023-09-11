@@ -163,6 +163,7 @@ export async function createCustomFieldsIfNotExists({
         type: CustomFieldType.TEXT,
         required: false,
         helpText: "",
+        active: true,
       });
       // Assign the new custom field to all values associated with the name
       for (const item of data) {
