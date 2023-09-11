@@ -24,6 +24,17 @@ export const test = base.extend<{}, { account: Account }>({
 
       const page = await browser.newPage();
 
+      // page.on("console", (message) => {
+      //   console.log(`[Page Console] ${message.text()}`);
+      // });
+
+      // await page.evaluate((email) => {
+      //   console.log(email);
+      // }, email);
+      // await page.evaluate((password) => {
+      //   console.log(password);
+      // }, password);
+
       await page.goto("/");
       await page.click("[data-test-id=signupButton]");
       await expect(page).toHaveURL(/.*join/);

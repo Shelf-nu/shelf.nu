@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
@@ -9,43 +10,52 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { createCategory } from "~/modules/category";
-import { assertIsPost, getRandomColor, isFormProcessing } from "~/utils";
+import { getCategory, updateCategory } from "~/modules/category";
+import {
+  assertIsPost,
+  isFormProcessing,
+  getRequiredParam,
+  handleInputChange,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
-export const NewCategoryFormSchema = z.object({
+export const UpdateCategoryFormSchema = z.object({
   name: z.string().min(3, "Name is required"),
   description: z.string(),
   color: z.string().regex(/^#/).min(7),
 });
 
-const title = "New category";
+const title = "Edit category";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request, params }: LoaderArgs) {
   await requireAuthSession(request);
 
-  const colorFromServer = getRandomColor();
+  const id = getRequiredParam(params, "categoryId");
+  const category = await getCategory({ id });
+
+  const colorFromServer = category?.color;
 
   const header = {
     title,
   };
 
-  return json({ header, colorFromServer });
+  return json({ header, colorFromServer, category });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request }: LoaderArgs) {
+export async function action({ request, params }: LoaderArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
   const formData = await request.formData();
-  const result = await NewCategoryFormSchema.safeParseAsync(
+  const result = await UpdateCategoryFormSchema.safeParseAsync(
     parseFormAny(formData)
   );
+  const id = getRequiredParam(params, "categoryId");
 
   if (!result.success) {
     return json(
@@ -56,14 +66,14 @@ export async function action({ request }: LoaderArgs) {
     );
   }
 
-  await createCategory({
+  await updateCategory({
     ...result.data,
-    userId: authSession.userId,
+    id,
   });
 
   sendNotification({
-    title: "Category created",
-    message: "Your category has been created successfully",
+    title: "Category Updated",
+    message: "Your category has been updated successfully",
     icon: { name: "success", variant: "success" },
     senderId: authSession.userId,
   });
@@ -75,11 +85,16 @@ export async function action({ request }: LoaderArgs) {
   });
 }
 
-export default function NewCategory() {
-  const zo = useZorm("NewQuestionWizardScreen", NewCategoryFormSchema);
+export default function EditCategory() {
+  const zo = useZorm("NewQuestionWizardScreen", UpdateCategoryFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  const { colorFromServer } = useLoaderData();
+  const { colorFromServer, category } = useLoaderData();
+
+  const [formData, setFormData] = useState<{ [key: string]: any }>({
+    name: category.name,
+    description: category.description,
+  });
 
   return (
     <>
@@ -98,7 +113,9 @@ export default function NewCategory() {
             error={zo.errors.name()?.message}
             hideErrorText
             autoFocus
-            required={zodFieldIsRequired(NewCategoryFormSchema.shape.name)}
+            value={formData.name}
+            onChange={(e) => handleInputChange(e, setFormData, "name")}
+            required={zodFieldIsRequired(UpdateCategoryFormSchema.shape.name)}
           />
           <Input
             label="Description"
@@ -107,8 +124,10 @@ export default function NewCategory() {
             disabled={disabled}
             data-test-id="categoryDescription"
             className="mb-4 lg:mb-0"
+            value={formData.description}
+            onChange={(e) => handleInputChange(e, setFormData, "description")}
             required={zodFieldIsRequired(
-              NewCategoryFormSchema.shape.description
+              UpdateCategoryFormSchema.shape.description
             )}
           />
           <div className="mb-6 lg:mb-0">
@@ -118,7 +137,9 @@ export default function NewCategory() {
               error={zo.errors.color()?.message}
               hideErrorText
               colorFromServer={colorFromServer}
-              required={zodFieldIsRequired(NewCategoryFormSchema.shape.color)}
+              required={zodFieldIsRequired(
+                UpdateCategoryFormSchema.shape.color
+              )}
             />
           </div>
         </div>
@@ -128,7 +149,7 @@ export default function NewCategory() {
             Cancel
           </Button>
           <Button type="submit" size="sm">
-            Create
+            Update
           </Button>
         </div>
       </Form>
