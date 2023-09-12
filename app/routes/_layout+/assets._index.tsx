@@ -268,7 +268,9 @@ const ListAssetContent = ({
       </Td>
 
       {/* Location */}
-      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
+      <Td className="hidden md:table-cell">
+        {location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}
+      </Td>
     </>
   );
 };
