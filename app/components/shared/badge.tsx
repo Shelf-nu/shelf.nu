@@ -18,7 +18,7 @@ export const Badge = ({
       mixBlendMode: "multiply",
     }}
     className={tw(
-      "inline-flex items-center rounded-2xl py-[1px] pl-[6px] text-[12px] font-medium",
+      "inline-flex items-center rounded-2xl py-[2px] pl-[6px] text-[12px] font-medium",
       withDot ? " gap-1 pr-2" : "px-2"
     )}
   >
@@ -27,7 +27,7 @@ export const Badge = ({
         style={{
           backgroundColor: color,
         }}
-        className="h-2 w-2 rounded-full"
+        className="h-1.5 w-1.5 rounded-full"
       />
     ) : null}
 

@@ -27,7 +27,7 @@ import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { notFound } from "~/utils";
+import { notFound, userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
@@ -128,6 +128,11 @@ export async function loader({ request }: LoaderArgs) {
     modelName,
     canExportAssets: canExportAssets(user?.tier?.tierLimit),
     canImportAssets: canImportAssets(user?.tier?.tierLimit),
+    searchFieldLabel: "Search assets",
+    searchFieldTooltip: {
+      title: "Search your asset database",
+      text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+    },
   });
 }
 
@@ -193,9 +198,10 @@ export default function AssetIndexPage() {
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">Custodian</Th>
               <Th className="hidden md:table-cell">Category</Th>
               <Th className="hidden md:table-cell">Tags</Th>
+              <Th className="hidden md:table-cell">Custodian</Th>
+              <Th className="hidden md:table-cell">Location</Th>
             </>
           }
         />
@@ -215,12 +221,15 @@ const ListAssetContent = ({
         name: string;
       };
     };
+    location: {
+      name: string;
+    };
   };
 }) => {
-  const { category, tags, custody } = item;
-
+  const { category, tags, custody, location } = item;
   return (
     <>
+      {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
@@ -235,14 +244,16 @@ const ListAssetContent = ({
                 className="h-full w-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="">
+            <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
                 {item.title}
               </span>
-              <div className="block md:hidden">
-                {category ? (
-                  <Badge color={category.color}>{category.name}</Badge>
-                ) : null}
+              <div>
+                <Badge
+                  color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
+                >
+                  {userFriendlyAssetStatus(item.status)}
+                </Badge>
               </div>
             </div>
           </div>
@@ -252,21 +263,28 @@ const ListAssetContent = ({
           </button>
         </div>
       </Td>
-      <Td className="hidden md:table-cell">
-        {custody ? (
-          <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
-            {custody.custodian.name}
-          </span>
-        ) : null}
-      </Td>
+
+      {/* Category */}
       <Td className="hidden md:table-cell">
         {category ? (
-          <Badge color={category.color}>{category.name}</Badge>
+          <Badge color={category.color} withDot={false}>
+            {category.name}
+          </Badge>
         ) : null}
       </Td>
+
+      {/* Tags */}
       <Td className="hidden text-left md:table-cell">
         <ListItemTagsColumn tags={tags} />
       </Td>
+
+      {/* Custodian */}
+      <Td className="hidden md:table-cell">
+        {custody ? <GrayBadge>{custody.custodian.name}</GrayBadge> : null}
+      </Td>
+
+      {/* Location */}
+      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
     </>
   );
 };
@@ -293,3 +311,9 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
     </div>
   ) : null;
 };
+
+const GrayBadge = ({ children }: { children: string | JSX.Element }) => (
+  <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
+    {children}
+  </span>
+);

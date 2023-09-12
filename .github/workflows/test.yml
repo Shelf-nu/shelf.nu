@@ -28,6 +28,7 @@ jobs:
       - run: echo ✓
 
   lint:
+    needs: authorize
     name: ⬣ ESLint
     runs-on: ubuntu-latest
     steps:
@@ -53,6 +54,7 @@ jobs:
         run: npm run lint
 
   typecheck:
+    needs: authorize
     name: ʦ TypeScript
     runs-on: ubuntu-latest
     steps:
@@ -78,6 +80,7 @@ jobs:
         run: npm run typecheck --if-present
 
   vitest:
+    needs: authorize
     name: ⚡ Vitest
     runs-on: ubuntu-latest
     steps:
