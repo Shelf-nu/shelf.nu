@@ -110,7 +110,7 @@ export async function action({ request, params }: ActionArgs) {
   );
 }
 
-export default function AssetEditPage() {
+export default function CustomFieldEditPage() {
   const name = useAtomValue(titleAtom);
   const hasName = name !== "Untitled custom field";
   const { customField } = useLoaderData<typeof loader>();

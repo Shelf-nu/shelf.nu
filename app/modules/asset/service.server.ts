@@ -97,24 +97,28 @@ export async function getAssets({
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
   /** Default value of where. Takes the assetss belonging to current user */
-  let where: Prisma.AssetWhereInput = { userId };
+  let where: Prisma.AssetSearchViewWhereInput = { asset: { userId } };
 
   /** If the search string exists, add it to the where object */
   if (search) {
-    where.title = {
-      contains: search,
-      mode: "insensitive",
+    const words = search
+      .split(" ")
+      .map((w) => w.replace(/[^a-zA-Z0-9]/g, ""))
+      .filter(Boolean) //remove any special character
+      .join(" & ");
+    where.searchVector = {
+      search: words,
     };
   }
 
-  if (categoriesIds && categoriesIds.length > 0) {
-    where.categoryId = {
+  if (categoriesIds && categoriesIds.length > 0 && where.asset) {
+    where.asset.categoryId = {
       in: categoriesIds,
     };
   }
 
-  if (tagsIds && tagsIds.length > 0) {
-    where.tags = {
+  if (tagsIds && tagsIds.length > 0 && where.asset) {
+    where.asset.tags = {
       some: {
         id: {
           in: tagsIds,
@@ -123,25 +127,29 @@ export async function getAssets({
     };
   }
 
-  const [assets, totalAssets] = await db.$transaction([
+  const [assetSearch, totalAssets] = await db.$transaction([
     /** Get the assets */
-    db.asset.findMany({
+    db.assetSearchView.findMany({
       skip,
       take,
       where,
       include: {
-        category: true,
-        tags: true,
-        location: {
-          select: {
-            name: true,
-          },
-        },
-        custody: {
-          select: {
-            custodian: {
+        asset: {
+          include: {
+            category: true,
+            tags: true,
+            location: {
               select: {
                 name: true,
+              },
+            },
+            custody: {
+              select: {
+                custodian: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -151,10 +159,10 @@ export async function getAssets({
     }),
 
     /** Count them */
-    db.asset.count({ where }),
+    db.assetSearchView.count({ where }),
   ]);
 
-  return { assets, totalAssets };
+  return { assets: assetSearch.map((a) => a.asset), totalAssets };
 }
 
 export async function createAsset({

@@ -272,7 +272,9 @@ const ListAssetContent = ({
               <div className="font-medium">{item.title}</div>
               <div className="block md:hidden">
                 {category ? (
-                  <Badge color={category.color}>{category.name}</Badge>
+                  <Badge color={category.color} withDot={false}>
+                    {category.name}
+                  </Badge>
                 ) : null}
               </div>
             </div>
@@ -285,7 +287,9 @@ const ListAssetContent = ({
       </Td>
       <Td className="hidden md:table-cell">
         {category ? (
-          <Badge color={category.color}>{category.name}</Badge>
+          <Badge color={category.color} withDot={false}>
+            {category.name}
+          </Badge>
         ) : null}
       </Td>
       <Td className="hidden text-left md:table-cell">

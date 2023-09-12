@@ -60,6 +60,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
     return redirect("onboarding");
   }
 
+
   return json({
     user,
     organizationId: user?.organizations[0].id,

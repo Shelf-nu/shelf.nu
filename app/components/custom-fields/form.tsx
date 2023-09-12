@@ -7,6 +7,7 @@ import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/custom-fields.new";
 import { useOrganizationId } from "~/hooks/use-organization-id";
 import { isFormProcessing } from "~/utils";
+import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import {
@@ -76,7 +77,11 @@ export const CustomFieldForm = ({
       className="flex w-full flex-col gap-2"
       encType="multipart/form-data"
     >
-      <FormRow rowLabel={"Name"} className="border-b-0 pb-[10px]">
+      <FormRow
+        rowLabel={"Name"}
+        className="border-b-0 pb-[10px]"
+        required={zodFieldIsRequired(NewCustomFieldFormSchema.shape.name)}
+      >
         <Input
           label="Name"
           hideLabel
@@ -88,12 +93,17 @@ export const CustomFieldForm = ({
           className="w-full"
           defaultValue={name || ""}
           placeholder="Choose a field name"
+          required={zodFieldIsRequired(NewCustomFieldFormSchema.shape.name)}
         />
       </FormRow>
 
       <div>
         <label className="lg:hidden">Type</label>
-        <FormRow rowLabel={"Type"} className="border-b-0 pb-[10px] pt-[6px]">
+        <FormRow
+          rowLabel={"Type"}
+          className="border-b-0 pb-[10px] pt-[6px]"
+          required={zodFieldIsRequired(NewCustomFieldFormSchema.shape.type)}
+        >
           <Select
             name="type"
             defaultValue={type || selectedFieldTypeRef.current}
@@ -171,6 +181,7 @@ export const CustomFieldForm = ({
               filling the field
             </p>
           }
+          required={zodFieldIsRequired(NewCustomFieldFormSchema.shape.helpText)}
         >
           <Input
             inputType="textarea"
@@ -182,6 +193,9 @@ export const CustomFieldForm = ({
             data-test-id="fieldHelpText"
             className="w-full"
             hideLabel
+            required={zodFieldIsRequired(
+              NewCustomFieldFormSchema.shape.helpText
+            )}
           />
         </FormRow>
       </div>

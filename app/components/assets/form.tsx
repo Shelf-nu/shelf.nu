@@ -54,15 +54,20 @@ export const AssetForm = ({
 
   const { customFields } = useLoaderData();
 
+  // console.log(customFields);
+
   const FormSchema = mergedSchema({
     baseSchema: NewAssetFormSchema,
-    customFields: customFields.map((cf: CustomField) => ({
-      id: cf.id,
-      name: cf.name,
-      helpText: cf?.helpText || "",
-      required: cf.required,
-      type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-    })),
+    customFields: customFields.map(
+      (cf: CustomField) =>
+        cf.active && {
+          id: cf.id,
+          name: cf.name,
+          helpText: cf?.helpText || "",
+          required: cf.required,
+          type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+        }
+    ),
   });
 
   const zo = useZorm("NewQuestionWizardScreen", FormSchema);
@@ -86,7 +91,7 @@ export const AssetForm = ({
       <FormRow
         rowLabel={"Name"}
         className="border-b-0 pb-[10px]"
-        required={zodFieldIsRequired(NewAssetFormSchema.shape.title)}
+        required={zodFieldIsRequired(FormSchema.shape.title)}
       >
         <Input
           label="Name"
@@ -98,7 +103,7 @@ export const AssetForm = ({
           onChange={updateTitle}
           className="w-full"
           defaultValue={title || ""}
-          required={zodFieldIsRequired(NewAssetFormSchema.shape.title)}
+          required={zodFieldIsRequired(FormSchema.shape.title)}
         />
       </FormRow>
 
@@ -130,7 +135,7 @@ export const AssetForm = ({
           </p>
         }
         className="border-b-0 pb-[10px]"
-        required={zodFieldIsRequired(NewAssetFormSchema.shape.category)}
+        required={zodFieldIsRequired(FormSchema.shape.category)}
       >
         <CategorySelect defaultValue={category || undefined} />
       </FormRow>
@@ -146,7 +151,7 @@ export const AssetForm = ({
           </p>
         }
         className="border-b-0 py-[10px]"
-        required={zodFieldIsRequired(NewAssetFormSchema.shape.tags)}
+        required={zodFieldIsRequired(FormSchema.shape.tags)}
       >
         <TagsAutocomplete existingTags={tags || []} />
       </FormRow>
@@ -163,7 +168,7 @@ export const AssetForm = ({
           </p>
         }
         className="pt-[10px]"
-        required={zodFieldIsRequired(NewAssetFormSchema.shape.newLocationId)}
+        required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
       >
         <LocationSelect />
       </FormRow>
@@ -178,7 +183,7 @@ export const AssetForm = ({
             </p>
           }
           className="border-b-0"
-          required={zodFieldIsRequired(NewAssetFormSchema.shape.description)}
+          required={zodFieldIsRequired(FormSchema.shape.description)}
         >
           <Input
             inputType="textarea"
@@ -189,12 +194,12 @@ export const AssetForm = ({
             disabled={disabled}
             data-test-id="assetDescription"
             className="w-full"
-            required={zodFieldIsRequired(NewAssetFormSchema.shape.description)}
+            required={zodFieldIsRequired(FormSchema.shape.description)}
           />
         </FormRow>
       </div>
 
-      <AssetCustomFields zo={zo} />
+      <AssetCustomFields zo={zo} schema={FormSchema} />
 
       <div className="pt-6 text-right">
         <Button type="submit" disabled={disabled}>

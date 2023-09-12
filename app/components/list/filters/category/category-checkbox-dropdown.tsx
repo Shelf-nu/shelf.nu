@@ -115,7 +115,7 @@ export const CategoryCheckboxDropdown = () => {
                     variant="tertiary"
                     disabled={isSearchingCategories}
                     onClick={clearCategorySearch}
-                    className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
+                    className="z-100 pointer-events-auto absolute right-[14px] top-1/2 translate-y-1/2 border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                   />
                 )}
               </div>
@@ -158,7 +158,7 @@ const CheckboxItem = ({
       htmlFor={category.name}
       className="relative flex cursor-default select-none items-center rounded-lg px-2 py-1.5 text-sm font-medium outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 "
     >
-      <Badge color={category.color} noBg>
+      <Badge color={category.color} withDot={false} noBg>
         {category.name}
       </Badge>
       <input
