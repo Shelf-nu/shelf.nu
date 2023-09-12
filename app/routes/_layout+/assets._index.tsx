@@ -297,7 +297,7 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
 };
 
 const GrayBadge = ({ children }: { children: string | JSX.Element }) => (
-  <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
+  <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
     {children}
   </span>
 );
