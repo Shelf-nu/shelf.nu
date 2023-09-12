@@ -8,7 +8,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared";
 import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
-import { Td } from "~/components/table";
+import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";
 import { getFilteredAndPaginatedCustomFields } from "~/modules/custom-field";
 import { getOrganizationByUserId } from "~/modules/organization";
@@ -102,7 +102,16 @@ export default function CustomFieldsIndexPage() {
           }}
         />
       </div>
-      <List ItemComponent={TeamMemberRow} />
+      <List
+        ItemComponent={TeamMemberRow}
+        headerChildren={
+          <>
+            <Th>Required</Th>
+            <Th>Status</Th>
+            <Th>Actions</Th>
+          </>
+        }
+      />
     </>
   );
 }
@@ -120,15 +129,22 @@ function TeamMemberRow({ item }: { item: CustomField }) {
             </Link>
             <span className="lowercase text-gray-600">{item.type}</span>
           </div>
-          <div className="flex items-start gap-3">
-            {!item.active && (
-              <Badge color="#dc2626" withDot={false}>
-                inactive
-              </Badge>
-            )}
-            <ActionsDropdown customField={item} />
-          </div>
         </div>
+      </Td>
+      <Td>
+        <span className="text-text-sm font-medium lowercase text-gray-600">
+          {item.required}
+        </span>
+      </Td>
+      <Td>
+        {!item.active && (
+          <Badge color="#dc2626" withDot={false}>
+            inactive
+          </Badge>
+        )}
+      </Td>
+      <Td>
+        <ActionsDropdown customField={item} />
       </Td>
     </>
   );
