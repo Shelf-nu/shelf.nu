@@ -120,7 +120,9 @@ const CategoryItem = ({
 }) => (
   <>
     <Td title={`Category: ${item.name}`} className="w-1/4 ">
-      <Badge color={item.color}>{item.name}</Badge>
+      <Badge color={item.color} withDot={false}>
+        {item.name}
+      </Badge>
     </Td>
     <Td className="w-3/4 text-gray-500" title="Description">
       {item.description}
@@ -136,7 +138,7 @@ const CategoryItem = ({
         icon={"write"}
         title={"Edit"}
         data-test-id="editCategoryButton"
-       />
+      />
       <DeleteCategory category={item} />
     </Td>
   </>
