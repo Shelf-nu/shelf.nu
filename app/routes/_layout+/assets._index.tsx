@@ -25,7 +25,7 @@ import { Td, Th } from "~/components/table";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { getUserByID } from "~/modules/user";
-import { notFound } from "~/utils";
+import { notFound, userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export interface IndexResponse {
@@ -219,14 +219,16 @@ const ListAssetContent = ({
                 className="h-full w-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="">
+            <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
                 {item.title}
               </span>
-              <div className="block md:hidden">
-                {category ? (
-                  <Badge color={category.color}>{category.name}</Badge>
-                ) : null}
+              <div>
+                <Badge
+                  color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
+                >
+                  {userFriendlyAssetStatus(item.status)}
+                </Badge>
               </div>
             </div>
           </div>
@@ -245,7 +247,9 @@ const ListAssetContent = ({
       </Td>
       <Td className="hidden md:table-cell">
         {category ? (
-          <Badge color={category.color}>{category.name}</Badge>
+          <Badge color={category.color} withDot={false}>
+            {category.name}
+          </Badge>
         ) : null}
       </Td>
       <Td className="hidden text-left md:table-cell">

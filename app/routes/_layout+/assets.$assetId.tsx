@@ -163,7 +163,7 @@ export default function AssetDetailsPage() {
               {userFriendlyAssetStatus(asset.status)}
             </Badge>
             {location ? (
-              <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
+              <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700">
                 {location.name}
               </span>
             ) : null}
@@ -239,7 +239,7 @@ export default function AssetDetailsPage() {
                     Category
                   </span>
                   <div className="max-w-[250px]">
-                    <Badge color={asset.category?.color}>
+                    <Badge color={asset.category?.color} withDot={false}>
                       {asset.category?.name}
                     </Badge>
                   </div>
