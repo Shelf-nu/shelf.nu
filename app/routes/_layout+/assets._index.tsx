@@ -182,9 +182,10 @@ export default function AssetIndexPage() {
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
-              <Th className="hidden md:table-cell">Custodian</Th>
               <Th className="hidden md:table-cell">Category</Th>
               <Th className="hidden md:table-cell">Tags</Th>
+              <Th className="hidden md:table-cell">Custodian</Th>
+              <Th className="hidden md:table-cell">Location</Th>
             </>
           }
         />
@@ -204,12 +205,15 @@ const ListAssetContent = ({
         name: string;
       };
     };
+    location: {
+      name: string;
+    };
   };
 }) => {
-  const { category, tags, custody } = item;
-
+  const { category, tags, custody, location } = item;
   return (
     <>
+      {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
@@ -241,21 +245,26 @@ const ListAssetContent = ({
           </button>
         </div>
       </Td>
-      <Td className="hidden md:table-cell">
-        {custody ? (
-          <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
-            {custody.custodian.name}
-          </span>
-        ) : null}
-      </Td>
+
+      {/* Category */}
       <Td className="hidden md:table-cell">
         {category ? (
           <Badge color={category.color}>{category.name}</Badge>
         ) : null}
       </Td>
+
+      {/* Tags */}
       <Td className="hidden text-left md:table-cell">
         <ListItemTagsColumn tags={tags} />
       </Td>
+
+      {/* Custodian */}
+      <Td className="hidden md:table-cell">
+        {custody ? <GrayBadge>{custody.custodian.name}</GrayBadge> : null}
+      </Td>
+
+      {/* Location */}
+      <Td>{location?.name ? <GrayBadge>{location.name}</GrayBadge> : null}</Td>
     </>
   );
 };
@@ -282,3 +291,9 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
     </div>
   ) : null;
 };
+
+const GrayBadge = ({ children }: { children: string | JSX.Element }) => (
+  <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[6px] py-[2px] text-center text-[12px] font-medium text-gray-700">
+    {children}
+  </span>
+);

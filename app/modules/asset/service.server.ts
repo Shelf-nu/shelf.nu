@@ -1,4 +1,4 @@
-import {
+import type {
   Category,
   Location,
   Note,
@@ -82,7 +82,8 @@ export async function getAssets({
   if (search) {
     const words = search
       .split(" ")
-      .map((w) =>w.replace(/[^a-zA-Z0-9]/g, '')).filter(Boolean) //remove any special character
+      .map((w) => w.replace(/[^a-zA-Z0-9]/g, ""))
+      .filter(Boolean) //remove any special character
       .join(" & ");
     where.searchVector = {
       search: words,
