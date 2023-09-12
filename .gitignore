@@ -25,3 +25,7 @@ test-results/
 /playwright-report/*
 desktop-app/shelf-installer
 desktop-app/portable
+
+.npmrc
+
+.vscode
