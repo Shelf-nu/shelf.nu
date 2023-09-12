@@ -3,6 +3,7 @@
  * are needed by the server, but are only known by the browser.
  */
 import { parseAcceptLanguage } from "intl-parse-accept-language";
+import { ShelfStackError } from "./error";
 import { useRequestInfo } from "./request-info";
 
 export const clientHints = {
@@ -18,7 +19,7 @@ type ClientHintNames = keyof typeof clientHints;
 function getCookieValue(cookieString: string, name: ClientHintNames) {
   const hint = clientHints[name];
   if (!hint) {
-    throw new Error(`Unknown client hint: ${name}`);
+    throw new ShelfStackError({message:`Unknown client hint: ${name}`});
   }
   const value = cookieString
     .split(";")
