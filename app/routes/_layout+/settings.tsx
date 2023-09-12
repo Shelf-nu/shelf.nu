@@ -4,6 +4,7 @@ import { Link, Outlet } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { requireAuthSession } from "~/modules/auth";
+import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -33,8 +34,11 @@ export default function SettingsPage() {
     { to: "user", content: "My details" },
     { to: "custom-fields", content: "Custom fields" },
     { to: "workspace", content: "Workspace" },
-    { to: "subscription", content: "Subscription" },
   ];
+
+  if (ENABLE_PREMIUM_FEATURES) {
+    items.push({ to: "subscription", content: "Subscription" });
+  }
   return (
     <>
       <Header />
