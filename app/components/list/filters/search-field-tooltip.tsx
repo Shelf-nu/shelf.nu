@@ -22,10 +22,10 @@ export const SearchFieldTooltip = () => {
             <h6 className="mb-1 text-xs font-semibold text-gray-700">
               Powerful database search
             </h6>
-            <p className="text-xs font-semibold text-gray-500">
-              Search database entries on asset, category, tag, location,
-              custodian names or description. When searching you’ll need to
-              separate queries by space.
+            <p className="text-xs font-medium text-gray-500">
+              Search database entries on asset name or <b>description</b>,
+              <b>category</b>, <b>tag</b>, <b>location</b>, <b>custodian names</b>. Separate your keywords
+              with spaces for the best results.
             </p>
           </div>
         </TooltipContent>
