@@ -133,7 +133,7 @@ function TeamMemberRow({ item }: { item: CustomField }) {
       </Td>
       <Td>
         <span className="text-text-sm font-medium lowercase text-gray-600">
-          {item.required}
+          {item.required ? "yes" : "no"}
         </span>
       </Td>
       <Td>
