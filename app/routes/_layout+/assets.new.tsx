@@ -77,6 +77,7 @@ export async function action({ request }: LoaderArgs) {
   const customFields = await db.customField.findMany({
     where: {
       userId: authSession.userId,
+      active: true,
     },
   });
 

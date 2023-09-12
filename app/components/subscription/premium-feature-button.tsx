@@ -50,9 +50,9 @@ const HoverMessage = ({
     </HoverCardTrigger>
     <HoverCardContent>
       <p>
-        {buttonContent.message} Please{" "}
+        {buttonContent.message} Please consider{" "}
         <Button to="/settings/subscription" variant={"link"}>
-          upgrade to a paid plan
+          upgrading to a paid plan
         </Button>
         .
       </p>

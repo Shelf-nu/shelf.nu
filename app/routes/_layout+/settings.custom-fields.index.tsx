@@ -90,7 +90,7 @@ export default function CustomFieldsIndexPage() {
           buttonContent={{
             title: "New Custom Field",
             message:
-              "You cannot create more custom fields wihin your subscription plan.",
+              "You are not able to create more custom fields within your current plan.",
           }}
           buttonProps={{
             to: "new",

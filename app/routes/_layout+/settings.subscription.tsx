@@ -144,7 +144,7 @@ export default function UserPage() {
           className="flex w-full flex-col"
         >
           <TabsList className="center mx-auto mb-8">
-            <TabsTrigger value="month">Montly</TabsTrigger>
+            <TabsTrigger value="month">Monthly</TabsTrigger>
             <TabsTrigger value="year">Yearly (2 months free)</TabsTrigger>
           </TabsList>
           <TabsContent value="month">

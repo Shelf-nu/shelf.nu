@@ -1,10 +1,9 @@
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
+import { Link, Outlet, useRouteLoaderData } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { requireAuthSession } from "~/modules/auth";
-import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -36,9 +35,11 @@ export default function SettingsPage() {
     { to: "workspace", content: "Workspace" },
   ];
 
-  if (ENABLE_PREMIUM_FEATURES) {
+  const { enablePremium } = useRouteLoaderData("routes/_layout+/_layout");
+  if (enablePremium) {
     items.push({ to: "subscription", content: "Subscription" });
   }
+
   return (
     <>
       <Header />

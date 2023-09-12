@@ -4,6 +4,7 @@ import type { Zorm } from "react-zorm";
 import type { z } from "zod";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { isFormProcessing } from "~/utils";
+import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { SearchIcon } from "../icons";
@@ -11,8 +12,10 @@ import { Button } from "../shared";
 
 export default function AssetCustomFields({
   zo,
+  schema,
 }: {
   zo: Zorm<z.ZodObject<any, any, any>>;
+  schema: z.ZodObject<any, any, any>;
 }) {
   /** Get the custom fields from the loader */
   const { customFields } = useLoaderData();
@@ -41,6 +44,7 @@ export default function AssetCustomFields({
             rowLabel={field.name}
             subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
             className="border-b-0"
+            required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
           >
             <Input
               hideLabel
@@ -55,6 +59,7 @@ export default function AssetCustomFields({
                 )?.value || ""
               }
               className="w-full"
+              required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
             />
           </FormRow>
         ))
