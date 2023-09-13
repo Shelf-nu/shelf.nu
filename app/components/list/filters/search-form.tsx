@@ -37,7 +37,20 @@ export const SearchForm = () => {
           className="w-full md:w-auto"
           inputClassName="pr-9"
         />
-        <SearchFieldTooltip />
+        {search ? (
+          <Button
+            to="#"
+            icon="x"
+            variant="tertiary"
+            disabled={isSearching}
+            name="intent"
+            value="clearSearch"
+            title="Clear search"
+            className="absolute right-3.5 top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
+          />
+        ) : (
+          <SearchFieldTooltip />
+        )}
       </div>
       <Button
         icon={isSearching ? "spinner" : "search"}
@@ -47,18 +60,6 @@ export const SearchForm = () => {
         disabled={isSearching}
         attachToInput
       />
-      {search && (
-        <Button
-          to="#"
-          icon="x"
-          variant="tertiary"
-          disabled={isSearching}
-          name="intent"
-          value="clearSearch"
-          title="Clear search"
-          className=" absolute right-[63px] top-[50%] z-10 translate-y-[-50%] border-0 p-0 text-center text-gray-400 hover:text-gray-900"
-        />
-      )}
     </div>
   );
 };
