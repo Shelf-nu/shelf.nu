@@ -189,3 +189,12 @@ export async function createCustomFieldsIfNotExists({
 
   return customFields;
 }
+
+export async function getActiveCustomFields({ userId }: { userId: string }) {
+  return await db.customField.findMany({
+    where: {
+      userId,
+      active: true,
+    },
+  });
+}

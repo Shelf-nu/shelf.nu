@@ -17,6 +17,7 @@ import {
   updateAssetMainImage,
 } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { getActiveCustomFields } from "~/modules/custom-field";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
@@ -74,11 +75,8 @@ export async function action({ request }: LoaderArgs) {
 
   const formData = await clonedRequest.formData();
 
-  const customFields = await db.customField.findMany({
-    where: {
-      userId: authSession.userId,
-      active: true,
-    },
+  const customFields = await getActiveCustomFields({
+    userId: authSession.userId,
   });
 
   const FormSchema = mergedSchema({
