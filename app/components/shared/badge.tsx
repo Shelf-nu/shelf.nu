@@ -1,4 +1,4 @@
-import { tw } from "~/utils/tw-classes";
+import { tw } from "~/utils";
 
 export const Badge = ({
   children,

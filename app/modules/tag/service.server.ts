@@ -1,5 +1,6 @@
-import type { Prisma, Tag, User } from "@prisma/client";
+import type { Prisma, Tag, TeamMember, User } from "@prisma/client";
 import { db } from "~/database";
+import type { CreateAssetFromContentImportPayload } from "../asset";
 
 export async function getTags({
   userId,
@@ -88,27 +89,69 @@ export const buildTagsSet = (tags: string | undefined) =>
       }
     : { set: [] };
 
-    export async function getTag({ id }: Pick<Tag, "id">){
-      return db.tag.findUnique({
-        where: { 
-          id
-         }
-      })
-    }
-    
-    export async function updateTag({
-      id,
-      name,
-      description
-    }: Pick<Tag, "id" | "name" | "description" > 
-    ) {
-      return db.tag.update({
-        where: {
-          id
-        },
+export async function createTagsIfNotExists({
+  data,
+  userId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+}): Promise<Record<string, TeamMember["id"]>> {
+  const tags = data
+    .filter(({ tags }) => tags.length > 0)
+    .reduce((acc: Record<string, string>, curr) => {
+      curr.tags.forEach((tag) => tag !== "" && (acc[tag.trim()] = ""));
+      return acc;
+    }, {});
+
+  // now we loop through the categories and check if they exist
+  for (const tag of Object.keys(tags)) {
+    const existingTag = await db.tag.findFirst({
+      where: {
+        name: tag,
+        userId,
+      },
+    });
+
+    if (!existingTag) {
+      // if the tag doesn't exist, we create a new one
+      const newTag = await db.tag.create({
         data: {
-          name,
-          description
+          name: tag as string,
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
         },
       });
+      tags[tag] = newTag.id;
+    } else {
+      // if the tag exists, we just update the id
+      tags[tag] = existingTag.id;
     }
+  }
+  return tags;
+}
+export async function getTag({ id }: Pick<Tag, "id">) {
+  return db.tag.findUnique({
+    where: {
+      id,
+    },
+  });
+}
+
+export async function updateTag({
+  id,
+  name,
+  description,
+}: Pick<Tag, "id" | "name" | "description">) {
+  return db.tag.update({
+    where: {
+      id,
+    },
+    data: {
+      name,
+      description,
+    },
+  });
+}

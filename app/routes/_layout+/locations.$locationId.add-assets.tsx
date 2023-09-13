@@ -111,6 +111,7 @@ export const action = async ({ request, params }: ActionArgs) => {
 
 export default function AddAssetsToLocation() {
   const { location } = useLoaderData<typeof loader>();
+
   return (
     <div>
       <header className="mb-5">

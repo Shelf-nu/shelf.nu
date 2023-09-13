@@ -8,6 +8,7 @@ declare global {
       MAPTILER_TOKEN: string;
       MICROSOFT_CLARITY_ID: string;
       CRISP_WEBSITE_ID: string;
+      ENABLE_PREMIUM_FEATURES: string;
     };
   }
 }
@@ -23,6 +24,9 @@ declare global {
       MAPTILER_TOKEN: string;
       CRISP_WEBSITE_ID: string;
       MICROSOFT_CLARITY_ID: string;
+      STRIPE_SECRET_KEY: string;
+      STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
+      ENABLE_PREMIUM_FEATURES: string;
     }
   }
 }
@@ -54,6 +58,10 @@ function getEnv(
 export const SERVER_URL = getEnv("SERVER_URL");
 export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
 export const SESSION_SECRET = getEnv("SESSION_SECRET");
+export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
+  isSecret: true,
+  isRequired: false,
+});
 
 /**
  * Shared envs
@@ -78,12 +86,20 @@ export const MICROSOFT_CLARITY_ID = getEnv("MICROSOFT_CLARITY_ID", {
   isRequired: false,
 });
 
+export const ENABLE_PREMIUM_FEATURES =
+  getEnv("ENABLE_PREMIUM_FEATURES", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
 export function getBrowserEnv() {
   return {
+    NODE_ENV,
     SUPABASE_URL,
     SUPABASE_ANON_PUBLIC,
     MAPTILER_TOKEN,
     CRISP_WEBSITE_ID,
     MICROSOFT_CLARITY_ID,
+    ENABLE_PREMIUM_FEATURES,
   };
 }

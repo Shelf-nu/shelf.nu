@@ -137,6 +137,10 @@ export const links: LinksFunction = () => [
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
+  const customFieldsValues =
+    asset?.customFields?.length > 0
+      ? asset.customFields.filter((f) => f?.value && f.value !== "")
+      : [];
   const assetIsAvailable = asset.status === "AVAILABLE";
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
@@ -286,6 +290,31 @@ export default function AssetDetailsPage() {
               </li>
             </ul>
           </Card>
+
+          {/* Here custom fields relates to AssetCustomFieldValue */}
+          {customFieldsValues?.length > 0 ? (
+            <>
+              <TextualDivider text="Custom fields" className="mb-8 lg:hidden" />
+              <Card>
+                <ul className="item-information">
+                  {customFieldsValues.map((field, index) => (
+                    <li
+                      className={tw(
+                        "flex justify-between",
+                        index === customFieldsValues.length - 1 ? "" : "mb-4 "
+                      )}
+                      key={field.id}
+                    >
+                      <span className="text-[12px] font-medium text-gray-600">
+                        {field.customField.name}
+                      </span>
+                      <div className="max-w-[250px]">{field.value}</div>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            </>
+          ) : null}
 
           <ScanDetails />
         </div>

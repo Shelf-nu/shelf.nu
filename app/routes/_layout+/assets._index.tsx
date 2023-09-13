@@ -1,10 +1,12 @@
 import type { Category, Asset, Tag, Custody } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import { useLoaderData, useNavigate } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
+import { ExportButton } from "~/components/assets/export-button";
+import { ImportButton } from "~/components/assets/import-button";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -22,11 +24,12 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
+import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { getUserByID } from "~/modules/user";
 import { notFound, userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */
@@ -64,11 +67,19 @@ export interface IndexResponse {
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-  const user = await getUserByID(userId);
 
-  if (!user) {
-    return redirect("/login");
-  }
+  const user = await db.user.findUnique({
+    where: {
+      id: userId,
+    },
+    select: {
+      firstName: true,
+      tier: {
+        include: { tierLimit: true },
+      },
+    },
+  });
+
   const {
     search,
     totalAssets,
@@ -115,6 +126,8 @@ export async function loader({ request }: LoaderArgs) {
     next,
     prev,
     modelName,
+    canExportAssets: canExportAssets(user?.tier?.tierLimit),
+    canImportAssets: canImportAssets(user?.tier?.tierLimit),
     searchFieldLabel: "Search assets",
     searchFieldTooltip: {
       title: "Search your asset database",
@@ -129,6 +142,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
+  const { canExportAssets, canImportAssets } = useLoaderData<typeof loader>();
   const selectedCategories = useAtomValue(selectedCategoriesAtom);
   const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
 
@@ -146,11 +160,13 @@ export default function AssetIndexPage() {
   return (
     <>
       <Header>
+        <ExportButton canExportAssets={canExportAssets} />
+        <ImportButton canImportAssets={canImportAssets} />
         <Button
           to="new"
           role="link"
           aria-label={`new asset`}
-          icon="plus"
+          icon="asset"
           data-test-id="createNewAsset"
         >
           New Asset

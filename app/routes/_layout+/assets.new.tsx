@@ -1,3 +1,4 @@
+import { OrganizationType } from "@prisma/client";
 import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
@@ -7,6 +8,7 @@ import { titleAtom } from "~/atoms/assets.new";
 
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
+import { db } from "~/database";
 
 import {
   createAsset,
@@ -15,24 +17,40 @@ import {
   updateAssetMainImage,
 } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { getActiveCustomFields } from "~/modules/custom-field";
+import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { buildTagsSet } from "~/modules/tag";
-import { assertIsPost } from "~/utils";
+import { assertIsPost, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import {
+  extractCustomFieldValuesFromResults,
+  mergedSchema,
+} from "~/utils/custom-field-schema";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Asset";
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
-  const { categories, tags, locations } = await getAllRelatedEntries({
+  const organization = await getOrganizationByUserId({
     userId,
+    orgType: OrganizationType.PERSONAL,
   });
+
+  if (!organization) {
+    throw new Error("Organization not found");
+  }
+  const { categories, tags, locations, customFields } =
+    await getAllRelatedEntries({
+      userId,
+      organizationId: organization.id,
+    });
 
   const header = {
     title,
   };
 
-  return json({ header, categories, tags, locations });
+  return json({ header, categories, tags, locations, customFields });
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -56,9 +74,22 @@ export async function action({ request }: LoaderArgs) {
   const clonedRequest = request.clone();
 
   const formData = await clonedRequest.formData();
-  const result = await NewAssetFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+
+  const customFields = await getActiveCustomFields({
+    userId: authSession.userId,
+  });
+
+  const FormSchema = mergedSchema({
+    baseSchema: NewAssetFormSchema,
+    customFields: customFields.map((cf) => ({
+      id: cf.id,
+      name: slugify(cf.name),
+      helpText: cf?.helpText || "",
+      required: cf.required,
+      type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+    })),
+  });
+  const result = await FormSchema.safeParseAsync(parseFormAny(formData));
 
   if (!result.success) {
     return json(
@@ -75,6 +106,9 @@ export async function action({ request }: LoaderArgs) {
   }
 
   const { title, description, category, qrId, newLocationId } = result.data;
+
+  const customFieldsValues = extractCustomFieldValuesFromResults({ result });
+
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
 
@@ -86,6 +120,7 @@ export async function action({ request }: LoaderArgs) {
     locationId: newLocationId,
     qrId,
     tags,
+    customFieldsValues,
   });
 
   // Not sure how to handle this failing as the asset is already created

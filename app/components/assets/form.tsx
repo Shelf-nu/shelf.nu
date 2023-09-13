@@ -1,5 +1,5 @@
-import type { Asset, Qr } from "@prisma/client";
-import { Form, Link, useNavigation } from "@remix-run/react";
+import type { Asset, CustomField, Qr } from "@prisma/client";
+import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
@@ -7,7 +7,11 @@ import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/assets.new";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { isFormProcessing } from "~/utils";
+
+import { mergedSchema } from "~/utils/custom-field-schema";
 import { zodFieldIsRequired } from "~/utils/zod";
+import AssetCustomFields from "./custom-fields-inputs";
+
 import { CategorySelect } from "../category/category-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -47,7 +51,27 @@ export const AssetForm = ({
   tags,
 }: Props) => {
   const navigation = useNavigation();
-  const zo = useZorm("NewQuestionWizardScreen", NewAssetFormSchema);
+
+  const { customFields } = useLoaderData();
+
+  // console.log(customFields);
+
+  const FormSchema = mergedSchema({
+    baseSchema: NewAssetFormSchema,
+    customFields: customFields.map(
+      (cf: CustomField) =>
+        cf.active && {
+          id: cf.id,
+          name: cf.name,
+          helpText: cf?.helpText || "",
+          required: cf.required,
+          type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+        }
+    ),
+  });
+
+  const zo = useZorm("NewQuestionWizardScreen", FormSchema);
+
   const disabled = isFormProcessing(navigation.state);
 
   const fileError = useAtomValue(fileErrorAtom);
@@ -67,7 +91,7 @@ export const AssetForm = ({
       <FormRow
         rowLabel={"Name"}
         className="border-b-0 pb-[10px]"
-        required={zodFieldIsRequired(NewAssetFormSchema.shape.title)}
+        required={zodFieldIsRequired(FormSchema.shape.title)}
       >
         <Input
           label="Name"
@@ -79,7 +103,7 @@ export const AssetForm = ({
           onChange={updateTitle}
           className="w-full"
           defaultValue={title || ""}
-          required={zodFieldIsRequired(NewAssetFormSchema.shape.title)}
+          required={zodFieldIsRequired(FormSchema.shape.title)}
         />
       </FormRow>
 
@@ -111,7 +135,7 @@ export const AssetForm = ({
           </p>
         }
         className="border-b-0 pb-[10px]"
-        required={zodFieldIsRequired(NewAssetFormSchema.shape.category)}
+        required={zodFieldIsRequired(FormSchema.shape.category)}
       >
         <CategorySelect defaultValue={category || undefined} />
       </FormRow>
@@ -127,7 +151,7 @@ export const AssetForm = ({
           </p>
         }
         className="border-b-0 py-[10px]"
-        required={zodFieldIsRequired(NewAssetFormSchema.shape.tags)}
+        required={zodFieldIsRequired(FormSchema.shape.tags)}
       >
         <TagsAutocomplete existingTags={tags || []} />
       </FormRow>
@@ -144,7 +168,7 @@ export const AssetForm = ({
           </p>
         }
         className="pt-[10px]"
-        required={zodFieldIsRequired(NewAssetFormSchema.shape.newLocationId)}
+        required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
       >
         <LocationSelect />
       </FormRow>
@@ -158,7 +182,8 @@ export const AssetForm = ({
               asset’s overview page. You can always change it.
             </p>
           }
-          required={zodFieldIsRequired(NewAssetFormSchema.shape.description)}
+          className="border-b-0"
+          required={zodFieldIsRequired(FormSchema.shape.description)}
         >
           <Input
             inputType="textarea"
@@ -169,12 +194,14 @@ export const AssetForm = ({
             disabled={disabled}
             data-test-id="assetDescription"
             className="w-full"
-            required={zodFieldIsRequired(NewAssetFormSchema.shape.description)}
+            required={zodFieldIsRequired(FormSchema.shape.description)}
           />
         </FormRow>
       </div>
 
-      <div className="text-right">
+      <AssetCustomFields zo={zo} schema={FormSchema} />
+
+      <div className="pt-6 text-right">
         <Button type="submit" disabled={disabled}>
           {disabled ? <Spinner /> : "Save"}
         </Button>

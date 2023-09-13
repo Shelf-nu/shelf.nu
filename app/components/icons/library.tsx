@@ -282,6 +282,28 @@ export function CheckmarkIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Alternative checkmark icon with different styling*/
+export function AltCheckmarkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <rect width="24" height="24" rx="12" fill="#FDEAD7" />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M17.0965 7.39004L9.9365 14.3L8.0365 12.27C7.6865 11.94 7.1365 11.92 6.7365 12.2C6.3465 12.49 6.2365 13 6.4765 13.41L8.7265 17.07C8.9465 17.41 9.3265 17.62 9.7565 17.62C10.1665 17.62 10.5565 17.41 10.7765 17.07C11.1365 16.6 18.0065 8.41004 18.0065 8.41004C18.9065 7.49004 17.8165 6.68004 17.0965 7.38004V7.39004Z"
+        fill="#EF6820"
+      />
+    </svg>
+  );
+}
+
 /** This one doesnt have a circle around it. Its a clean version */
 export function CheckIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -873,6 +895,89 @@ export const ArrowLeftIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeLinecap="round"
       strokeLinejoin="round"
     />
+  </svg>
+);
+
+export const InfoIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 20 20"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M10.0001 13.3333V9.99999M10.0001 6.66666H10.0084M18.3334 9.99999C18.3334 14.6024 14.6025 18.3333 10.0001 18.3333C5.39771 18.3333 1.66675 14.6024 1.66675 9.99999C1.66675 5.39762 5.39771 1.66666 10.0001 1.66666C14.6025 1.66666 18.3334 5.39762 18.3334 9.99999Z"
+      stroke="#EF6820"
+      strokeWidth="1.66667"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+export const SingleLayerIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="20"
+    height="10"
+    viewBox="0 0 20 10"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M10.2982 0.982398C10.1889 0.927738 10.1342 0.900409 10.0769 0.889652C10.0261 0.880126 9.97403 0.880126 9.92325 0.889652C9.86592 0.900409 9.81126 0.927738 9.70194 0.982398L1.66675 4.99999L9.70194 9.01759C9.81126 9.07225 9.86592 9.09958 9.92325 9.11033C9.97403 9.11986 10.0261 9.11986 10.0769 9.11033C10.1342 9.09958 10.1889 9.07225 10.2982 9.01759L18.3334 4.99999L10.2982 0.982398Z"
+      stroke="#EF6820"
+      strokeWidth="1.66667"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+export const DoubleLayerIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 20 20"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M1.66675 12.0833L9.70194 16.1009C9.81126 16.1556 9.86592 16.1829 9.92325 16.1937C9.97403 16.2032 10.0261 16.2032 10.0769 16.1937C10.1342 16.1829 10.1889 16.1556 10.2982 16.1009L18.3334 12.0833M1.66675 7.91666L9.70194 3.89907C9.81126 3.84441 9.86592 3.81708 9.92325 3.80632C9.97403 3.7968 10.0261 3.7968 10.0769 3.80632C10.1342 3.81708 10.1889 3.84441 10.2982 3.89907L18.3334 7.91666L10.2982 11.9343C10.1889 11.9889 10.1342 12.0162 10.0769 12.027C10.0261 12.0365 9.97403 12.0365 9.92325 12.027C9.86592 12.0162 9.81126 11.9889 9.70194 11.9343L1.66675 7.91666Z"
+      stroke="#EF6820"
+      strokeWidth="1.66667"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+export const MultiLayerIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 20 20"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <g clipPath="url(#clip0_8828_5375)">
+      <path
+        d="M1.66663 10L9.70182 14.0176C9.81114 14.0723 9.86579 14.0996 9.92313 14.1103C9.97391 14.1199 10.026 14.1199 10.0768 14.1103C10.1341 14.0996 10.1888 14.0723 10.2981 14.0176L18.3333 10M1.66663 14.1667L9.70182 18.1843C9.81114 18.2389 9.86579 18.2663 9.92313 18.277C9.97391 18.2865 10.026 18.2865 10.0768 18.277C10.1341 18.2663 10.1888 18.2389 10.2981 18.1843L18.3333 14.1667M1.66663 5.83334L9.70182 1.81574C9.81114 1.76108 9.86579 1.73375 9.92313 1.723C9.97391 1.71347 10.026 1.71347 10.0768 1.723C10.1341 1.73375 10.1888 1.76108 10.2981 1.81574L18.3333 5.83334L10.2981 9.85093C10.1888 9.90559 10.1341 9.93292 10.0768 9.94368C10.026 9.9532 9.97391 9.9532 9.92313 9.94368C9.86579 9.93292 9.81114 9.90559 9.70182 9.85093L1.66663 5.83334Z"
+        stroke="#EF6820"
+        strokeWidth="1.66667"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </g>
+    <defs>
+      <clipPath id="clip0_8828_5375">
+        <rect width="20" height="20" fill="white" />
+      </clipPath>
+    </defs>
   </svg>
 );
 

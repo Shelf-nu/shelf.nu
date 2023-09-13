@@ -7,8 +7,12 @@ import type {
   Asset,
   User,
   Tag,
+  Organization,
+  TeamMember,
+  CustomField,
+  AssetCustomFieldValue,
 } from "@prisma/client";
-import { ErrorCorrection } from "@prisma/client";
+import { AssetStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { db } from "~/database";
 import {
@@ -18,10 +22,14 @@ import {
   getParamsValues,
   oneDayFromNow,
 } from "~/utils";
+import { processCustomFields } from "~/utils/import.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
-import { getAllCategories } from "../category";
+import { createCategoriesIfNotExists, getAllCategories } from "../category";
+import { createCustomFieldsIfNotExists } from "../custom-field";
+import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
-import { getAllTags } from "../tag";
+import { createTagsIfNotExists, getAllTags } from "../tag";
+import { createTeamMemberIfNotExists } from "../team-member";
 
 export async function getAsset({
   userId,
@@ -43,6 +51,24 @@ export async function getAsset({
         select: {
           createdAt: true,
           custodian: true,
+        },
+      },
+      customFields: {
+        where: {
+          customField: {
+            active: true,
+          },
+        },
+        include: {
+          customField: {
+            select: {
+              id: true,
+              name: true,
+              helpText: true,
+              required: true,
+              type: true,
+            },
+          },
         },
       },
     },
@@ -82,7 +108,8 @@ export async function getAssets({
   if (search) {
     const words = search
       .split(" ")
-      .map((w) => w.replace(/[^a-zA-Z0-9\-\_]/g, '')).filter(Boolean) //remove uncommon special character
+      .map((w) => w.replace(/[^a-zA-Z0-9\-_]/g, ""))
+      .filter(Boolean) //remove uncommon special character
       .join(" & ");
     where.searchVector = {
       search: words,
@@ -151,10 +178,14 @@ export async function createAsset({
   locationId,
   qrId,
   tags,
+  custodian,
+  customFieldsValues,
 }: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
+  custodian?: TeamMember["id"];
+  customFieldsValues?: ({ id: string; value: string | undefined } | null)[];
 }) {
   /** User connction data */
   const user = {
@@ -176,14 +207,14 @@ export async function createAsset({
     qr && qr.userId === userId && qr.assetId === null
       ? { connect: { id: qrId } }
       : {
-        create: [
-          {
-            version: 0,
-            errorCorrection: ErrorCorrection["L"],
-            user,
-          },
-        ],
-      };
+          create: [
+            {
+              version: 0,
+              errorCorrection: ErrorCorrection["L"],
+              user,
+            },
+          ],
+        };
 
   /** Data object we send via prisma to create Asset */
   const data = {
@@ -224,11 +255,45 @@ export async function createAsset({
     });
   }
 
+  /** If a custodian is passed, create a Custody relation with that asset
+   * `custodian` represents the id of a {@link TeamMember}. */
+  if (custodian) {
+    Object.assign(data, {
+      custody: {
+        create: {
+          custodian: {
+            connect: {
+              id: custodian,
+            },
+          },
+        },
+      },
+      status: AssetStatus.IN_CUSTODY,
+    });
+  }
+
+  /** If custom fields are passed, create them */
+  if (customFieldsValues && customFieldsValues.length > 0) {
+    Object.assign(data, {
+      /** Custom fields here refers to the values, check the Schema for more info */
+      customFields: {
+        create: customFieldsValues?.map(
+          (cf: { id: string; value: string | undefined } | null) =>
+            cf !== null && {
+              value: cf?.value || "",
+              customFieldId: cf.id,
+            }
+        ),
+      },
+    });
+  }
+
   return db.asset.create({
     data,
     include: {
       location: true,
       user: true,
+      custody: true,
     },
   });
 }
@@ -244,6 +309,7 @@ interface UpdateAssetPayload {
   mainImageExpiration?: Asset["mainImageExpiration"];
   tags?: { set: { id: string }[] };
   userId?: User["id"];
+  customFieldsValues?: { id: string; value: string | undefined }[];
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
@@ -258,6 +324,7 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     newLocationId,
     currentLocationId,
     userId,
+    customFieldsValues: customFieldsValuesFromForm,
   } = payload;
   const isChangingLocation =
     newLocationId && currentLocationId && newLocationId !== currentLocationId;
@@ -295,6 +362,42 @@ export async function updateAsset(payload: UpdateAssetPayload) {
   if (tags && tags?.set) {
     Object.assign(data, {
       tags,
+    });
+  }
+
+  /** If custom fields are passed, create/update them */
+  if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
+    /** We get the current values. We need this in order to co-relate the correct fields to update as we dont have the id's of the values */
+    const currentCustomFieldsValues = await db.assetCustomFieldValue.findMany({
+      where: {
+        assetId: id,
+      },
+      select: {
+        id: true,
+        customFieldId: true,
+      },
+    });
+
+    Object.assign(data, {
+      customFields: {
+        upsert: customFieldsValuesFromForm?.map(
+          (cf: { id: string; value: string | undefined }) => ({
+            where: {
+              id:
+                currentCustomFieldsValues.find(
+                  (ccfv) => ccfv.customFieldId === cf.id
+                )?.id || "",
+            },
+            update: {
+              value: cf?.value || "",
+            },
+            create: {
+              value: cf?.value || "",
+              customFieldId: cf.id,
+            },
+          })
+        ),
+      },
     });
   }
 
@@ -439,10 +542,17 @@ export async function deleteNote({
 /** Fetches all related entries required for creating a new asset */
 export async function getAllRelatedEntries({
   userId,
+  organizationId,
 }: {
   userId: User["id"];
-}): Promise<{ categories: Category[]; tags: Tag[]; locations: Location[] }> {
-  const [categories, tags, locations] = await db.$transaction([
+  organizationId: Organization["id"];
+}): Promise<{
+  categories: Category[];
+  tags: Tag[];
+  locations: Location[];
+  customFields: CustomField[];
+}> {
+  const [categories, tags, locations, customFields] = await db.$transaction([
     /** Get the categories */
     db.category.findMany({ where: { userId } }),
 
@@ -451,8 +561,13 @@ export async function getAllRelatedEntries({
 
     /** Get the locations */
     db.location.findMany({ where: { userId } }),
+
+    /** Get the custom fields */
+    db.customField.findMany({
+      where: { organizationId, active: { equals: true } },
+    }),
   ]);
-  return { categories, tags, locations };
+  return { categories, tags, locations, customFields };
 }
 
 export const getPaginatedAndFilterableAssets = async ({
@@ -538,4 +653,385 @@ export const createLocationChangeNote = async ({
     userId,
     assetId,
   });
+};
+
+/** Fetches assets with the data needed for exporting to CSV */
+export const fetchAssetsForExport = async ({
+  userId,
+}: {
+  userId: User["id"];
+}) =>
+  await db.asset.findMany({
+    where: {
+      userId,
+    },
+    include: {
+      category: true,
+      location: true,
+      notes: true,
+      custody: {
+        include: {
+          custodian: true,
+        },
+      },
+      tags: true,
+      customFields: {
+        include: {
+          customField: true,
+        },
+      },
+    },
+  });
+
+export const createAssetsFromContentImport = async ({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) => {
+  const categories = await createCategoriesIfNotExists({
+    data,
+    userId,
+  });
+
+  const locations = await createLocationsIfNotExists({
+    data,
+    userId,
+  });
+
+  const teamMembers = await createTeamMemberIfNotExists({
+    data,
+    organizationId,
+  });
+
+  const tags = await createTagsIfNotExists({
+    data,
+    userId,
+  });
+
+  const customFields = await createCustomFieldsIfNotExists({
+    data,
+    organizationId,
+    userId,
+  });
+
+  for (const asset of data) {
+    const assetCustomFieldsValues = Object.entries(asset)
+      .map(([key, value]) => (key.startsWith("cf:") ? value : null))
+      .filter((v) => v !== null);
+
+    await createAsset({
+      title: asset.title,
+      description: asset.description || "",
+      userId,
+      categoryId: asset.category ? categories[asset.category] : null,
+      locationId: asset.location ? locations[asset.location] : undefined,
+      custodian: asset.custodian ? teamMembers[asset.custodian] : undefined,
+      tags:
+        asset.tags.length > 0
+          ? {
+              set: asset.tags
+                .filter((t) => tags[t])
+                .map((t) => ({ id: tags[t] })),
+            }
+          : undefined,
+      customFieldsValues:
+        assetCustomFieldsValues?.length > 0
+          ? assetCustomFieldsValues
+              .map((v: string) =>
+                customFields[v]?.id
+                  ? {
+                      id: customFields[v].id,
+                      value: v || "",
+                    }
+                  : null
+              )
+              .filter((v) => v !== null)
+          : undefined,
+    });
+  }
+};
+
+export interface CreateAssetFromContentImportPayload
+  extends Record<string, any> {
+  title: string;
+  description?: string;
+  category?: string;
+  tags: string[];
+  location?: string;
+  custodian?: string;
+}
+
+export const createAssetsFromBackupImport = async ({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromBackupImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) => {
+  // console.log(data);
+
+  data.map(async (asset) => {
+    /** Base data from asset */
+    const d = {
+      data: {
+        title: asset.title,
+        description: asset.description || null,
+        mainImage: asset.mainImage || null,
+        mainImageExpiration: oneDayFromNow(),
+        userId,
+        organizationId,
+        status: asset.status,
+        createdAt: new Date(asset.createdAt),
+        updatedAt: new Date(asset.updatedAt),
+        qrCodes: {
+          create: [
+            {
+              version: 0,
+              errorCorrection: ErrorCorrection["L"],
+              userId,
+            },
+          ],
+        },
+      },
+    };
+
+    /** Category */
+    if (asset.category && Object.keys(asset?.category).length > 0) {
+      const category = asset.category as Category;
+
+      const existingCat = await db.category.findFirst({
+        where: {
+          userId,
+          name: category.name,
+        },
+      });
+
+      /** If it doesnt exist, create a new one */
+      if (!existingCat) {
+        const newCat = await db.category.create({
+          data: {
+            name: category.name,
+            description: category.description || "",
+            color: category.color,
+            userId,
+            createdAt: new Date(category.createdAt),
+            updatedAt: new Date(category.updatedAt),
+          },
+        });
+        /** Add it to the data for creating the asset */
+        Object.assign(d.data, {
+          categoryId: newCat.id,
+        });
+      } else {
+        /** Add it to the data for creating the asset */
+        Object.assign(d.data, {
+          categoryId: existingCat.id,
+        });
+      }
+    }
+
+    /** Location */
+    if (asset.location && Object.keys(asset?.location).length > 0) {
+      const location = asset.location as Location;
+
+      const existingLoc = await db.location.findFirst({
+        where: {
+          userId,
+          name: location.name,
+        },
+      });
+
+      /** If it doesnt exist, create a new one */
+      if (!existingLoc) {
+        const newLoc = await db.location.create({
+          data: {
+            name: location.name,
+            description: location.description || "",
+            address: location.address || "",
+            userId,
+            createdAt: new Date(location.createdAt),
+            updatedAt: new Date(location.updatedAt),
+          },
+        });
+        /** Add it to the data for creating the asset */
+        Object.assign(d.data, {
+          locationId: newLoc.id,
+        });
+      } else {
+        /** Add it to the data for creating the asset */
+        Object.assign(d.data, {
+          locationId: existingLoc.id,
+        });
+      }
+    }
+
+    /** Custody */
+    if (asset.custody && Object.keys(asset?.custody).length > 0) {
+      const { custodian } = asset.custody;
+
+      const existingCustodian = await db.teamMember.findFirst({
+        where: {
+          organizations: {
+            some: {
+              id: organizationId,
+            },
+          },
+          name: custodian.name,
+        },
+      });
+
+      if (!existingCustodian) {
+        const newCustodian = await db.teamMember.create({
+          data: {
+            name: custodian.name,
+            organizations: {
+              connect: {
+                id: organizationId,
+              },
+            },
+            createdAt: new Date(custodian.createdAt),
+            updatedAt: new Date(custodian.updatedAt),
+          },
+        });
+
+        Object.assign(d.data, {
+          custody: {
+            create: {
+              teamMemberId: newCustodian.id,
+            },
+          },
+        });
+      } else {
+        Object.assign(d.data, {
+          custody: {
+            create: {
+              teamMemberId: existingCustodian.id,
+            },
+          },
+        });
+      }
+    }
+
+    /** Tags */
+    if (asset.tags && asset.tags.length > 0) {
+      const tagsNames = asset.tags.map((t) => t.name);
+      // now we loop through the categories and check if they exist
+      let tags: Record<string, string> = {};
+      for (const tag of tagsNames) {
+        const existingTag = await db.tag.findFirst({
+          where: {
+            name: tag,
+            userId,
+          },
+        });
+
+        if (!existingTag) {
+          // if the tag doesn't exist, we create a new one
+          const newTag = await db.tag.create({
+            data: {
+              name: tag as string,
+              user: {
+                connect: {
+                  id: userId,
+                },
+              },
+            },
+          });
+          tags[tag] = newTag.id;
+        } else {
+          // if the tag exists, we just update the id
+          tags[tag] = existingTag.id;
+        }
+      }
+
+      Object.assign(d.data, {
+        tags:
+          asset.tags.length > 0
+            ? {
+                connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
+              }
+            : undefined,
+      });
+    }
+
+    /** Custom fields */
+    if (asset.customFields && asset.customFields.length > 0) {
+      /** we need to check if custom fields exist and create them
+       * Then we need to also create the values for the asset.customFields
+       */
+
+      const cfIds = await processCustomFields({
+        asset,
+        organizationId,
+        userId,
+      });
+
+      Object.assign(d.data, {
+        customFields: {
+          create: asset.customFields.map((cf) => ({
+            value: cf.value,
+            customFieldId: cfIds[cf.customField.name],
+          })),
+        },
+      });
+    }
+
+    /** Create the Asset */
+    const { id: assetId } = await db.asset.create(d);
+
+    /** Create notes */
+    if (asset?.notes?.length > 0) {
+      await db.note.createMany({
+        data: asset.notes.map((note: Note) => ({
+          content: note.content,
+          type: note.type,
+          assetId,
+          userId,
+          createdAt: new Date(note.createdAt),
+          updatedAt: new Date(note.updatedAt),
+        })),
+      });
+    }
+  });
+};
+
+export interface CreateAssetFromBackupImportPayload
+  extends Record<string, any> {
+  id: string;
+  title: string;
+  description?: string;
+  category:
+    | {
+        id: string;
+        name: string;
+        description: string;
+        color: string;
+        createdAt: string;
+        updatedAt: string;
+        userId: string;
+      }
+    | {};
+  tags: {
+    name: string;
+  }[];
+  location:
+    | {
+        name: string;
+        description?: string;
+        address?: string;
+        createdAt: string;
+        updatedAt: string;
+      }
+    | {};
+  customFields: AssetCustomFieldsValuesWithFields[];
+}
+
+export type AssetCustomFieldsValuesWithFields = AssetCustomFieldValue & {
+  customField: CustomField;
 };
