@@ -103,8 +103,7 @@ export async function getAssets({
   if (search) {
     const words = search
       .split(" ")
-      .map((w) => w.replace(/[^a-zA-Z0-9]/g, ""))
-      .filter(Boolean) //remove any special character
+      .map((w) => w.replace(/[^a-zA-Z0-9\-\_]/g, '')).filter(Boolean) //remove uncommon special character
       .join(" & ");
     where.searchVector = {
       search: words,
@@ -202,14 +201,14 @@ export async function createAsset({
     qr && qr.userId === userId && qr.assetId === null
       ? { connect: { id: qrId } }
       : {
-          create: [
-            {
-              version: 0,
-              errorCorrection: ErrorCorrection["L"],
-              user,
-            },
-          ],
-        };
+        create: [
+          {
+            version: 0,
+            errorCorrection: ErrorCorrection["L"],
+            user,
+          },
+        ],
+      };
 
   /** Data object we send via prisma to create Asset */
   const data = {
