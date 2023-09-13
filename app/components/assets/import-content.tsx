@@ -145,22 +145,26 @@ const FileForm = ({ intent }: { intent: string }) => {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm asset import</AlertDialogTitle>
-            <AlertDialogDescription>
-              You need to type: <b>"I AGREE"</b> in the field below to accept
-              the import. By doing this you agree that you have read the
-              requirements and you understand the limitations and consiquences
-              of using this feature.
-            </AlertDialogDescription>
-            <Input
-              type="text"
-              label={"Confirmation"}
-              name="agree"
-              value={agreed}
-              onChange={(e) => setAgreed(e.target.value as any)}
-              placeholder="I AGREE"
-              pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
-              required
-            />
+            {!isSuccessful ? (
+              <>
+                <AlertDialogDescription>
+                  You need to type: <b>"I AGREE"</b> in the field below to
+                  accept the import. By doing this you agree that you have read
+                  the requirements and you understand the limitations and
+                  consiquences of using this feature.
+                </AlertDialogDescription>
+                <Input
+                  type="text"
+                  label={"Confirmation"}
+                  name="agree"
+                  value={agreed}
+                  onChange={(e) => setAgreed(e.target.value as any)}
+                  placeholder="I AGREE"
+                  pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
+                  required
+                />
+              </>
+            ) : null}
           </AlertDialogHeader>
           {fetcher.data?.error ? (
             <div>
@@ -175,7 +179,7 @@ const FileForm = ({ intent }: { intent: string }) => {
             </div>
           ) : null}
 
-          {fetcher.data?.success ? (
+          {isSuccessful ? (
             <div>
               <b className="text-green-500">Success!</b>
               <p>Your assets have been imported.</p>
@@ -200,7 +204,7 @@ const FileForm = ({ intent }: { intent: string }) => {
                   }}
                   disabled={disabled}
                 >
-                  {disabled ? "Importing..." : "Import"}
+                  {isFormProcessing(fetcher.state) ? "Importing..." : "Import"}
                 </Button>
               </>
             )}
