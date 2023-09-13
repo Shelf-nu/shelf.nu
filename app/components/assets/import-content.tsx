@@ -51,7 +51,12 @@ export const ImportContent = () => (
     <h3>Import your own content</h3>
     <p>
       Import your own content by placing it in the csv file. Here you can{" "}
-      <Button variant="link" to="#">
+      <Button
+        variant="link"
+        to="/shelf.nu-example-asset-import-from-content.csv"
+        target="_blank"
+        download
+      >
         download our CSV template.
       </Button>{" "}
       Some important details about how this works:
@@ -78,6 +83,9 @@ export const ImportContent = () => (
         assets. A new asset will be created for each valid row in the sheet.
       </li>
       <li>
+        To import custom fields prefix, your column heading with <b>"cf: "</b>.
+      </li>
+      <li>
         <b>IMPORTANT:</b> The first row of the sheet will be ignored. Use it to
         describe the columns.
       </li>
@@ -90,9 +98,10 @@ export const ImportContent = () => (
 );
 
 const FileForm = ({ intent }: { intent: string }) => {
+  const [agreed, setAgreed] = useState<"I AGREE" | "">("");
   const formRef = useRef<HTMLFormElement>(null);
   const fetcher = useFetcher();
-  const disabled = isFormProcessing(fetcher.state);
+  const disabled = isFormProcessing(fetcher.state) || agreed !== "I AGREE";
   const isSuccessful = fetcher.data?.success;
 
   /** We use a controlled field for the file, because of the confirmation dialog we have.
@@ -137,10 +146,21 @@ const FileForm = ({ intent }: { intent: string }) => {
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm asset import</AlertDialogTitle>
             <AlertDialogDescription>
-              By clicking import you agree that you have read the requirements
-              and you understand the limitations and consiquences of using this
-              feature.
+              You need to type: <b>"I AGREE"</b> in the field below to accept
+              the import. By doing this you agree that you have read the
+              requirements and you understand the limitations and consiquences
+              of using this feature.
             </AlertDialogDescription>
+            <Input
+              type="text"
+              label={"Confirmation"}
+              name="agree"
+              value={agreed}
+              onChange={(e) => setAgreed(e.target.value as any)}
+              placeholder="I AGREE"
+              pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
+              required
+            />
           </AlertDialogHeader>
           {fetcher.data?.error ? (
             <div>
