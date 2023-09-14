@@ -56,20 +56,27 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
 
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
+  cookie.globalPerPage = 20;
   if (!user?.onboarded) {
     return redirect("onboarding");
   }
 
-
-  return json({
-    user,
-    organizationId: user?.organizations[0].id,
-    subscription,
-    enablePremium: ENABLE_PREMIUM_FEATURES,
-    hideSupportBanner: cookie.hideSupportBanner,
-    minimizedSidebar: cookie.minimizedSidebar,
-    isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
-  });
+  return json(
+    {
+      user,
+      organizationId: user?.organizations[0].id,
+      subscription,
+      enablePremium: ENABLE_PREMIUM_FEATURES,
+      hideSupportBanner: cookie.hideSupportBanner,
+      minimizedSidebar: cookie.minimizedSidebar,
+      isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 };
 
 export default function App() {

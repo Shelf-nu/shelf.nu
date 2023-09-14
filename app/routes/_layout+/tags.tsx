@@ -9,6 +9,7 @@ import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import { DeleteTag } from "~/components/tag/delete-tag";
+import { userPrefs } from "~/cookies";
 
 import { requireAuthSession } from "~/modules/auth";
 import { deleteTag, getTags } from "~/modules/tag";
@@ -25,9 +26,11 @@ export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search } = getParamsValues(searchParams);
+  const { page, perPageParams, search } = getParamsValues(searchParams);
   const { prev, next } = generatePageMeta(request);
 
+  // const cookie = updateCookieWithPerPage({ request, perPageParam, indexName: "tags" });
+  // const {perPage} = cookie;
   const { tags, totalTags } = await getTags({
     userId,
     page,
@@ -43,18 +46,25 @@ export async function loader({ request }: LoaderArgs) {
     singular: "tag",
     plural: "tags",
   };
-  return json({
-    header,
-    items: tags,
-    search,
-    page,
-    totalItems: totalTags,
-    totalPages,
-    perPage,
-    prev,
-    next,
-    modelName,
-  });
+  return json(
+    {
+      header,
+      items: tags,
+      search,
+      page,
+      totalItems: totalTags,
+      totalPages,
+      perPage,
+      prev,
+      next,
+      modelName,
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -127,16 +137,16 @@ const TagItem = ({
     </Td>
     <Td className="text-left">
       <Button
-          to={`${item.id}/edit`}
-          role="link"
-          aria-label={`edit tags`}
-          variant="secondary"
-          size="sm"
-          className=" mx-2 text-[12px]"
-          icon={"write"}
-          title={"Edit"}
-          data-test-id="editTagsButton"
-        />
+        to={`${item.id}/edit`}
+        role="link"
+        aria-label={`edit tags`}
+        variant="secondary"
+        size="sm"
+        className=" mx-2 text-[12px]"
+        icon={"write"}
+        title={"Edit"}
+        data-test-id="editTagsButton"
+      />
       <DeleteTag tag={item} />
     </Td>
   </>

@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { Form, useSearchParams, useSubmit } from "@remix-run/react";
+import {
+  Form,
+  useLoaderData,
+  useSearchParams,
+  useSubmit,
+} from "@remix-run/react";
 import {
   Select,
   SelectTrigger,
@@ -10,17 +15,22 @@ import {
 
 export default function PerPageItemsSelect() {
   const perPageValues = ["20", "50", "100"];
-  const [perPage, setPerPage] = useState<string>("20");
+  const [perPageLocalValue, setPerPageLocalValue] = useState<string>("20");
   const submit = useSubmit();
   const [searchParams] = useSearchParams();
-  const perPageParam = searchParams.get("per_page");
 
-  /** This effect handles setting the perPage value from search params */
+  const { perPage } = useLoaderData();
+
+  /** This effect handles setting the default perPage value
+   * We have some priorities we need to handle
+   * 1. If the param exists, that takes priority, because it reflects the latest state based on the action taken by the user(changing the select)
+   * 2. If it doesnt, set the value to perPage from the loader data
+   */
   useEffect(() => {
-    if (perPageParam) {
-      setPerPage(() => perPageParam);
+    if (perPage) {
+      setPerPageLocalValue(() => perPage);
     }
-  }, [perPageParam, setPerPage]);
+  }, [perPage, setPerPageLocalValue]);
 
   return (
     <div className="relative">
@@ -37,9 +47,9 @@ export default function PerPageItemsSelect() {
         )}
         <Select
           name="per_page"
-          value={perPage.toString()}
+          value={perPageLocalValue.toString()}
           onValueChange={(value) => {
-            setPerPage(() => value);
+            setPerPageLocalValue(() => value);
           }}
         >
           <SelectTrigger className="px-3.5 py-3">

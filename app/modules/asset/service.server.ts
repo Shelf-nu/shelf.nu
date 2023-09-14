@@ -13,7 +13,7 @@ import type {
   AssetCustomFieldValue,
 } from "@prisma/client";
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
-import type { LoaderArgs } from "@remix-run/node";
+import { createCookie, type LoaderArgs } from "@remix-run/node";
 import { userPrefs } from "~/cookies";
 import { db } from "~/database";
 import {
@@ -581,17 +581,29 @@ export const getPaginatedAndFilterableAssets = async ({
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, categoriesIds, tagsIds } =
     getParamsValues(searchParams);
+
   const { prev, next } = generatePageMeta(request);
+
+  // This function should run the code below
+  // const cookie = updateCookieWithPerPage({ request, perPageParam });
 
   /* Get the cookie header */
   const cookieHeader = request.headers.get("Cookie");
-  /** Parse cookie */
-  const cookie = (await userPrefs.parse(cookieHeader)) || {};
+  /** Parse cookie
+   *  In the else case, lets figure out how can we create cookie by passing the userPrefs variable we import, so we dont repeat the code
+   *
+   */
+  let cookie =
+    (await userPrefs.parse(cookieHeader)) ||
+    createCookie("user-prefs", {
+      maxAge: 604_800, // one week
+    });
+
   /** If the perPageParam is different from the cookie, we update the cookie */
-  if (perPageParam !== cookie.perPage && perPageParam !== 0) {
+  if (cookie && perPageParam !== cookie.perPage && perPageParam !== 0) {
     cookie.perPage = perPageParam;
   }
-  const perPage = perPageParam !== 0 ? perPageParam : cookie.perPage;
+  const perPage = cookie?.perPage ? cookie.perPage : 20;
 
   const categories = await getAllCategories({
     userId,
