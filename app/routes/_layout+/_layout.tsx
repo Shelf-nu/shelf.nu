@@ -68,6 +68,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
     enablePremium: ENABLE_PREMIUM_FEATURES,
     hideSupportBanner: cookie.hideSupportBanner,
     minimizedSidebar: cookie.minimizedSidebar,
+    perPageItems: cookie.perPageItems,
     isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
   });
 };

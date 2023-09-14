@@ -22,7 +22,7 @@ export function ProfilePictureUpload() {
           { file },
           {
             method: "post",
-            action: "/api/user/upload-user-photo",
+            action: "/api/user/prefs/upload-user-photo",
             encType: "multipart/form-data",
           }
         );
