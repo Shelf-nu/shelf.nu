@@ -593,17 +593,12 @@ export const getPaginatedAndFilterableAssets = async ({
    *  In the else case, lets figure out how can we create cookie by passing the userPrefs variable we import, so we dont repeat the code
    *
    */
-  let cookie =
-    (await userPrefs.parse(cookieHeader)) ||
-    createCookie("user-prefs", {
-      maxAge: 604_800, // one week
-    });
+  let cookie = (await userPrefs.parse(cookieHeader)) || {};
 
   /** If the perPageParam is different from the cookie, we update the cookie */
   if (cookie && perPageParam !== cookie.perPage && perPageParam !== 0) {
     cookie.perPage = perPageParam;
   }
-  const perPage = cookie?.perPage ? cookie.perPage : 20;
 
   const categories = await getAllCategories({
     userId,
@@ -616,7 +611,7 @@ export const getPaginatedAndFilterableAssets = async ({
   const { assets, totalAssets } = await getAssets({
     userId,
     page,
-    perPage,
+    perPage: cookie.perPage,
     search,
     categoriesIds,
     tagsIds,
@@ -625,7 +620,7 @@ export const getPaginatedAndFilterableAssets = async ({
 
   return {
     page,
-    perPage,
+    perPage: cookie.perPage,
     search,
     totalAssets,
     prev,

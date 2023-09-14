@@ -56,7 +56,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
 
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
-  cookie.globalPerPage = 20;
+  cookie.perPage = 20;
   if (!user?.onboarded) {
     return redirect("onboarding");
   }
