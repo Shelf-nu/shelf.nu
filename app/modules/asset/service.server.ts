@@ -14,6 +14,7 @@ import type {
 } from "@prisma/client";
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
+import { userPrefs } from "~/cookies";
 import { db } from "~/database";
 import {
   dateTimeInUnix,
@@ -578,9 +579,19 @@ export const getPaginatedAndFilterableAssets = async ({
   userId: User["id"];
 }) => {
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search, categoriesIds, tagsIds } =
+  const { page, perPageParam, search, categoriesIds, tagsIds } =
     getParamsValues(searchParams);
   const { prev, next } = generatePageMeta(request);
+
+  /* Get the cookie header */
+  const cookieHeader = request.headers.get("Cookie");
+  /** Parse cookie */
+  const cookie = (await userPrefs.parse(cookieHeader)) || {};
+  /** If the perPageParam is different from the cookie, we update the cookie */
+  if (perPageParam !== cookie.perPage && perPageParam !== 0) {
+    cookie.perPage = perPageParam;
+  }
+  const perPage = perPageParam !== 0 ? perPageParam : cookie.perPage;
 
   const categories = await getAllCategories({
     userId,
@@ -598,7 +609,7 @@ export const getPaginatedAndFilterableAssets = async ({
     categoriesIds,
     tagsIds,
   });
-  const totalPages = Math.ceil(totalAssets / perPage);
+  const totalPages = Math.ceil(totalAssets / perPageParam);
 
   return {
     page,
@@ -611,6 +622,7 @@ export const getPaginatedAndFilterableAssets = async ({
     tags,
     assets,
     totalPages,
+    cookie,
   };
 };
 
