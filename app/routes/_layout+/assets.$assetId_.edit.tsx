@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { OrganizationType } from "@prisma/client";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
@@ -11,7 +11,6 @@ import { ErrorBoundryComponent } from "~/components/errors";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { db } from "~/database";
 import {
   getAllRelatedEntries,
   getAsset,
@@ -75,7 +74,7 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Edit",
+  breadcrumb: () => "single",
 };
 
 export async function action({ request, params }: ActionArgs) {
@@ -149,14 +148,11 @@ export async function action({ request, params }: ActionArgs) {
     senderId: authSession.userId,
   });
 
-  return json(
-    { success: true },
-    {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, { authSession }),
-      },
-    }
-  );
+  return redirect(`/assets/${id}`, {
+    headers: {
+      "Set-Cookie": await commitAuthSession(request, { authSession }),
+    },
+  });
 }
 
 export default function AssetEditPage() {

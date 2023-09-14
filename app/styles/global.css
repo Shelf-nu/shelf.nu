@@ -170,3 +170,12 @@ dialog {
   content: " *";
   display: inline;
 }
+
+.horizontal-menu {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+.horizontal-menu::-webkit-scrollbar {
+  display: none;
+}
