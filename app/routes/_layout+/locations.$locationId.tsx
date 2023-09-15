@@ -38,6 +38,7 @@ import {
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
@@ -55,7 +56,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   });
 
   if (!location) {
-    throw new Response("Not Found", { status: 404 });
+    throw new ShelfStackError({message:"Not Found",  status: 404 });
   }
 
   const totalItems = totalAssetsWithinLocation;

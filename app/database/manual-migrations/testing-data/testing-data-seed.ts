@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 import type { User } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
+import { ShelfStackError } from "~/utils/error";
 
 const prisma = new PrismaClient();
 
@@ -28,8 +29,7 @@ async function seed() {
       });
     });
   } catch (cause) {
-    console.error(cause);
-    throw new Error("Seed failed 🥲");
+    throw new ShelfStackError({ message: "Seed failed 🥲", cause });
   }
 }
 

@@ -14,6 +14,7 @@ import {
 } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { assertIsPost } from "~/utils";
+import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
@@ -90,7 +91,7 @@ export const action = async ({ request, params }: ActionArgs) => {
   });
 
   if (!location) {
-    throw new Response("Something went wrong", { status: 500 });
+    throw new ShelfStackError({message:"Something went wrong",  status: 500 });
   }
 
   if (asset) {

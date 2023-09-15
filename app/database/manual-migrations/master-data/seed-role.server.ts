@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 import type { Role } from "@prisma/client";
 import { PrismaClient, Roles } from "@prisma/client";
+import { ShelfStackError } from "~/utils/error";
 
 const prisma = new PrismaClient();
 
@@ -90,8 +91,7 @@ async function seed() {
 
     console.log(`Database has been seeded. 🌱\n`);
   } catch (cause) {
-    console.error(cause);
-    throw new Error("Seed failed 🥲");
+    throw new ShelfStackError({ message: "Seed failed 🥲", cause });
   }
 }
 

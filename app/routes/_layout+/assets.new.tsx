@@ -8,7 +8,6 @@ import { titleAtom } from "~/atoms/assets.new";
 
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
-import { db } from "~/database";
 
 import {
   createAsset,

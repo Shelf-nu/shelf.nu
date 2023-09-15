@@ -19,6 +19,7 @@ import {
   getCurrentSearchParams,
   getParamsValues,
 } from "~/utils";
+import { ShelfStackError } from "~/utils/error";
 import {
   deleteProfilePicture,
   getPublicFileURL,
@@ -323,7 +324,7 @@ export async function updateProfilePicture({
 
 export async function deleteUser(id: User["id"]) {
   if (!id) {
-    throw new Error("User ID is required");
+    throw new ShelfStackError({message:"User ID is required"});
   }
 
   try {

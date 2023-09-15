@@ -77,7 +77,7 @@ describe(notFound.name, () => {
   });
 
   it("should return message", async () => {
-    expect(await notFound("not-found-message").text()).toBe(
+    expect(await notFound("not-found-message").message).toBe(
       "not-found-message"
     );
   });

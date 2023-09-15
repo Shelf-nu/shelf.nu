@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 
 import { createUser } from "~/modules/user";
+import { ShelfStackError } from "~/utils/error";
 import {
   createAdminRole,
   createUserRole,
@@ -78,7 +79,7 @@ async function seed() {
     });
 
     if (!user) {
-      throw new Error("Unable to create user");
+      throw new ShelfStackError({ message: "Unable to create user" });
     }
 
     console.log(`Database has been seeded. 🌱\n`);
@@ -86,8 +87,7 @@ async function seed() {
       `User added to your database 👇 \n🆔: ${user.id}\n📧: ${user.email}\n🔑: supabase`
     );
   } catch (cause) {
-    console.error(cause);
-    throw new Error("Seed failed 🥲");
+    throw new ShelfStackError({ message: "Seed failed 🥲",cause });
   }
 }
 
