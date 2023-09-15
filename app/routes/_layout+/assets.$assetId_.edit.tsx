@@ -11,7 +11,6 @@ import { ErrorBoundryComponent } from "~/components/errors";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { db } from "~/database";
 import {
   getAllRelatedEntries,
   getAsset,

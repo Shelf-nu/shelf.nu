@@ -17,6 +17,7 @@ import {
   getUserPersonalOrganizationData,
 } from "~/modules/organization";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { userPrefs } from "~/utils/cookies.server";
 
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
@@ -33,6 +34,7 @@ export const loader = async ({ request }: LoaderArgs) => {
     teamMembers,
     totalTeamMembers,
     totalPages,
+    cookie,
   } = await getPaginatedAndFilterableTeamMembers({
     request,
     organizationId: organization.id,
@@ -43,22 +45,28 @@ export const loader = async ({ request }: LoaderArgs) => {
     plural: "Team Members",
   };
 
-  return json({
-    organization,
-    totalAssets,
-    totalLocations,
-
-    search,
-    items: teamMembers,
-    page,
-    totalItems: totalTeamMembers,
-    perPage,
-    totalPages,
-    next,
-    prev,
-    modelName,
-    title: "Workspace",
-  });
+  return json(
+    {
+      organization,
+      totalAssets,
+      totalLocations,
+      search,
+      items: teamMembers,
+      page,
+      totalItems: totalTeamMembers,
+      perPage,
+      totalPages,
+      next,
+      prev,
+      modelName,
+      title: "Workspace",
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 };
 
 export const action = async ({ request }: ActionArgs) => {

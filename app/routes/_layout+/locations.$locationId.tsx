@@ -37,6 +37,7 @@ import {
   tw,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
@@ -44,7 +45,9 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   const id = getRequiredParam(params, "locationId");
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search } = getParamsValues(searchParams);
+  const { page, perPageParam, search } = getParamsValues(searchParams);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
 
   const { location, totalAssetsWithinLocation } = await getLocation({
     userId,
@@ -73,19 +76,26 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 
   const mapData = await geolocate(location.address);
 
-  return json({
-    location,
-    header,
-    modelName,
-    items: location.assets,
-    page,
-    totalItems,
-    perPage,
-    totalPages,
-    next,
-    prev,
-    mapData,
-  });
+  return json(
+    {
+      location,
+      header,
+      modelName,
+      items: location.assets,
+      page,
+      totalItems,
+      perPage,
+      totalPages,
+      next,
+      prev,
+      mapData,
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 };
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [

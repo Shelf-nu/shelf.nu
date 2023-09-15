@@ -19,15 +19,17 @@ import {
   getParamsValues,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search } = getParamsValues(searchParams);
+  const { page, perPageParam, search } = getParamsValues(searchParams);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
   const { prev, next } = generatePageMeta(request);
-
   const { tags, totalTags } = await getTags({
     userId,
     page,
@@ -43,18 +45,25 @@ export async function loader({ request }: LoaderArgs) {
     singular: "tag",
     plural: "tags",
   };
-  return json({
-    header,
-    items: tags,
-    search,
-    page,
-    totalItems: totalTags,
-    totalPages,
-    perPage,
-    prev,
-    next,
-    modelName,
-  });
+  return json(
+    {
+      header,
+      items: tags,
+      search,
+      page,
+      totalItems: totalTags,
+      totalPages,
+      perPage,
+      prev,
+      next,
+      modelName,
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -127,16 +136,16 @@ const TagItem = ({
     </Td>
     <Td className="text-left">
       <Button
-          to={`${item.id}/edit`}
-          role="link"
-          aria-label={`edit tags`}
-          variant="secondary"
-          size="sm"
-          className=" mx-2 text-[12px]"
-          icon={"write"}
-          title={"Edit"}
-          data-test-id="editTagsButton"
-        />
+        to={`${item.id}/edit`}
+        role="link"
+        aria-label={`edit tags`}
+        variant="secondary"
+        size="sm"
+        className=" mx-2 text-[12px]"
+        icon={"write"}
+        title={"Edit"}
+        data-test-id="editTagsButton"
+      />
       <DeleteTag tag={item} />
     </Td>
   </>

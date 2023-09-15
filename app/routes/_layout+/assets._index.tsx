@@ -29,6 +29,7 @@ import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { notFound, userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { userPrefs } from "~/utils/cookies.server";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -91,6 +92,7 @@ export async function loader({ request }: LoaderArgs) {
     tags,
     assets,
     totalPages,
+    cookie,
   } = await getPaginatedAndFilterableAssets({
     request,
     userId,
@@ -113,27 +115,34 @@ export async function loader({ request }: LoaderArgs) {
     plural: "assets",
   };
 
-  return json({
-    header,
-    items: assets,
-    categories,
-    tags,
-    search,
-    page,
-    totalItems: totalAssets,
-    perPage,
-    totalPages,
-    next,
-    prev,
-    modelName,
-    canExportAssets: canExportAssets(user?.tier?.tierLimit),
-    canImportAssets: canImportAssets(user?.tier?.tierLimit),
-    searchFieldLabel: "Search assets",
-    searchFieldTooltip: {
-      title: "Search your asset database",
-      text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+  return json(
+    {
+      header,
+      items: assets,
+      categories,
+      tags,
+      search,
+      page,
+      totalItems: totalAssets,
+      perPage,
+      totalPages,
+      next,
+      prev,
+      modelName,
+      canExportAssets: canExportAssets(user?.tier?.tierLimit),
+      canImportAssets: canImportAssets(user?.tier?.tierLimit),
+      searchFieldLabel: "Search assets",
+      searchFieldTooltip: {
+        title: "Search your asset database",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+      },
     },
-  });
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [

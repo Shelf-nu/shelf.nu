@@ -1,5 +1,5 @@
 import { type ActionArgs, json } from "@remix-run/node";
-import { userPrefs } from "~/cookies";
+import { userPrefs } from "~/utils/cookies.server";
 
 export async function action({ request }: ActionArgs) {
   const cookieHeader = request.headers.get("Cookie");
