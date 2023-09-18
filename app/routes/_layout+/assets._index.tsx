@@ -172,7 +172,7 @@ export default function AssetIndexPage() {
     clearTagFilters();
   };
 
-  const [notificationSender] = useClientNotification();
+  const [sendNotification] = useClientNotification();
 
   return (
     <>
@@ -190,7 +190,7 @@ export default function AssetIndexPage() {
         </Button>
         <Button
           onClick={() =>
-            notificationSender({
+            sendNotification({
               title: "Test notification",
               message: "This is a test notification",
               icon: { name: "trash", variant: "error" },
