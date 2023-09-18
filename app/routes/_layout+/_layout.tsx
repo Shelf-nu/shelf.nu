@@ -20,6 +20,7 @@ import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getCustomerActiveSubscription,
   getStripeCustomer,
+  stripe,
 } from "~/utils/stripe.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
@@ -45,7 +46,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
       })
     : undefined;
   let subscription = null;
-  if (user?.customerId) {
+  if (user?.customerId && stripe) {
     // Get the Stripe customer
     const customer = (await getStripeCustomer(
       user.customerId

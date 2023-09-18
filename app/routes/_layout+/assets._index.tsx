@@ -171,6 +171,8 @@ export default function AssetIndexPage() {
     clearTagFilters();
   };
 
+  // const [sendNotification] = useClientNotification();
+
   return (
     <>
       <Header>

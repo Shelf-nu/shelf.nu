@@ -3,16 +3,17 @@ import { atom } from "jotai";
 import type { Icon } from "~/components/shared/icons-map";
 
 export type NotificationVariant = "primary" | "gray" | "success" | "error";
+export type NotificationIcon = {
+  name: Icon;
+  variant: NotificationVariant;
+  className?: string;
+};
 
 export interface NotificationType {
   open: boolean;
   title: string;
   message: string;
-  icon: {
-    name: Icon;
-    variant: NotificationVariant;
-    className?: string;
-  };
+  icon: NotificationIcon;
   time?: number;
   senderId: User["id"] | null;
 }
