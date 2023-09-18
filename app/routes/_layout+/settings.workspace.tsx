@@ -17,8 +17,8 @@ import {
   getUserPersonalOrganizationData,
 } from "~/modules/organization";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfStackError } from "~/utils/error";
 import { userPrefs } from "~/utils/cookies.server";
+import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);

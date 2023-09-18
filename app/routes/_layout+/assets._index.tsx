@@ -29,8 +29,8 @@ import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfStackError } from "~/utils/error";
 import { userPrefs } from "~/utils/cookies.server";
+import { ShelfStackError } from "~/utils/error";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
