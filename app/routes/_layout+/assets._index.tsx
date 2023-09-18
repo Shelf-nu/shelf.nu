@@ -29,6 +29,7 @@ import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
@@ -92,6 +93,7 @@ export async function loader({ request }: LoaderArgs) {
     tags,
     assets,
     totalPages,
+    cookie,
   } = await getPaginatedAndFilterableAssets({
     request,
     userId,
@@ -102,7 +104,11 @@ export async function loader({ request }: LoaderArgs) {
   }
 
   if (!assets) {
-    throw new ShelfStackError({ title: "heyy!", message: `No assets found`, status: 404 });
+    throw new ShelfStackError({
+      title: "heyy!",
+      message: `No assets found`,
+      status: 404,
+    });
   }
 
   const header: HeaderData = {
@@ -114,27 +120,34 @@ export async function loader({ request }: LoaderArgs) {
     plural: "assets",
   };
 
-  return json({
-    header,
-    items: assets,
-    categories,
-    tags,
-    search,
-    page,
-    totalItems: totalAssets,
-    perPage,
-    totalPages,
-    next,
-    prev,
-    modelName,
-    canExportAssets: canExportAssets(user?.tier?.tierLimit),
-    canImportAssets: canImportAssets(user?.tier?.tierLimit),
-    searchFieldLabel: "Search assets",
-    searchFieldTooltip: {
-      title: "Search your asset database",
-      text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+  return json(
+    {
+      header,
+      items: assets,
+      categories,
+      tags,
+      search,
+      page,
+      totalItems: totalAssets,
+      perPage,
+      totalPages,
+      next,
+      prev,
+      modelName,
+      canExportAssets: canExportAssets(user?.tier?.tierLimit),
+      canImportAssets: canImportAssets(user?.tier?.tierLimit),
+      searchFieldLabel: "Search assets",
+      searchFieldTooltip: {
+        title: "Search your asset database",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+      },
     },
-  });
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [

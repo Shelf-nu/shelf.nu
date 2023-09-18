@@ -17,13 +17,15 @@ import {
   getUserPersonalOrganizationData,
 } from "~/modules/organization";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
   const { organization, totalAssets, totalLocations } =
     await getUserPersonalOrganizationData({ userId });
-  if (!organization) throw new ShelfStackError({message:"Organization not found"});
+  if (!organization)
+    throw new ShelfStackError({ message: "Organization not found" });
 
   const {
     page,
@@ -34,6 +36,7 @@ export const loader = async ({ request }: LoaderArgs) => {
     teamMembers,
     totalTeamMembers,
     totalPages,
+    cookie,
   } = await getPaginatedAndFilterableTeamMembers({
     request,
     organizationId: organization.id,
@@ -44,22 +47,28 @@ export const loader = async ({ request }: LoaderArgs) => {
     plural: "Team Members",
   };
 
-  return json({
-    organization,
-    totalAssets,
-    totalLocations,
-
-    search,
-    items: teamMembers,
-    page,
-    totalItems: totalTeamMembers,
-    perPage,
-    totalPages,
-    next,
-    prev,
-    modelName,
-    title: "Workspace",
-  });
+  return json(
+    {
+      organization,
+      totalAssets,
+      totalLocations,
+      search,
+      items: teamMembers,
+      page,
+      totalItems: totalTeamMembers,
+      perPage,
+      totalPages,
+      next,
+      prev,
+      modelName,
+      title: "Workspace",
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 };
 
 export const action = async ({ request }: ActionArgs) => {

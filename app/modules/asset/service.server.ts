@@ -13,7 +13,7 @@ import type {
   AssetCustomFieldValue,
 } from "@prisma/client";
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
-import type { LoaderArgs } from "@remix-run/node";
+import { type LoaderArgs } from "@remix-run/node";
 import { db } from "~/database";
 import {
   dateTimeInUnix,
@@ -22,6 +22,7 @@ import {
   getParamsValues,
   oneDayFromNow,
 } from "~/utils";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { processCustomFields } from "~/utils/import.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import { createCategoriesIfNotExists, getAllCategories } from "../category";
@@ -578,9 +579,12 @@ export const getPaginatedAndFilterableAssets = async ({
   userId: User["id"];
 }) => {
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search, categoriesIds, tagsIds } =
+  const { page, perPageParam, search, categoriesIds, tagsIds } =
     getParamsValues(searchParams);
+
   const { prev, next } = generatePageMeta(request);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
 
   const categories = await getAllCategories({
     userId,
@@ -611,6 +615,7 @@ export const getPaginatedAndFilterableAssets = async ({
     tags,
     assets,
     totalPages,
+    cookie,
   };
 };
 

@@ -13,7 +13,10 @@ export const ChatWithAnExpert = () => {
           New: Order Asset Labels
         </h5>
         <div className="mt-[-6px]">
-          <fetcher.Form method="post" action="/api/user/dismiss-support-banner">
+          <fetcher.Form
+            method="post"
+            action="/api/user/prefs/dismiss-support-banner"
+          >
             <input type="hidden" name="bannerVisibility" value="hidden" />
             <button type="submit">
               <XIcon />

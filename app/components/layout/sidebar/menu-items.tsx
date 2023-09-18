@@ -153,7 +153,10 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
               </li>
             ))}
             <li>
-              <fetcher.Form method="post" action="/api/user/minimized-sidebar">
+              <fetcher.Form
+                method="post"
+                action="/api/user/prefs/minimized-sidebar"
+              >
                 <input
                   type="hidden"
                   name="minimizeSidebar"
