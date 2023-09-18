@@ -25,7 +25,6 @@ import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
-import { useClientNotification } from "~/hooks/use-client-notificaiton";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { userFriendlyAssetStatus } from "~/utils";
@@ -172,7 +171,7 @@ export default function AssetIndexPage() {
     clearTagFilters();
   };
 
-  const [sendNotification] = useClientNotification();
+  // const [sendNotification] = useClientNotification();
 
   return (
     <>
