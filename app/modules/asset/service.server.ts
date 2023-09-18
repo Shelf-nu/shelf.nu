@@ -584,6 +584,7 @@ export const getPaginatedAndFilterableAssets = async ({
 
   const { prev, next } = generatePageMeta(request);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
 
   const categories = await getAllCategories({
     userId,
@@ -596,16 +597,16 @@ export const getPaginatedAndFilterableAssets = async ({
   const { assets, totalAssets } = await getAssets({
     userId,
     page,
-    perPage: cookie.perPage,
+    perPage,
     search,
     categoriesIds,
     tagsIds,
   });
-  const totalPages = Math.ceil(totalAssets / perPageParam);
+  const totalPages = Math.ceil(totalAssets / perPage);
 
   return {
     page,
-    perPage: cookie.perPage,
+    perPage,
     search,
     totalAssets,
     prev,

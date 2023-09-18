@@ -72,18 +72,19 @@ export const getPaginatedAndFilterableTeamMembers = async ({
   const { prev, next } = generatePageMeta(request);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
 
   const { teamMembers, totalTeamMembers } = await getTeamMembers({
     organizationId,
     page,
-    perPage: cookie.perPage,
+    perPage,
     search,
   });
-  const totalPages = Math.ceil(totalTeamMembers / cookie.perPage);
+  const totalPages = Math.ceil(totalTeamMembers / perPage);
 
   return {
     page,
-    perPage: cookie.perPage,
+    perPage,
     search,
     prev,
     next,
