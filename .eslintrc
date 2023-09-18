@@ -1,5 +1,5 @@
 {
-  "plugins": ["tailwindcss","unused-imports"],
+  "plugins": ["tailwindcss"],
   "extends": [
     "@remix-run/eslint-config",
     "@remix-run/eslint-config/node",
@@ -19,7 +19,6 @@
     }
   },
   "rules": {
-    "unused-imports/no-unused-imports-ts":"warn",
     "tailwindcss/no-custom-classname": "off",
     "no-console": "warn",
     "arrow-body-style": ["warn", "as-needed"],
