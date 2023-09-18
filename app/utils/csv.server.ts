@@ -102,6 +102,9 @@ export const buildCsvDataFromAssets = ({
             })
           );
           break;
+        case "description":
+          toExport.push(`"${String(value).replace(/\n|\r/g, "")}"`);
+          break;
         default:
           toExport.push(String(value));
       }
