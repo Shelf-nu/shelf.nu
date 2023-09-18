@@ -188,17 +188,6 @@ export default function AssetIndexPage() {
         >
           New Asset
         </Button>
-        <Button
-          onClick={() =>
-            sendNotification({
-              title: "Test notification",
-              message: "This is a test notification",
-              icon: { name: "trash", variant: "error" },
-            })
-          }
-        >
-          Send Test notification
-        </Button>
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         <Filters>
