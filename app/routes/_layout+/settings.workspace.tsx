@@ -17,13 +17,15 @@ import {
   getUserPersonalOrganizationData,
 } from "~/modules/organization";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { ShelfStackError } from "~/utils/error";
 import { userPrefs } from "~/utils/cookies.server";
 
 export const loader = async ({ request }: LoaderArgs) => {
   const { userId } = await requireAuthSession(request);
   const { organization, totalAssets, totalLocations } =
     await getUserPersonalOrganizationData({ userId });
-  if (!organization) throw new Error("Organization not found");
+  if (!organization)
+    throw new ShelfStackError({ message: "Organization not found" });
 
   const {
     page,

@@ -27,8 +27,9 @@ import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { notFound, userFriendlyAssetStatus } from "~/utils";
+import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { ShelfStackError } from "~/utils/error";
 import { userPrefs } from "~/utils/cookies.server";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
@@ -103,7 +104,11 @@ export async function loader({ request }: LoaderArgs) {
   }
 
   if (!assets) {
-    throw notFound(`No assets found`);
+    throw new ShelfStackError({
+      title: "heyy!",
+      message: `No assets found`,
+      status: 404,
+    });
   }
 
   const header: HeaderData = {

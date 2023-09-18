@@ -6,7 +6,8 @@ import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
 import { belongsToCurrentUser } from "~/modules/qr/utils.server";
 import { createScan, updateScan } from "~/modules/scan";
-import { assertIsPost, notFound } from "~/utils";
+import { assertIsPost } from "~/utils";
+import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   /* Get the ID of the QR from the params */
@@ -34,7 +35,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
    * that is still there. Will we allow someone to claim it?
    */
   if (!qr) {
-    throw notFound("Not found");
+    throw new ShelfStackError({message:"Not found"});
   }
 
   /**

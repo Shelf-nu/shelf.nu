@@ -9,6 +9,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase";
 import { requireAuthSession } from "~/modules/auth";
 import { cropImage, extractImageNameFromSupabaseUrl } from ".";
 import { SUPABASE_URL } from "./env";
+import { ShelfStackError } from "./error";
 
 export function getPublicFileURL({
   filename,
@@ -119,7 +120,7 @@ export async function deleteProfilePicture({
       ) ||
       url === ""
     ) {
-      throw new Error("Wrong url");
+      throw new ShelfStackError({ message: "Wrong url" });
     }
 
     const { error } = await getSupabaseAdmin()
@@ -145,7 +146,7 @@ export async function deleteAssets({
     const path = extractImageNameFromSupabaseUrl({ url, bucketName });
 
     if (!path) {
-      throw new Error("Cannot find image");
+      throw new ShelfStackError({message:"Cannot find image"});
     }
 
     const { error } = await getSupabaseAdmin()

@@ -1,5 +1,7 @@
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { NODE_ENV } from "~/utils/env";
+import type { ShelfStackError} from "~/utils/error";
+import { isShelfStackError } from "~/utils/error";
 import { ErrorContent } from "./content";
 
 export interface ErrorContentProps {
@@ -12,7 +14,11 @@ export const ErrorBoundryComponent = ({
   title,
   message,
 }: ErrorContentProps) => {
-  const error = useRouteError();
+  const error: Error = useRouteError() as Error;
+  if (isShelfStackError(error)) {
+    title = title || (error as ShelfStackError).title
+    message = message || error.message
+  }
   /** 404 ERROR */
   if (isRouteErrorResponse(error)) {
     switch (error.status) {
