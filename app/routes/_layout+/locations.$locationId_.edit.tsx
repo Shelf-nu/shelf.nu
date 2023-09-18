@@ -17,6 +17,7 @@ import { getLocation, updateLocation } from "~/modules/location";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfStackError } from "~/utils/error";
 import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ request, params }: LoaderArgs) {
@@ -26,7 +27,7 @@ export async function loader({ request, params }: LoaderArgs) {
 
   const { location } = await getLocation({ userId, id });
   if (!location) {
-    throw new Response("Not Found", { status: 404 });
+    throw new ShelfStackError({ message: "Location Not Found", status: 404 });
   }
 
   const header: HeaderData = {

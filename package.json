@@ -79,6 +79,7 @@
     "zod": "^3.21.4"
   },
   "devDependencies": {
+    "eslint-plugin-unused-imports": "^3.0.0",
     "@faker-js/faker": "^7.6.0",
     "@playwright/test": "^1.34.3",
     "@remix-run/dev": "^1.19.3",

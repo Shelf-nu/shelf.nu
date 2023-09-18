@@ -42,6 +42,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfStackError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssets } from "~/utils/storage.server";
 
@@ -51,7 +52,7 @@ export async function loader({ request, params }: LoaderArgs) {
 
   const asset = await getAsset({ userId, id });
   if (!asset) {
-    throw new Response("Not Found", { status: 404 });
+    throw new ShelfStackError({message:"Asset Not Found",  status: 404 });
   }
   /** We get the first QR code(for now we can only have 1)
    * And using the ID of tha qr code, we find the latest scan
