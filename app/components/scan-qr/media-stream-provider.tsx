@@ -160,15 +160,12 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
 
       setVideoTrackInfo(undefined);
       setCurrentVideoDeviceId("");
-
-      alert("Stop Media Stream");
     } catch (error: any) {
       sendNotification({
         title: "camera acces error",
         message: error.toString(),
         icon: { name: "trash", variant: "error" },
       });
-      alert(error.toString());
     }
   }, [videoRef, stopVideoState]);
 
@@ -209,8 +206,6 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
         });
       }
 
-      alert(JSON.stringify(constraints));
-
       if (
         constraints?.deviceId ||
         constraints?.height ||
@@ -241,8 +236,6 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
           constraints: videoTrack.getConstraints(),
           settings: videoTrack.getSettings(),
         });
-
-        alert("Apply Constraints");
       } catch (error: any) {
         sendNotification({
           title: "camera acces error",
@@ -290,14 +283,12 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
 
 export const useMediaStream = () => useContext(MediaStreamContext);
 
-export const useStopMediaStream = () => {
-  const { stopMediaStream } = useMediaStream();
-
+export const useStopMediaStream = (stopMediaStream: () => void) => {
   useEffect(() => {
     return () => {
       stopMediaStream();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stopMediaStream]); // Include stopMediaStream as a dependency
 };
 
 type MediaStreamVideoProps = HTMLAttributes<HTMLVideoElement> & {
