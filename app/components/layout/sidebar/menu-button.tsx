@@ -2,11 +2,10 @@ import { useAtom } from "jotai";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 
-
 const MenuButton = () => {
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   return (
-    <button className="menu-btn relative z-50" onClick={toggleMobileNav}>
+    <button className="menu-btn relative z-50 pt-1.5" onClick={toggleMobileNav}>
       <span
         className={tw(
           "mb-1 block h-[2px] w-[19px] rounded-full bg-gray-500 transition-all",
