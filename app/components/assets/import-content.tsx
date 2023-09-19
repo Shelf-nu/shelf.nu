@@ -27,6 +27,7 @@ export const ImportBackup = () => (
     <p>This feature comes with some important limitations:</p>
     <ul className="list-inside list-disc">
       <li>Assets will be imported with all their relationships</li>
+      <li>Assets images will NOT be imported</li>
       <li>
         Assets will not be merged with existing ones. A asset with a new ID will
         be created for each row in your CSV export

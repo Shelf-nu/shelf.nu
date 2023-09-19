@@ -11,6 +11,8 @@ const keysToSkip = [
   "categoryId",
   "locationId",
   "customFieldId",
+  "mainImage",
+  "mainImageExpiration",
 ];
 
 export const loader = async ({ request }: LoaderArgs) => {
