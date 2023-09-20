@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
@@ -50,8 +50,6 @@ export default function QRPreview() {
     "routes/_layout+/assets.$assetId"
   )?.asset;
 
-  const [qrDataUrl, setQrDataUrl] = useState<string>("");
-
   const handleChange = () => {
     submit(formRef.current);
   };
@@ -62,7 +60,6 @@ export default function QRPreview() {
     // making sure that the captureDiv and downloadBtn exists in DOM
     if (captureDiv && downloadBtn) {
       domtoimage.toPng(captureDiv).then(function (dataUrl: string) {
-        setQrDataUrl(() => dataUrl);
         downloadBtn.href = dataUrl;
         downloadBtn.click();
       });
@@ -142,7 +139,7 @@ export default function QRPreview() {
         Download QR Code
       </Button>
       <a
-        href={qrDataUrl}
+        href="/"
         download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
           data.qr.id
         }.png`}
