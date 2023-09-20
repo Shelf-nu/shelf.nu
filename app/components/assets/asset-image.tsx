@@ -27,7 +27,6 @@ export const AssetImage = ({
     if (mainImage && mainImageExpiration) {
       const now = new Date();
       const expiration = new Date(mainImageExpiration);
-
       if (now > expiration) {
         fetcher.submit(
           { assetId, mainImage: mainImage || "" },
