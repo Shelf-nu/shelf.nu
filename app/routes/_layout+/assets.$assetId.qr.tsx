@@ -3,7 +3,7 @@ import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
-import html2canvas from "html2canvas";
+import domtoimage from "dom-to-image";
 import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
@@ -44,6 +44,7 @@ export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
   const formRef = useRef<HTMLFormElement>(null);
   const captureDivRef = useRef<HTMLImageElement>(null);
+  const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
   const submit = useSubmit();
   const asset = useMatchesData<{ asset: Asset }>(
     "routes/_layout+/assets.$assetId"
@@ -55,15 +56,28 @@ export default function QRPreview() {
     submit(formRef.current);
   };
 
-  useEffect(() => {
+  // useEffect(() => {
+  //   const captureDiv = captureDivRef.current;
+  //   // making sure that the captureDiv exists in DOM
+  //   if (captureDiv) {
+  //     domtoimage.toPng(captureDiv).then(function (dataUrl: string) {
+  //       setQrDataUrl(() => dataUrl);
+  //     });
+  //   }
+  // }, [data]);
+
+  function downloadQr() {
     const captureDiv = captureDivRef.current;
-    // making sure that the captureDiv exists in DOM
-    if (captureDiv) {
-      html2canvas(captureDiv).then((canvas) => {
-        setQrDataUrl(() => canvas.toDataURL("image/png"));
+    const downloadBtn = downloadQrBtnRef.current;
+    // making sure that the captureDiv and downloadBtn exists in DOM
+    if (captureDiv && downloadBtn) {
+      domtoimage.toPng(captureDiv).then(function (dataUrl: string) {
+        setQrDataUrl(() => dataUrl);
+        downloadBtn.href = dataUrl;
+        downloadBtn.click();
       });
     }
-  }, [data]);
+  }
 
   return asset ? (
     <div className="">
@@ -75,18 +89,14 @@ export default function QRPreview() {
       </header>
       <div className="mb-4 w-auto rounded-xl border border-solid p-6">
         <div
-          className="flex h-auto flex-col justify-center gap-1 rounded-md border-[5px] border-[#E3E4E8] p-3"
+          className="flex h-auto flex-col justify-center gap-1 rounded-md border-[5px] border-[#E3E4E8] bg-white p-3"
           ref={captureDivRef}
         >
-          <div className="z-50 max-w-full truncate bg-white text-center text-[12px]">
+          <div className="z-50 max-w-full truncate  text-center text-[12px]">
             {asset.title}
           </div>
           <figure className="qr-code z-[49] flex justify-center">
-            <img
-              src={data.qr.src}
-              alt={`${data.qr.size}-shelf-qr-code.png`}
-              className="rounded-md"
-            />
+            <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
           </figure>
           <div className="w-full text-center text-[12px]">
             <span className="block  text-gray-600">{data.qr.id}</span>
@@ -132,17 +142,25 @@ export default function QRPreview() {
           </span>
         </li>
       </ul>
+      {/* using this button to convert html to png and download image using the a tag below */}
       <Button
         icon="barcode"
-        to={qrDataUrl}
-        download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
-          data.qr.id
-        }.png`}
+        onClick={downloadQr}
         variant="secondary"
         className="w-full"
       >
         Download QR Code
       </Button>
+      <a
+        href={qrDataUrl}
+        download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
+          data.qr.id
+        }.png`}
+        ref={downloadQrBtnRef}
+        className="hidden"
+      >
+        download
+      </a>
     </div>
   ) : null;
 }
