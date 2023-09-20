@@ -10,7 +10,6 @@ export const action = async ({ request }: ActionArgs) => {
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
   const mainImage = formData.get("mainImage") as string;
-
   if (!assetId || !mainImage)
     return json({ error: "Asset id & mainImage are reqired" });
 
