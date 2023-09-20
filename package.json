@@ -118,7 +118,7 @@
     "vitest": "^0.24.5"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "prisma": {
     "schema": "app/database/schema.prisma",
