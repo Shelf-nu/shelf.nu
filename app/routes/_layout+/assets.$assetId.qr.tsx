@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
@@ -55,16 +55,6 @@ export default function QRPreview() {
   const handleChange = () => {
     submit(formRef.current);
   };
-
-  // useEffect(() => {
-  //   const captureDiv = captureDivRef.current;
-  //   // making sure that the captureDiv exists in DOM
-  //   if (captureDiv) {
-  //     domtoimage.toPng(captureDiv).then(function (dataUrl: string) {
-  //       setQrDataUrl(() => dataUrl);
-  //     });
-  //   }
-  // }, [data]);
 
   function downloadQr() {
     const captureDiv = captureDivRef.current;
