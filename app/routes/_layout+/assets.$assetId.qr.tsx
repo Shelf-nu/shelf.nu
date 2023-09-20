@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
@@ -42,6 +42,7 @@ export async function loader({ request, params }: LoaderArgs) {
 export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
   const formRef = useRef<HTMLFormElement>(null);
+  const qrImageRef = useRef<HTMLImageElement>(null);
   const submit = useSubmit();
   const asset = useMatchesData<{ asset: Asset }>(
     "routes/_layout+/assets.$assetId"
@@ -50,6 +51,30 @@ export default function QRPreview() {
   const handleChange = () => {
     submit(formRef.current);
   };
+
+  useEffect(() => {
+    const targetImage = qrImageRef.current;
+    // making sure that the targetImage exists in DOM
+    if (targetImage) {
+      //creating a html canvas element
+      const canvas = document.createElement("canvas") as HTMLCanvasElement;
+      canvas.width = targetImage.offsetWidth;
+      canvas.height = targetImage.offsetHeight;
+
+      // Get the 2D drawing context of the canvas
+      const context = canvas.getContext("2d");
+
+      //drawing the targetImage on canvas
+      context.drawImage(targetImage, 0, 0);
+
+      //converting canvas to dataURL
+      const dataUrl = canvas.toDataURL("image/png");
+      const img = new Image();
+      img.src = dataUrl;
+      // Appending the image to the DOM
+      document.body.appendChild(img);
+    }
+  });
 
   return asset ? (
     <div className="">
@@ -65,8 +90,15 @@ export default function QRPreview() {
             {asset.title}
           </h6>
         </div>
-        <figure className="qr-code flex  justify-center">
-          <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
+        <figure className="qr-code flex justify-center p-3">
+          <div className="rounded-md bg-[#E3E4E8] p-3">
+            <img
+              ref={qrImageRef}
+              src={data.qr.src}
+              alt={`${data.qr.size}-shelf-qr-code.png`}
+              className="rounded-md"
+            />
+          </div>
         </figure>
         <div className="text-center">
           <span className="block text-[12px] text-gray-600">{data.qr.id}</span>
