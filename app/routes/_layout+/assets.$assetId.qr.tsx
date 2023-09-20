@@ -43,7 +43,7 @@ export async function loader({ request, params }: LoaderArgs) {
 export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
   const formRef = useRef<HTMLFormElement>(null);
-  const qrImageRef = useRef<HTMLImageElement>(null);
+  const captureDivRef = useRef<HTMLImageElement>(null);
   const submit = useSubmit();
   const asset = useMatchesData<{ asset: Asset }>(
     "routes/_layout+/assets.$assetId"
@@ -56,16 +56,14 @@ export default function QRPreview() {
   };
 
   useEffect(() => {
-    const captureDiv = qrImageRef.current;
+    const captureDiv = captureDivRef.current;
     // making sure that the captureDiv exists in DOM
     if (captureDiv) {
-      html2canvas(captureDiv, {
-        foreignObjectRendering: true,
-      }).then((canvas) => {
+      html2canvas(captureDiv).then((canvas) => {
         setQrDataUrl(() => canvas.toDataURL("image/png"));
       });
     }
-  });
+  }, [data]);
 
   return asset ? (
     <div className="">
@@ -78,7 +76,7 @@ export default function QRPreview() {
       <div className="mb-4 w-auto rounded-xl border border-solid p-6">
         <div
           className="flex h-auto flex-col justify-center gap-1 rounded-md border-[5px] border-[#E3E4E8] p-3"
-          ref={qrImageRef}
+          ref={captureDivRef}
         >
           <div className="z-50 max-w-full truncate bg-white text-center text-[12px]">
             {asset.title}
