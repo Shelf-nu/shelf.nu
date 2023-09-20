@@ -1,14 +1,11 @@
 import { type ActionArgs, json } from "@remix-run/node";
-import { userPrefs } from "~/cookies";
+import { userPrefs } from "~/utils/cookies.server";
 
 export async function action({ request }: ActionArgs) {
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
   const bodyParams = await request.formData();
-
-  if (bodyParams.get("bannerVisibility") === "hidden") {
-    cookie.hideSupportBanner = true;
-  }
+  cookie.minimizedSidebar = bodyParams.get("minimizeSidebar") === "open";
 
   return json(
     { success: true },

@@ -1,3 +1,5 @@
+import { ShelfStackError } from "./error";
+
 export function getCurrentPath(request: Request) {
   return new URL(request.url).pathname;
 }
@@ -28,15 +30,15 @@ export function isDelete(request: Request) {
 }
 
 export function notFound(message: string) {
-  return new Response(message, { status: 404 });
+  return new ShelfStackError({ message, status: 404 });
 }
 
 function notAllowedMethod(message: string) {
-  return new Response(message, { status: 405 });
+  return new ShelfStackError({ message, status: 405 });
 }
 
 function badRequest(message: string) {
-  return new Response(message, { status: 400 });
+  return new ShelfStackError({ message, status: 400 });
 }
 
 export function getRequiredParam(

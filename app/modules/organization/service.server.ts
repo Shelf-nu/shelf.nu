@@ -7,6 +7,7 @@ import {
   getCurrentSearchParams,
   getParamsValues,
 } from "~/utils";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 
 export const getUserPersonalOrganizationData = async ({
   userId,
@@ -67,8 +68,11 @@ export const getPaginatedAndFilterableTeamMembers = async ({
   organizationId: Organization["id"];
 }) => {
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search } = getParamsValues(searchParams);
+  const { page, perPageParam, search } = getParamsValues(searchParams);
   const { prev, next } = generatePageMeta(request);
+
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
 
   const { teamMembers, totalTeamMembers } = await getTeamMembers({
     organizationId,
@@ -87,6 +91,7 @@ export const getPaginatedAndFilterableTeamMembers = async ({
     teamMembers,
     totalPages,
     totalTeamMembers,
+    cookie,
   };
 };
 

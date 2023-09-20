@@ -7,6 +7,7 @@
     "db:prepare-migration": "prisma migrate dev --create-only --skip-seed",
     "db:deploy-migration": "prisma migrate deploy",
     "dev": "remix dev",
+    "production:dev": "dotenv -e .env.production -- remix dev",
     "format": "prettier --write .",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
     "setup": "run-s setup:db setup:seed",

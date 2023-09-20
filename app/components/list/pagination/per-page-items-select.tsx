@@ -1,5 +1,9 @@
-import { useEffect, useState } from "react";
-import { Form, useSearchParams, useSubmit } from "@remix-run/react";
+import {
+  Form,
+  useLoaderData,
+  useSearchParams,
+  useSubmit,
+} from "@remix-run/react";
 import {
   Select,
   SelectTrigger,
@@ -10,17 +14,9 @@ import {
 
 export default function PerPageItemsSelect() {
   const perPageValues = ["20", "50", "100"];
-  const [perPage, setPerPage] = useState<string>("20");
   const submit = useSubmit();
   const [searchParams] = useSearchParams();
-  const perPageParam = searchParams.get("per_page");
-
-  /** This effect handles setting the perPage value from search params */
-  useEffect(() => {
-    if (perPageParam) {
-      setPerPage(() => perPageParam);
-    }
-  }, [perPageParam, setPerPage]);
+  const { perPage } = useLoaderData();
 
   return (
     <div className="relative">
@@ -35,13 +31,7 @@ export default function PerPageItemsSelect() {
             <input type="hidden" name={key} value={value} key={value} />
           ) : null
         )}
-        <Select
-          name="per_page"
-          value={perPage.toString()}
-          onValueChange={(value) => {
-            setPerPage(() => value);
-          }}
-        >
+        <Select name="per_page" defaultValue={perPage.toString()}>
           <SelectTrigger className="px-3.5 py-3">
             <SelectValue />
           </SelectTrigger>

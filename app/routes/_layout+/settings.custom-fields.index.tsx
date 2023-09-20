@@ -20,6 +20,7 @@ import {
   generatePageMeta,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -31,7 +32,9 @@ export const ErrorBoundary = () => <ErrorBoundryComponent />;
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search } = getParamsValues(searchParams);
+  const { page, perPageParam, search } = getParamsValues(searchParams);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
   const { prev, next } = generatePageMeta(request);
   const organization = await getOrganizationByUserId({
     userId,
@@ -52,7 +55,7 @@ export async function loader({ request }: LoaderArgs) {
 
   const tierLimit = await getUserTierLimit(userId);
 
-  const totalPages = Math.ceil(totalCustomFields / perPage);
+  const totalPages = Math.ceil(totalCustomFields / perPageParam);
 
   const header: HeaderData = {
     title: "Custom Fields",
@@ -61,22 +64,29 @@ export async function loader({ request }: LoaderArgs) {
     singular: "custom fields",
     plural: "custom Fields",
   };
-  return json({
-    header,
-    items: customFields,
-    search,
-    page,
-    totalItems: totalCustomFields,
-    totalPages,
-    perPage,
-    prev,
-    next,
-    modelName,
-    canCreateMoreCustomFields: canCreateMoreCustomFields({
-      tierLimit,
-      totalCustomFields,
-    }),
-  });
+  return json(
+    {
+      header,
+      items: customFields,
+      search,
+      page,
+      totalItems: totalCustomFields,
+      totalPages,
+      perPage,
+      prev,
+      next,
+      modelName,
+      canCreateMoreCustomFields: canCreateMoreCustomFields({
+        tierLimit,
+        totalCustomFields,
+      }),
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 }
 
 export default function CustomFieldsIndexPage() {

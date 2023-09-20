@@ -9,6 +9,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase";
 import { requireAuthSession } from "~/modules/auth";
 import { cropImage, extractImageNameFromSupabaseUrl } from ".";
 import { SUPABASE_URL } from "./env";
+import { ShelfStackError } from "./error";
 
 export function getPublicFileURL({
   filename,
@@ -31,13 +32,24 @@ export async function createSignedUrl({
   filename: string;
   bucketName?: string;
 }) {
-  const { data, error } = await getSupabaseAdmin()
-    .storage.from(bucketName)
-    .createSignedUrl(filename, 86_400_000); //24h
+  try {
+    // Check if there is a leading slash and we need to remove it as signing will not work with the slash included
+    if (filename.startsWith("/")) {
+      filename = filename.substring(1); // Remove the first character
+    }
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .createSignedUrl(filename, 86_400_000); //24h
 
-  if (error) throw error;
+    if (error) throw error;
 
-  return data.signedUrl;
+    return data.signedUrl;
+  } catch (error) {
+    return new ShelfStackError({
+      message:
+        "Something went wrong with updating your image. Please refresh the page. If the issue persists contact support.",
+    });
+  }
 }
 
 async function uploadFile(
@@ -119,7 +131,7 @@ export async function deleteProfilePicture({
       ) ||
       url === ""
     ) {
-      throw new Error("Wrong url");
+      throw new ShelfStackError({ message: "Wrong url" });
     }
 
     const { error } = await getSupabaseAdmin()
@@ -145,7 +157,7 @@ export async function deleteAssets({
     const path = extractImageNameFromSupabaseUrl({ url, bucketName });
 
     if (!path) {
-      throw new Error("Cannot find image");
+      throw new ShelfStackError({ message: "Cannot find image" });
     }
 
     const { error } = await getSupabaseAdmin()

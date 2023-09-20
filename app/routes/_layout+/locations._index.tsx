@@ -19,12 +19,16 @@ import {
   tw,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 
 export async function loader({ request }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPage, search } = getParamsValues(searchParams);
+  const { page, perPageParam, search } = getParamsValues(searchParams);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
   const { prev, next } = generatePageMeta(request);
 
   const { locations, totalLocations } = await getLocations({
@@ -42,18 +46,25 @@ export async function loader({ request }: LoaderArgs) {
     singular: "location",
     plural: "locations",
   };
-  return json({
-    header,
-    items: locations,
-    search,
-    page,
-    totalItems: totalLocations,
-    totalPages,
-    perPage,
-    prev,
-    next,
-    modelName,
-  });
+  return json(
+    {
+      header,
+      items: locations,
+      search,
+      page,
+      totalItems: totalLocations,
+      totalPages,
+      perPage,
+      prev,
+      next,
+      modelName,
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [

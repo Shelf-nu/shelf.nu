@@ -11,15 +11,16 @@ import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { Toaster } from "~/components/shared/toast";
-import { userPrefs } from "~/cookies";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/index.css";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils";
+import { userPrefs } from "~/utils/cookies.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getCustomerActiveSubscription,
   getStripeCustomer,
+  stripe,
 } from "~/utils/stripe.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
@@ -45,7 +46,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
       })
     : undefined;
   let subscription = null;
-  if (user?.customerId) {
+  if (user?.customerId && stripe) {
     // Get the Stripe customer
     const customer = (await getStripeCustomer(
       user.customerId
@@ -56,20 +57,27 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
 
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
+  cookie.perPage = 20;
   if (!user?.onboarded) {
     return redirect("onboarding");
   }
 
-
-  return json({
-    user,
-    organizationId: user?.organizations[0].id,
-    subscription,
-    enablePremium: ENABLE_PREMIUM_FEATURES,
-    hideSupportBanner: cookie.hideSupportBanner,
-    minimizedSidebar: cookie.minimizedSidebar,
-    isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
-  });
+  return json(
+    {
+      user,
+      organizationId: user?.organizations[0].id,
+      subscription,
+      enablePremium: ENABLE_PREMIUM_FEATURES,
+      hideSupportBanner: cookie.hideSupportBanner,
+      minimizedSidebar: cookie.minimizedSidebar,
+      isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 };
 
 export default function App() {
