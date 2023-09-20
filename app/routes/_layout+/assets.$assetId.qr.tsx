@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
+import html2canvas from "html2canvas";
 import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
@@ -48,31 +49,21 @@ export default function QRPreview() {
     "routes/_layout+/assets.$assetId"
   )?.asset;
 
+  const [qrDataUrl, setQrDataUrl] = useState<string>("");
+
   const handleChange = () => {
     submit(formRef.current);
   };
 
   useEffect(() => {
-    const targetImage = qrImageRef.current;
-    // making sure that the targetImage exists in DOM
-    if (targetImage) {
-      //creating a html canvas element
-      const canvas = document.createElement("canvas") as HTMLCanvasElement;
-      canvas.width = targetImage.offsetWidth;
-      canvas.height = targetImage.offsetHeight;
-
-      // Get the 2D drawing context of the canvas
-      const context = canvas.getContext("2d");
-
-      //drawing the targetImage on canvas
-      context.drawImage(targetImage, 0, 0);
-
-      //converting canvas to dataURL
-      const dataUrl = canvas.toDataURL("image/png");
-      const img = new Image();
-      img.src = dataUrl;
-      // Appending the image to the DOM
-      document.body.appendChild(img);
+    const captureDiv = qrImageRef.current;
+    // making sure that the captureDiv exists in DOM
+    if (captureDiv) {
+      html2canvas(captureDiv, {
+        foreignObjectRendering: true,
+      }).then((canvas) => {
+        setQrDataUrl(() => canvas.toDataURL("image/png"));
+      });
     }
   });
 
@@ -84,24 +75,28 @@ export default function QRPreview() {
           <XIcon />
         </Link>
       </header>
-      <div className="mb-4 w-full rounded-xl border border-solid p-6">
-        <div className="text-center">
-          <h6 className="mb-1 font-semibold leading-5 text-gray-700">
+      <div className="mb-4 w-auto rounded-xl border border-solid p-6">
+        <div
+          className="flex h-auto flex-col justify-center gap-1 rounded-md border-[5px] border-[#E3E4E8] p-3"
+          ref={qrImageRef}
+        >
+          <div className="z-50 max-w-full truncate bg-white text-center text-[12px]">
             {asset.title}
-          </h6>
-        </div>
-        <figure className="qr-code flex justify-center p-3">
-          <div className="rounded-md bg-[#E3E4E8] p-3">
+          </div>
+          <figure className="qr-code z-[49] flex justify-center">
             <img
-              ref={qrImageRef}
               src={data.qr.src}
               alt={`${data.qr.size}-shelf-qr-code.png`}
               className="rounded-md"
             />
+          </figure>
+          <div className="w-full text-center text-[12px]">
+            <span className="block  text-gray-600">{data.qr.id}</span>
+            <span className="block text-gray-500">
+              Powered by{" "}
+              <span className="font-semibold text-gray-600">shelf.nu</span>
+            </span>
           </div>
-        </figure>
-        <div className="text-center">
-          <span className="block text-[12px] text-gray-600">{data.qr.id}</span>
         </div>
       </div>
       <ul className="description-list">
@@ -141,7 +136,7 @@ export default function QRPreview() {
       </ul>
       <Button
         icon="barcode"
-        to={data.qr.src}
+        to={qrDataUrl}
         download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
           data.qr.id
         }.png`}
