@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
@@ -50,18 +50,33 @@ export default function QRPreview() {
     "routes/_layout+/assets.$assetId"
   )?.asset;
 
-  const handleChange = () => {
+  const fileName = useMemo(
+    () =>
+      `${slugify(asset?.title || "asset")}-${data.qr.size}-shelf-qr-code-${
+        data.qr.id
+      }.png`,
+    [asset, data.qr.id, data.qr.size]
+  );
+
+  const handleSizeChange = () => {
     submit(formRef.current);
   };
 
-  function downloadQr() {
+  function downloadQr(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
     const captureDiv = captureDivRef.current;
     const downloadBtn = downloadQrBtnRef.current;
     // making sure that the captureDiv and downloadBtn exists in DOM
     if (captureDiv && downloadBtn) {
-      domtoimage.toPng(captureDiv).then(function (dataUrl: string) {
-        downloadBtn.href = dataUrl;
-        downloadBtn.click();
+      e.preventDefault();
+      domtoimage.toPng(captureDiv).then((dataUrl: string) => {
+        const downloadLink = document.createElement("a");
+        downloadLink.href = dataUrl;
+        downloadLink.download = fileName;
+        // Trigger a click event to initiate the download
+        downloadLink.click();
+
+        // Clean up the object URL after the download
+        URL.revokeObjectURL(downloadLink.href);
       });
     }
   }
@@ -107,7 +122,7 @@ export default function QRPreview() {
               <select
                 name="size"
                 value={data.qr.size}
-                onChange={handleChange}
+                onChange={handleSizeChange}
                 className=" border-none py-0 pr-6"
                 style={{ backgroundPosition: "right center" }}
               >
@@ -133,21 +148,15 @@ export default function QRPreview() {
       <Button
         icon="barcode"
         onClick={downloadQr}
+        download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
+          data.qr.id
+        }.png`}
+        ref={downloadQrBtnRef}
         variant="secondary"
         className="w-full"
       >
         Download QR Code
       </Button>
-      <a
-        href="/"
-        download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
-          data.qr.id
-        }.png`}
-        ref={downloadQrBtnRef}
-        className="hidden"
-      >
-        download
-      </a>
     </div>
   ) : null;
 }
