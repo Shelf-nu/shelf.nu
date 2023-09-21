@@ -72,7 +72,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
 
       stopMediaStream();
     };
-  }, [videoDevices, stopMediaStream]);
+  }, [videoDevices, stopMediaStream, sendNotification]);
 
   return (
     <>

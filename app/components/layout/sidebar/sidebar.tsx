@@ -30,7 +30,7 @@ export default function Sidebar() {
   const handleScannerClose = () => {
     stopMediaStream();
     setShowScanner(false);
-    window.location.reload(); // Clear error messages when closing the scanner
+    // window.location.reload();
   };
 
   /** We use optimistic UI for folding of the sidebar

@@ -7,6 +7,7 @@
     "db:prepare-migration": "prisma migrate dev --create-only --skip-seed",
     "db:deploy-migration": "prisma migrate deploy",
     "dev": "remix dev",
+    "production:dev": "dotenv -e .env.production -- remix dev",
     "format": "prettier --write .",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
     "setup": "run-s setup:db setup:seed",
@@ -55,6 +56,7 @@
     "crisp-sdk-web": "^1.0.19",
     "csv-parse": "^5.4.0",
     "detectrtc": "^1.4.1",
+    "dom-to-image": "^2.6.0",
     "framer-motion": "^9.1.7",
     "intl-parse-accept-language": "^1.0.0",
     "isbot": "^3.6.12",
@@ -91,6 +93,7 @@
     "@testing-library/jest-dom": "^5.16.5",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^14.4.3",
+    "@types/dom-to-image": "^2.6.4",
     "@types/nodemailer": "^6.4.8",
     "@types/react": "^18.2.14",
     "@types/react-dom": "^18.2.6",
@@ -119,7 +122,7 @@
     "vitest": "^0.24.5"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
   "prisma": {
     "schema": "app/database/schema.prisma",
