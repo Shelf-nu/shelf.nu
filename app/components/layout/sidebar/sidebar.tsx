@@ -1,8 +1,13 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Link, useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
-import { ShelfTypography } from "~/components/icons/library";
+import { BarCodeIcon, ShelfTypography } from "~/components/icons/library";
 
+import {
+  useMediaStream,
+  useStopMediaStream,
+} from "~/components/scan-qr/media-stream-provider";
+import QRScanner from "~/components/scan-qr/qrcode-scanner";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 
@@ -16,6 +21,17 @@ export default function Sidebar() {
   const { user, minimizedSidebar } = useLoaderData<typeof loader>();
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);
+
+  const [showScanner, setShowScanner] = useState(false);
+
+  const { stopMediaStream } = useMediaStream();
+  useStopMediaStream(stopMediaStream);
+
+  const handleScannerClose = () => {
+    stopMediaStream();
+    setShowScanner(false);
+    // window.location.reload();
+  };
 
   /** We use optimistic UI for folding of the sidebar
    * As we are making a request to the server to store the cookie,
@@ -42,8 +58,19 @@ export default function Sidebar() {
             className="h-full"
           />
         </Link>
-        <MenuButton />
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={() => setShowScanner(true)}
+            title="Scan QR Code"
+            className="relative flex items-center justify-center px-2 transition"
+          >
+            <BarCodeIcon className="h-6 w-6 text-gray-500" />
+          </button>
+          <MenuButton />
+        </div>
       </header>
+      {showScanner && <QRScanner onClose={handleScannerClose} />}
+
       <Overlay />
       <aside
         id="main-navigation"
