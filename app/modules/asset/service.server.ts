@@ -10,7 +10,6 @@ import type {
   Organization,
   TeamMember,
   CustomField,
-  AssetCustomFieldValue,
 } from "@prisma/client";
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
 import { type LoaderArgs } from "@remix-run/node";
@@ -25,10 +24,12 @@ import {
 } from "~/utils";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
-import { processCustomFields } from "~/utils/import.server";
+import { buildCustomFieldValue, getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import type { ShelfAssetCustomFieldValueType } from "./types";
 import { createCategoriesIfNotExists, getAllCategories } from "../category";
-import { createCustomFieldsIfNotExists } from "../custom-field";
+import { createCustomFieldsIfNotExists, upsertCustomField } from "../custom-field";
+import type { CustomFieldDraftPayload } from "../custom-field/types";
 import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
 import { createTagsIfNotExists, getAllTags } from "../tag";
@@ -188,7 +189,7 @@ export async function createAsset({
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
-  customFieldsValues?: ({ id: string; value: string | undefined } | null)[];
+  customFieldsValues?: ShelfAssetCustomFieldValueType[];
 }) {
   /** User connction data */
   const user = {
@@ -210,14 +211,14 @@ export async function createAsset({
     qr && qr.userId === userId && qr.assetId === null
       ? { connect: { id: qrId } }
       : {
-          create: [
-            {
-              version: 0,
-              errorCorrection: ErrorCorrection["L"],
-              user,
-            },
-          ],
-        };
+        create: [
+          {
+            version: 0,
+            errorCorrection: ErrorCorrection["L"],
+            user,
+          },
+        ],
+      };
 
   /** Data object we send via prisma to create Asset */
   const data = {
@@ -281,10 +282,10 @@ export async function createAsset({
       /** Custom fields here refers to the values, check the Schema for more info */
       customFields: {
         create: customFieldsValues?.map(
-          (cf: { id: string; value: string | undefined } | null) =>
-            cf !== null && {
-              value: cf?.value || "",
-              customFieldId: cf.id,
+          ({ id, value }) =>
+            id && value && {
+              value,
+              customFieldId: id,
             }
         ),
       },
@@ -312,7 +313,7 @@ interface UpdateAssetPayload {
   mainImageExpiration?: Asset["mainImageExpiration"];
   tags?: { set: { id: string }[] };
   userId?: User["id"];
-  customFieldsValues?: { id: string; value: string | undefined }[];
+  customFieldsValues?: ShelfAssetCustomFieldValueType[];
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
@@ -384,19 +385,17 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     Object.assign(data, {
       customFields: {
         upsert: customFieldsValuesFromForm?.map(
-          (cf: { id: string; value: string | undefined }) => ({
+          ({ id, value }) => ({
             where: {
               id:
                 currentCustomFieldsValues.find(
-                  (ccfv) => ccfv.customFieldId === cf.id
+                  (ccfv) => ccfv.customFieldId === id
                 )?.id || "",
             },
-            update: {
-              value: cf?.value || "",
-            },
+            update: { value },
             create: {
-              value: cf?.value || "",
-              customFieldId: cf.id,
+              value,
+              customFieldId: id,
             },
           })
         ),
@@ -809,9 +808,19 @@ export const createAssetsFromContentImport = async ({
   });
 
   for (const asset of data) {
-    const assetCustomFieldsValues = Object.entries(asset)
-      .map(([key, value]) => (key.startsWith("cf:") ? value : null))
-      .filter((v) => v !== null);
+    const customFieldsValues: ShelfAssetCustomFieldValueType[] = Object.entries(asset).reduce((res, [key, val]) => {
+      if (key.startsWith("cf:") && val) {
+        const { name } = getDefinitionFromCsvHeader(key)
+        if (customFields[name].id) {
+          res.push({
+            id: customFields[name].id,
+            value: buildCustomFieldValue({ raw: asset[key] }, customFields[name]),
+          } as ShelfAssetCustomFieldValueType)
+        }
+      }
+      return res
+    }, [] as ShelfAssetCustomFieldValueType[])
+
 
     await createAsset({
       title: asset.title,
@@ -823,24 +832,12 @@ export const createAssetsFromContentImport = async ({
       tags:
         asset.tags.length > 0
           ? {
-              set: asset.tags
-                .filter((t) => tags[t])
-                .map((t) => ({ id: tags[t] })),
-            }
+            set: asset.tags
+              .filter((t) => tags[t])
+              .map((t) => ({ id: tags[t] })),
+          }
           : undefined,
-      customFieldsValues:
-        assetCustomFieldsValues?.length > 0
-          ? assetCustomFieldsValues
-              .map((v: string) =>
-                customFields[v]?.id
-                  ? {
-                      id: customFields[v].id,
-                      value: v || "",
-                    }
-                  : null
-              )
-              .filter((v) => v !== null)
-          : undefined,
+      customFieldsValues
     });
   }
 };
@@ -866,6 +863,7 @@ export const createAssetsFromBackupImport = async ({
 }) => {
   // console.log(data);
 
+  //TODO use concurrency control over it will overload the server
   data.map(async (asset) => {
     /** Base data from asset */
     const d = {
@@ -1044,29 +1042,29 @@ export const createAssetsFromBackupImport = async ({
         tags:
           asset.tags.length > 0
             ? {
-                connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
-              }
+              connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
+            }
             : undefined,
       });
     }
 
     /** Custom fields */
     if (asset.customFields && asset.customFields.length > 0) {
-      /** we need to check if custom fields exist and create them
-       * Then we need to also create the values for the asset.customFields
-       */
 
-      const cfIds = await processCustomFields({
-        asset,
-        organizationId,
-        userId,
-      });
+      const customFieldDef = asset.customFields.reduce((res, { value, customField }) => {
+        const { id, createdAt, updatedAt, ...rest } = customField
+        const options = value?.valueOption?.length ? [value?.valueOption] : undefined
+        res.push({ ...rest, options, userId, organizationId })
+        return res
+      }, [] as Array<CustomFieldDraftPayload>)
+
+      const cfIds = await upsertCustomField(customFieldDef)
 
       Object.assign(d.data, {
         customFields: {
           create: asset.customFields.map((cf) => ({
             value: cf.value,
-            customFieldId: cfIds[cf.customField.name],
+            customFieldId: cfIds[cf.customField.name].id,
           })),
         },
       });
@@ -1097,31 +1095,31 @@ export interface CreateAssetFromBackupImportPayload
   title: string;
   description?: string;
   category:
-    | {
-        id: string;
-        name: string;
-        description: string;
-        color: string;
-        createdAt: string;
-        updatedAt: string;
-        userId: string;
-      }
-    | {};
+  | {
+    id: string;
+    name: string;
+    description: string;
+    color: string;
+    createdAt: string;
+    updatedAt: string;
+    userId: string;
+  }
+  | {};
   tags: {
     name: string;
   }[];
   location:
-    | {
-        name: string;
-        description?: string;
-        address?: string;
-        createdAt: string;
-        updatedAt: string;
-      }
-    | {};
+  | {
+    name: string;
+    description?: string;
+    address?: string;
+    createdAt: string;
+    updatedAt: string;
+  }
+  | {};
   customFields: AssetCustomFieldsValuesWithFields[];
 }
 
-export type AssetCustomFieldsValuesWithFields = AssetCustomFieldValue & {
+export type AssetCustomFieldsValuesWithFields = ShelfAssetCustomFieldValueType & {
   customField: CustomField;
 };
