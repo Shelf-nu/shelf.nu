@@ -78,12 +78,12 @@ model Asset {
   location       Location?     @relation(fields: [locationId], references: [id])
   locationId     String?
 
-  custody      Custody?
-  notes        Note[]
-  qrCodes      Qr[]
-  reports      ReportFound[]
-  tags         Tag[]
-  customFields AssetCustomFieldValue[]
+  custody         Custody?
+  notes           Note[]
+  qrCodes         Qr[]
+  reports         ReportFound[]
+  tags            Tag[]
+  customFields    AssetCustomFieldValue[]
   assetSearchView AssetSearchView?
 }
 
@@ -92,9 +92,9 @@ view AssetSearchView {
   searchVector String
 
   // Relationships
-  asset Asset @relation(fields: [assetId], references: [id])
+  asset   Asset  @relation(fields: [assetId], references: [id])
   assetId String @unique
-  
+
   // Datetime
   createdAt DateTime @default(now())
 }
@@ -336,9 +336,10 @@ model CustomField {
   name     String
   helpText String?
   required Boolean @default(false)
-  active Boolean @default(true)
+  active   Boolean @default(true)
 
-  type CustomFieldType @default(TEXT)
+  type    CustomFieldType @default(TEXT)
+  options String[]
 
   // Relationships
   organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
@@ -355,12 +356,17 @@ model CustomField {
 
 enum CustomFieldType {
   TEXT
+  OPTION
+  BOOLEAN
+  DATE
+  MULTILINE_TEXT
 }
 
 model AssetCustomFieldValue {
   id String @id @default(cuid())
 
-  value String
+  // value String
+  value Json //{raw: "actual data",valueText:"text type",valueBoolean:"boolean type" and so on... }
 
   // Relationships
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)

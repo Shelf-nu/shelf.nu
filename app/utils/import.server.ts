@@ -1,10 +1,6 @@
-import type { CustomField } from "@prisma/client";
-import { db } from "~/database";
 import type {
-  CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
 } from "~/modules/asset";
-import { createCustomField } from "~/modules/custom-field";
 
 /* This function receives an array of object and a key name
  * It then extracts all the values of that key and makes sure there are no duplicates
@@ -82,59 +78,3 @@ export function extractCSVDataFromBackupImport(data: string[][]): any[] {
  */
 const cellIsEmpty = (cell: string) =>
   cell === "" || cell === undefined || cell === "{}" || cell === "[]";
-
-export async function processCustomFields({
-  asset,
-  organizationId,
-  userId,
-}: {
-  asset: CreateAssetFromBackupImportPayload;
-  userId: string;
-  organizationId: string;
-}) {
-  const cfIds: Record<CustomField["name"], CustomField["id"]> = {};
-
-  for (const customFieldValue of asset.customFields) {
-    const existingCustomField = await db.customField.findFirst({
-      where: {
-        name: customFieldValue.customField.name,
-        organizationId,
-      },
-    });
-
-    if (!existingCustomField) {
-      const keysToExclude = [
-        "id",
-        "createdAt",
-        "updatedAt",
-        "userId",
-        "organizationId",
-      ];
-
-      /** The reason we do it like this is because we dont want to worry about having to update the call to
-       * createCustomFeild when a new attribute is added to the model
-       * This approach will skip the keys which are not needed and just build the payload from the rest of the keys
-       */
-      const payloadObject = excludeKeys(
-        customFieldValue.customField,
-        keysToExclude
-      );
-
-      const newCustomField = await createCustomField({
-        organizationId,
-        userId,
-        ...payloadObject,
-      });
-      cfIds[customFieldValue.customField.name] = newCustomField.id;
-    } else {
-      cfIds[customFieldValue.customField.name] = existingCustomField.id;
-    }
-  }
-  return cfIds;
-}
-
-function excludeKeys(obj: any, keysToExclude: string[]) {
-  const newObj = { ...obj };
-  keysToExclude.forEach((key) => delete newObj[key]);
-  return newObj;
-}

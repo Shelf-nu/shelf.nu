@@ -33,12 +33,12 @@ type MediaStreamContextValue = {
   isVideoPlayed: boolean;
   onChangeConstraints: MediaStreamTrack["applyConstraints"];
   videoTrackInfo:
-    | {
-        capabilities: MediaTrackCapabilities;
-        constraints: MediaTrackConstraints;
-        settings: MediaTrackSettings;
-      }
-    | undefined;
+  | {
+    capabilities: MediaTrackCapabilities;
+    constraints: MediaTrackConstraints;
+    settings: MediaTrackSettings;
+  }
+  | undefined;
 };
 
 export const MediaStreamContext = createContext<MediaStreamContextValue>({
@@ -314,7 +314,7 @@ export const MediaStreamVideo: FC<MediaStreamVideoProps> = ({
       video.volume = 0;
       video.setAttribute("playsinline", "playsinline");
       video.srcObject = mediaStream;
-      video.play().then(() => {});
+      video.play().then(() => { });
     }
   }, [mediaStream]);
 

@@ -8,7 +8,7 @@ import { updateTitleAtom } from "~/atoms/assets.new";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { isFormProcessing } from "~/utils";
 
-import { mergedSchema } from "~/utils/custom-field-schema";
+import { mergedSchema } from "~/utils/custom-fields";
 import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
 
@@ -54,8 +54,6 @@ export const AssetForm = ({
 
   const { customFields } = useLoaderData();
 
-  // console.log(customFields);
-
   const FormSchema = mergedSchema({
     baseSchema: NewAssetFormSchema,
     customFields: customFields.map(
@@ -66,6 +64,7 @@ export const AssetForm = ({
           helpText: cf?.helpText || "",
           required: cf.required,
           type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+          options: cf.options
         }
     ),
   });
