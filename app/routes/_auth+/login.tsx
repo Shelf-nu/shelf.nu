@@ -28,6 +28,7 @@ export async function loader({ request }: LoaderArgs) {
   const authSession = await getAuthSession(request);
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
+
   if (authSession) return redirect("/");
   return json({ title, subHeading });
 }
@@ -61,9 +62,9 @@ export async function action({ request }: ActionArgs) {
 
   const { email, password, redirectTo } = result.data;
 
-  const authSession = await signInWithEmail(email, password);
+  const signInResult = await signInWithEmail(email, password);
 
-  if (!authSession) {
+  if (signInResult.status === "error") {
     return json(
       {
         errors: {
@@ -74,13 +75,29 @@ export async function action({ request }: ActionArgs) {
       },
       { status: 400 }
     );
+  } else if (signInResult.status === "Email verification_required") {
+    return redirect(`/verify-email?email=${encodeURIComponent(email)}`);
   }
 
-  return createAuthSession({
-    request,
-    authSession,
-    redirectTo: redirectTo || "/",
-  });
+  // Ensure that user property exists before proceeding
+  if (signInResult.status === "success" && signInResult.authSession) {
+    return createAuthSession({
+      request,
+      authSession: signInResult.authSession,
+      redirectTo: redirectTo || "/",
+    });
+  }
+
+  // Handle any unexpected scenarios
+  return json(
+    {
+      errors: {
+        email: "Something went wrong. Please try again later.",
+        password: null,
+      },
+    },
+    { status: 500 }
+  );
 }
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
