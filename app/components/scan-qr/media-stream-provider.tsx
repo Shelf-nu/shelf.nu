@@ -140,7 +140,7 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
         });
       }
     },
-    [playVideoState, setCurrentVideoDeviceId]
+    [playVideoState, sendNotification]
   );
 
   const stopMediaStream = useCallback<
@@ -167,7 +167,7 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
         icon: { name: "trash", variant: "error" },
       });
     }
-  }, [videoRef, stopVideoState]);
+  }, [videoRef, stopVideoState, sendNotification]);
 
   const onChangeConstraints = useCallback<
     MediaStreamContextValue["onChangeConstraints"]
@@ -244,7 +244,7 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
         });
       }
     },
-    [startMediaStream, stopMediaStream]
+    [startMediaStream, stopMediaStream, sendNotification]
   );
 
   const value = useMemo(
@@ -284,11 +284,12 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
 export const useMediaStream = () => useContext(MediaStreamContext);
 
 export const useStopMediaStream = (stopMediaStream: () => void) => {
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       stopMediaStream();
-    };
-  }, [stopMediaStream]); // Include stopMediaStream as a dependency
+    },
+    [stopMediaStream]
+  ); // Include stopMediaStream as a dependency
 };
 
 type MediaStreamVideoProps = HTMLAttributes<HTMLVideoElement> & {
