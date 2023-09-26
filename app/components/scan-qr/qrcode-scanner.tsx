@@ -48,13 +48,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
 
               if (match) {
                 stopMediaStream();
-                // const qrId = match[4]; // Get the last segment of the URL as the QR id
+                const qrId = match[4]; // Get the last segment of the URL as the QR id
 
                 setScanCompleted(true); // Set the scanCompleted state to true
 
-                window.location.href = scannedData;
+                // window.location.href = scannedData;
 
-                // navigate(`/qr/${qrId}`); (using this way will not close camera access)
+                navigate(`/qr/${qrId}`); 
               } else {
                 sendNotification({
                   title: "QR Code Not Valid",
@@ -72,7 +72,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
 
       stopMediaStream();
     };
-  }, [videoDevices, stopMediaStream]);
+  }, [videoDevices, stopMediaStream, sendNotification]);
 
   return (
     <>
