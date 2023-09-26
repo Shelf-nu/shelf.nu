@@ -54,7 +54,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
 
                 // window.location.href = scannedData;
 
-                navigate(`/qr/${qrId}`); (using this way will not close camera access)
+                navigate(`/qr/${qrId}`); 
               } else {
                 sendNotification({
                   title: "QR Code Not Valid",
