@@ -540,6 +540,46 @@ export async function deleteNote({
   });
 }
 
+export async function duplicateAsset({
+  asset,
+  userId,
+  amountOfDuplicates,
+}: {
+  asset: Prisma.AssetGetPayload<{ include: { custody: true } }>;
+  userId: string;
+  amountOfDuplicates: number;
+}) {
+  const duplicatedAssets = [];
+
+  for (let i = 0; i < amountOfDuplicates; i++) {
+    const duplicatedAsset = await db.asset.create({
+      data: {
+        title: asset.title,
+        description: asset.description,
+        mainImage: asset.mainImage,
+        mainImageExpiration: asset.mainImageExpiration,
+        status: asset.status,
+        user: { connect: { id: userId } },
+        organization: asset.organizationId
+          ? { connect: { id: asset.organizationId } }
+          : undefined,
+        category: asset.categoryId
+          ? { connect: { id: asset.categoryId } }
+          : undefined,
+        location: asset.locationId
+          ? { connect: { id: asset.locationId } }
+          : undefined,
+        custody: asset.custody
+          ? { connect: { id: asset.custody.id } }
+          : undefined,
+      },
+    });
+    duplicatedAssets.push(duplicatedAsset);
+  }
+
+  return duplicatedAssets;
+}
+
 /** Fetches all related entries required for creating a new asset */
 export async function getAllRelatedEntries({
   userId,

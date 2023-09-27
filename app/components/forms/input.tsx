@@ -15,7 +15,7 @@ export interface InputProps
    * - input
    * - textarea
    */
-  inputType?: "input" | "textarea";
+  inputType?: "input" | "textarea" | "number";
 
   /** Weather the label is hidden */
   hideLabel?: boolean;
@@ -103,6 +103,10 @@ const Input = forwardRef(function Input(
     // @TODO dont know how to fix that.
     // @ts-ignore
     input = <textarea {...inputProps} rows={rest.rows || 8} />;
+  } else if (inputType === "number") {
+    // @TODO dont know how to fix that.
+    // @ts-ignore
+    input = <input {...inputProps} type="number" />;
   }
 
   return (
