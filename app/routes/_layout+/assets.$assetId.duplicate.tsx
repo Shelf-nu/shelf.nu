@@ -39,7 +39,7 @@ export const action = async ({ request, params }: ActionArgs) => {
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({
     where: { id: assetId },
-    include: { custody: true },
+    include: { custody: { include: { custodian: true } } },
   });
   if (!asset) {
     throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
