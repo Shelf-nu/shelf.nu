@@ -63,9 +63,6 @@ export async function signInWithEmail(
     password,
   });
 
-  console.log(data);
-  console.log(error);
-
   if (error) {
     return {status: "error", message: error.message };
     
