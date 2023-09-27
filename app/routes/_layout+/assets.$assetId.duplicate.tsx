@@ -1,6 +1,13 @@
 import type { ActionArgs, LoaderArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
+import { parseFormAny, useZorm } from "react-zorm";
+import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import Input from "~/components/forms/input";
 import { Badge, Button } from "~/components/shared";
@@ -32,6 +39,12 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   });
 };
 
+const DuplicateAssetSchema = z.object({
+  amountOfDuplicates: z
+    .string()
+    .min(1, { message: "There should be at least 1 duplicate!" }),
+});
+
 export const action = async ({ request, params }: ActionArgs) => {
   assertIsPost(request);
 
@@ -46,11 +59,18 @@ export const action = async ({ request, params }: ActionArgs) => {
   }
 
   const formData = await request.formData();
-  const amountOfDuplicates =
-    (formData.get("amountOfDuplicates") as string) ?? 1;
+  const result = await DuplicateAssetSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
+
+  if (!result.success) {
+    return json({ errors: result.error }, { status: 400 });
+  }
+
+  const amountOfDuplicates = Number(result.data.amountOfDuplicates);
 
   const allowedDuplicates = Math.min(
-    Number(amountOfDuplicates),
+    amountOfDuplicates,
     MAX_DUPLICATES_ALLOWED
   );
 
@@ -77,12 +97,16 @@ export function links() {
 }
 
 export default function DuplicateAsset() {
+  const zo = useZorm("DuplicateAsset", DuplicateAssetSchema);
   const { asset } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isProcessing = isFormProcessing(navigation.state);
+  const data = useActionData<{
+    errors: { amountOfDuplicates: string };
+  }>();
 
   return (
-    <Form method="post">
+    <Form ref={zo.ref} method="post">
       <div className="modal-content-wrapper space-y-6">
         <div className="w-full border-b pb-4 text-lg font-semibold">
           Duplicate asset
@@ -115,15 +139,20 @@ export default function DuplicateAsset() {
         </div>
 
         <Input
+          type="number"
           label="Amount of duplicates"
-          name="amountOfDuplicates"
+          name={zo.fields.amountOfDuplicates()}
           defaultValue={1}
           placeholder="How many duplicates assets you want to create for this asset ?"
-          data-test-id="amountOfDuplicates"
-          min="1"
-          max={MAX_DUPLICATES_ALLOWED.toString()}
           className="w-full"
           disabled={isProcessing}
+          required
+          error={
+            zo.errors.amountOfDuplicates()?.message ||
+            data?.errors?.amountOfDuplicates
+          }
+          min={1}
+          max={MAX_DUPLICATES_ALLOWED}
         />
 
         <div className="flex gap-3">
