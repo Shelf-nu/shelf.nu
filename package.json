@@ -108,7 +108,6 @@
     "eslint": "^8.44.0",
     "eslint-config-prettier": "^8.8.0",
     "eslint-plugin-tailwindcss": "^3.13.0",
-    "eslint-plugin-unused-imports": "^3.0.0",
     "happy-dom": "^10.0.3",
     "msw": "^1.2.2",
     "nodemailer-mock": "^2.0.1",
