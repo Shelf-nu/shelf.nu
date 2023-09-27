@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useContext, useState } from "react";
+import { useNavigate } from "@remix-run/react";
 import {
   BrowserMultiFormatReader,
   DecodeHintType,
@@ -24,6 +25,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
   const { stopMediaStream } = useMediaStream();
   useStopMediaStream(stopMediaStream);
   const [scanCompleted, setScanCompleted] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const codeReader = new BrowserMultiFormatReader();
@@ -54,7 +56,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
 
                 // window.location.href = scannedData;
 
-                navigate(`/qr/${qrId}`); 
+                navigate(`/qr/${qrId}`);
               } else {
                 sendNotification({
                   title: "QR Code Not Valid",
@@ -72,7 +74,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
 
       stopMediaStream();
     };
-  }, [videoDevices, stopMediaStream, sendNotification]);
+  }, [videoDevices, stopMediaStream, sendNotification, navigate]);
 
   return (
     <>
