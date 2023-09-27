@@ -554,7 +554,9 @@ export async function duplicateAsset({
   for (let i = 0; i < amountOfDuplicates; i++) {
     const duplicatedAsset = await db.asset.create({
       data: {
-        title: asset.title,
+        title: `${asset.title} (copy ${
+          amountOfDuplicates > 1 ? i : ""
+        } ${Date.now()})`,
         description: asset.description,
         mainImage: asset.mainImage,
         mainImageExpiration: asset.mainImageExpiration,
