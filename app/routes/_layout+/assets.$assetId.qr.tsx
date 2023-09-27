@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import type { Asset } from "@prisma/client";
-import type { LoaderArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
 import domtoimage from "dom-to-image";
@@ -13,7 +13,7 @@ import { getCurrentSearchParams, slugify } from "~/utils";
 
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
-export async function loader({ request, params }: LoaderArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
   const { assetId } = params as { assetId: string };
   const searchParams = getCurrentSearchParams(request);

@@ -1,9 +1,5 @@
 import { OrganizationType, Roles } from "@prisma/client";
-import type {
-  LinksFunction,
-  LoaderArgs,
-  LoaderFunction,
-} from "@remix-run/node";
+import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Outlet } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
@@ -25,7 +21,7 @@ import {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
-export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession

@@ -1,5 +1,9 @@
 import { OrganizationType } from "@prisma/client";
-import type { ActionArgs, V2_MetaFunction, LoaderArgs } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  MetaFunction,
+  LoaderFunctionArgs,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import {
@@ -26,7 +30,7 @@ import {
   extractCSVDataFromContentImport,
 } from "~/utils/import.server";
 
-export const action = async ({ request }: ActionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   const { userId } = await requireAuthSession(request);
 
   try {
@@ -66,7 +70,7 @@ export const action = async ({ request }: ActionArgs) => {
   }
 };
 
-export const loader = async ({ request }: LoaderArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { userId } = await requireAuthSession(request);
   await assertUserCanImportAssets({ userId });
 
@@ -77,7 +81,7 @@ export const loader = async ({ request }: LoaderArgs) => {
   });
 };
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 

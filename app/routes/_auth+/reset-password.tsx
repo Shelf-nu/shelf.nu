@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -19,7 +23,7 @@ import {
 import { assertIsPost, isFormProcessing, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
   const title = "Set new password";
   const subHeading =
@@ -50,7 +54,7 @@ const ResetPasswordSchema = z
     return { password, confirmPassword, refreshToken };
   });
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const formData = await request.formData();
@@ -102,7 +106,7 @@ export async function action({ request }: ActionArgs) {
   });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { json, redirect } from "@remix-run/node";
-import type { LoaderArgs, ActionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { useActionData, useFetcher, useSearchParams } from "@remix-run/react";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
@@ -19,7 +19,7 @@ import { assertIsPost, randomUsernameFromEmail, safeRedirect } from "~/utils";
 
 // imagine a user go back after OAuth login success or type this URL
 // we don't want him to fall in a black hole 👽
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
 
   if (authSession) return redirect("/");
@@ -27,7 +27,7 @@ export async function loader({ request }: LoaderArgs) {
   return json({});
 }
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const formData = await request.formData();

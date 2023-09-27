@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import * as Toast from "@radix-ui/react-toast";
 
 import { useAtom } from "jotai";
-import { useEventSource } from "remix-utils";
+import { useEventSource } from "remix-utils/use-event-source";
 import {
   clearNotificationAtom,
   showNotificationAtom,

@@ -1,4 +1,8 @@
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 
 import { Form, useActionData, useNavigation } from "@remix-run/react";
@@ -43,7 +47,7 @@ export const UpdateFormSchema = z.object({
   lastName: z.string().optional(),
 });
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
 
@@ -121,7 +125,7 @@ export async function action({ request }: ActionArgs) {
   }
 }
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
 
   const title = "User Settings";
@@ -129,7 +133,7 @@ export async function loader({ request }: LoaderArgs) {
   return json({ title });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 

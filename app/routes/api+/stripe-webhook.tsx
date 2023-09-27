@@ -1,11 +1,11 @@
 import { TierId } from "@prisma/client";
-import type { ActionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type Stripe from "stripe";
 import { db } from "~/database";
 import { fetchStripeSubscription, stripe } from "~/utils/stripe.server";
 
-export const action = async ({ request }: ActionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   const payload = await request.text();
   const sig = request.headers.get("stripe-signature") as string;
   let event;

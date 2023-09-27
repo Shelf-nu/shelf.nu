@@ -1,4 +1,4 @@
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
   Link,
@@ -16,7 +16,7 @@ export const handle = {
   breadcrumb: () => <Link to="/settings">Settings</Link>,
 };
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
   const title = "Settings";
   const subHeading = "Manage your preferences here.";
@@ -27,7 +27,7 @@ export async function loader({ request }: LoaderArgs) {
   return json({ header });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 

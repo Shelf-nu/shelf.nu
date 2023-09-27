@@ -1,4 +1,4 @@
-import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { UserXIcon } from "~/components/icons";
@@ -11,7 +11,7 @@ import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export const loader = async ({ request, params }: LoaderArgs) => {
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await requireAuthSession(request);
   const custody = await db.custody.findUnique({
     where: { assetId: params.assetId as string },
@@ -39,7 +39,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   });
 };
 
-export const action = async ({ request, params }: ActionArgs) => {
+export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { userId } = await requireAuthSession(request);
   const assetId = params.assetId as string;
 

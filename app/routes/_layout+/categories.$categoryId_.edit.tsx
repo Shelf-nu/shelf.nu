@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -29,7 +29,7 @@ export const UpdateCategoryFormSchema = z.object({
 
 const title = "Edit category";
 
-export async function loader({ request, params }: LoaderArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireAuthSession(request);
 
   const id = getRequiredParam(params, "categoryId");
@@ -44,11 +44,11 @@ export async function loader({ request, params }: LoaderArgs) {
   return json({ header, colorFromServer, category });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request, params }: LoaderArgs) {
+export async function action({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
   const formData = await request.formData();

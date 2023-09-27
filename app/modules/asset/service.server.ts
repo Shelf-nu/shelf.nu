@@ -13,7 +13,7 @@ import type {
   AssetCustomFieldValue,
 } from "@prisma/client";
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
-import { type LoaderArgs } from "@remix-run/node";
+import { type LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import {
   dateTimeInUnix,
@@ -575,7 +575,7 @@ export const getPaginatedAndFilterableAssets = async ({
   request,
   userId,
 }: {
-  request: LoaderArgs["request"];
+  request: LoaderFunctionArgs["request"];
   userId: User["id"];
 }) => {
   const searchParams = getCurrentSearchParams(request);

@@ -1,11 +1,11 @@
-import type { RouteMatch } from "@remix-run/react";
+import type { UIMatch } from "@remix-run/react";
 import { ChevronRight } from "~/components/icons/library";
 
 export function Breadcrumb({
   match,
   isLastItem,
 }: {
-  match: RouteMatch;
+  match: UIMatch;
   isLastItem: boolean;
 }) {
   let breadcrumb = match?.handle?.breadcrumb(match);

@@ -1,10 +1,10 @@
-import type { LoaderArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 
-import { eventStream } from "remix-utils";
+import { eventStream } from "remix-utils/event-stream";
 import { requireAuthSession } from "~/modules/auth";
 import { emitter } from "~/utils/emitter/emitter.server";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
 
   return eventStream(request.signal, function setup(send) {

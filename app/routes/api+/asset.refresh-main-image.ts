@@ -1,10 +1,10 @@
-import { json, type ActionArgs } from "@remix-run/node";
+import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { updateAsset } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { assertIsPost, oneDayFromNow } from "~/utils";
 import { createSignedUrl } from "~/utils/storage.server";
 
-export const action = async ({ request }: ActionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   assertIsPost(request);
   await requireAuthSession(request);
   const formData = await request.formData();
