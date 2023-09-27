@@ -102,7 +102,7 @@ const Input = forwardRef(function Input(
   if (inputType === "textarea") {
     // @TODO dont know how to fix that.
     // @ts-ignore
-    input = <textarea {...inputProps} rows={rest.rows || 8} />;
+    input = <textarea {...inputProps} maxLength={rest.maxLength || 250} rows={rest.rows || 8} />;
   }
 
   return (
