@@ -52,11 +52,12 @@ export async function generateCode({
   code.addData(`${process.env.SERVER_URL}/qr/${qr.id}`);
   code.make();
 
+  /** We use a margin of 0 because we handle this using canvas in the client */
   const sizes = {
-    cable: [1, 6], // 45px => 1.2cm(1.19)
-    small: [2, 14], // 94px => 2.5cm(2.48)
-    medium: [4, 19], // 170px => 4.5cm(4.49)
-    large: [6], // 246px => 6.50cm
+    cable: [1, 0], // 29px => 0.8cm(0.77)
+    small: [2, 0], // 58px => 1.5cm(1.53)
+    medium: [4, 0], // 116px => 3.1cm(3.07)
+    large: [6, 0], // 174px => 4.7cm(4.6)
   };
   const src = await gifToPng(code.createDataURL(...sizes[size]));
 
