@@ -57,28 +57,28 @@ export async function resendVerificationEmail(email: string) {
 export async function signInWithEmail(
   email: string,
   password: string
-): Promise<{ status: string; authSession?: any }> {
+){
   const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({
     email,
     password,
   });
 
-  if (error) {
-    if (error.message === "Email not confirmed") {
-      return { status: "Email verification_required" };
-    } else {
-      return { status: "error" };
-    }
-  }
+  console.log(data);
+  console.log(error);
 
+  if (error) {
+    return {status: "error", message: error.message };
+    
+  }
+;
   if (!data.session) {
-    return { status: "error" };
+    return { status: "error", message: "something went wrong try login again"};
   }
 
   const mappedSession = mapAuthSession(data.session);
 
   if (!mappedSession) {
-    return { status: "error" };
+    return { status: "error",  message: "something went wrong try login again"};
   }
 
   return { status: "success", authSession: mappedSession };

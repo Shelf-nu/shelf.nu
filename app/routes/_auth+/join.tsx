@@ -76,7 +76,7 @@ export async function action({ request }: ActionArgs) {
 
   if (existingUser) {
     return json(
-      { errors: { email: "user-already-exist", password: null } },
+      { errors: { email: "User with this Email already exits, login instead", password: null } },
       { status: 400 }
     );
   }
@@ -141,7 +141,7 @@ export default function Join() {
               autoComplete="email"
               disabled={disabled}
               inputClassName="w-full"
-              error={zo.errors.email()?.message}
+              error={zo.errors.email()?.message || data?.errors?.email}
             />
           </div>
 
@@ -154,7 +154,7 @@ export default function Join() {
             autoComplete="new-password"
             disabled={disabled}
             inputClassName="w-full"
-            error={zo.errors.password()?.message || data?.errors?.email}
+            error={zo.errors.password()?.message }
           />
           <PasswordInput
             label="Confirm Password"
