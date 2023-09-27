@@ -18,7 +18,8 @@ import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
-export const loader = async ({ params }: LoaderArgs) => {
+export const loader = async ({ request, params }: LoaderArgs) => {
+  await requireAuthSession(request);
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({ where: { id: assetId } });
   if (!asset) {
