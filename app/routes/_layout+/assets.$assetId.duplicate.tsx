@@ -114,7 +114,6 @@ export default function DuplicateAsset() {
         </div>
 
         <Input
-          inputType="number"
           label="Amount of duplicates"
           name="amountOfDuplicates"
           defaultValue={1}
