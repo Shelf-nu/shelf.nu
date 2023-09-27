@@ -551,7 +551,7 @@ export async function duplicateAsset({
 }) {
   const duplicatedAssets = [];
 
-  for (let i = 0; i < amountOfDuplicates; i++) {
+  for (const i of [...Array(amountOfDuplicates)].keys()) {
     const duplicatedAsset = await db.asset.create({
       data: {
         title: `${asset.title} (copy ${
