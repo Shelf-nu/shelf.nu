@@ -7,6 +7,7 @@ import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/custom-fields.new";
 import { useOrganizationId } from "~/hooks/use-organization-id";
 import { isFormProcessing } from "~/utils";
+import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -60,13 +61,6 @@ const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
   MULTILINE_TEXT: "A place to store longer, multiline information for your asset. For instance: Descriptions, comments, or detailed notes."
 };
 
-const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
-  BOOLEAN: "Boolean",
-  DATE: "Date",
-  MULTILINE_TEXT: "MultiLine Text",
-  OPTION: "Option",
-  TEXT: "Text"
-}
 
 export const CustomFieldForm = ({
   options: opts,
@@ -144,10 +138,10 @@ export const CustomFieldForm = ({
               align="start"
             >
               <div className=" max-h-[320px] overflow-auto">
-                {Object.values(CustomFieldType).map((value) => (
+                {Object.keys(FIELD_TYPE_NAME).map((value) => (
                   <SelectItem value={value} key={value}>
                     <span className="mr-4 text-[14px] text-gray-700">
-                      {FIELD_TYPE_NAME[value]}
+                      {FIELD_TYPE_NAME[value as CustomFieldType]}
                     </span>
                   </SelectItem>
                 ))}

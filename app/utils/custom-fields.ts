@@ -32,15 +32,13 @@ const getSchema = ({
     })
     : z.string(params).optional();
 
-  const date = required ? z.string(params) : z.string(params).optional()
-
   const option = required ? z.string(params) : z.string(params).optional()
 
   return {
     text,
     multiline_text: text,
     number: z.number(params),
-    date,
+    date:text,
     boolean: z.string(params).optional().transform((val) => val === "on" ? true : false),
     option: option.transform((v, ctx) => {
       if (v && !options?.includes(v)) {
@@ -149,4 +147,13 @@ export const getDefinitionFromCsvHeader = (header: string): Pick<CustomField, "h
   let type = defArr.find(e => e.toLowerCase().startsWith("type:"))?.substring(5) || "text" //"text"
   type = type.replace(/\s+/g, "_").toUpperCase()
   return { name, active: true, helpText: "", required: false, type: type as CustomFieldType }
+}
+
+// order of the keys control the UI form dorpdown order, so dont change unless u know what you are doing
+export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
+  TEXT: "Single-line text",
+  MULTILINE_TEXT: "Multi-line text",
+  OPTION: "Option",
+  BOOLEAN: "Boolean",
+  DATE: "Date",
 }
