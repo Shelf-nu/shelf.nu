@@ -1,16 +1,11 @@
+import type { UIMatch } from "@remix-run/react";
 import { ChevronRight } from "~/components/icons/library";
 
 export function Breadcrumb({
   match,
   isLastItem,
 }: {
-  match: {
-    handle: {
-      breadcrumb: (match: {
-        data: { location: { name: string } } | { asset: { title: string } };
-      }) => string;
-    };
-  };
+  match: UIMatch<any, any>;
   isLastItem: boolean;
 }) {
   let breadcrumb = match?.handle?.breadcrumb(match);
