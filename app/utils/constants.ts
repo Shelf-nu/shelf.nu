@@ -1,1 +1,1 @@
-export const MAX_DUPLICATES_ALLOWED = 50;
+export const MAX_DUPLICATES_ALLOWED = 10;

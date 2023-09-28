@@ -603,7 +603,7 @@ export async function duplicateAsset({
     if (asset.mainImage) {
       const imagePath = await uploadDuplicateAssetMainImage(
         asset.mainImage,
-        asset.id,
+        duplicatedAsset.id,
         userId
       );
 

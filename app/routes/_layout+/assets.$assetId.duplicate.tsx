@@ -40,8 +40,8 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 };
 
 const DuplicateAssetSchema = z.object({
-  amountOfDuplicates: z
-    .string()
+  amountOfDuplicates: z.coerce
+    .number()
     .min(1, { message: "There should be at least 1 duplicate!" })
     .max(MAX_DUPLICATES_ALLOWED, {
       message: `There can be a max of ${MAX_DUPLICATES_ALLOWED} duplicates!`,
@@ -149,8 +149,6 @@ export default function DuplicateAsset() {
             zo.errors.amountOfDuplicates()?.message ||
             data?.errors?.amountOfDuplicates
           }
-          min={1}
-          max={MAX_DUPLICATES_ALLOWED}
         />
 
         <div className="flex gap-3">
