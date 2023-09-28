@@ -42,7 +42,10 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 const DuplicateAssetSchema = z.object({
   amountOfDuplicates: z
     .string()
-    .min(1, { message: "There should be at least 1 duplicate!" }),
+    .min(1, { message: "There should be at least 1 duplicate!" })
+    .max(MAX_DUPLICATES_ALLOWED, {
+      message: `There can be a max of ${MAX_DUPLICATES_ALLOWED} duplicates!`,
+    }),
 });
 
 export const action = async ({ request, params }: ActionArgs) => {
@@ -69,15 +72,10 @@ export const action = async ({ request, params }: ActionArgs) => {
 
   const amountOfDuplicates = Number(result.data.amountOfDuplicates);
 
-  const allowedDuplicates = Math.min(
-    amountOfDuplicates,
-    MAX_DUPLICATES_ALLOWED
-  );
-
   const duplicatedAssets = await duplicateAsset({
     asset,
     userId,
-    amountOfDuplicates: allowedDuplicates,
+    amountOfDuplicates,
   });
 
   sendNotification({
@@ -88,7 +86,7 @@ export const action = async ({ request, params }: ActionArgs) => {
   });
 
   return redirect(
-    `/assets/${allowedDuplicates > 1 ? "" : duplicatedAssets[0].id}`
+    `/assets/${amountOfDuplicates > 1 ? "" : duplicatedAssets[0].id}`
   );
 };
 
