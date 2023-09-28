@@ -67,7 +67,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 export default function ContactOwner() {
   const zo = useZorm("NewQuestionWizardScreen", NewReportSchema);
-  const data = useActionData();
+  const data = useActionData<typeof action>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   usePosition();

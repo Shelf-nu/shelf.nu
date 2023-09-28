@@ -114,6 +114,7 @@ export async function action({ request }: ActionFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
+
     return json(
       { success: true },
       {
@@ -142,7 +143,9 @@ export default function UserPage() {
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const data = useActionData<UpdateUserResponse>();
+  const errors = data?.errors as UpdateUserResponse['errors']
   const user = useUserData();
+  const usernameError = errors?.username || zo.errors.username()?.message; 
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
@@ -227,7 +230,7 @@ export default function UserPage() {
             type="text"
             name={zo.fields.username()}
             defaultValue={user?.username || undefined}
-            error={zo.errors.username()?.message || data?.errors?.username}
+            error={usernameError}
             className="w-full"
             inputClassName="flex-1"
             required={zodFieldIsRequired(UpdateFormSchema.shape.username)}

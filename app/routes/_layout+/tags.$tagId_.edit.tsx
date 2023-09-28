@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
@@ -14,7 +13,6 @@ import {
   assertIsPost,
   getRequiredParam,
   isFormProcessing,
-  handleInputChange,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -86,14 +84,8 @@ export default function EditTag() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateTagFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  const { tag } = useLoaderData();
-
-  const [formData, setFormData] = useState<{ [key: string]: any }>({
-    name: tag.name,
-    description: tag.description,
-  });
-
-  return (
+  const { tag } = useLoaderData<typeof loader>();
+  return tag ? (
     <>
       <Form
         method="post"
@@ -110,9 +102,8 @@ export default function EditTag() {
             error={zo.errors.name()?.message}
             hideErrorText
             autoFocus
-            value={formData.name}
-            onChange={(e) => handleInputChange(e, setFormData, "name")}
             required={zodFieldIsRequired(UpdateTagFormSchema.shape.name)}
+            defaultValue={tag.name}
           />
           <Input
             label="Description"
@@ -121,9 +112,8 @@ export default function EditTag() {
             disabled={disabled}
             data-test-id="tagDescription"
             className="mb-4 lg:mb-0"
-            value={formData.description}
-            onChange={(e) => handleInputChange(e, setFormData, "description")}
             required={zodFieldIsRequired(UpdateTagFormSchema.shape.description)}
+            defaultValue={tag.description || undefined}
           />
         </div>
 
@@ -137,5 +127,5 @@ export default function EditTag() {
         </div>
       </Form>
     </>
-  );
+  ) : null
 }

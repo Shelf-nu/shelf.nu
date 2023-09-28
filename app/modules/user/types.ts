@@ -16,6 +16,7 @@ export interface UpdateUserResponse {
   user: User | null;
   errors: {
     /** key is the field name, value is the error message */
+    username: string | null;
     [k: string]: string | unknown;
   } | null;
 

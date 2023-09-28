@@ -98,7 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function Onboarding() {
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
-  const { user } = useLoaderData();
+  const { user } = useLoaderData<typeof loader>();
 
   return (
     <div>
