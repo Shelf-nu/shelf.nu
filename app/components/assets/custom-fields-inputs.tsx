@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { useState } from "react";
-import type { CustomField, CustomFieldType } from "@prisma/client";
+import { CustomField, CustomFieldType } from "@prisma/client";
 import { CalendarIcon } from "@radix-ui/react-icons";
 import { Popover, PopoverContent, PopoverTrigger } from "@radix-ui/react-popover";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
@@ -64,8 +64,10 @@ export default function AssetCustomFields({
       <Popover>
         <PopoverTrigger asChild>
           <Button
+            error={zo.errors[`cf-${field.id}`]()?.message}
+            variant="secondary"
             className={tw(
-              "w-[290px] pl-1 text-left font-normal",
+              "w-full min-w-[300px] pl-1 text-left font-normal",
               !dateObj[field.id] && "text-muted-foreground"
             )}
           >

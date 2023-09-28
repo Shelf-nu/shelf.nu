@@ -34,6 +34,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       children,
       title,
       onlyIconOnMobile,
+      error,
+      hideErrorText = false,
       ...props
     }: ButtonProps,
     ref
@@ -83,24 +85,30 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       widths[width],
       disabledStyles,
       attachedStyles,
-      className
+      className,
+      error ? "border-error-300 focus:border-error-300 focus:ring-error-100" : ""
     );
 
     return (
-      <Component
-        className={finalStyles}
-        prefetch={props.to ? "intent" : "none"}
-        {...props}
-        title={title}
-        ref={ref}
-      >
-        {icon && iconsMap[icon]}{" "}
-        {children ? (
-          <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>
-            {children}
-          </span>
-        ) : null}
-      </Component>
+      <>
+        <Component
+          className={finalStyles}
+          prefetch={props.to ? "intent" : "none"}
+          {...props}
+          title={title}
+          ref={ref}
+        >
+          {icon && iconsMap[icon]}{" "}
+          {children ? (
+            <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>
+              {children}
+            </span>
+          ) : null}
+        </Component>
+        {!hideErrorText && error && (
+          <div className="text-sm text-error-500">{error}</div>
+        )}
+      </>
     );
   }
 );
