@@ -35,7 +35,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
    * that is still there. Will we allow someone to claim it?
    */
   if (!qr) {
-    throw new ShelfStackError({message:"Not found"});
+    throw new ShelfStackError({ message: "Not found" });
   }
 
   /**

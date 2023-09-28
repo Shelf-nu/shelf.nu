@@ -324,7 +324,7 @@ export async function updateProfilePicture({
 
 export async function deleteUser(id: User["id"]) {
   if (!id) {
-    throw new ShelfStackError({message:"User ID is required"});
+    throw new ShelfStackError({ message: "User ID is required" });
   }
 
   try {

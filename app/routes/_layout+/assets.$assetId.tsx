@@ -52,7 +52,7 @@ export async function loader({ request, params }: LoaderArgs) {
 
   const asset = await getAsset({ userId, id });
   if (!asset) {
-    throw new ShelfStackError({message:"Asset Not Found",  status: 404 });
+    throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
   }
   /** We get the first QR code(for now we can only have 1)
    * And using the ID of tha qr code, we find the latest scan

@@ -24,8 +24,9 @@ export const SearchFieldTooltip = () => {
             </h6>
             <p className="text-xs font-medium text-gray-500">
               Search database entries on asset name or <b>description</b>,
-              <b>category</b>, <b>tag</b>, <b>location</b>, <b>custodian names</b>. Separate your keywords
-              with spaces for the best results.
+              <b>category</b>, <b>tag</b>, <b>location</b>,{" "}
+              <b>custodian names</b>. Separate your keywords with spaces for the
+              best results.
             </p>
           </div>
         </TooltipContent>

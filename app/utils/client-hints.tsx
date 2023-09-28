@@ -19,7 +19,7 @@ type ClientHintNames = keyof typeof clientHints;
 function getCookieValue(cookieString: string, name: ClientHintNames) {
   const hint = clientHints[name];
   if (!hint) {
-    throw new ShelfStackError({message:`Unknown client hint: ${name}`});
+    throw new ShelfStackError({ message: `Unknown client hint: ${name}` });
   }
   const value = cookieString
     .split(";")
@@ -57,11 +57,11 @@ export function getHints(request?: Request) {
       return acc;
     },
     {} as {
-      [name in ClientHintNames]: typeof clientHints[name] extends {
+      [name in ClientHintNames]: (typeof clientHints)[name] extends {
         transform: (value: any) => infer ReturnValue;
       }
         ? ReturnValue
-        : typeof clientHints[name]["fallback"];
+        : (typeof clientHints)[name]["fallback"];
     }
   );
 }
