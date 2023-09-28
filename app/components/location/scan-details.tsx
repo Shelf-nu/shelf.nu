@@ -1,17 +1,18 @@
 import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared";
+import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
 
 export function ScanDetails() {
-  const { lastScan } = useLoaderData();
+  const { lastScan } = useLoaderData<typeof loader>();
   let latitude, longitude;
 
   const hasLocation = lastScan?.coordinates !== "Unknown location";
 
   if (hasLocation) {
-    latitude = lastScan?.coordinates.split(",")[0];
-    longitude = lastScan?.coordinates.split(",")[1];
+    latitude = lastScan?.coordinates.split(",")[0]
+    longitude = lastScan?.coordinates.split(",")[1]
   }
 
   return (
@@ -22,8 +23,8 @@ export function ScanDetails() {
           <div className="overflow-hidden border-b">
             {hasLocation ? (
               <ShelfMap
-                latitude={parseFloat(latitude)}
-                longitude={parseFloat(longitude)}
+                latitude={parseFloat(latitude as string)}
+                longitude={parseFloat(longitude as string)}
               />
             ) : (
               <MapPlaceholder />

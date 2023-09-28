@@ -32,11 +32,19 @@ import {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { userId } = await requireAuthSession(request);
+  const error = {
+    message: "",
+    details: {
+      code: null,
+    },
+  };
 
   try {
     const { user } = await assertUserCanImportAssets({ userId });
 
-    const intent = (await request.clone().formData()).get("intent") as string;
+    const intent = (await request.clone().formData()).get("intent") as
+      | "backup"
+      | "content";
     const personalOrg = user?.organizations.find(
       (org) => org.type === OrganizationType.PERSONAL
     );
@@ -53,7 +61,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           userId,
           organizationId: personalOrg?.id || "",
         });
-        return json({ success: true });
+        return json({ success: true, error }, { status: 200 });
       case "content":
         const contentData = extractCSVDataFromContentImport(csvData);
         await createAssetsFromContentImport({
@@ -61,12 +69,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           userId,
           organizationId: personalOrg?.id || "",
         });
-        return json({ success: true });
+        return json({ success: true, error }, { status: 200 });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid CSV file";
 
-    return json({ error: { message } }, { status: 400 });
+    return json(
+      {
+        success: false,
+        error: {
+          message,
+          details: {
+            code: null,
+          },
+        },
+      },
+      { status: 400 }
+    );
   }
 };
 

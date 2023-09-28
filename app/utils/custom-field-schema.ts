@@ -35,7 +35,7 @@ const getSchema = ({
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 
-type CustomFieldZodSchema = {
+export type CustomFieldZodSchema = {
   id: string;
   name: string;
   type: "text" | "number" | "date" | "boolean";

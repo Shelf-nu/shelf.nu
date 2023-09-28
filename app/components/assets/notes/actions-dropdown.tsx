@@ -1,4 +1,3 @@
-import type { Note } from "@prisma/client";
 
 import { HorizontalDotsIcon } from "~/components/icons";
 import {
@@ -9,10 +8,10 @@ import {
 import { DeleteNote } from "./delete-note";
 
 interface Props {
-  note: Note;
+  noteId: string;
 }
 
-export const ActionsDopdown = ({ note }: Props) => (
+export const ActionsDopdown = ({ noteId }: Props) => (
   <DropdownMenu modal={false}>
     <DropdownMenuTrigger>
       <HorizontalDotsIcon />
@@ -22,7 +21,7 @@ export const ActionsDopdown = ({ note }: Props) => (
       className="order w-[180px] rounded-md bg-white p-1.5 text-right"
     >
       <div className="relative flex  select-none items-center rounded p-2 text-left text-[13px] leading-none outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-gradient-to-br hover:bg-gray-100">
-        <DeleteNote note={note} />
+        <DeleteNote noteId={noteId} />
       </div>
     </DropdownMenuContent>
   </DropdownMenu>

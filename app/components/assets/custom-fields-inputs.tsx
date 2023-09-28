@@ -1,4 +1,3 @@
-import type { CustomField } from "@prisma/client";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
 import type { Zorm } from "react-zorm";
 import type { z } from "zod";
@@ -18,7 +17,7 @@ export default function AssetCustomFields({
   schema: z.ZodObject<any, any, any>;
 }) {
   /** Get the custom fields from the loader */
-  const { customFields } = useLoaderData();
+  const { customFields } = useLoaderData<typeof loader>();
 
   const { customFields: customFieldsValues } =
     useLoaderData<typeof loader>()?.asset || [];
@@ -38,7 +37,7 @@ export default function AssetCustomFields({
         </Link>
       </div>
       {customFields.length > 0 ? (
-        customFields.map((field: CustomField) => (
+        customFields.map((field) => (
           <FormRow
             key={field.id}
             rowLabel={field.name}

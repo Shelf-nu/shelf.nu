@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { Asset } from "@prisma/client";
 
 import { useFetcher } from "@remix-run/react";
+import type { action } from "~/routes/api+/asset.refresh-main-image";
 import { tw } from "~/utils";
 
 export const AssetImage = ({
@@ -18,10 +19,12 @@ export const AssetImage = ({
   className?: string;
   rest?: HTMLImageElement;
 }) => {
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<typeof action>();
   const { assetId, mainImage, mainImageExpiration, alt } = asset;
   const url =
-    mainImage || fetcher?.data?.mainImage || "/images/asset-placeholder.jpg";
+    mainImage ||
+    fetcher?.data?.asset?.mainImage ||
+    "/images/asset-placeholder.jpg";
 
   useEffect(() => {
     if (mainImage && mainImageExpiration) {

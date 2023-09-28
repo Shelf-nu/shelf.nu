@@ -1,13 +1,14 @@
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { useUserData } from "~/hooks";
+import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isFormProcessing } from "~/utils";
 import { NewNote } from "./new";
 import type { NoteWithDate } from "./note";
 import { Note } from "./note";
 
 export const Notes = () => {
-  const { asset } = useLoaderData();
+  const { asset } = useLoaderData<typeof loader>();
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
   const hasNotes = asset?.notes.length > 0;
@@ -40,7 +41,7 @@ export const Notes = () => {
               </div>
             </li>
           ) : null}
-          {asset.notes.map((note: NoteWithDate) => (
+          {(asset.notes as NoteWithDate[]).map((note) => (
             <Note key={note.id} note={note} />
           ))}
         </ul>
