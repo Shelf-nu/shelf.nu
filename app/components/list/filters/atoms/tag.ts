@@ -19,7 +19,7 @@ export const addInitialSelectedTagsAtom = atom(
   (_get, set, selected: string[]) => {
     set(selectedTagsAtom, (prev) => ({
       ...prev,
-      items: selected
+      items: selected,
     }));
   }
 );
@@ -29,13 +29,12 @@ export const addOrRemoveSelectedTagIdAtom = atom(
   null,
   (_get, set, event: React.ChangeEvent<HTMLInputElement>) => {
     set(selectedTagsAtom, (prev) => {
-
       const node = event.target as HTMLInputElement;
       const id = node.value satisfies string;
       const newSelected = prev.items.includes(id)
         ? prev.items.filter((string) => string !== id)
         : [...prev.items, id];
-      return {isFiltering: true, items: newSelected};
+      return { isFiltering: true, items: newSelected };
     });
   }
 );
@@ -45,16 +44,16 @@ export const addOrRemoveSelectedTagIdAtom = atom(
  * Gets set to false as a callback of the form submit
  * */
 export const toggleIsFilteringTagsAtom = atom(
-  (get) => get(selectedTagsAtom).isFiltering, 
+  (get) => get(selectedTagsAtom).isFiltering,
   (get, set) => {
     set(selectedTagsAtom, (prev) => ({
       ...prev,
-      isFiltering: !get(selectedTagsAtom)
-    }))
-})
-
+      isFiltering: !get(selectedTagsAtom),
+    }));
+  }
+);
 
 /** Clears the items. */
-export const clearTagFiltersAtom = atom(null, 
-  (_get, set) => set(selectedTagsAtom, { isFiltering: true, items: [] })
-)
+export const clearTagFiltersAtom = atom(null, (_get, set) =>
+  set(selectedTagsAtom, { isFiltering: true, items: [] })
+);

@@ -91,7 +91,7 @@ export const action = async ({ request, params }: ActionArgs) => {
   });
 
   if (!location) {
-    throw new ShelfStackError({message:"Something went wrong",  status: 500 });
+    throw new ShelfStackError({ message: "Something went wrong", status: 500 });
   }
 
   if (asset) {

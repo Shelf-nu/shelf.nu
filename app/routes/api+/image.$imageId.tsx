@@ -7,12 +7,10 @@ export async function loader({ request, params }: LoaderArgs) {
   const session = await getAuthSession(request);
 
   if (!session)
-    throw new ShelfStackError(
-      {
-        message: "Unauthorized. You are not allowed to view this resource",
-        status: 403
-      }
-    );
+    throw new ShelfStackError({
+      message: "Unauthorized. You are not allowed to view this resource",
+      status: 403,
+    });
   const image = await db.image.findUnique({
     where: { id: params.imageId },
     select: { contentType: true, blob: true, userId: true },
