@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link, useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
-import { BarCodeIcon, ShelfTypography } from "~/components/icons/library";
+import { ScanQRIcon, ShelfTypography } from "~/components/icons/library";
 
 import {
   useMediaStream,
@@ -64,7 +64,7 @@ export default function Sidebar() {
             title="Scan QR Code"
             className="relative flex items-center justify-center px-2 transition"
           >
-            <BarCodeIcon className="h-6 w-6 text-gray-500" />
+            <ScanQRIcon />
           </button>
           <MenuButton />
         </div>

@@ -1,9 +1,10 @@
-import { useMemo, useRef } from "react";
+import React, { useMemo, useRef } from "react";
 import type { Asset } from "@prisma/client";
 import type { LoaderArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Form, Link, useLoaderData, useSubmit } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import domtoimage from "dom-to-image";
+import { useReactToPrint } from "react-to-print";
 import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
@@ -42,10 +43,8 @@ export async function loader({ request, params }: LoaderArgs) {
 
 export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
-  const formRef = useRef<HTMLFormElement>(null);
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
-  const submit = useSubmit();
   const asset = useMatchesData<{ asset: Asset }>(
     "routes/_layout+/assets.$assetId"
   )?.asset;
@@ -58,9 +57,9 @@ export default function QRPreview() {
     [asset, data.qr.id, data.qr.size]
   );
 
-  const handleSizeChange = () => {
-    submit(formRef.current);
-  };
+  // const handleSizeChange = () => {
+  //   submit(formRef.current);
+  // };
 
   function downloadQr(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
     const captureDiv = captureDivRef.current;
@@ -81,6 +80,10 @@ export default function QRPreview() {
     }
   }
 
+  const printQr = useReactToPrint({
+    content: () => captureDivRef.current,
+  });
+
   return asset ? (
     <div className="">
       <header className="mb-6 flex items-center justify-between leading-7">
@@ -90,27 +93,10 @@ export default function QRPreview() {
         </Link>
       </header>
       <div className="mb-4 w-auto rounded-xl border border-solid p-6">
-        <div
-          className="flex h-auto flex-col justify-center gap-1 rounded-md border-[5px] border-[#E3E4E8] bg-white p-3"
-          ref={captureDivRef}
-        >
-          <div className="z-50 max-w-full truncate  text-center text-[12px]">
-            {asset.title}
-          </div>
-          <figure className="qr-code z-[49] flex justify-center">
-            <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
-          </figure>
-          <div className="w-full text-center text-[12px]">
-            <span className="block  text-gray-600">{data.qr.id}</span>
-            <span className="block text-gray-500">
-              Powered by{" "}
-              <span className="font-semibold text-gray-600">shelf.nu</span>
-            </span>
-          </div>
-        </div>
+        <QrLabel ref={captureDivRef} data={data} title={asset.title} />
       </div>
       <ul className="description-list">
-        <li className="mb-4 flex justify-between text-gray-600">
+        {/* <li className="mb-4 flex justify-between text-gray-600">
           <label
             htmlFor="size"
             className="key max-w-[120px] break-words font-medium"
@@ -134,7 +120,7 @@ export default function QRPreview() {
               </select>
             </Form>
           </span>
-        </li>
+        </li> */}
         <li className="mb-4 flex justify-between text-gray-600">
           <span className="key max-w-[120px] break-words font-medium">
             File
@@ -145,18 +131,63 @@ export default function QRPreview() {
         </li>
       </ul>
       {/* using this button to convert html to png and download image using the a tag below */}
-      <Button
-        icon="barcode"
-        onClick={downloadQr}
-        download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
-          data.qr.id
-        }.png`}
-        ref={downloadQrBtnRef}
-        variant="secondary"
-        className="w-full"
-      >
-        Download QR Code
-      </Button>
+      <div className="flex items-center gap-3">
+        <Button
+          icon="download"
+          onClick={downloadQr}
+          download={`${slugify(asset.title)}-${data.qr.size}-shelf-qr-code-${
+            data.qr.id
+          }.png`}
+          ref={downloadQrBtnRef}
+          variant="secondary"
+          className="w-full"
+        >
+          Download
+        </Button>
+        <Button
+          icon="print"
+          variant="secondary"
+          className="w-full"
+          onClick={printQr}
+        >
+          Print
+        </Button>
+      </div>
     </div>
   ) : null;
 }
+
+interface QrLabelProps {
+  data: {
+    qr: {
+      id: string;
+      size: SizeKeys;
+      src: string;
+    };
+  };
+  title: string;
+}
+
+const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>((props, ref) => {
+  const { data, title } = props;
+  return (
+    <div
+      className="flex h-auto max-w-[244px] flex-col justify-center gap-3 rounded-md border-[5px] border-[#E3E4E8] bg-white px-3 py-[17px]"
+      ref={ref}
+    >
+      <div className="z-50 max-w-full truncate  text-center text-[12px]">
+        {title}
+      </div>
+      <figure className="qr-code z-[49] flex justify-center">
+        <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
+      </figure>
+      <div className="w-full text-center text-[12px]">
+        <span className="block  text-gray-600">{data.qr.id}</span>
+        <span className="block text-gray-500">
+          Powered by{" "}
+          <span className="font-semibold text-gray-600">shelf.nu</span>
+        </span>
+      </div>
+    </div>
+  );
+});
