@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { useState } from "react";
-import { CustomField, CustomFieldType } from "@prisma/client";
+import type { CustomField, CustomFieldType } from "@prisma/client";
 import { CalendarIcon } from "@radix-ui/react-icons";
 import { Popover, PopoverContent, PopoverTrigger } from "@radix-ui/react-popover";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
