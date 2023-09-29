@@ -18,7 +18,7 @@ export async function createCustomField({
   organizationId,
   active,
   userId,
-  options = []
+  options = [],
 }: CustomFieldDraftPayload) {
   return db.customField.create({
     data: {
@@ -111,7 +111,7 @@ export async function updateCustomField(payload: {
   type?: CustomField["type"];
   required?: CustomField["required"];
   active?: CustomField["active"];
-  options?: CustomField["options"]
+  options?: CustomField["options"];
 }) {
   const { id, name, helpText, required, active, options } = payload;
   //dont ever update type
@@ -122,7 +122,7 @@ export async function updateCustomField(payload: {
     helpText,
     required,
     active,
-    options
+    options,
   };
 
   return await db.customField.update({
@@ -131,7 +131,9 @@ export async function updateCustomField(payload: {
   });
 }
 
-export async function upsertCustomField(definitions: CustomFieldDraftPayload[]): Promise<Record<string, CustomField>> {
+export async function upsertCustomField(
+  definitions: CustomFieldDraftPayload[]
+): Promise<Record<string, CustomField>> {
   const customFields: Record<string, CustomField> = {};
 
   for (const def of definitions) {
@@ -144,20 +146,29 @@ export async function upsertCustomField(definitions: CustomFieldDraftPayload[]):
 
     if (!existingCustomField) {
       const newCustomField = await createCustomField(def);
-      customFields[def.name] = newCustomField
+      customFields[def.name] = newCustomField;
     } else {
       if (existingCustomField.type !== def.type) {
-        throw badRequest(`custom field with name ${def.name} already exist with diffrent type ${existingCustomField.type}`)
+        throw badRequest(
+          `custom field with name ${def.name} already exist with diffrent type ${existingCustomField.type}`
+        );
       }
       if (existingCustomField.type === "OPTION") {
-        const newOptions = def.options?.filter(op => !existingCustomField?.options?.includes(op))
+        const newOptions = def.options?.filter(
+          (op) => !existingCustomField?.options?.includes(op)
+        );
         if (newOptions?.length) {
           //create non exisitng options
-          const options = (existingCustomField?.options || []).concat(Array.from(new Set(newOptions)))
-          existingCustomField = await updateCustomField({ id: existingCustomField.id, options });
+          const options = (existingCustomField?.options || []).concat(
+            Array.from(new Set(newOptions))
+          );
+          existingCustomField = await updateCustomField({
+            id: existingCustomField.id,
+            options,
+          });
         }
       }
-      customFields[def.name] = existingCustomField
+      customFields[def.name] = existingCustomField;
     }
   }
 
@@ -173,28 +184,27 @@ export async function createCustomFieldsIfNotExists({
   userId: User["id"];
   organizationId: Organization["id"];
 }): Promise<Record<string, CustomField>> {
-
   //{CF header:[all options in csv combined]}
-  const optionMap: Record<string, string[]> = {}
+  const optionMap: Record<string, string[]> = {};
   //{CF header: definition to create}
-  const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {}
+  const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {};
   for (let item of data) {
     Object.keys(item).map((k) => {
       if (k.startsWith("cf:")) {
-        const def = getDefinitionFromCsvHeader(k)
+        const def = getDefinitionFromCsvHeader(k);
         if (!fieldToDefDraftMap[k]) {
-          fieldToDefDraftMap[k] = { ...def, userId, organizationId }
+          fieldToDefDraftMap[k] = { ...def, userId, organizationId };
         }
         if (def.type === "OPTION") {
-          optionMap[k] = (optionMap[k] || []).concat([item[k]])
+          optionMap[k] = (optionMap[k] || []).concat([item[k]]);
         }
       }
-    })
+    });
   }
 
   for (const [customFieldDefStr, def] of Object.entries(fieldToDefDraftMap)) {
     if (def.type === "OPTION" && optionMap[customFieldDefStr]?.length) {
-      def.options = optionMap[customFieldDefStr]
+      def.options = optionMap[customFieldDefStr];
     }
   }
 

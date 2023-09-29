@@ -86,7 +86,9 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       disabledStyles,
       attachedStyles,
       className,
-      error ? "border-error-300 focus:border-error-300 focus:ring-error-100" : ""
+      error
+        ? "border-error-300 focus:border-error-300 focus:ring-error-100"
+        : ""
     );
 
     return (

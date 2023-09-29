@@ -67,7 +67,7 @@ export async function action({ request }: LoaderArgs) {
     );
   }
 
-  const { name, helpText, required, type, active, organizationId,options } =
+  const { name, helpText, required, type, active, organizationId, options } =
     result.data;
 
   await createCustomField({
@@ -78,7 +78,7 @@ export async function action({ request }: LoaderArgs) {
     active,
     organizationId,
     userId: authSession.userId,
-    options
+    options,
   });
 
   sendNotification({

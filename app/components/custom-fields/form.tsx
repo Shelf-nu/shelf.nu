@@ -39,8 +39,8 @@ export const NewCustomFieldFormSchema = z.object({
     .optional()
     .transform((val) => (val === "on" ? true : false)),
   organizationId: z.string(),
-  options: z.array(z.string()).optional()
-})
+  options: z.array(z.string()).optional(),
+});
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
@@ -49,8 +49,8 @@ interface Props {
   required?: CustomField["required"];
   type?: CustomField["type"];
   active?: CustomField["active"];
-  options?: CustomField["options"]
-  isEdit?: boolean
+  options?: CustomField["options"];
+  isEdit?: boolean;
 }
 
 const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
@@ -58,9 +58,9 @@ const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
   OPTION: "A dropdown list of predefined options.",
   BOOLEAN: "A true/false or yes/no value.",
   DATE: "A date picker for selecting a date.",
-  MULTILINE_TEXT: "A place to store longer, multiline information for your asset. For instance: Descriptions, comments, or detailed notes."
+  MULTILINE_TEXT:
+    "A place to store longer, multiline information for your asset. For instance: Descriptions, comments, or detailed notes.",
 };
-
 
 export const CustomFieldForm = ({
   options: opts,
@@ -69,14 +69,16 @@ export const CustomFieldForm = ({
   required,
   type,
   active,
-  isEdit = false
+  isEdit = false,
 }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
   const disabled = isFormProcessing(navigation.state);
 
-  const [options, setOptions] = useState<Array<string>>(opts || [])
-  const [selectedType, setSelectedType] = useState<CustomFieldType>(type || "TEXT")
+  const [options, setOptions] = useState<Array<string>>(opts || []);
+  const [selectedType, setSelectedType] = useState<CustomFieldType>(
+    type || "TEXT"
+  );
 
   const [, updateTitle] = useAtom(updateTitleAtom);
 
@@ -121,9 +123,7 @@ export const CustomFieldForm = ({
             name="type"
             defaultValue={selectedType}
             disabled={disabled}
-            onValueChange={(val: CustomFieldType) =>
-              setSelectedType(val)
-            }
+            onValueChange={(val: CustomFieldType) => setSelectedType(val)}
           >
             <SelectTrigger
               disabled={isEdit}
@@ -151,11 +151,26 @@ export const CustomFieldForm = ({
           <div className="mt-2 w-full min-w-[500px] flex-1 grow rounded-xl border px-6 py-5 text-[14px] text-gray-600">
             <p>{FIELD_TYPE_DESCRIPTION[selectedType]}</p>
           </div>
-          {selectedType === "OPTION" ? <>
-            <OptionBuilder onRemove={(i: number) => { options.splice(i, 1); setOptions([...options]) }} options={options} onAdd={(o: string) => setOptions([...options, o])} />
-            {options.map((op, i) => <input key={i} type="hidden" name={zo.fields.options(i)()} value={op} />)}
-          </> : null}
-
+          {selectedType === "OPTION" ? (
+            <>
+              <OptionBuilder
+                onRemove={(i: number) => {
+                  options.splice(i, 1);
+                  setOptions([...options]);
+                }}
+                options={options}
+                onAdd={(o: string) => setOptions([...options, o])}
+              />
+              {options.map((op, i) => (
+                <input
+                  key={i}
+                  type="hidden"
+                  name={zo.fields.options(i)()}
+                  value={op}
+                />
+              ))}
+            </>
+          ) : null}
         </FormRow>
       </div>
       <FormRow rowLabel="" className="border-b-0 pt-2">

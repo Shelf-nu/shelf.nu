@@ -61,10 +61,10 @@ export async function loader({ request, params }: LoaderArgs) {
    */
   const lastScan = asset.qrCodes[0]?.id
     ? parseScanData({
-      scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
-      userId,
-      request,
-    })
+        scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
+        userId,
+        request,
+      })
     : null;
 
   const notes = asset.notes.map((note) => ({
@@ -311,7 +311,11 @@ export default function AssetDetailsPage() {
                       <span className="text-[12px] font-medium text-gray-600">
                         {field.customField.name}
                       </span>
-                      <div className="max-w-[250px] text-end">{getCustomFieldDisplayValue(field.value as unknown as ShelfAssetCustomFieldValueType["value"])}</div>
+                      <div className="max-w-[250px] text-end">
+                        {getCustomFieldDisplayValue(
+                          field.value as unknown as ShelfAssetCustomFieldValueType["value"]
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>

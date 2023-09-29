@@ -64,7 +64,7 @@ export const AssetForm = ({
           helpText: cf?.helpText || "",
           required: cf.required,
           type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-          options: cf.options
+          options: cf.options,
         }
     ),
   });

@@ -23,12 +23,18 @@ import {
   oneDayFromNow,
 } from "~/utils";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import {
+  buildCustomFieldValue,
+  getDefinitionFromCsvHeader,
+} from "~/utils/custom-fields";
 import { ShelfStackError } from "~/utils/error";
-import { buildCustomFieldValue, getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { ShelfAssetCustomFieldValueType } from "./types";
 import { createCategoriesIfNotExists, getAllCategories } from "../category";
-import { createCustomFieldsIfNotExists, upsertCustomField } from "../custom-field";
+import {
+  createCustomFieldsIfNotExists,
+  upsertCustomField,
+} from "../custom-field";
 import type { CustomFieldDraftPayload } from "../custom-field/types";
 import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
@@ -211,14 +217,14 @@ export async function createAsset({
     qr && qr.userId === userId && qr.assetId === null
       ? { connect: { id: qrId } }
       : {
-        create: [
-          {
-            version: 0,
-            errorCorrection: ErrorCorrection["L"],
-            user,
-          },
-        ],
-      };
+          create: [
+            {
+              version: 0,
+              errorCorrection: ErrorCorrection["L"],
+              user,
+            },
+          ],
+        };
 
   /** Data object we send via prisma to create Asset */
   const data = {
@@ -283,7 +289,8 @@ export async function createAsset({
       customFields: {
         create: customFieldsValues?.map(
           ({ id, value }) =>
-            id && value && {
+            id &&
+            value && {
               value,
               customFieldId: id,
             }
@@ -384,21 +391,19 @@ export async function updateAsset(payload: UpdateAssetPayload) {
 
     Object.assign(data, {
       customFields: {
-        upsert: customFieldsValuesFromForm?.map(
-          ({ id, value }) => ({
-            where: {
-              id:
-                currentCustomFieldsValues.find(
-                  (ccfv) => ccfv.customFieldId === id
-                )?.id || "",
-            },
-            update: { value },
-            create: {
-              value,
-              customFieldId: id,
-            },
-          })
-        ),
+        upsert: customFieldsValuesFromForm?.map(({ id, value }) => ({
+          where: {
+            id:
+              currentCustomFieldsValues.find(
+                (ccfv) => ccfv.customFieldId === id
+              )?.id || "",
+          },
+          update: { value },
+          create: {
+            value,
+            customFieldId: id,
+          },
+        })),
       },
     });
   }
@@ -808,19 +813,23 @@ export const createAssetsFromContentImport = async ({
   });
 
   for (const asset of data) {
-    const customFieldsValues: ShelfAssetCustomFieldValueType[] = Object.entries(asset).reduce((res, [key, val]) => {
+    const customFieldsValues: ShelfAssetCustomFieldValueType[] = Object.entries(
+      asset
+    ).reduce((res, [key, val]) => {
       if (key.startsWith("cf:") && val) {
-        const { name } = getDefinitionFromCsvHeader(key)
+        const { name } = getDefinitionFromCsvHeader(key);
         if (customFields[name].id) {
           res.push({
             id: customFields[name].id,
-            value: buildCustomFieldValue({ raw: asset[key] }, customFields[name]),
-          } as ShelfAssetCustomFieldValueType)
+            value: buildCustomFieldValue(
+              { raw: asset[key] },
+              customFields[name]
+            ),
+          } as ShelfAssetCustomFieldValueType);
         }
       }
-      return res
-    }, [] as ShelfAssetCustomFieldValueType[])
-
+      return res;
+    }, [] as ShelfAssetCustomFieldValueType[]);
 
     await createAsset({
       title: asset.title,
@@ -832,12 +841,12 @@ export const createAssetsFromContentImport = async ({
       tags:
         asset.tags.length > 0
           ? {
-            set: asset.tags
-              .filter((t) => tags[t])
-              .map((t) => ({ id: tags[t] })),
-          }
+              set: asset.tags
+                .filter((t) => tags[t])
+                .map((t) => ({ id: tags[t] })),
+            }
           : undefined,
-      customFieldsValues
+      customFieldsValues,
     });
   }
 };
@@ -1042,23 +1051,27 @@ export const createAssetsFromBackupImport = async ({
         tags:
           asset.tags.length > 0
             ? {
-              connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
-            }
+                connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
+              }
             : undefined,
       });
     }
 
     /** Custom fields */
     if (asset.customFields && asset.customFields.length > 0) {
+      const customFieldDef = asset.customFields.reduce(
+        (res, { value, customField }) => {
+          const { id, createdAt, updatedAt, ...rest } = customField;
+          const options = value?.valueOption?.length
+            ? [value?.valueOption]
+            : undefined;
+          res.push({ ...rest, options, userId, organizationId });
+          return res;
+        },
+        [] as Array<CustomFieldDraftPayload>
+      );
 
-      const customFieldDef = asset.customFields.reduce((res, { value, customField }) => {
-        const { id, createdAt, updatedAt, ...rest } = customField
-        const options = value?.valueOption?.length ? [value?.valueOption] : undefined
-        res.push({ ...rest, options, userId, organizationId })
-        return res
-      }, [] as Array<CustomFieldDraftPayload>)
-
-      const cfIds = await upsertCustomField(customFieldDef)
+      const cfIds = await upsertCustomField(customFieldDef);
 
       Object.assign(d.data, {
         customFields: {
@@ -1095,31 +1108,32 @@ export interface CreateAssetFromBackupImportPayload
   title: string;
   description?: string;
   category:
-  | {
-    id: string;
-    name: string;
-    description: string;
-    color: string;
-    createdAt: string;
-    updatedAt: string;
-    userId: string;
-  }
-  | {};
+    | {
+        id: string;
+        name: string;
+        description: string;
+        color: string;
+        createdAt: string;
+        updatedAt: string;
+        userId: string;
+      }
+    | {};
   tags: {
     name: string;
   }[];
   location:
-  | {
-    name: string;
-    description?: string;
-    address?: string;
-    createdAt: string;
-    updatedAt: string;
-  }
-  | {};
+    | {
+        name: string;
+        description?: string;
+        address?: string;
+        createdAt: string;
+        updatedAt: string;
+      }
+    | {};
   customFields: AssetCustomFieldsValuesWithFields[];
 }
 
-export type AssetCustomFieldsValuesWithFields = ShelfAssetCustomFieldValueType & {
-  customField: CustomField;
-};
+export type AssetCustomFieldsValuesWithFields =
+  ShelfAssetCustomFieldValueType & {
+    customField: CustomField;
+  };

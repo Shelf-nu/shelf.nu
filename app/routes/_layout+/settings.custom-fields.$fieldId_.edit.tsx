@@ -82,7 +82,7 @@ export async function action({ request, params }: ActionArgs) {
     );
   }
 
-  const { name, helpText,  active, required,options } = result.data;
+  const { name, helpText, active, required, options } = result.data;
 
   await updateCustomField({
     id,
@@ -90,7 +90,7 @@ export async function action({ request, params }: ActionArgs) {
     helpText,
     active,
     required,
-    options
+    options,
   });
 
   sendNotification({

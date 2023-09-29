@@ -98,11 +98,14 @@ export async function action({ request, params }: ActionArgs) {
       helpText: cf?.helpText || "",
       required: cf.required,
       type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-      options:cf.options
+      options: cf.options,
     })),
   });
   const result = await FormSchema.safeParseAsync(parseFormAny(formData));
-  const customFieldsValues = extractCustomFieldValuesFromResults({ result ,customFieldDef:customFields});
+  const customFieldsValues = extractCustomFieldValuesFromResults({
+    result,
+    customFieldDef: customFields,
+  });
 
   if (!result.success) {
     return json(

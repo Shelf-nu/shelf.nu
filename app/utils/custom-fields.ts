@@ -1,5 +1,5 @@
 import type { CustomField, CustomFieldType } from "@prisma/client";
-import { format } from "date-fns"
+import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
@@ -12,7 +12,7 @@ const getSchema = ({
   params,
   field_name,
   required = false,
-  options
+  options,
 }: {
   params: {
     invalid_type_error?: string | undefined;
@@ -21,35 +21,38 @@ const getSchema = ({
   };
   field_name?: string | undefined;
   required?: boolean;
-  options?: CustomField["options"]
+  options?: CustomField["options"];
 }) => {
   /** If the field is required, we set the correct field type using zod */
   const text = required
     ? z.string(params).min(1, {
-      message: field_name
-        ? `${field_name} is required`
-        : `This field is required`,
-    })
+        message: field_name
+          ? `${field_name} is required`
+          : `This field is required`,
+      })
     : z.string(params).optional();
 
-  const option = required ? z.string(params) : z.string(params).optional()
+  const option = required ? z.string(params) : z.string(params).optional();
 
   return {
     text,
     multiline_text: text,
     number: z.number(params),
-    date:text,
-    boolean: z.string(params).optional().transform((val) => val === "on" ? true : false),
+    date: text,
+    boolean: z
+      .string(params)
+      .optional()
+      .transform((val) => (val === "on" ? true : false)),
     option: option.transform((v, ctx) => {
       if (v && !options?.includes(v)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["option"],
           message: `${v} is not a valid option`,
-        })
+        });
       }
-      return v
-    })
+      return v;
+    }),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 
@@ -59,7 +62,7 @@ type CustomFieldZodSchema = {
   type: "text" | "number" | "date" | "boolean" | "option" | "multiline_text";
   helpText: string;
   required: boolean;
-  options?: CustomField["options"]
+  options?: CustomField["options"];
 };
 
 function buildSchema(fields: CustomFieldZodSchema[]) {
@@ -76,7 +79,7 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
         },
         field_name: field.name,
         required: field.required,
-        options: field.options
+        options: field.options,
       })[field.type],
     });
 
@@ -103,51 +106,76 @@ export const mergedSchema = <T extends ZodRawShape>({
  */
 export const extractCustomFieldValuesFromResults = ({
   result,
-  customFieldDef
+  customFieldDef,
 }: {
-  result: { [key: string]: any },
-  customFieldDef: CustomField[]
+  result: { [key: string]: any };
+  customFieldDef: CustomField[];
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
-  const customFieldsKeys = Object.keys(result.data).filter((key) =>
-    key.startsWith("cf-") && result.data[key] != ''
+  const customFieldsKeys = Object.keys(result.data).filter(
+    (key) => key.startsWith("cf-") && result.data[key] != ""
   );
 
   return customFieldsKeys.map((key) => {
     const id = key.split("-")[1];
-    const value = buildCustomFieldValue({ raw: result.data[key] }, customFieldDef.find(v => v.id === id)!);
+    const value = buildCustomFieldValue(
+      { raw: result.data[key] },
+      customFieldDef.find((v) => v.id === id)!
+    );
     return { id, value } as ShelfAssetCustomFieldValueType;
   });
 };
 
-export const buildCustomFieldValue = (value: ShelfAssetCustomFieldValueType["value"], def: CustomField): ShelfAssetCustomFieldValueType["value"] => {
-  const { raw } = value
+export const buildCustomFieldValue = (
+  value: ShelfAssetCustomFieldValueType["value"],
+  def: CustomField
+): ShelfAssetCustomFieldValueType["value"] => {
+  const { raw } = value;
 
   switch (def.type) {
-    case "BOOLEAN": return { raw, valueBoolean: Boolean(raw) };
-    case "DATE": return { raw, valueDate: new Date(raw as string).toISOString() };
-    case "OPTION": return { raw, valueOption: String(raw) };
-    case "MULTILINE_TEXT": return { raw, valueMultiLineText: String(raw) };
+    case "BOOLEAN":
+      return { raw, valueBoolean: Boolean(raw) };
+    case "DATE":
+      return { raw, valueDate: new Date(raw as string).toISOString() };
+    case "OPTION":
+      return { raw, valueOption: String(raw) };
+    case "MULTILINE_TEXT":
+      return { raw, valueMultiLineText: String(raw) };
   }
 
-  return { raw, valueText: String(raw) }
-}
+  return { raw, valueText: String(raw) };
+};
 
-export const getCustomFieldDisplayValue = (value: ShelfAssetCustomFieldValueType["value"]): string => {
+export const getCustomFieldDisplayValue = (
+  value: ShelfAssetCustomFieldValueType["value"]
+): string => {
   if (value.valueDate) {
-    return format(new Date(value.valueDate), "PPP")
+    return format(new Date(value.valueDate), "PPP");
   }
-  return String(value.raw)
-}
+  return String(value.raw);
+};
 
 //header = "cf:name,type:text"
-export const getDefinitionFromCsvHeader = (header: string): Pick<CustomField, "helpText" | "name" | "type" | "required" | "active"> => {
-  const defArr = header.split(",").map(e => e.trim()) //["cf:name","type:text"]
-  const name = defArr.find((e: string) => e.toLowerCase().startsWith("cf:"))!.substring(3).trim(); //name
-  let type = defArr.find(e => e.toLowerCase().startsWith("type:"))?.substring(5) || "text" //"text"
-  type = type.replace(/\s+/g, "_").toUpperCase()
-  return { name, active: true, helpText: "", required: false, type: type as CustomFieldType }
-}
+export const getDefinitionFromCsvHeader = (
+  header: string
+): Pick<CustomField, "helpText" | "name" | "type" | "required" | "active"> => {
+  const defArr = header.split(",").map((e) => e.trim()); //["cf:name","type:text"]
+  const name = defArr
+    .find((e: string) => e.toLowerCase().startsWith("cf:"))!
+    .substring(3)
+    .trim(); //name
+  let type =
+    defArr.find((e) => e.toLowerCase().startsWith("type:"))?.substring(5) ||
+    "text"; //"text"
+  type = type.replace(/\s+/g, "_").toUpperCase();
+  return {
+    name,
+    active: true,
+    helpText: "",
+    required: false,
+    type: type as CustomFieldType,
+  };
+};
 
 // order of the keys control the UI form dorpdown order, so dont change unless u know what you are doing
 export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
@@ -156,4 +184,4 @@ export const FIELD_TYPE_NAME: { [key in CustomFieldType]: string } = {
   OPTION: "Option",
   BOOLEAN: "Boolean",
   DATE: "Date",
-}
+};

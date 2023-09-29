@@ -86,7 +86,7 @@ export async function action({ request }: LoaderArgs) {
       helpText: cf?.helpText || "",
       required: cf.required,
       type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-      options:cf.options
+      options: cf.options,
     })),
   });
   const result = await FormSchema.safeParseAsync(parseFormAny(formData));
@@ -107,7 +107,10 @@ export async function action({ request }: LoaderArgs) {
 
   const { title, description, category, qrId, newLocationId } = result.data;
 
-  const customFieldsValues = extractCustomFieldValuesFromResults({ result ,customFieldDef:customFields});
+  const customFieldsValues = extractCustomFieldValuesFromResults({
+    result,
+    customFieldDef: customFields,
+  });
 
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);

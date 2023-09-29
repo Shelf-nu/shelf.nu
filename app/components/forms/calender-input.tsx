@@ -1,26 +1,43 @@
-"use client"
+"use client";
 
-import { forwardRef } from "react"
-import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons"
-import { DayPicker } from "react-day-picker"
+import { forwardRef } from "react";
+import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
+import { DayPicker } from "react-day-picker";
 
 import { tw as cn } from "~/utils";
 
-export type CalendarProps = React.ComponentProps<typeof DayPicker>
+export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
 const Calendar = forwardRef<
   React.ElementRef<any>,
   React.ComponentPropsWithoutRef<any>
->(function Calendar({ className, classNames, showOutsideDays = true, selected, onSelect, name, ...props }, ref) {
+>(function Calendar(
+  {
+    className,
+    classNames,
+    showOutsideDays = true,
+    selected,
+    onSelect,
+    name,
+    ...props
+  },
+  ref
+) {
   return (
     <>
       <DayPicker
-        onSelect={(range: unknown, d: Date) => { onSelect(d) }}
+        onSelect={(range: unknown, d: Date) => {
+          onSelect(d);
+        }}
         selected={selected}
         showOutsideDays={showOutsideDays}
-        className={cn("p-3 z-50 border-4 border-indigo bg-slate-200 z-100", className)}
+        className={cn(
+          "p-3 z-50 border-4 border-indigo bg-slate-200 z-100",
+          className
+        )}
         classNames={{
-          months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
+          months:
+            "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
           month: "space-y-4",
           caption: "flex justify-center pt-1 relative items-center",
           caption_label: "text-sm font-medium",
@@ -41,9 +58,7 @@ const Calendar = forwardRef<
               ? "[&:has(>.day-range-end)]:rounded-r-md [&:has(>.day-range-start)]:rounded-l-md first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md"
               : "[&:has([aria-selected])]:rounded-md"
           ),
-          day: cn(
-            "h-8 w-8 p-0 font-normal aria-selected:opacity-100"
-          ),
+          day: cn("h-8 w-8 p-0 font-normal aria-selected:opacity-100"),
           day_range_start: "day-range-start",
           day_range_end: "day-range-end",
           day_selected:
@@ -63,11 +78,9 @@ const Calendar = forwardRef<
         {...props}
       />
     </>
-
-  )
+  );
 });
-
 
 // Calendar.displayName = "Calendar"
 
-export { Calendar }
+export { Calendar };

@@ -1,6 +1,4 @@
-import type {
-  CreateAssetFromContentImportPayload,
-} from "~/modules/asset";
+import type { CreateAssetFromContentImportPayload } from "~/modules/asset";
 
 /* This function receives an array of object and a key name
  * It then extracts all the values of that key and makes sure there are no duplicates
