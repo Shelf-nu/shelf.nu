@@ -11,8 +11,8 @@ export function ScanDetails() {
   const hasLocation = lastScan?.coordinates !== "Unknown location";
 
   if (hasLocation) {
-    latitude = lastScan?.coordinates.split(",")[0]
-    longitude = lastScan?.coordinates.split(",")[1]
+    latitude = lastScan?.coordinates.split(",")[0];
+    longitude = lastScan?.coordinates.split(",")[1];
   }
 
   return (

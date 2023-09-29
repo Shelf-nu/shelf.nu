@@ -99,7 +99,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
       </TabsContent>
       <TabsContent value="preview">
         <MarkdownViewer
-          content={content}
+          content={content as string}
           className="min-h-[210px] rounded-lg border px-[14px] py-2"
         />
       </TabsContent>

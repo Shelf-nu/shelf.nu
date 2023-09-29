@@ -9,11 +9,7 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getTag, updateTag } from "~/modules/tag";
-import {
-  assertIsPost,
-  getRequiredParam,
-  isFormProcessing,
-} from "~/utils";
+import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -127,5 +123,5 @@ export default function EditTag() {
         </div>
       </Form>
     </>
-  ) : null
+  ) : null;
 }

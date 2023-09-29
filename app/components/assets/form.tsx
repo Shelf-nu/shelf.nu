@@ -9,7 +9,7 @@ import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { isFormProcessing } from "~/utils";
 
-import type { CustomFieldZodSchema} from "~/utils/custom-field-schema";
+import type { CustomFieldZodSchema } from "~/utils/custom-field-schema";
 import { mergedSchema } from "~/utils/custom-field-schema";
 import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
@@ -55,16 +55,15 @@ export const AssetForm = ({
   const navigation = useNavigation();
 
   const customFields = useLoaderData<typeof loader>().customFields.map(
-      (cf) =>
-        cf.active && {
-          id: cf.id,
-          name: cf.name,
-          helpText: cf?.helpText || "",
-          required: cf.required,
-          type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-        }
-
-    ) as CustomFieldZodSchema[];
+    (cf) =>
+      cf.active && {
+        id: cf.id,
+        name: cf.name,
+        helpText: cf?.helpText || "",
+        required: cf.required,
+        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+      }
+  ) as CustomFieldZodSchema[];
 
   const FormSchema = mergedSchema({
     baseSchema: NewAssetFormSchema,

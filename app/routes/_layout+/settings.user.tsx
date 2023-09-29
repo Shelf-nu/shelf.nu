@@ -143,9 +143,9 @@ export default function UserPage() {
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const data = useActionData<UpdateUserResponse>();
-  const errors = data?.errors as UpdateUserResponse['errors']
+  const errors = data?.errors as UpdateUserResponse["errors"];
   const user = useUserData();
-  const usernameError = errors?.username || zo.errors.username()?.message; 
+  const usernameError = errors?.username || zo.errors.username()?.message;
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);

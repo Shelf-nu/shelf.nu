@@ -10,11 +10,7 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategory, updateCategory } from "~/modules/category";
-import {
-  assertIsPost,
-  isFormProcessing,
-  getRequiredParam,
-} from "~/utils";
+import { assertIsPost, isFormProcessing, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -145,5 +141,5 @@ export default function EditCategory() {
         </div>
       </Form>
     </>
-  ): null
+  ) : null;
 }

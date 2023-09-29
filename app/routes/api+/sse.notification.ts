@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 
-import { eventStream } from "remix-utils/event-stream";
+import { eventStream } from "remix-utils";
 import { requireAuthSession } from "~/modules/auth";
 import { emitter } from "~/utils/emitter/emitter.server";
 

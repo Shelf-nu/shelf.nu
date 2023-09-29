@@ -1,17 +1,12 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import {
-  Link,
-  Outlet,
-  useLocation,
-} from "@remix-run/react";
+import { Link, Outlet, useLocation } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-
 
 export const handle = {
   breadcrumb: () => <Link to="/settings">Settings</Link>,
@@ -47,7 +42,9 @@ export default function SettingsPage() {
    * */
   const location = useLocation();
   const isCustomFieldsNew = location.pathname === "/settings/custom-fields/new";
-  const enablePremium = useMatchesData<{ enablePremium: boolean }>("routes/_layout+/_layout")?.enablePremium;
+  const enablePremium = useMatchesData<{ enablePremium: boolean }>(
+    "routes/_layout+/_layout"
+  )?.enablePremium;
 
   if (enablePremium) {
     items.push({ to: "subscription", content: "Subscription" });
