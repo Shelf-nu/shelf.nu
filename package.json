@@ -5,7 +5,7 @@
   "scripts": {
     "build": "remix build",
     "db:prepare-migration": "prisma migrate dev --create-only --skip-seed",
-    "db:deploy-migration": "prisma migrate deploy",
+    "db:deploy-migration": "prisma migrate deploy && prisma generate",
     "dev": "remix dev",
     "production:dev": "dotenv -e .env.production -- remix dev",
     "format": "prettier --write .",
