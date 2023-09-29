@@ -87,7 +87,7 @@ async function seed() {
       `User added to your database 👇 \n🆔: ${user.id}\n📧: ${user.email}\n🔑: supabase`
     );
   } catch (cause) {
-    throw new ShelfStackError({ message: "Seed failed 🥲",cause });
+    throw new ShelfStackError({ message: "Seed failed 🥲", cause });
   }
 }
 

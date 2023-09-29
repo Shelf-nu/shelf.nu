@@ -3,10 +3,16 @@ export function isFormProcessing(state: "idle" | "submitting" | "loading") {
 }
 
 export function handleInputChange(
-  event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> ,
-  setState: React.Dispatch<React.SetStateAction<{
-    [key: string]: any;
-  }>>, 
-  field: string){
-  setState(currentState => ({...currentState, [field]: event.target.value}))
+  event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  setState: React.Dispatch<
+    React.SetStateAction<{
+      [key: string]: any;
+    }>
+  >,
+  field: string
+) {
+  setState((currentState) => ({
+    ...currentState,
+    [field]: event.target.value,
+  }));
 }
