@@ -33,7 +33,7 @@ https://github.com/dcastil/tailwind-merge
 ```js
 <div
   className={tw(
-    "absolute -top-1 -right-0.5 m-2", //positioning
+    "absolute -right-0.5 -top-1 m-2", //positioning
     "h-4 w-4", //size
     "flex items-center justify-center p-2", //content
     "rounded-full focus:outline-none", //border
@@ -55,13 +55,13 @@ https://github.com/dcastil/tailwind-merge
     "truncate bg-white text-xs font-bold focus:outline-none",
     variant === "cta" && [
       // variant
-      "py-2 px-3",
+      "px-3 py-2",
       "text-indigo-500 lg:text-lg",
       "rounded-lg border-2 border-gray-100",
     ],
     variant === "notification" && [
       // variant
-      "py-[6px] px-3",
+      "px-3 py-[6px]",
       "text-gray-700",
       "rounded-md border-2 border-gray-100",
     ],

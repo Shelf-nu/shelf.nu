@@ -191,7 +191,7 @@ export default {
     },
     container: {
       center: true,
-      padding: '2rem',
+      padding: "2rem",
     },
     animation: {
       "accordion-down": "accordion-down 0.2s ease-out",

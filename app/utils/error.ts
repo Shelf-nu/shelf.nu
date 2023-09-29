@@ -1,4 +1,3 @@
-
 import type { HTTPStatusCode } from "./http-status";
 
 /**
@@ -15,47 +14,47 @@ import type { HTTPStatusCode } from "./http-status";
  *
  */
 export type FailureReason = {
-	message: string;
-	title?:string;
-	status?: HTTPStatusCode;
-	cause?: unknown;
-	metadata?: Record<string, unknown>;
-	tag?: string;
-	traceId?: string;
+  message: string;
+  title?: string;
+  status?: HTTPStatusCode;
+  cause?: unknown;
+  metadata?: Record<string, unknown>;
+  tag?: string;
+  traceId?: string;
 };
 
 /**
  * A custom error class to normalize the error handling in our app.
  */
 export class ShelfStackError extends Error {
-	readonly cause: FailureReason["cause"];
-	readonly metadata: FailureReason["metadata"];
-	readonly tag: FailureReason["tag"];
-	readonly status: FailureReason["status"];
-	readonly title:FailureReason["title"]
-	traceId: FailureReason["traceId"];
+  readonly cause: FailureReason["cause"];
+  readonly metadata: FailureReason["metadata"];
+  readonly tag: FailureReason["tag"];
+  readonly status: FailureReason["status"];
+  readonly title: FailureReason["title"];
+  traceId: FailureReason["traceId"];
 
-	constructor({
-		message,
-		status = 500,
-		cause = null,
-		metadata,
-		tag = "untagged 🐞",
-		traceId,
-		title
-	}: FailureReason) {
-		super();
-		this.name = "ShelfStackError 👀";
-		this.message = message;
-		this.status = isShelfStackError(cause) ? cause.status : status;
-		this.cause = cause;
-		this.metadata = metadata;
-		this.tag = tag;
-		this.traceId = traceId
-		this.title=title
-	}
+  constructor({
+    message,
+    status = 500,
+    cause = null,
+    metadata,
+    tag = "untagged 🐞",
+    traceId,
+    title,
+  }: FailureReason) {
+    super();
+    this.name = "ShelfStackError 👀";
+    this.message = message;
+    this.status = isShelfStackError(cause) ? cause.status : status;
+    this.cause = cause;
+    this.metadata = metadata;
+    this.tag = tag;
+    this.traceId = traceId;
+    this.title = title;
+  }
 }
 
 export function isShelfStackError(cause: unknown): cause is ShelfStackError {
-	return cause instanceof ShelfStackError;
+  return cause instanceof ShelfStackError;
 }

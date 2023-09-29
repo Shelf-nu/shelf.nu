@@ -52,7 +52,7 @@ export async function loader({ request, params }: LoaderArgs) {
 
   const asset = await getAsset({ userId, id });
   if (!asset) {
-    throw new ShelfStackError({message:"Not Found", status: 404 });
+    throw new ShelfStackError({ message: "Not Found", status: 404 });
   }
 
   const header: HeaderData = {

@@ -9,10 +9,10 @@ export function mapAuthSession(
   if (!supabaseAuthSession) return null;
 
   if (!supabaseAuthSession.refresh_token)
-    throw new ShelfStackError({message:"User should have a refresh token"});
+    throw new ShelfStackError({ message: "User should have a refresh token" });
 
   if (!supabaseAuthSession.user?.email)
-    throw new ShelfStackError({message:"User should have an email"});
+    throw new ShelfStackError({ message: "User should have an email" });
 
   return {
     accessToken: supabaseAuthSession.access_token,
