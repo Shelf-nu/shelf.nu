@@ -15,6 +15,7 @@ import type {
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
 import { type LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
+import { getSupabaseAdmin } from "~/integrations/supabase";
 import {
   dateTimeInUnix,
   generatePageMeta,
@@ -23,6 +24,7 @@ import {
   oneDayFromNow,
 } from "~/utils";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
+import { ShelfStackError } from "~/utils/error";
 import { processCustomFields } from "~/utils/import.server";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import { createCategoriesIfNotExists, getAllCategories } from "../category";
@@ -109,7 +111,7 @@ export async function getAssets({
   if (search) {
     const words = search
       .split(" ")
-      .map((w) => w.replace(/[^a-zA-Z0-9\-_]/g, ""))
+      .map((w) => w.replace(/[^a-zA-Z0-9\-_]/g, "") + ":*")
       .filter(Boolean) //remove uncommon special character
       .join(" & ");
     where.searchVector = {
@@ -538,6 +540,89 @@ export async function deleteNote({
   return db.note.deleteMany({
     where: { id, userId },
   });
+}
+
+async function uploadDuplicateAssetMainImage(
+  mainImageUrl: string,
+  assetId: string,
+  userId: string
+) {
+  /**
+   * Getting the blob from asset mainImage signed url so
+   * that we can upload it into duplicated assets as well
+   * */
+  const imageFile = await fetch(mainImageUrl);
+  const imageFileBlob = await imageFile.blob();
+
+  /** Uploading the Blob to supabase */
+  const { data, error } = await getSupabaseAdmin()
+    .storage.from("assets")
+    .upload(
+      `${userId}/${assetId}/main-image-${dateTimeInUnix(Date.now())}`,
+      imageFileBlob,
+      { contentType: imageFileBlob.type, upsert: true }
+    );
+
+  if (!data?.path || error) {
+    throw new ShelfStackError({
+      message: "Could not upload image fot the asset!",
+      status: 500,
+    });
+  }
+
+  /** Getting the signed url from supabase to we can view image  */
+  const signedUrl = await createSignedUrl({ filename: data.path });
+  return signedUrl;
+}
+
+export async function duplicateAsset({
+  asset,
+  userId,
+  amountOfDuplicates,
+}: {
+  asset: Prisma.AssetGetPayload<{
+    include: { custody: { include: { custodian: true } }; tags: true };
+  }>;
+  userId: string;
+  amountOfDuplicates: number;
+}) {
+  const duplicatedAssets = [];
+
+  for (const i of [...Array(amountOfDuplicates)].keys()) {
+    const duplicatedAsset = await createAsset({
+      title: `${asset.title} (copy ${
+        amountOfDuplicates > 1 ? i : ""
+      } ${Date.now()})`,
+      description: asset.description,
+      userId,
+      categoryId: asset.categoryId,
+      locationId: asset.locationId ?? undefined,
+      custodian: asset?.custody?.custodian.id ?? undefined,
+      tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
+    });
+
+    if (asset.mainImage) {
+      const imagePath = await uploadDuplicateAssetMainImage(
+        asset.mainImage,
+        duplicatedAsset.id,
+        userId
+      );
+
+      if (typeof imagePath === "string") {
+        await db.asset.update({
+          where: { id: duplicatedAsset.id },
+          data: {
+            mainImage: imagePath,
+            mainImageExpiration: oneDayFromNow(),
+          },
+        });
+      }
+    }
+
+    duplicatedAssets.push(duplicatedAsset);
+  }
+
+  return duplicatedAssets;
 }
 
 /** Fetches all related entries required for creating a new asset */

@@ -1,0 +1,1 @@
+export const MAX_DUPLICATES_ALLOWED = 10;

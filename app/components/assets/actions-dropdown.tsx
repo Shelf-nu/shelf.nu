@@ -2,7 +2,13 @@ import { useState } from "react";
 import type { Asset } from "@prisma/client";
 import { useSearchParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
-import { ChevronRight, PenIcon, UserIcon, UserXIcon } from "~/components/icons";
+import {
+  ChevronRight,
+  DuplicateIcon,
+  PenIcon,
+  UserIcon,
+  UserXIcon,
+} from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -103,6 +109,22 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
               >
                 <span className="flex items-center gap-2">
                   <PenIcon /> Edit
+                </span>
+              </Button>
+            </DropdownMenuItem>
+            <DropdownMenuItem className="p-3">
+              <Button
+                to="duplicate"
+                role="link"
+                variant="link"
+                className="justify-start text-gray-700 hover:text-gray-700"
+                width="full"
+              >
+                <span
+                  className="flex items-center gap-2"
+                  onClick={() => setOpen(false)}
+                >
+                  <DuplicateIcon /> Duplicate
                 </span>
               </Button>
             </DropdownMenuItem>

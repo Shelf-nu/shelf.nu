@@ -18,12 +18,15 @@ export function getUniqueValuesFromArrayOfObjects({
   array: Array<CreateAssetFromContentImportPayload>;
   key: string;
 }) {
-  const items = array.reduce((acc, item) => {
-    if (item[key] && item[key] !== "") {
-      acc[item[key]] = "";
-    }
-    return acc;
-  }, {} as Record<string, string>);
+  const items = array.reduce(
+    (acc, item) => {
+      if (item[key] && item[key] !== "") {
+        acc[item[key]] = "";
+      }
+      return acc;
+    },
+    {} as Record<string, string>
+  );
   return items;
 }
 

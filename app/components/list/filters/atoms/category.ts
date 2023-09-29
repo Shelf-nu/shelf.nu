@@ -19,7 +19,7 @@ export const addInitialSelectedCategoriesAtom = atom(
   (_get, set, selected: string[]) => {
     set(selectedCategoriesAtom, (prev) => ({
       ...prev,
-      items: selected
+      items: selected,
     }));
   }
 );
@@ -29,13 +29,12 @@ export const addOrRemoveSelectedCategoryIdAtom = atom(
   null,
   (_get, set, event: React.ChangeEvent<HTMLInputElement>) => {
     set(selectedCategoriesAtom, (prev) => {
-
       const node = event.target as HTMLInputElement;
       const id = node.value satisfies string;
       const newSelected = prev.items.includes(id)
         ? prev.items.filter((string) => string !== id)
         : [...prev.items, id];
-      return {isFiltering: true, items: newSelected};
+      return { isFiltering: true, items: newSelected };
     });
   }
 );
@@ -45,16 +44,16 @@ export const addOrRemoveSelectedCategoryIdAtom = atom(
  * Gets set to false as a callback of the form submit
  * */
 export const toggleIsFilteringCategoriesAtom = atom(
-  (get) => get(selectedCategoriesAtom).isFiltering, 
+  (get) => get(selectedCategoriesAtom).isFiltering,
   (get, set) => {
     set(selectedCategoriesAtom, (prev) => ({
       ...prev,
-      isFiltering: !get(selectedCategoriesAtom)
-    }))
-})
-
+      isFiltering: !get(selectedCategoriesAtom),
+    }));
+  }
+);
 
 /** Clears the items. */
-export const clearCategoryFiltersAtom = atom(null, 
-  (_get, set) => set(selectedCategoriesAtom, { isFiltering: true, items: [] })
-)
+export const clearCategoryFiltersAtom = atom(null, (_get, set) =>
+  set(selectedCategoriesAtom, { isFiltering: true, items: [] })
+);
