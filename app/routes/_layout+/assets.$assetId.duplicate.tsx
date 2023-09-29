@@ -42,9 +42,9 @@ export const loader = async ({ request, params }: LoaderArgs) => {
 const DuplicateAssetSchema = z.object({
   amountOfDuplicates: z.coerce
     .number()
-    .min(1, { message: "There should be at least 1 duplicate!" })
+    .min(1, { message: "There should be at least 1 duplicate." })
     .max(MAX_DUPLICATES_ALLOWED, {
-      message: `There can be a max of ${MAX_DUPLICATES_ALLOWED} duplicates!`,
+      message: `There can be a max of ${MAX_DUPLICATES_ALLOWED} duplicates created at a time.`,
     }),
 });
 
