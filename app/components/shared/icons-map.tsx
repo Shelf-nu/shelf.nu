@@ -19,8 +19,6 @@ import {
   CategoriesIcon,
   LocationMarkerIcon,
   AssetsIcon,
-  DownloadIcon,
-  PrintIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -43,9 +41,7 @@ export type Icon =
   | "tag"
   | "category"
   | "location"
-  | "asset"
-  | "download"
-  | "print";
+  | "asset";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -71,8 +67,6 @@ export const iconsMap: IconsMap = {
   category: <CategoriesIcon />,
   location: <LocationMarkerIcon />,
   asset: <AssetsIcon />,
-  download: <DownloadIcon />,
-  print: <PrintIcon />,
 };
 
 export default iconsMap;
