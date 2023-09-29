@@ -110,7 +110,7 @@ export async function getAssets({
   /** If the search string exists, add it to the where object */
   if (search) {
     const words = search
-      .split(" ")      
+      .split(" ")
       .map((w) => w.replace(/[^a-zA-Z0-9\-_]/g, "") + ":*")
       .filter(Boolean) //remove uncommon special character
       .join(" & ");
@@ -581,7 +581,7 @@ export async function duplicateAsset({
   amountOfDuplicates,
 }: {
   asset: Prisma.AssetGetPayload<{
-    include: { custody: { include: { custodian: true } } };
+    include: { custody: { include: { custodian: true } }; tags: true };
   }>;
   userId: string;
   amountOfDuplicates: number;
@@ -598,6 +598,7 @@ export async function duplicateAsset({
       categoryId: asset.categoryId,
       locationId: asset.locationId ?? undefined,
       custodian: asset?.custody?.custodian.id ?? undefined,
+      tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
     });
 
     if (asset.mainImage) {
