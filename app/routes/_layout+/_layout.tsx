@@ -1,4 +1,4 @@
-import { OrganizationType, Roles } from "@prisma/client";
+import { Roles } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderArgs,
