@@ -41,11 +41,10 @@ export default function DynamicDropdown<T>({
   loaderKey,
 }: Props<T>) {
   /** @TODO Find a better way */
-  const [initialItems, setInitialItems] = useState<Array<DropdownItem>>([]);
+  const loaderData = useLoaderData();
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [, setSearchParams] = useSearchParams();
-  const loaderData = useLoaderData();
 
   const fetcher = useFetcher<Array<DropdownItem>>();
 
@@ -53,21 +52,13 @@ export default function DynamicDropdown<T>({
     setSearchParams({ [model.name]: selectedItems });
   }, [model.name, selectedItems, setSearchParams]);
 
-  useEffect(
-    function loadInitialItems() {
-      const items = (loaderData[loaderKey] ?? []) as Array<DropdownItem>;
-      setInitialItems(items);
-    },
-    [loaderData, loaderKey]
-  );
-
   const items = useMemo(() => {
     if (fetcher.data) {
       return fetcher.data;
     }
 
-    return initialItems;
-  }, [fetcher.data, initialItems]);
+    return (loaderData[loaderKey] ?? []) as Array<DropdownItem>;
+  }, [fetcher.data, loaderData, loaderKey]);
 
   return (
     <div className="relative w-full">
