@@ -29,6 +29,7 @@ import TextualDivider from "~/components/shared/textual-divider";
 import ProfilePicture from "~/components/user/profile-picture";
 import { usePosition, useUserData } from "~/hooks";
 import { deleteAsset, getAsset } from "~/modules/asset";
+import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
@@ -41,6 +42,7 @@ import {
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
+import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
@@ -140,7 +142,7 @@ export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
   const customFieldsValues =
     asset?.customFields?.length > 0
-      ? asset.customFields.filter((f) => f?.value && f.value !== "")
+      ? asset.customFields.filter((f) => f?.value)
       : [];
   const assetIsAvailable = asset.status === "AVAILABLE";
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
@@ -309,7 +311,11 @@ export default function AssetDetailsPage() {
                       <span className="text-[12px] font-medium text-gray-600">
                         {field.customField.name}
                       </span>
-                      <div className="max-w-[250px]">{field.value}</div>
+                      <div className="max-w-[250px] text-end">
+                        {getCustomFieldDisplayValue(
+                          field.value as unknown as ShelfAssetCustomFieldValueType["value"]
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>

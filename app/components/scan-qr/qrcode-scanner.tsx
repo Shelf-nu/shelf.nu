@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useContext, useState } from "react";
+import { useNavigate } from "@remix-run/react";
 import {
   BrowserMultiFormatReader,
   DecodeHintType,
@@ -24,6 +25,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
   const { stopMediaStream } = useMediaStream();
   useStopMediaStream(stopMediaStream);
   const [scanCompleted, setScanCompleted] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const codeReader = new BrowserMultiFormatReader();
@@ -48,13 +50,13 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
 
               if (match) {
                 stopMediaStream();
-                // const qrId = match[4]; // Get the last segment of the URL as the QR id
+                const qrId = match[4]; // Get the last segment of the URL as the QR id
 
                 setScanCompleted(true); // Set the scanCompleted state to true
 
-                window.location.href = scannedData;
+                // window.location.href = scannedData;
 
-                // navigate(`/qr/${qrId}`); (using this way will not close camera access)
+                navigate(`/qr/${qrId}`);
               } else {
                 sendNotification({
                   title: "QR Code Not Valid",
@@ -72,7 +74,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
 
       stopMediaStream();
     };
-  }, [videoDevices, stopMediaStream, sendNotification]);
+  }, [videoDevices, stopMediaStream, sendNotification, navigate]);
 
   return (
     <>
