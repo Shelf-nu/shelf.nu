@@ -36,7 +36,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
           organizations: {
             where: {
               // This is default for now. Will need to be adjusted when we have more org types and teams functionality is active
-              type: OrganizationType.PERSONAL,
+              id: authSession.organizationId,
             },
             select: {
               id: true,
@@ -65,7 +65,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   return json(
     {
       user,
-      organizationId: user?.organizations[0].id,
+      organization: user?.organizations[0],
       subscription,
       enablePremium: ENABLE_PREMIUM_FEATURES,
       hideSupportBanner: cookie.hideSupportBanner,
