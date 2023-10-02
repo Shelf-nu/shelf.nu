@@ -14,13 +14,9 @@ function getNewPrismaClient() {
   return new PrismaClient().$extends({
     model: {
       $allModels: {
-        async dynamicFindMany<T, K extends string>(
-          this: T,
-          field: string,
-          value: Prisma.Payload<T, "findMany">["scalars"][K]
-        ) {
+        async dynamicFindMany<T>(this: T, options: Prisma.Args<T, "findMany">) {
           const ctx = Prisma.getExtensionContext(this) as any;
-          return ctx.findMany({ where: { [field]: { search: value } } });
+          return ctx.findMany(options);
         },
       },
     },
