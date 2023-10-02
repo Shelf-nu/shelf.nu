@@ -24,7 +24,7 @@ export async function signInWithEmail(email: string, password: string) {
 
   if (!data.session || error) return null;
 
-  return mapAuthSession(data.session);
+  return await mapAuthSession(data.session);
 }
 
 export async function sendMagicLink(email: string) {
@@ -80,7 +80,7 @@ export async function refreshAccessToken(
 
   if (!data.session || error) return null;
 
-  return mapAuthSession(data.session);
+  return await mapAuthSession(data.session);
 }
 
 export async function verifyAuthSession(authSession: AuthSession) {
