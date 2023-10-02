@@ -17,7 +17,7 @@ import { assertIsPost } from "~/utils";
 import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
-  const { userId } = await requireAuthSession(request);
+  const { userId, organizationId } = await requireAuthSession(request);
   const lcationId = params.locationId as string;
   const location = await db.location.findUnique({
     where: {
@@ -39,6 +39,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   } = await getPaginatedAndFilterableAssets({
     request,
     userId,
+    organizationId,
   });
 
   const modelName = {

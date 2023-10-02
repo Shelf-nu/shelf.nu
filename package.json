@@ -6,6 +6,7 @@
     "build": "remix build",
     "db:diff": "prisma migrate diff --from-url=${DATABASE_URL} --to-migrations=./app/database/migrations --shadow-database-url=${SHADOW_DATABASE_URL} --script > rollback.sql",
     "db:prepare-migration": "prisma migrate dev --create-only --skip-seed",
+    "db:generate-type": "prisma generate",
     "db:deploy-migration": "prisma migrate deploy && prisma generate",
     "dev": "remix dev",
     "production:dev": "dotenv -e .env.production -- remix dev",

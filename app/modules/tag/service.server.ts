@@ -1,6 +1,6 @@
 import type { Prisma, Tag, TeamMember, User } from "@prisma/client";
 import { db } from "~/database";
-import type { CreateAssetFromContentImportPayload } from "../asset";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function getTags({
   userId,

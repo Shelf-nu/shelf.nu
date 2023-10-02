@@ -7,7 +7,7 @@ import {
   getParamsValues,
 } from "~/utils";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
-import type { CreateAssetFromContentImportPayload } from "../asset";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function createTeamMemberIfNotExists({
   data,

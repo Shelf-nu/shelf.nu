@@ -8,7 +8,7 @@ import { badRequest } from "remix-utils";
 import { db } from "~/database";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { CustomFieldDraftPayload } from "./types";
-import type { CreateAssetFromContentImportPayload } from "../asset";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function createCustomField({
   name,

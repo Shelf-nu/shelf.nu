@@ -1,7 +1,7 @@
 import type { Category, Prisma, User } from "@prisma/client";
 import { db } from "~/database";
 import { getRandomColor } from "~/utils";
-import type { CreateAssetFromContentImportPayload } from "../asset";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function createCategory({
   name,

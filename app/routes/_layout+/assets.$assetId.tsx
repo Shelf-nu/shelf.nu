@@ -49,10 +49,10 @@ import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderArgs) {
-  const { userId } = await requireAuthSession(request);
+  const { userId, organizationId } = await requireAuthSession(request);
   const id = getRequiredParam(params, "assetId");
 
-  const asset = await getAsset({ userId, id });
+  const asset = await getAsset({ organizationId, id });
   if (!asset) {
     throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
   }
@@ -105,7 +105,7 @@ export async function action({ request, params }: ActionArgs) {
   const formData = await request.formData();
   const mainImageUrl = formData.get("mainImage") as string;
 
-  await deleteAsset({ userId: authSession.userId, id });
+  await deleteAsset({ organizationId: authSession.organizationId, id });
   await deleteAssetImage({
     url: mainImageUrl,
     bucketName: "assets",

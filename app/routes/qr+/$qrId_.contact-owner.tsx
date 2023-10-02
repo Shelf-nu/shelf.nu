@@ -8,6 +8,7 @@ import { SuccessIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { usePosition } from "~/hooks";
 import { getAsset } from "~/modules/asset";
+import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
 import { createReport, sendReportEmails } from "~/modules/report-found";
 import { getUserByID } from "~/modules/user";
@@ -23,6 +24,7 @@ export const NewReportSchema = z.object({
 
 export const action = async ({ request, params }: ActionArgs) => {
   assertIsPost(request);
+  const { organizationId } = await requireAuthSession(request);
   const qrId = params.qrId as string;
   const qr = await getQr(qrId);
 
@@ -32,7 +34,7 @@ export const action = async ({ request, params }: ActionArgs) => {
 
   const owner = await getUserByID(qr.userId);
   if (!owner) return new Response("Something went wrong", { status: 500 });
-  const asset = await getAsset({ userId: owner.id, id: qr.assetId });
+  const asset = await getAsset({ organizationId, id: qr.assetId });
 
   const formData = await request.formData();
   const result = await NewReportSchema.safeParseAsync(parseFormAny(formData));

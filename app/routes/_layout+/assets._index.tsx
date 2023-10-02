@@ -68,8 +68,9 @@ export interface IndexResponse {
 }
 
 export async function loader({ request }: LoaderArgs) {
-  const { userId } = await requireAuthSession(request);
+  const { userId, organizationId } = await requireAuthSession(request);
 
+  //@TODO avoid this call by saving user data in session
   const user = await db.user.findUnique({
     where: {
       id: userId,
@@ -97,6 +98,7 @@ export async function loader({ request }: LoaderArgs) {
   } = await getPaginatedAndFilterableAssets({
     request,
     userId,
+    organizationId,
   });
 
   if (totalPages !== 0 && page > totalPages) {
