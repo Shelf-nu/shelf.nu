@@ -8,8 +8,6 @@ import { useMatchesData } from "./use-matches-data";
  */
 export function useOrganizationId(): Organization["id"] | undefined {
   return useMatchesData<{
-    organization: {
-      id: Organization["id"];
-    };
-  }>("routes/_layout+/_layout")?.organization.id;
+    currentOrganizationId: Organization["id"];
+  }>("routes/_layout+/_layout")?.currentOrganizationId;
 }

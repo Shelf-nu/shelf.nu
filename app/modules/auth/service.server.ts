@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { SERVER_URL } from "~/utils/env";
 
-import { mapAuthSession } from "./mappers";
+import { mapAuthSession } from "./mappers.server";
 import type { AuthSession } from "./types";
 
 export async function createEmailAuthAccount(email: string, password: string) {

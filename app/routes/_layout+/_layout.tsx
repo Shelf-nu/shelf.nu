@@ -27,6 +27,7 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   const authSession = await requireAuthSession(request);
+
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
     ? await db.user.findUnique({
@@ -34,12 +35,10 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
         include: {
           roles: true,
           organizations: {
-            where: {
-              // This is default for now. Will need to be adjusted when we have more org types and teams functionality is active
-              id: authSession.organizationId,
-            },
             select: {
               id: true,
+              name: true,
+              type: true,
             },
           },
         },
@@ -61,11 +60,11 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
   if (!user?.onboarded) {
     return redirect("onboarding");
   }
-
   return json(
     {
       user,
-      organization: user?.organizations[0],
+      organizations: user?.organizations,
+      currentOrganizationId: authSession.organizationId,
       subscription,
       enablePremium: ENABLE_PREMIUM_FEATURES,
       hideSupportBanner: cookie.hideSupportBanner,
