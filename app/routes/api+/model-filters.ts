@@ -1,10 +1,9 @@
-import type { Prisma } from "@prisma/client";
 import { json, type LoaderArgs } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 
-type ModelNames = Uncapitalize<Prisma.ModelName>;
+export type AllowedModelNames = "asset" | "tag" | "category";
 
 const ModelFiltersSchema = z.object({
   /** Models that are allowed to filter */
@@ -18,7 +17,7 @@ const ModelFiltersSchema = z.object({
 });
 
 export async function loader({ request }: LoaderArgs) {
-  await requireAuthSession(request);
+  const { userId } = await requireAuthSession(request);
 
   /** Getting all the query parameters from url */
   const url = new URL(request.url);
@@ -33,16 +32,23 @@ export async function loader({ request }: LoaderArgs) {
     return json({ errors: result.error }, { status: 400 });
   }
 
-  const model = result.data.model as ModelNames;
-  const queryData = (await db[model].dynamicFindMany(
-    result.data.queryKey,
-    result.data.queryValue
-  )) as Array<Record<string, string>>;
+  const model = result.data.model as AllowedModelNames;
+  const queryData = (await db[model].dynamicFindMany({
+    where: {
+      [result.data.queryKey]: {
+        contains: result.data.queryValue,
+        mode: "insensitive",
+      },
+      userId,
+    },
+    take: 4,
+  })) as Array<Record<string, string>>;
 
   return json(
     queryData.map((item) => ({
       id: item.id,
-      [result.data.queryKey]: item[result.data.queryKey],
+      name: item[result.data.queryKey],
+      color: item?.color,
     }))
   );
 }
