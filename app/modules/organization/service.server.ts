@@ -98,3 +98,40 @@ export const getUserOrganizationsWithDetailedData = async ({
       },
     },
   });
+
+export async function createOrganization({
+  name,
+  userId,
+  image,
+}: Pick<Organization, "name"> & {
+  userId: User["id"];
+  image: File | null;
+}) {
+  const data = {
+    name,
+    type: OrganizationType.TEAM,
+    owner: {
+      connect: {
+        id: userId,
+      },
+    },
+  };
+
+  if (image?.size && image?.size > 0) {
+    Object.assign(data, {
+      image: {
+        create: {
+          blob: Buffer.from(await image.arrayBuffer()),
+          contentType: image.type,
+          user: {
+            connect: {
+              id: userId,
+            },
+          },
+        },
+      },
+    });
+  }
+
+  return db.organization.create({ data });
+}

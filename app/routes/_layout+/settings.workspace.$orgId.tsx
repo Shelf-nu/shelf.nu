@@ -23,6 +23,10 @@ export async function loader({ request, params }: LoaderArgs) {
     },
   });
 
+  if (!organization) {
+    throw new Error("Organization not found");
+  }
+
   const {
     page,
     perPage,
@@ -35,12 +39,8 @@ export async function loader({ request, params }: LoaderArgs) {
     cookie,
   } = await getPaginatedAndFilterableTeamMembers({
     request,
-    organizationId,
+    organizationId: organization.id,
   });
-
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
 
   const header: HeaderData = {
     title: `Settings - ${organization.name}`,

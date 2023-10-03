@@ -67,7 +67,7 @@ export default function WorkspacePage() {
         <div className="mb-2.5 flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
           <h2 className=" text-lg text-gray-900">Workspaces</h2>
           <PremiumFeatureButton
-            canUseFeature={false}
+            canUseFeature={true}
             buttonContent={{
               title: "New workspace",
               message:
