@@ -148,7 +148,7 @@ export const CustomFieldForm = ({
               </div>
             </SelectContent>
           </Select>
-          <div className="mt-2 w-full min-w-[500px] flex-1 grow rounded-xl border px-6 py-5 text-[14px] text-gray-600">
+          <div className="mt-2 w-full flex-1 grow rounded-xl border px-6 py-5 text-[14px] text-gray-600 ">
             <p>{FIELD_TYPE_DESCRIPTION[selectedType]}</p>
           </div>
           {selectedType === "OPTION" ? (
