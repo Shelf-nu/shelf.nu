@@ -46,7 +46,7 @@ import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
-import { deleteAssets } from "~/utils/storage.server";
+import { deleteAssetImage } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderArgs) {
   const { userId } = await requireAuthSession(request);
@@ -106,7 +106,7 @@ export async function action({ request, params }: ActionArgs) {
   const mainImageUrl = formData.get("mainImage") as string;
 
   await deleteAsset({ userId: authSession.userId, id });
-  await deleteAssets({
+  await deleteAssetImage({
     url: mainImageUrl,
     bucketName: "assets",
   });
