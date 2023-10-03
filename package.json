@@ -3,11 +3,11 @@
   "private": true,
   "sideEffects": false,
   "scripts": {
-    "build": "remix build",
+    "build": "run-s build:*",
     "db:diff": "prisma migrate diff --from-url=${DATABASE_URL} --to-migrations=./app/database/migrations --shadow-database-url=${SHADOW_DATABASE_URL} --script > rollback.sql",
     "db:prepare-migration": "prisma migrate dev --create-only --skip-seed",
     "db:deploy-migration": "prisma migrate deploy && prisma generate",
-    "dev": "remix dev",
+    "dev": "run-p dev:*",
     "production:dev": "dotenv -e .env.production -- remix dev",
     "format": "prettier --write .",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
@@ -28,7 +28,11 @@
     "lint:fix": "npm run lint -- --fix",
     "format-code": "npm run prettier:fix & npm run lint:fix",
     "stripe:webhook": "stripe listen --forward-to localhost:3000/api/stripe-webhook",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "build:remix": "remix build",
+    "build:worker": "remix-pwa build",
+    "dev:remix": "remix dev",
+    "dev:worker": "remix-pwa dev"
   },
   "dependencies": {
     "@markdoc/markdoc": "^0.2.2",
@@ -83,7 +87,14 @@
     "tailwindcss-animate": "^1.0.6",
     "tiny-invariant": "^1.3.1",
     "ua-parser-js": "^1.0.35",
-    "zod": "^3.21.4"
+    "zod": "^3.21.4",
+    "dotenv": "^16.3.1",
+    "@remix-pwa/cache": "^2.0.10",
+    "@remix-pwa/sw": "^2.1.9",
+    "@remix-pwa/strategy": "^2.1.7",
+    "@remix-pwa/push": "^1.0.9",
+    "@remix-pwa/client": "^2.0.1",
+    "@remix-pwa/sync": "^2.0.1"
   },
   "devDependencies": {
     "@faker-js/faker": "^7.6.0",
@@ -123,7 +134,11 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^4.9.5",
     "vite-tsconfig-paths": "^3.6.0",
-    "vitest": "^0.24.5"
+    "vitest": "^0.24.5",
+    "@remix-pwa/worker-runtime": "^2.0.6",
+    "@remix-pwa/dev": "2.0.28",
+    "remix-pwa": "^3.0.17",
+    "glob": "^10.3.10"
   },
   "engines": {
     "node": ">=18"
