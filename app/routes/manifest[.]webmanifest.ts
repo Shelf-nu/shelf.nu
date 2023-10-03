@@ -3,8 +3,8 @@ import { json } from "@remix-run/node";
 export const loader = async () =>
   json(
     {
-      short_name: "PWA",
-      name: "Remix PWA",
+      short_name: "Shelf",
+      name: "Shelf | Asset Management Made Simple",
       start_url: "/",
       display: "standalone",
       background_color: "#d3d7dd",
