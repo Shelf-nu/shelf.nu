@@ -13,7 +13,7 @@ interface Props {
 function OptionBuilder({ options, onAdd, onRemove, disabled }: Props) {
   const [opt, setOpt] = useState("");
   return (
-    <div className="container mt-2 w-12 flex-1 rounded-xl border px-6 py-5 text-[14px] text-gray-600">
+    <div className="container flex-1 grow rounded-xl border px-6 py-5 text-[14px] text-gray-600">
       <div className="">
         <Input
           onChange={({ target }) => setOpt(target.value)}

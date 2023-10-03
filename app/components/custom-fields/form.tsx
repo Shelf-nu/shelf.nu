@@ -148,11 +148,13 @@ export const CustomFieldForm = ({
               </div>
             </SelectContent>
           </Select>
-          <div className="mt-2 w-full flex-1 grow rounded-xl border px-6 py-5 text-[14px] text-gray-600 ">
+          <div className="mt-2 flex-1 grow rounded-xl border px-6 py-5 text-[14px] text-gray-600 ">
             <p>{FIELD_TYPE_DESCRIPTION[selectedType]}</p>
           </div>
-          {selectedType === "OPTION" ? (
-            <>
+        </FormRow>
+        {selectedType === "OPTION" ? (
+          <>
+            <FormRow rowLabel="" className="mt-0 border-b-0 pt-0">
               <OptionBuilder
                 onRemove={(i: number) => {
                   options.splice(i, 1);
@@ -169,9 +171,9 @@ export const CustomFieldForm = ({
                   value={op}
                 />
               ))}
-            </>
-          ) : null}
-        </FormRow>
+            </FormRow>
+          </>
+        ) : null}
       </div>
       <FormRow rowLabel="" className="border-b-0 pt-2">
         <div className="flex items-center gap-3">
