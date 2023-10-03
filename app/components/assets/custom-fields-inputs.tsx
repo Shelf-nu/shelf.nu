@@ -77,10 +77,20 @@ export default function AssetCustomFields({
             getCustomFieldVal(field.id) === "true" || field.required
           }
         />
+        <label className="font-medium text-gray-700 lg:hidden">
+          <span className={field.required ? "required-input-label" : ""}>
+            {field.name}
+          </span>
+        </label>
       </div>
     ),
     DATE: (field) => (
       <>
+        <label className="mb-1.5 font-medium text-gray-700 lg:hidden">
+          <span className={field.required ? "required-input-label" : ""}>
+            {field.name}
+          </span>
+        </label>
         <input
           name={`cf-${field.id}`}
           value={dateObj[field.id]?.toISOString() || ""}
@@ -121,33 +131,40 @@ export default function AssetCustomFields({
     OPTION: (field) => {
       const val = getCustomFieldVal(field.id);
       return (
-        <Select
-          name={`cf-${field.id}`}
-          defaultValue={val ? val : field.required ? field.options[0] : ""}
-          disabled={disabled}
-        >
-          <SelectTrigger
-            className="px-3.5 py-3"
-            placeholder={`Choose ${field.name}`}
+        <>
+          <label className="mb-1.5 font-medium text-gray-700 lg:hidden">
+            <span className={field.required ? "required-input-label" : ""}>
+              {field.name}
+            </span>
+          </label>
+          <Select
+            name={`cf-${field.id}`}
+            defaultValue={val ? val : field.required ? field.options[0] : ""}
+            disabled={disabled}
           >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent
-            position="popper"
-            className="w-full min-w-[300px]"
-            align="start"
-          >
-            <div className=" max-h-[320px] overflow-auto">
-              {field.options.map((value) => (
-                <SelectItem value={value} key={value}>
-                  <span className="mr-4 text-[14px] text-gray-700">
-                    {value.toLowerCase()}
-                  </span>
-                </SelectItem>
-              ))}
-            </div>
-          </SelectContent>
-        </Select>
+            <SelectTrigger
+              className="px-3.5 py-3"
+              placeholder={`Choose ${field.name}`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent
+              position="popper"
+              className="w-full min-w-[300px]"
+              align="start"
+            >
+              <div className=" max-h-[320px] overflow-auto">
+                {field.options.map((value) => (
+                  <SelectItem value={value} key={value}>
+                    <span className="mr-4 text-[14px] text-gray-700">
+                      {value.toLowerCase()}
+                    </span>
+                  </SelectItem>
+                ))}
+              </div>
+            </SelectContent>
+          </Select>
+        </>
       );
     },
   };

@@ -114,6 +114,7 @@ export default function Custody() {
   const actionData = useActionData<{ error: string } | null>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
+
   return (
     <>
       <Form method="post">
@@ -128,7 +129,7 @@ export default function Custody() {
               one of your team members.
             </p>
           </div>
-          <div className="mb-8">
+          <div className=" relative z-50 mb-8">
             <CustodianSelect />
           </div>
           {actionData?.error ? (
