@@ -25,7 +25,7 @@ export function Breadcrumb({
     <div className="breadcrumb">
       {breadcrumb}{" "}
       {!isLastItem && (
-        <span className="mx-4">
+        <span className="mx-2.5 md:mx-4">
           <ChevronRight className="inline align-middle" />
         </span>
       )}
