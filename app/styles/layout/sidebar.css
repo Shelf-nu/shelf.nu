@@ -31,7 +31,7 @@
   }
 
   .collapsed-navigation .bottom {
-    @apply border-none;
+    @apply border-transparent;
   }
 
   .collapsed-navigation .bottom a {
