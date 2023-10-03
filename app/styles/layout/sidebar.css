@@ -23,11 +23,7 @@
 
   .collapsed-navigation .menu li a,
   .collapsed-navigation .menu li button {
-    @apply py-3;
-  }
-  .collapsed-navigation .menu li a .icon,
-  .collapsed-navigation .menu li button .icon {
-    @apply ml-0.5;
+    @apply py-2.5;
   }
 
   .collapsed-navigation .logout-btn form {
@@ -35,11 +31,7 @@
   }
 
   .collapsed-navigation .bottom {
-    @apply border-none;
-  }
-
-  .collapsed-navigation img {
-    @apply ml-2;
+    @apply border-transparent;
   }
 
   .collapsed-navigation .bottom a {
