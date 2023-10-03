@@ -1,4 +1,3 @@
-import { useMemo, useState } from "react";
 import type { OrganizationType } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import {

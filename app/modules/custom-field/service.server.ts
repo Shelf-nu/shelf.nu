@@ -189,7 +189,7 @@ export async function createCustomFieldsIfNotExists({
   //{CF header: definition to create}
   const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {};
   for (let item of data) {
-    Object.keys(item).map((k) => {
+    for (let k of Object.keys(item)) {
       if (k.startsWith("cf:")) {
         const def = getDefinitionFromCsvHeader(k);
         if (!fieldToDefDraftMap[k]) {
@@ -199,7 +199,7 @@ export async function createCustomFieldsIfNotExists({
           optionMap[k] = (optionMap[k] || []).concat([item[k]]);
         }
       }
-    });
+    }
   }
 
   for (const [customFieldDefStr, def] of Object.entries(fieldToDefDraftMap)) {

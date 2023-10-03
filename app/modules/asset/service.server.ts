@@ -1061,6 +1061,7 @@ export const createAssetsFromBackupImport = async ({
     if (asset.customFields && asset.customFields.length > 0) {
       const customFieldDef = asset.customFields.reduce(
         (res, { value, customField }) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { id, createdAt, updatedAt, ...rest } = customField;
           const options = value?.valueOption?.length
             ? [value?.valueOption]
