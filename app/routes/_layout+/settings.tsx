@@ -45,7 +45,9 @@ export default function SettingsPage() {
    * the view /new should not inherit from the parent layouts
    * */
   const location = useLocation();
-  const isCustomFieldsNew = location.pathname === "/settings/custom-fields/new";
+  const shouldHideHeader =
+    location.pathname === "/settings/custom-fields/new" ||
+    /^\/settings\/workspace\/\w+$/.test(location.pathname);
 
   const { enablePremium } = useRouteLoaderData("routes/_layout+/_layout");
   if (enablePremium) {
@@ -54,9 +56,9 @@ export default function SettingsPage() {
 
   return (
     <>
-      {isCustomFieldsNew ? null : <Header />}
+      {shouldHideHeader ? null : <Header />}
       <div>
-        {isCustomFieldsNew ? null : <HorizontalTabs items={items} />}
+        {shouldHideHeader ? null : <HorizontalTabs items={items} />}
         <div>
           <Outlet />
         </div>

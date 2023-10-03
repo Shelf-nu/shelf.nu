@@ -16,6 +16,8 @@ export function Breadcrumb({
   if (typeof breadcrumb === "string" && breadcrumb === "single") {
     if (match?.data?.location) {
       breadcrumb = match?.data?.location?.name || "Not found";
+    } else if (match?.data?.organization) {
+      breadcrumb = match?.data?.organization?.name || "Not found";
     } else {
       breadcrumb = match?.data?.asset?.title || "Not found";
     }

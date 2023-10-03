@@ -13,7 +13,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.workspace";
+
+import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.workspace.$orgId";
 import { XIcon } from "../icons";
 
 export const DeleteMember = ({
