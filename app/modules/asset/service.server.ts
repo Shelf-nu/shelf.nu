@@ -48,12 +48,14 @@ import { createTeamMemberIfNotExists } from "../team-member";
 
 export async function getAsset({
   organizationId,
+  userId,
   id,
 }: Pick<Asset, "id"> & {
-  organizationId: Organization["id"];
+  organizationId?: Organization["id"];
+  userId?: User["id"];
 }) {
   const asset = await db.asset.findFirst({
-    where: { id, organizationId },
+    where: { id, organizationId, userId },
     include: {
       category: true,
       notes: {
