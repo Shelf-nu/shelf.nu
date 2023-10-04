@@ -6,13 +6,13 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
+import { db } from "~/database";
 import { usePosition } from "~/hooks";
 import { getAsset } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { getQr } from "~/modules/qr";
 import { createReport, sendReportEmails } from "~/modules/report-found";
 import { getUserByID } from "~/modules/user";
-import { assertIsPost, isFormProcessing, tw } from "~/utils";
+import { assertIsPost, getRequiredParam, isFormProcessing, tw } from "~/utils";
 
 export const NewReportSchema = z.object({
   email: z
@@ -24,17 +24,28 @@ export const NewReportSchema = z.object({
 
 export const action = async ({ request, params }: ActionArgs) => {
   assertIsPost(request);
-  const { userId } = await requireAuthSession(request);
-  const qrId = params.qrId as string;
-  const qr = await getQr(qrId);
+  await requireAuthSession(request);
 
-  if (!qr || !qr.assetId) {
+  /** Get the QR id from the url */
+  const qrId = getRequiredParam(params, "qrId");
+  /** Query the QR and include the asset and userId for later use */
+  const qr = await db.qr.findFirst({
+    where: {
+      id: qrId,
+    },
+    select: {
+      asset: true,
+      userId: true,
+    },
+  });
+
+  if (!qr || !qr.asset || !qr.asset.id) {
     return new Response("QR code doesnt exist.", { status: 400 });
   }
 
   const owner = await getUserByID(qr.userId);
   if (!owner) return new Response("Something went wrong", { status: 500 });
-  const asset = await getAsset({ userId, id: qr.assetId });
+  const asset = await getAsset({ id: qr.asset.id });
 
   const formData = await request.formData();
   const result = await NewReportSchema.safeParseAsync(parseFormAny(formData));
@@ -49,7 +60,7 @@ export const action = async ({ request, params }: ActionArgs) => {
   const report = await createReport({
     email,
     content,
-    assetId: qr.assetId,
+    assetId: qr.asset.id,
   });
   if (!report) return new Response("Something went wrong", { status: 500 });
 
