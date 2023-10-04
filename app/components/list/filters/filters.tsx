@@ -22,17 +22,10 @@ export const Filters = ({
   className?: string;
 }) => {
   const { search } = useLoaderData();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const perPageParam = searchParams.get("per_page");
 
-  const [isFilteringCategories, toggleIsFilteringCategories] = useAtom(
-    toggleIsFilteringCategoriesAtom
-  );
-  const [isFilteringTags, toggleIsFilteringTags] = useAtom(
-    toggleIsFilteringTagsAtom
-  );
-
-  const submit = useSubmit();
+  // const submit = useSubmit();
 
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
@@ -42,24 +35,24 @@ export const Filters = ({
     }
   }, [search]);
 
-  /**
-   * Submit the form when the selected array changes
-   */
-  useEffect(() => {
-    /** check the flag and if its true, submit the form. */
-    if (isFilteringCategories) {
-      submit(formRef.current);
-      toggleIsFilteringCategories();
-    }
-  }, [submit, isFilteringCategories, toggleIsFilteringCategories]);
+  // /**
+  //  * Submit the form when the selected array changes
+  //  */
+  // useEffect(() => {
+  //   /** check the flag and if its true, submit the form. */
+  //   if (isFilteringCategories) {
+  //     submit(formRef.current);
+  //     toggleIsFilteringCategories();
+  //   }
+  // }, [submit, isFilteringCategories, toggleIsFilteringCategories]);
 
-  useEffect(() => {
-    /** check the flag and if its true, submit the form. */
-    if (isFilteringTags) {
-      submit(formRef.current);
-      toggleIsFilteringTags();
-    }
-  }, [submit, isFilteringTags, toggleIsFilteringTags]);
+  // useEffect(() => {
+  //   /** check the flag and if its true, submit the form. */
+  //   if (isFilteringTags) {
+  //     submit(formRef.current);
+  //     toggleIsFilteringTags();
+  //   }
+  // }, [submit, isFilteringTags, toggleIsFilteringTags]);
 
   return (
     <div
@@ -68,7 +61,17 @@ export const Filters = ({
         className
       )}
     >
-      <Form ref={formRef} className="w-full">
+      <Form
+        ref={formRef}
+        className="w-full"
+        onSubmit={(e) => {
+          const formData = new FormData(e.currentTarget);
+          const s = formData.get("s") as string;
+          if (s) {
+            setSearchParams((prev) => ({ ...prev, s }));
+          }
+        }}
+      >
         {perPageParam ? (
           <input type="hidden" name="per_page" value={perPageParam} />
         ) : null}

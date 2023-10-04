@@ -7,6 +7,7 @@ import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ExportButton } from "~/components/assets/export-button";
 import { ImportButton } from "~/components/assets/import-button";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -94,6 +95,8 @@ export async function loader({ request }: LoaderArgs) {
     assets,
     totalPages,
     cookie,
+    totalCategories,
+    totalTags,
   } = await getPaginatedAndFilterableAssets({
     request,
     userId,
@@ -141,6 +144,8 @@ export async function loader({ request }: LoaderArgs) {
         title: "Search your asset database",
         text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
       },
+      totalCategories,
+      totalTags,
     },
     {
       headers: {
@@ -204,8 +209,31 @@ export default function AssetIndexPage() {
                 <div className="text-gray-500"> | </div>
               </div>
             ) : null}
-            <CategoryFilters />
-            <TagFilters />
+            <div className="inline-flex justify-end gap-2 p-3 md:p-0 lg:gap-4">
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Categories{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "category", key: "name" }}
+                label="Filter by category"
+                initialDataKey="categories"
+                countKey="totalCategories"
+              />
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "tag", key: "name" }}
+                label="Filter by tags"
+                initialDataKey="tags"
+                countKey="totalTags"
+              />
+            </div>
           </div>
         </Filters>
         <List
