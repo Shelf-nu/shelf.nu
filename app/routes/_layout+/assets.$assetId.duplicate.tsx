@@ -51,7 +51,7 @@ const DuplicateAssetSchema = z.object({
 export const action = async ({ request, params }: ActionArgs) => {
   assertIsPost(request);
 
-  const { userId } = await requireAuthSession(request);
+  const { userId, organizationId } = await requireAuthSession(request);
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({
     where: { id: assetId },
@@ -76,6 +76,7 @@ export const action = async ({ request, params }: ActionArgs) => {
     asset,
     userId,
     amountOfDuplicates,
+    organizationId,
   });
 
   sendNotification({

@@ -29,7 +29,12 @@ import {
 } from "~/utils/custom-fields";
 import { ShelfStackError } from "~/utils/error";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
-import type { ShelfAssetCustomFieldValueType } from "./types";
+import type {
+  CreateAssetFromBackupImportPayload,
+  CreateAssetFromContentImportPayload,
+  ShelfAssetCustomFieldValueType,
+  UpdateAssetPayload,
+} from "./types";
 import { createCategoriesIfNotExists, getAllCategories } from "../category";
 import {
   createCustomFieldsIfNotExists,
@@ -42,13 +47,15 @@ import { createTagsIfNotExists, getAllTags } from "../tag";
 import { createTeamMemberIfNotExists } from "../team-member";
 
 export async function getAsset({
+  organizationId,
   userId,
   id,
 }: Pick<Asset, "id"> & {
-  userId: User["id"];
+  organizationId?: Organization["id"];
+  userId?: User["id"];
 }) {
   const asset = await db.asset.findFirst({
-    where: { id, userId },
+    where: { id, organizationId, userId },
     include: {
       category: true,
       notes: {
@@ -88,14 +95,14 @@ export async function getAsset({
 }
 
 export async function getAssets({
-  userId,
+  organizationId,
   page = 1,
   perPage = 8,
   search,
   categoriesIds,
   tagsIds,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
 
   /** Page number. Starts at 1 */
   page: number;
@@ -112,7 +119,7 @@ export async function getAssets({
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
   /** Default value of where. Takes the assetss belonging to current user */
-  let where: Prisma.AssetSearchViewWhereInput = { asset: { userId } };
+  let where: Prisma.AssetSearchViewWhereInput = { asset: { organizationId } };
 
   /** If the search string exists, add it to the where object */
   if (search) {
@@ -190,17 +197,25 @@ export async function createAsset({
   tags,
   custodian,
   customFieldsValues,
+  organizationId,
 }: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  organizationId: Organization["id"];
 }) {
   /** User connction data */
   const user = {
     connect: {
       id: userId,
+    },
+  };
+
+  const organization = {
+    connect: {
+      id: organizationId as string,
     },
   };
 
@@ -232,6 +247,7 @@ export async function createAsset({
     description,
     user,
     qrCodes,
+    organization,
   };
 
   /** If a categoryId is passed, link the category to the asset. */
@@ -307,20 +323,6 @@ export async function createAsset({
       custody: true,
     },
   });
-}
-
-interface UpdateAssetPayload {
-  id: Asset["id"];
-  title?: Asset["title"];
-  description?: Asset["description"];
-  categoryId?: Asset["categoryId"];
-  newLocationId?: Asset["locationId"];
-  currentLocationId?: Asset["locationId"];
-  mainImage?: Asset["mainImage"];
-  mainImageExpiration?: Asset["mainImageExpiration"];
-  tags?: { set: { id: string }[] };
-  userId?: User["id"];
-  customFieldsValues?: ShelfAssetCustomFieldValueType[];
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
@@ -463,10 +465,10 @@ export async function updateAsset(payload: UpdateAssetPayload) {
 
 export async function deleteAsset({
   id,
-  userId,
-}: Pick<Asset, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Asset, "id"> & { organizationId: Organization["id"] }) {
   return db.asset.deleteMany({
-    where: { id, userId },
+    where: { id, organizationId },
   });
 }
 
@@ -583,12 +585,14 @@ export async function duplicateAsset({
   asset,
   userId,
   amountOfDuplicates,
+  organizationId,
 }: {
   asset: Prisma.AssetGetPayload<{
     include: { custody: { include: { custodian: true } }; tags: true };
   }>;
   userId: string;
   amountOfDuplicates: number;
+  organizationId: string;
 }) {
   const duplicatedAssets = [];
 
@@ -597,6 +601,7 @@ export async function duplicateAsset({
       title: `${asset.title} (copy ${
         amountOfDuplicates > 1 ? i : ""
       } ${Date.now()})`,
+      organizationId,
       description: asset.description,
       userId,
       categoryId: asset.categoryId,
@@ -663,9 +668,11 @@ export async function getAllRelatedEntries({
 export const getPaginatedAndFilterableAssets = async ({
   request,
   userId,
+  organizationId,
 }: {
   request: LoaderArgs["request"];
   userId: User["id"];
+  organizationId: Organization["id"];
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, categoriesIds, tagsIds } =
@@ -684,7 +691,7 @@ export const getPaginatedAndFilterableAssets = async ({
   });
 
   const { assets, totalAssets } = await getAssets({
-    userId,
+    organizationId,
     page,
     perPage,
     search,
@@ -751,13 +758,13 @@ export const createLocationChangeNote = async ({
 
 /** Fetches assets with the data needed for exporting to CSV */
 export const fetchAssetsForExport = async ({
-  userId,
+  organizationId,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
 }) =>
   await db.asset.findMany({
     where: {
-      userId,
+      organizationId,
     },
     include: {
       category: true,
@@ -832,6 +839,7 @@ export const createAssetsFromContentImport = async ({
     }, [] as ShelfAssetCustomFieldValueType[]);
 
     await createAsset({
+      organizationId,
       title: asset.title,
       description: asset.description || "",
       userId,
@@ -851,16 +859,6 @@ export const createAssetsFromContentImport = async ({
   }
 };
 
-export interface CreateAssetFromContentImportPayload
-  extends Record<string, any> {
-  title: string;
-  description?: string;
-  category?: string;
-  tags: string[];
-  location?: string;
-  custodian?: string;
-}
-
 export const createAssetsFromBackupImport = async ({
   data,
   userId,
@@ -870,9 +868,7 @@ export const createAssetsFromBackupImport = async ({
   userId: User["id"];
   organizationId: Organization["id"];
 }) => {
-  // console.log(data);
-
-  //TODO use concurrency control over it will overload the server
+  //TODO use concurrency control or it will overload the server
   data.map(async (asset) => {
     /** Base data from asset */
     const d = {
@@ -1102,39 +1098,3 @@ export const createAssetsFromBackupImport = async ({
     }
   });
 };
-
-export interface CreateAssetFromBackupImportPayload
-  extends Record<string, any> {
-  id: string;
-  title: string;
-  description?: string;
-  category:
-    | {
-        id: string;
-        name: string;
-        description: string;
-        color: string;
-        createdAt: string;
-        updatedAt: string;
-        userId: string;
-      }
-    | {};
-  tags: {
-    name: string;
-  }[];
-  location:
-    | {
-        name: string;
-        description?: string;
-        address?: string;
-        createdAt: string;
-        updatedAt: string;
-      }
-    | {};
-  customFields: AssetCustomFieldsValuesWithFields[];
-}
-
-export type AssetCustomFieldsValuesWithFields =
-  ShelfAssetCustomFieldValueType & {
-    customField: CustomField;
-  };

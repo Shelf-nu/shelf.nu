@@ -116,6 +116,7 @@ export async function action({ request }: LoaderArgs) {
   const tags = buildTagsSet(result.data.tags);
 
   const asset = await createAsset({
+    organizationId: authSession.organizationId,
     title,
     description,
     userId: authSession.userId,

@@ -16,11 +16,11 @@ const keysToSkip = [
 ];
 
 export const loader = async ({ request }: LoaderArgs) => {
-  const { userId } = await requireAuthSession(request);
+  const { userId, organizationId } = await requireAuthSession(request);
 
   await assertUserCanExportAssets({ userId });
 
-  const assets = await fetchAssetsForExport({ userId });
+  const assets = await fetchAssetsForExport({ organizationId });
 
   const csvData = buildCsvDataFromAssets({
     assets,

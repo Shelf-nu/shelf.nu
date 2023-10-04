@@ -32,25 +32,17 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
 export async function loader({ request, params }: LoaderArgs) {
-  const { userId } = await requireAuthSession(request);
-  const organization = await getOrganizationByUserId({
-    userId,
-    orgType: OrganizationType.PERSONAL,
-  });
-
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
+  const { userId, organizationId } = await requireAuthSession(request);
 
   const { categories, tags, locations, customFields } =
     await getAllRelatedEntries({
       userId,
-      organizationId: organization.id,
+      organizationId,
     });
 
   const id = getRequiredParam(params, "assetId");
 
-  const asset = await getAsset({ userId, id });
+  const asset = await getAsset({ organizationId, id });
   if (!asset) {
     throw new ShelfStackError({ message: "Not Found", status: 404 });
   }

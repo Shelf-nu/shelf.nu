@@ -1,6 +1,6 @@
 import type { Prisma, User, Location } from "@prisma/client";
 import { db } from "~/database";
-import type { CreateAssetFromContentImportPayload } from "../asset";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function getLocation({
   userId,
