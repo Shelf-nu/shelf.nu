@@ -336,7 +336,6 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     id,
     newLocationId,
     currentLocationId,
-    userId,
     customFieldsValues: customFieldsValuesFromForm,
   } = payload;
   const isChangingLocation =
@@ -428,14 +427,12 @@ export async function updateAsset(payload: UpdateAssetPayload) {
       db.location.findFirst({
         where: {
           id: currentLocationId,
-          userId,
         },
       }),
 
       db.location.findFirst({
         where: {
           id: newLocationId,
-          userId,
         },
         include: {
           user: {
@@ -655,7 +652,7 @@ export async function getAllRelatedEntries({
     db.tag.findMany({ where: { userId } }),
 
     /** Get the locations */
-    db.location.findMany({ where: { userId } }),
+    db.location.findMany({ where: { organizationId } }),
 
     /** Get the custom fields */
     db.customField.findMany({
@@ -801,6 +798,7 @@ export const createAssetsFromContentImport = async ({
   const locations = await createLocationsIfNotExists({
     data,
     userId,
+    organizationId,
   });
 
   const teamMembers = await createTeamMemberIfNotExists({
@@ -935,7 +933,7 @@ export const createAssetsFromBackupImport = async ({
 
       const existingLoc = await db.location.findFirst({
         where: {
-          userId,
+          organizationId,
           name: location.name,
         },
       });
@@ -947,6 +945,7 @@ export const createAssetsFromBackupImport = async ({
             name: location.name,
             description: location.description || "",
             address: location.address || "",
+            organizationId,
             userId,
             createdAt: new Date(location.createdAt),
             updatedAt: new Date(location.updatedAt),

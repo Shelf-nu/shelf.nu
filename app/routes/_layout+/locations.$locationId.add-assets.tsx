@@ -18,10 +18,10 @@ import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
   const { userId, organizationId } = await requireAuthSession(request);
-  const lcationId = params.locationId as string;
+  const locationId = params.locationId as string;
   const location = await db.location.findUnique({
     where: {
-      id: lcationId,
+      id: locationId,
     },
   });
 

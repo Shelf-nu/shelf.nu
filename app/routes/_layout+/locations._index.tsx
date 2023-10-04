@@ -22,7 +22,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 
 export async function loader({ request }: LoaderArgs) {
-  const { userId } = await requireAuthSession(request);
+  const { organizationId } = await requireAuthSession(request);
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -32,7 +32,7 @@ export async function loader({ request }: LoaderArgs) {
   const { prev, next } = generatePageMeta(request);
 
   const { locations, totalLocations } = await getLocations({
-    userId,
+    organizationId,
     page,
     perPage,
     search,

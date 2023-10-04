@@ -21,11 +21,11 @@ import { ShelfStackError } from "~/utils/error";
 import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ request, params }: LoaderArgs) {
-  const { userId } = await requireAuthSession(request);
+  const { organizationId } = await requireAuthSession(request);
 
   const id = getRequiredParam(params, "locationId");
 
-  const { location } = await getLocation({ userId, id });
+  const { location } = await getLocation({ organizationId, id });
   if (!location) {
     throw new ShelfStackError({ message: "Location Not Found", status: 404 });
   }

@@ -88,6 +88,7 @@ export async function action({ request }: ActionArgs) {
     description,
     address,
     userId: authSession.userId,
+    organizationId: authSession.organizationId,
     image: file || null,
   });
 

@@ -42,7 +42,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderArgs) => {
-  const { userId } = await requireAuthSession(request);
+  const { organizationId } = await requireAuthSession(request);
   const id = getRequiredParam(params, "locationId");
 
   const searchParams = getCurrentSearchParams(request);
@@ -51,7 +51,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   const { perPage } = cookie;
 
   const { location, totalAssetsWithinLocation } = await getLocation({
-    userId,
+    organizationId,
     id,
     page,
     perPage,
