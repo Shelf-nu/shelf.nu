@@ -6,7 +6,7 @@ import { LogoutButton } from "~/modules/auth";
 import { toggleMobileNavAtom } from "./atoms";
 
 interface Props {
-  user: User;
+  user: Pick<User, "username" | "email">;
 }
 
 export default function SidebarBottom({ user }: Props) {

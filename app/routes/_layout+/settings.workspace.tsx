@@ -1,5 +1,9 @@
 import type { Custody, TeamMember } from "@prisma/client";
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
@@ -20,7 +24,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
-export const loader = async ({ request }: LoaderArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { userId } = await requireAuthSession(request);
   const { organization, totalAssets, totalLocations } =
     await getUserPersonalOrganizationData({ userId });
@@ -71,7 +75,7 @@ export const loader = async ({ request }: LoaderArgs) => {
   );
 };
 
-export const action = async ({ request }: ActionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   await requireAuthSession(request);
 
   const formData = await request.formData();
@@ -85,7 +89,7 @@ export const action = async ({ request }: ActionArgs) => {
   return redirect(`/settings/workspace`);
 };
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 export const ErrorBoundary = () => <ErrorBoundryComponent />;

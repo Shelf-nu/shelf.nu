@@ -1,6 +1,10 @@
 import * as React from "react";
 
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
   Form,
@@ -24,7 +28,7 @@ import {
 import { assertIsPost, isFormProcessing, validEmail } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
@@ -43,7 +47,7 @@ const LoginFormSchema = z.object({
   redirectTo: z.string().optional(),
 });
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
   const formData = await request.formData();
   /** Check the zo validations */
@@ -83,7 +87,7 @@ export async function action({ request }: ActionArgs) {
   });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 

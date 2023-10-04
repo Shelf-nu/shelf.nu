@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
-import type { Tag as ShelfTag } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { Tag } from "react-tag-autocomplete";
 import { ReactTags } from "react-tag-autocomplete";
+import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 
 export interface Suggestion {
   label: string;
@@ -17,7 +17,7 @@ export const TagsAutocomplete = ({ existingTags }: { existingTags: Tag[] }) => {
 
   /** Get the tags from the loader */
 
-  const suggestions = useLoaderData().tags.map((tag: ShelfTag) => ({
+  const suggestions = useLoaderData<typeof loader>().tags.map((tag) => ({
     label: tag.name,
     value: tag.id,
   }));

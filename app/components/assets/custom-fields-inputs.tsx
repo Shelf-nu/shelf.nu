@@ -38,8 +38,8 @@ export default function AssetCustomFields({
   schema: z.ZodObject<any, any, any>;
 }) {
   /** Get the custom fields from the loader */
-  const { customFields } = useLoaderData();
-  const { asset } = useLoaderData<typeof loader>() || {};
+
+  const { customFields, asset } = useLoaderData<typeof loader>();
 
   const customFieldsValues =
     (asset?.customFields as unknown as ShelfAssetCustomFieldValueType[]) || [];
@@ -181,7 +181,7 @@ export default function AssetCustomFields({
         </Link>
       </div>
       {customFields.length > 0 ? (
-        customFields.map((field: CustomField) => {
+        customFields.map((field) => {
           const value = customFieldsValues?.find(
             (cfv) => cfv.customFieldId === field.id
           )?.value;
@@ -195,6 +195,8 @@ export default function AssetCustomFields({
               required={field.required}
             >
               {typeof fieldTypeToCompMap[field.type] === "function" ? (
+                // @ts-ignore
+                // @TODO we have to find a solution for this
                 fieldTypeToCompMap[field.type]!(field)
               ) : (
                 <Input

@@ -1,4 +1,3 @@
-import type { Note } from "@prisma/client";
 import { useFetcher, useParams } from "@remix-run/react";
 import { TrashIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
@@ -14,7 +13,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 
-export const DeleteNote = ({ note }: { note: Note }) => {
+export const DeleteNote = ({ noteId }: { noteId: string }) => {
   const fetcher = useFetcher();
   const params = useParams();
   return (
@@ -53,7 +52,7 @@ export const DeleteNote = ({ note }: { note: Note }) => {
             method="delete"
             action={`/assets/${params.assetId}/note`}
           >
-            <input type="hidden" name="noteId" value={note.id} />
+            <input type="hidden" name="noteId" value={noteId} />
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               type="submit"

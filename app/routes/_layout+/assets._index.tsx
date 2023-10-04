@@ -1,5 +1,5 @@
 import type { Category, Asset, Tag, Custody } from "@prisma/client";
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
@@ -67,7 +67,7 @@ export interface IndexResponse {
   };
 }
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
 
   const user = await db.user.findUnique({
@@ -150,7 +150,7 @@ export async function loader({ request }: LoaderArgs) {
   );
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data.header.title) },
 ];
 

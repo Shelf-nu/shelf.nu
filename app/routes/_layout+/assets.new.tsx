@@ -1,5 +1,5 @@
 import { OrganizationType } from "@prisma/client";
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
@@ -29,7 +29,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Asset";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
   const organization = await getOrganizationByUserId({
     userId,
@@ -52,7 +52,7 @@ export async function loader({ request }: LoaderArgs) {
   return json({ header, categories, tags, locations, customFields });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
@@ -60,7 +60,7 @@ export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export async function action({ request }: LoaderArgs) {
+export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
 

@@ -1,6 +1,6 @@
 import type { Asset, Image as ImageDataType, Location } from "@prisma/client";
 import { json } from "@remix-run/node";
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 
 import Header from "~/components/layout/header";
@@ -21,7 +21,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
 
   const searchParams = getCurrentSearchParams(request);
@@ -67,7 +67,7 @@ export async function loader({ request }: LoaderArgs) {
   );
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 

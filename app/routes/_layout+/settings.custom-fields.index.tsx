@@ -1,6 +1,6 @@
 import { OrganizationType, type CustomField } from "@prisma/client";
 import { json } from "@remix-run/node";
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import { ErrorBoundryComponent } from "~/components/errors";
@@ -24,13 +24,13 @@ import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);

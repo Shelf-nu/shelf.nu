@@ -3,7 +3,11 @@ import {
   unstable_parseMultipartFormData,
   unstable_createMemoryUploadHandler,
 } from "@remix-run/node";
-import type { ActionArgs, V2_MetaFunction, LoaderArgs } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  MetaFunction,
+  LoaderFunctionArgs,
+} from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
@@ -20,7 +24,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { MAX_SIZE } from "./locations.new";
 
-export async function loader({ request, params }: LoaderArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
 
   const id = getRequiredParam(params, "locationId");
@@ -40,7 +44,7 @@ export async function loader({ request, params }: LoaderArgs) {
   });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
@@ -48,7 +52,7 @@ export const handle = {
   breadcrumb: () => "Edit",
 };
 
-export async function action({ request, params }: ActionArgs) {
+export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
   const clonedRequest = request.clone();

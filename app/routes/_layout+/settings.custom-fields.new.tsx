@@ -1,4 +1,4 @@
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
@@ -21,7 +21,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Custom Field";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
 
   await assertUserCanCreateMoreCustomFields({ userId });
@@ -35,7 +35,7 @@ export async function loader({ request }: LoaderArgs) {
   });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data?.header?.title) : "" },
 ];
 
@@ -43,7 +43,7 @@ export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export async function action({ request }: LoaderArgs) {
+export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
   await assertUserCanCreateMoreCustomFields({ userId: authSession.userId });

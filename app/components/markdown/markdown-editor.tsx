@@ -2,6 +2,7 @@ import { useEffect, forwardRef } from "react";
 import type { TextareaHTMLAttributes, ChangeEvent } from "react";
 import { Link, useFetcher } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
+import type { action } from "~/routes/api+/utils.parse-markdown";
 import { tw } from "~/utils";
 import { MarkdownViewer } from "./markdown-viewer";
 import Input from "../forms/input";
@@ -34,7 +35,9 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
   }: Props,
   ref
 ) {
-  const fetcher = useFetcher();
+  // const sendMagicLink = useTypedFetcher<typeof action>();
+
+  const fetcher = useFetcher<typeof action>();
   const content = fetcher?.data?.content;
   const [markdown, setMarkdown] = useAtom(markdownAtom);
 
@@ -96,7 +99,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
       </TabsContent>
       <TabsContent value="preview">
         <MarkdownViewer
-          content={content}
+          content={content as string}
           className="min-h-[210px] rounded-lg border px-[14px] py-2"
         />
       </TabsContent>
