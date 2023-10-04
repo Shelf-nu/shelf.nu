@@ -120,6 +120,12 @@
     "vite-tsconfig-paths": "^3.6.0",
     "vitest": "^0.24.5"
   },
+  "overrides": {
+    "remix-utils": {
+      "@remix-run/react": "^2.0.1",
+      "@remix-run/server-runtime": "^2.0.1"
+    }
+  },
   "engines": {
     "node": ">=18"
   },
