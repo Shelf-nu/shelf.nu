@@ -16,45 +16,48 @@ import When from "../when/when";
 
 type DropdownItem = { id: string; name: string; color?: string };
 
-type Props<T> = {
+type Props = {
   className?: string;
   style?: React.CSSProperties;
   trigger: React.ReactElement;
   label?: React.ReactNode;
   searchIcon?: Icon;
   /** name of key in loader which is used to pass initial data */
-  loaderKey: string;
+  initialDataKey: string;
+  /** name of key in loader which passing the total count */
+  countKey: string;
   model: {
     /** name of the model for which the query has to run */
     name: AllowedModelNames;
     /** name of key for which we have to search the value */
-    key: keyof T;
+    key: string;
   };
 };
 
-export default function DynamicDropdown<T>({
+export default function DynamicDropdown({
   className,
   style,
   label = "Filter",
   trigger,
   searchIcon = "search",
   model,
-  loaderKey,
-}: Props<T>) {
+  initialDataKey,
+  countKey,
+}: Props) {
   const initialData = useLoaderData();
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchParams, setSearchParams] = useSearchParams();
   const itemInParams = searchParams.getAll(model.name);
-
+  const totalItems = initialData[countKey];
   const fetcher = useFetcher<Array<DropdownItem>>();
 
   const items = useMemo(() => {
-    if (fetcher.data) {
+    if (fetcher.data && fetcher.data?.length > 0) {
       return fetcher.data;
     }
 
-    return (initialData[loaderKey] ?? []) as Array<DropdownItem>;
-  }, [fetcher.data, initialData, loaderKey]);
+    return (initialData[initialDataKey] ?? []) as Array<DropdownItem>;
+  }, [fetcher.data, initialData, initialDataKey]);
 
   const handleSelectItemChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -128,7 +131,9 @@ export default function DynamicDropdown<T>({
                 className="mb-2 text-gray-500"
                 icon={searchIcon}
                 autoFocus
-                onKeyUp={(e) => {
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.currentTarget.value);
                   if (e.currentTarget.value) {
                     fetcher.submit(
                       {
@@ -141,7 +146,7 @@ export default function DynamicDropdown<T>({
                   }
                 }}
               />
-              <When truthy={true}>
+              <When truthy={Boolean(searchQuery)}>
                 <Button
                   icon="x"
                   variant="tertiary"
@@ -179,6 +184,12 @@ export default function DynamicDropdown<T>({
                 </label>
               ))}
             </div>
+            <When truthy={totalItems > 4}>
+              <div className="my-2 text-gray-500">
+                Showing 4 out of {initialData[countKey]}, type to search for
+                more
+              </div>
+            </When>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
