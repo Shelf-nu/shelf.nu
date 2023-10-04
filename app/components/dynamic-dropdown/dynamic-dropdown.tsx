@@ -1,4 +1,5 @@
-import { cloneElement, useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
+import { cloneElement, useCallback, useMemo, useState } from "react";
 import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { tw } from "~/utils";
@@ -40,48 +41,56 @@ export default function DynamicDropdown<T>({
   model,
   loaderKey,
 }: Props<T>) {
-  /** @TODO Find a better way */
-  const loaderData = useLoaderData();
+  const initialData = useLoaderData();
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const itemInParams = searchParams.getAll(model.name);
 
   const fetcher = useFetcher<Array<DropdownItem>>();
-
-  useEffect(() => {
-    setSearchParams({ [model.name]: selectedItems });
-  }, [model.name, selectedItems, setSearchParams]);
 
   const items = useMemo(() => {
     if (fetcher.data) {
       return fetcher.data;
     }
 
-    return (loaderData[loaderKey] ?? []) as Array<DropdownItem>;
-  }, [fetcher.data, loaderData, loaderKey]);
+    return (initialData[loaderKey] ?? []) as Array<DropdownItem>;
+  }, [fetcher.data, initialData, loaderKey]);
+
+  const handleSelectItemChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const value = e.currentTarget.value;
+      /** If item is already there in search params then remove it */
+      if (itemInParams.includes(value)) {
+        setSearchParams((prev) => {
+          prev.delete(model.name, value);
+          return prev;
+        });
+      } else {
+        /** Otherwise, add the item in search params */
+        setSearchParams((prev) => {
+          prev.append(model.name, value);
+          return prev;
+        });
+      }
+    },
+    [itemInParams, model.name, setSearchParams]
+  );
 
   return (
     <div className="relative w-full">
-      <div className="hidden">
-        {items.map((item) => (
-          <input
-            type="checkbox"
-            checked
-            value={item.id}
-            key={item.id}
-            name={model.name}
-            readOnly
-          />
-        ))}
-      </div>
       <DropdownMenu modal={false}>
-        <DropdownMenuTrigger className="inline-flex items-center gap-2 text-gray-500">
-          {cloneElement(trigger)}
-          <When truthy={selectedItems.length > 0}>
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
-              {selectedItems.length}
-            </div>
-          </When>
+        <DropdownMenuTrigger
+          className="inline-flex items-center gap-2 text-gray-500"
+          asChild
+        >
+          <div>
+            {cloneElement(trigger)}
+            <When truthy={itemInParams.length > 0}>
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
+                {itemInParams.length}
+              </div>
+            </When>
+          </div>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
@@ -94,13 +103,16 @@ export default function DynamicDropdown<T>({
           <div>
             <div className="mb-[6px] flex items-center justify-between">
               <div className="text-xs text-gray-500">{label}</div>
-              <When truthy={selectedItems.length > 0}>
+              <When truthy={itemInParams.length > 0}>
                 <Button
                   as="button"
                   variant="link"
                   className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
                   onClick={() => {
-                    setSelectedItems([]);
+                    setSearchParams((prev) => {
+                      prev.delete(model.name);
+                      return prev;
+                    });
                   }}
                 >
                   Clear filter
@@ -116,20 +128,17 @@ export default function DynamicDropdown<T>({
                 className="mb-2 text-gray-500"
                 icon={searchIcon}
                 autoFocus
-                value={searchQuery}
-                onChange={(e) => {
-                  if (e.target.value) {
+                onKeyUp={(e) => {
+                  if (e.currentTarget.value) {
                     fetcher.submit(
                       {
                         model: model.name,
                         queryKey: model.key as string,
-                        queryValue: e.target.value,
+                        queryValue: e.currentTarget.value,
                       },
                       { method: "GET", action: "/api/model-filters" }
                     );
                   }
-
-                  setSearchQuery(e.target.value);
                 }}
               />
               <When truthy={true}>
@@ -159,18 +168,10 @@ export default function DynamicDropdown<T>({
                     type="checkbox"
                     value={item.id}
                     className="hidden"
-                    checked={selectedItems.includes(item.id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedItems((prev) => [...prev, item.id]);
-                      } else {
-                        setSelectedItems((prev) =>
-                          prev.filter((p) => p !== item.id)
-                        );
-                      }
-                    }}
+                    checked={itemInParams.includes(item.id)}
+                    onChange={handleSelectItemChange}
                   />
-                  {selectedItems.includes(item.id) ? (
+                  {itemInParams.includes(item.id) ? (
                     <span className="absolute right-2 flex  items-center justify-center text-primary">
                       <CheckIcon />
                     </span>

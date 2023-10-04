@@ -7,6 +7,14 @@ export default function When({
   truthy,
   children,
   elseElement,
-}: React.PropsWithChildren<Props>) {
-  return truthy ? children : elseElement ?? null;
+}: React.PropsWithChildren<Props>): React.ReactNode | null {
+  if (truthy) {
+    return children;
+  }
+
+  if (typeof elseElement === "undefined") {
+    return null;
+  }
+
+  return elseElement;
 }
