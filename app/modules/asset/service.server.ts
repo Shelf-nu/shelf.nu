@@ -640,17 +640,18 @@ export async function getAllRelatedEntries({
 }> {
   const [categories, tags, locations, customFields] = await db.$transaction([
     /** Get the categories */
-    db.category.findMany({ where: { userId } }),
+    db.category.findMany({ where: { userId }, take: 4 }),
 
     /** Get the tags */
-    db.tag.findMany({ where: { userId } }),
+    db.tag.findMany({ where: { userId }, take: 4 }),
 
     /** Get the locations */
-    db.location.findMany({ where: { userId } }),
+    db.location.findMany({ where: { userId }, take: 4 }),
 
     /** Get the custom fields */
     db.customField.findMany({
       where: { organizationId, active: { equals: true } },
+      take: 4,
     }),
   ]);
   return { categories, tags, locations, customFields };
@@ -671,8 +672,8 @@ export const getPaginatedAndFilterableAssets = async ({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
-  const categories = await db.category.findMany({ take: 4 });
-  const tags = await db.tag.findMany({ take: 4 });
+  const categories = await db.category.findMany({ where: { userId }, take: 4 });
+  const tags = await db.tag.findMany({ where: { userId }, take: 4 });
 
   const { assets, totalAssets } = await getAssets({
     userId,
