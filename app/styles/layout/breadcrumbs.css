@@ -12,5 +12,5 @@
 
 .breadcrumb a,
 .breadcrumb span {
-  @apply mb-[-1px] block h-full text-[14px];
+  @apply mb-[-1px] block h-full text-[12px] md:text-[14px];
 }

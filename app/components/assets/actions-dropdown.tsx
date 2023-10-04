@@ -41,13 +41,25 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
         onOpenChange={(open) => setOpen(open)}
         open={open}
       >
-        <DropdownMenuTrigger className="asset-actions">
-          <Button variant="secondary" to="#" data-test-id="assetActionsButton">
+        <DropdownMenuTrigger className="asset-actions hidden sm:block">
+          <Button variant="secondary" data-test-id="assetActionsButton">
             <span className="flex items-center gap-2">
               Actions <ChevronRight className="chev" />
             </span>
           </Button>
         </DropdownMenuTrigger>
+
+        {/* using custom dropdown menu triggerer on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
+        <Button
+          variant="secondary"
+          data-test-id="assetActionsButton"
+          className="asset-actions sm:hidden"
+          onClick={() => setOpen(true)}
+        >
+          <span className="flex items-center gap-2">
+            Actions <ChevronRight className="chev" />
+          </span>
+        </Button>
 
         {open && (
           <style
@@ -69,14 +81,14 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-lg bg-white p-0 text-right md:static md:w-[180px] md:rounded-lg"
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-lg bg-white p-0 text-right md:static md:w-[180px] md:rounded-lg">
-            <DropdownMenuItem className="mb-2.5 border-b px-8 py-7 md:mb-0 md:p-3">
+            <DropdownMenuItem className="mb-2.5 border-b p-4 md:mb-0 md:p-0">
               {!assetIsAvailable ? (
                 <Button
                   to="release-custody"
                   role="link"
                   variant="link"
                   className="justify-start whitespace-nowrap
-                text-gray-700 hover:text-gray-700"
+                px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
                   onClick={() => setOpen(false)}
                 >
@@ -89,7 +101,7 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
                   to="give-custody"
                   role="link"
                   variant="link"
-                  className="justify-start text-gray-700 hover:text-gray-700"
+                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
                   onClick={() => setOpen(false)}
                 >
@@ -99,12 +111,12 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
                 </Button>
               )}
             </DropdownMenuItem>
-            <DropdownMenuItem className="px-8 py-4 md:p-3">
+            <DropdownMenuItem className="px-4 py-1 md:p-0">
               <Button
                 to="edit"
                 role="link"
                 variant="link"
-                className="justify-start text-gray-700 hover:text-gray-700"
+                className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                 width="full"
               >
                 <span className="flex items-center gap-2">
@@ -112,12 +124,12 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
                 </span>
               </Button>
             </DropdownMenuItem>
-            <DropdownMenuItem className="p-3">
+            <DropdownMenuItem className="px-4 py-1 md:p-0">
               <Button
                 to="duplicate"
                 role="link"
                 variant="link"
-                className="justify-start text-gray-700 hover:text-gray-700"
+                className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                 width="full"
               >
                 <span
@@ -129,14 +141,14 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
               </Button>
             </DropdownMenuItem>
             <DropdownMenuItem
-              className="px-8 py-4 md:p-3"
+              className="px-4 py-1 md:p-0"
               onSelect={(e) => {
                 e.preventDefault();
               }}
             >
               <DeleteAsset asset={asset} />
             </DropdownMenuItem>
-            <DropdownMenuItem className="mt-3 border-t p-4 md:hidden md:p-3">
+            <DropdownMenuItem className="mt-3 border-t p-4 md:hidden md:p-0">
               <Button
                 role="button"
                 variant="secondary"

@@ -19,7 +19,15 @@ export default function CustodianSelect() {
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>
         <div>
-          <SelectContent className="w-[352px]" position="popper" align="start">
+          <SelectContent
+            className="w-[352px]"
+            position="popper"
+            align="start"
+            ref={(ref) => {
+              if (!ref) return;
+              ref.ontouchstart = (e) => e.preventDefault();
+            }}
+          >
             {teamMembers.length > 0 ? (
               <div className=" max-h-[320px] overflow-auto">
                 {teamMembers.map((member) => (
