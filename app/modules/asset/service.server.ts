@@ -671,13 +671,8 @@ export const getPaginatedAndFilterableAssets = async ({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
-  const categories = await getAllCategories({
-    userId,
-  });
-
-  const tags = await getAllTags({
-    userId,
-  });
+  const categories = await db.category.findMany({ take: 4 });
+  const tags = await db.tag.findMany({ take: 4 });
 
   const { assets, totalAssets } = await getAssets({
     userId,
