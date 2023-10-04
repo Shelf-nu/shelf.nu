@@ -18,8 +18,6 @@ import {
   selectedCategoriesAtom,
   selectedTagsAtom,
 } from "~/components/list/filters/atoms";
-import { CategoryFilters } from "~/components/list/filters/category";
-import { TagFilters } from "~/components/list/filters/tag";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";

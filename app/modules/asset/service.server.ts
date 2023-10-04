@@ -30,7 +30,7 @@ import {
 import { ShelfStackError } from "~/utils/error";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { ShelfAssetCustomFieldValueType } from "./types";
-import { createCategoriesIfNotExists, getAllCategories } from "../category";
+import { createCategoriesIfNotExists } from "../category";
 import {
   createCustomFieldsIfNotExists,
   upsertCustomField,
@@ -38,7 +38,7 @@ import {
 import type { CustomFieldDraftPayload } from "../custom-field/types";
 import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
-import { createTagsIfNotExists, getAllTags } from "../tag";
+import { createTagsIfNotExists } from "../tag";
 import { createTeamMemberIfNotExists } from "../team-member";
 
 export async function getAsset({
@@ -676,11 +676,12 @@ export const getPaginatedAndFilterableAssets = async ({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
-  const categories = await db.category.findMany({ where: { userId }, take: 4 });
-  const totalCategories = await db.category.count({ where: { userId } });
-
-  const tags = await db.tag.findMany({ where: { userId }, take: 4 });
-  const totalTags = await db.tag.count({ where: { userId } });
+  const [categories, totalCategories, tags, totalTags] = await db.$transaction([
+    db.category.findMany({ where: { userId }, take: 4 }),
+    db.category.count({ where: { userId } }),
+    db.tag.findMany({ where: { userId }, take: 4 }),
+    db.tag.count({ where: { userId } }),
+  ]);
 
   const { assets, totalAssets } = await getAssets({
     userId,
@@ -1062,6 +1063,7 @@ export const createAssetsFromBackupImport = async ({
     if (asset.customFields && asset.customFields.length > 0) {
       const customFieldDef = asset.customFields.reduce(
         (res, { value, customField }) => {
+          // eslint-disable-next-line
           const { id, createdAt, updatedAt, ...rest } = customField;
           const options = value?.valueOption?.length
             ? [value?.valueOption]

@@ -1,17 +1,8 @@
 import { useRef, type ReactNode, useEffect } from "react";
-import {
-  Form,
-  useLoaderData,
-  useSearchParams,
-  useSubmit,
-} from "@remix-run/react";
-import { useAtom } from "jotai";
+import { Form, useLoaderData, useSearchParams } from "@remix-run/react";
 
 import { tw } from "~/utils";
-import {
-  toggleIsFilteringCategoriesAtom,
-  toggleIsFilteringTagsAtom,
-} from "./atoms";
+
 import { SearchForm } from "./search-form";
 
 export const Filters = ({
