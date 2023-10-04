@@ -21,6 +21,7 @@ import {
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
+import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
 
 export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
@@ -137,19 +138,19 @@ function TeamMemberRow({ item }: { item: CustomField }) {
             >
               {item.name}
             </Link>
-            <span className="lowercase text-gray-600">{item.type}</span>
+            <span className="text-gray-600">{FIELD_TYPE_NAME[item.type]}</span>
           </div>
         </div>
       </Td>
       <Td>
-        <span className="text-text-sm font-medium lowercase text-gray-600">
-          {item.required ? "yes" : "no"}
+        <span className="text-text-sm font-medium capitalize text-gray-600">
+          {item.required ? "Yes" : "No"}
         </span>
       </Td>
       <Td>
         {!item.active && (
           <Badge color="#dc2626" withDot={false}>
-            inactive
+            Inactive
           </Badge>
         )}
       </Td>

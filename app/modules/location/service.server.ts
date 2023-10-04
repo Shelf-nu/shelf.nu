@@ -35,6 +35,11 @@ export async function getLocation({
     db.location.findFirst({
       where: { id, userId },
       include: {
+        image: {
+          select: {
+            updatedAt: true,
+          },
+        },
         assets: {
           include: {
             category: true,
@@ -101,6 +106,11 @@ export async function getLocations({
       orderBy: { updatedAt: "desc" },
       include: {
         assets: true,
+        image: {
+          select: {
+            updatedAt: true,
+          },
+        },
       },
     }),
 
