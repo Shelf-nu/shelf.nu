@@ -3,6 +3,7 @@ import { cloneElement, useCallback, useMemo, useState } from "react";
 import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { tw } from "~/utils";
+import { resetFetcher } from "~/utils/fetcher";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons";
 import { Badge, Button } from "../shared";
@@ -52,7 +53,7 @@ export default function DynamicDropdown({
   const fetcher = useFetcher<Array<DropdownItem>>();
 
   const items = useMemo(() => {
-    if (fetcher.data && fetcher.data?.length > 0) {
+    if (fetcher.data) {
       return fetcher.data;
     }
 
@@ -152,6 +153,7 @@ export default function DynamicDropdown({
                   variant="tertiary"
                   disabled={Boolean(searchQuery)}
                   onClick={() => {
+                    resetFetcher(fetcher);
                     setSearchQuery("");
                   }}
                   className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
