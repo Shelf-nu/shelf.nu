@@ -23,7 +23,7 @@ import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request }: LoaderArgs) {
-  const { userId } = await requireAuthSession(request);
+  const { organizationId } = await requireAuthSession(request);
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -31,7 +31,7 @@ export async function loader({ request }: LoaderArgs) {
   const { perPage } = cookie;
   const { prev, next } = generatePageMeta(request);
   const { tags, totalTags } = await getTags({
-    userId,
+    organizationId,
     page,
     perPage,
     search,
@@ -71,12 +71,12 @@ export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ request }: ActionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const { userId, organizationId } = await requireAuthSession(request);
   assertIsDelete(request);
   const formData = await request.formData();
   const id = formData.get("id") as string;
 
-  await deleteTag({ id, userId });
+  await deleteTag({ id, organizationId });
   sendNotification({
     title: "Tag deleted",
     message: "Your tag has been deleted successfully",

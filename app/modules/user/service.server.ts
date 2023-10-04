@@ -93,13 +93,13 @@ export async function createUser({
         email,
         id: userId,
         username,
-        categories: {
-          create: defaultUserCategories,
-        },
         organizations: {
           create: [
             {
               name: "Personal",
+              categories: {
+                create: defaultUserCategories.map((c) => ({ ...c, userId })),
+              },
             },
           ],
         },

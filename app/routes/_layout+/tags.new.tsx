@@ -53,6 +53,7 @@ export async function action({ request }: LoaderArgs) {
   await createTag({
     ...result.data,
     userId: authSession.userId,
+    organizationId: authSession.organizationId,
   });
 
   sendNotification({
