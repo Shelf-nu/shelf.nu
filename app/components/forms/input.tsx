@@ -100,9 +100,15 @@ const Input = forwardRef(function Input(
   let input = <input {...inputProps} />;
 
   if (inputType === "textarea") {
-    // @TODO dont know how to fix that.
-    // @ts-ignore
-    input = <textarea {...inputProps} rows={rest.rows || 8} />;
+    input = (
+      // @TODO dont know how to fix that.
+      // @ts-ignore
+      <textarea
+        {...inputProps}
+        maxLength={rest.maxLength || 250}
+        rows={rest.rows || 8}
+      />
+    );
   }
 
   return (
