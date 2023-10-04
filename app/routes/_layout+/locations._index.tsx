@@ -1,4 +1,4 @@
-import type { Asset, Location } from "@prisma/client";
+import type { Asset, Image as ImageDataType, Location } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
@@ -103,6 +103,7 @@ export default function LocationsIndexPage() {
 
 interface LocationWithAssets extends Location {
   assets: Asset[];
+  image?: ImageDataType;
 }
 
 const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
@@ -118,6 +119,7 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
                 "h-full w-full rounded-[4px] border object-cover",
                 item.description ? "rounded-b-none border-b-0" : ""
               )}
+              updatedAt={item.image?.updatedAt}
             />
           </div>
           <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">

@@ -85,7 +85,17 @@ export const ImportContent = () => (
         assets. A new asset will be created for each valid row in the sheet.
       </li>
       <li>
-        To import custom fields prefix, your column heading with <b>"cf: "</b>.
+        To import custom fields, prefix your column heading with <b>"cf: "</b>,
+        add the type followed by a coma from one of the allowed types(
+        <b>"text", "boolean", "option", "multiline text", "date"</b>).
+        <br /> this is how a sample header looks like for custom type with name{" "}
+        <b>"purchase date"</b> and type <b>"date"</b> :{" "}
+        <b>"cf:purchase date, type:date"</b>
+        <br /> if no type is mentioned "text" is used as default type.
+        <br /> date can be in <b>mm-dd-yyyy</b> or <b>dd-mon-yyyy</b> format.
+        <br /> in case of options, you dont have to have the options created, we
+        create option(both the field and the option) while importing if the
+        option doesnt exisit.
       </li>
       <li>
         <b>IMPORTANT:</b> The first row of the sheet will be ignored. Use it to

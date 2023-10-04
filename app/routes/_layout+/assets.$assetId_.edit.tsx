@@ -31,7 +31,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
-} from "~/utils/custom-field-schema";
+} from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
@@ -102,10 +102,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
       helpText: cf?.helpText || "",
       required: cf.required,
       type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+      options: cf.options,
     })),
   });
   const result = await FormSchema.safeParseAsync(parseFormAny(formData));
-  const customFieldsValues = extractCustomFieldValuesFromResults({ result });
+  const customFieldsValues = extractCustomFieldValuesFromResults({
+    result,
+    customFieldDef: customFields,
+  });
 
   if (!result.success) {
     return json(

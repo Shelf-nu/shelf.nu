@@ -24,7 +24,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
-} from "~/utils/custom-field-schema";
+} from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Asset";
@@ -86,6 +86,7 @@ export async function action({ request }: LoaderFunctionArgs) {
       helpText: cf?.helpText || "",
       required: cf.required,
       type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+      options: cf.options,
     })),
   });
   const result = await FormSchema.safeParseAsync(parseFormAny(formData));
@@ -106,7 +107,10 @@ export async function action({ request }: LoaderFunctionArgs) {
 
   const { title, description, category, qrId, newLocationId } = result.data;
 
-  const customFieldsValues = extractCustomFieldValuesFromResults({ result });
+  const customFieldsValues = extractCustomFieldValuesFromResults({
+    result,
+    customFieldDef: customFields,
+  });
 
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);

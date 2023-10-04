@@ -86,15 +86,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
     );
   }
 
-  const { name, helpText, type, active, required } = result.data;
+  const { name, helpText, active, required, options } = result.data;
 
   await updateCustomField({
     id,
     name,
     helpText,
-    type,
     active,
     required,
+    options,
   });
 
   sendNotification({
@@ -124,11 +124,13 @@ export default function CustomFieldEditPage() {
       <Header title={hasName ? name : customField.name} />
       <div className=" items-top flex justify-between">
         <CustomFieldForm
+          isEdit
           name={customField.name || name}
           helpText={customField.helpText}
           required={customField.required}
           type={customField.type}
           active={customField.active}
+          options={customField.options}
         />
       </div>
     </>

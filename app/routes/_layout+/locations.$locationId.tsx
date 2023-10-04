@@ -153,6 +153,7 @@ export default function LocationPage() {
               "block h-auto w-full rounded-lg border object-cover 2xl:h-auto",
               location.description ? "rounded-b-none border-b-0" : ""
             )}
+            updatedAt={location.image?.updatedAt}
           />
           {location.description ? (
             <Card className=" mt-0 md:rounded-t-none">

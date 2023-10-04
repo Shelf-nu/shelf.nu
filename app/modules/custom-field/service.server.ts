@@ -1,11 +1,13 @@
 import {
-  CustomFieldType,
   type CustomField,
   type Organization,
   type Prisma,
   type User,
 } from "@prisma/client";
+import { badRequest } from "remix-utils";
 import { db } from "~/database";
+import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
+import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset";
 
 export async function createCustomField({
@@ -16,10 +18,8 @@ export async function createCustomField({
   organizationId,
   active,
   userId,
-}: Pick<CustomField, "helpText" | "name" | "type" | "required" | "active"> & {
-  organizationId: Organization["id"];
-  userId: User["id"];
-}) {
+  options = [],
+}: CustomFieldDraftPayload) {
   return db.customField.create({
     data: {
       name,
@@ -27,6 +27,7 @@ export async function createCustomField({
       type,
       required,
       active,
+      options,
       organization: {
         connect: {
           id: organizationId,
@@ -110,14 +111,18 @@ export async function updateCustomField(payload: {
   type?: CustomField["type"];
   required?: CustomField["required"];
   active?: CustomField["active"];
+  options?: CustomField["options"];
 }) {
-  const { id, name, helpText, type, required, active } = payload;
+  const { id, name, helpText, required, active, options } = payload;
+  //dont ever update type
+  //updating type would require changing all custom field values to that type
+  //which might fail when changing to incompatible type hence need a careful definition
   const data = {
     name,
-    type,
     helpText,
     required,
     active,
+    options,
   };
 
   return await db.customField.update({
@@ -126,6 +131,50 @@ export async function updateCustomField(payload: {
   });
 }
 
+export async function upsertCustomField(
+  definitions: CustomFieldDraftPayload[]
+): Promise<Record<string, CustomField>> {
+  const customFields: Record<string, CustomField> = {};
+
+  for (const def of definitions) {
+    let existingCustomField = await db.customField.findFirst({
+      where: {
+        name: def.name,
+        organizationId: def.organizationId,
+      },
+    });
+
+    if (!existingCustomField) {
+      const newCustomField = await createCustomField(def);
+      customFields[def.name] = newCustomField;
+    } else {
+      if (existingCustomField.type !== def.type) {
+        throw badRequest(
+          `custom field with name ${def.name} already exist with diffrent type ${existingCustomField.type}`
+        );
+      }
+      if (existingCustomField.type === "OPTION") {
+        const newOptions = def.options?.filter(
+          (op) => !existingCustomField?.options?.includes(op)
+        );
+        if (newOptions?.length) {
+          //create non exisitng options
+          const options = (existingCustomField?.options || []).concat(
+            Array.from(new Set(newOptions))
+          );
+          existingCustomField = await updateCustomField({
+            id: existingCustomField.id,
+            options,
+          });
+        }
+      }
+      customFields[def.name] = existingCustomField;
+    }
+  }
+
+  return customFields;
+}
+//returns {name:customField}
 export async function createCustomFieldsIfNotExists({
   data,
   userId,
@@ -135,59 +184,31 @@ export async function createCustomFieldsIfNotExists({
   userId: User["id"];
   organizationId: Organization["id"];
 }): Promise<Record<string, CustomField>> {
-  // This is the list of all the custom fields keys
-  // It should have only unique entries
-  const customFieldsKeys = data
-    .map((item) => Object.keys(item).filter((k) => k.startsWith("cf:")))
-    .flat()
-    .filter((v, i, a) => a.indexOf(v) === i);
-
-  /** Based on those keys we need to check if custom fields with those names exist */
-  const customFields = {};
-
-  for (const customFieldName of customFieldsKeys) {
-    const name = customFieldName.replace("cf:", "").trim();
-
-    const existingCustomField = await db.customField.findFirst({
-      where: {
-        name: name,
-        organizationId,
-      },
+  //{CF header:[all options in csv combined]}
+  const optionMap: Record<string, string[]> = {};
+  //{CF header: definition to create}
+  const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {};
+  for (let item of data) {
+    Object.keys(item).map((k) => {
+      if (k.startsWith("cf:")) {
+        const def = getDefinitionFromCsvHeader(k);
+        if (!fieldToDefDraftMap[k]) {
+          fieldToDefDraftMap[k] = { ...def, userId, organizationId };
+        }
+        if (def.type === "OPTION") {
+          optionMap[k] = (optionMap[k] || []).concat([item[k]]);
+        }
+      }
     });
+  }
 
-    if (!existingCustomField) {
-      const newCustomField = await createCustomField({
-        organizationId,
-        userId,
-        name,
-        type: CustomFieldType.TEXT,
-        required: false,
-        helpText: "",
-        active: true,
-      });
-      // Assign the new custom field to all values associated with the name
-      for (const item of data) {
-        if (item.hasOwnProperty(customFieldName)) {
-          const value = item[customFieldName];
-          if (value !== "") {
-            Object.assign(customFields, { [value]: newCustomField });
-          }
-        }
-      }
-    } else {
-      // Assign the existing custom field to all values associated with the name
-      for (const item of data) {
-        if (item.hasOwnProperty(customFieldName)) {
-          const value = item[customFieldName];
-          if (value !== "") {
-            Object.assign(customFields, { [value]: existingCustomField });
-          }
-        }
-      }
+  for (const [customFieldDefStr, def] of Object.entries(fieldToDefDraftMap)) {
+    if (def.type === "OPTION" && optionMap[customFieldDefStr]?.length) {
+      def.options = optionMap[customFieldDefStr];
     }
   }
 
-  return customFields;
+  return upsertCustomField(Object.values(fieldToDefDraftMap));
 }
 
 export async function getActiveCustomFields({ userId }: { userId: string }) {
