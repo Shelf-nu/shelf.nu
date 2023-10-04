@@ -39,6 +39,7 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
               id: true,
               name: true,
               type: true,
+              imageId: true,
             },
           },
         },

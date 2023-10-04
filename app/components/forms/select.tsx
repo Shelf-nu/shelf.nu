@@ -80,7 +80,7 @@ const SelectItem = React.forwardRef<
       <div className="flex w-full items-center justify-between">
         <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
 
-        <span className="flex h-3.5 w-3.5 items-center justify-center text-primary">
+        <span className="mr-[10px] flex h-3.5 w-3.5 items-center justify-center text-primary">
           <SelectPrimitive.ItemIndicator>
             <CheckIcon />
           </SelectPrimitive.ItemIndicator>

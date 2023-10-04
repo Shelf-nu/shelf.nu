@@ -31,6 +31,7 @@ import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
+import { isPersonalOrg } from "~/utils/organization.servers";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -80,8 +81,19 @@ export async function loader({ request }: LoaderArgs) {
       tier: {
         include: { tierLimit: true },
       },
+      organizations: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+        },
+      },
     },
   });
+
+  const currentOrganization = user?.organizations.find(
+    (org) => org.id === organizationId
+  );
 
   const {
     search,
@@ -107,14 +119,18 @@ export async function loader({ request }: LoaderArgs) {
 
   if (!assets) {
     throw new ShelfStackError({
-      title: "heyy!",
+      title: "Hey!",
       message: `No assets found`,
       status: 404,
     });
   }
 
   const header: HeaderData = {
-    title: user?.firstName ? `${user.firstName}'s inventory` : `Your inventory`,
+    title: isPersonalOrg(currentOrganization)
+      ? user?.firstName
+        ? `${user.firstName}'s inventory`
+        : `Your inventory`
+      : `${currentOrganization?.name}'s inventory`,
   };
 
   const modelName = {
@@ -172,8 +188,6 @@ export default function AssetIndexPage() {
     clearCategoryFilters();
     clearTagFilters();
   };
-
-  // const [sendNotification] = useClientNotification();
 
   return (
     <>

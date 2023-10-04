@@ -1,3 +1,4 @@
+import type { OrganizationType } from "@prisma/client";
 import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
@@ -88,6 +89,7 @@ export default function WorkspacePage() {
             <ListHeader
               children={
                 <>
+                  <Th className="hidden md:table-cell">Type</Th>
                   <Th className="hidden md:table-cell">Assets</Th>
                   <Th className="hidden md:table-cell">Locations</Th>
                   <Th className="hidden whitespace-nowrap md:table-cell">
@@ -112,8 +114,9 @@ export default function WorkspacePage() {
                       image:
                         org.type === "PERSONAL"
                           ? user?.profilePicture || "/images/default_pfp.jpg"
-                          : "", // @TODO this needs to be replaced with organizations image
+                          : `/api/image/${org.imageId}`, // @TODO this needs to be replaced with organizations image
                       _count: org._count,
+                      type: org.type,
                     }}
                   />
                 </ListItem>
@@ -134,6 +137,7 @@ const OrganizationRow = ({
   item: {
     name: string;
     image: string;
+    type: OrganizationType;
     _count: {
       assets: number;
       members: number;
@@ -148,7 +152,7 @@ const OrganizationRow = ({
             <img
               src={item.image || "/images/default_pfp.jpg"}
               alt={`${item.name}`}
-              className="h-12 w-12 rounded-[4px]"
+              className="h-12 w-12 rounded-[4px] object-cover"
             />
           </div>
           <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
@@ -157,6 +161,7 @@ const OrganizationRow = ({
         </div>
       </div>
     </Td>
+    <Td>{item.type}</Td>
     <Td>{item._count.assets}</Td>
     <Td>""</Td>
     <Td>{item._count.members}</Td>
