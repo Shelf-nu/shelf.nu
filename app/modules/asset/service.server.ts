@@ -325,6 +325,23 @@ export async function createAsset({
   });
 }
 
+<<<<<<< HEAD
+=======
+interface UpdateAssetPayload {
+  id: Asset["id"];
+  title?: Asset["title"];
+  description?: Asset["description"];
+  categoryId?: Asset["categoryId"];
+  newLocationId?: Asset["locationId"];
+  currentLocationId?: Asset["locationId"];
+  mainImage?: Asset["mainImage"];
+  mainImageExpiration?: Asset["mainImageExpiration"];
+  tags?: { set: { id: string }[] };
+  userId?: User["id"];
+  customFieldsValues?: ShelfAssetCustomFieldValueType[];
+}
+
+>>>>>>> e9fada6 (update)
 export async function updateAsset(payload: UpdateAssetPayload) {
   const {
     title,
