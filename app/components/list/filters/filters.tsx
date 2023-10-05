@@ -13,7 +13,7 @@ export const Filters = ({
   className?: string;
 }) => {
   const { search } = useLoaderData();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const perPageParam = searchParams.get("per_page");
 
   // const submit = useSubmit();
@@ -52,17 +52,7 @@ export const Filters = ({
         className
       )}
     >
-      <Form
-        ref={formRef}
-        className="w-full"
-        onSubmit={(e) => {
-          const formData = new FormData(e.currentTarget);
-          const s = formData.get("s") as string;
-          if (s) {
-            setSearchParams((prev) => ({ ...prev, s }));
-          }
-        }}
-      >
+      <Form ref={formRef} className="w-full">
         {perPageParam ? (
           <input type="hidden" name="per_page" value={perPageParam} />
         ) : null}

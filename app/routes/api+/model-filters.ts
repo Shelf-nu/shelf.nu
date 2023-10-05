@@ -1,4 +1,5 @@
-import { json, type LoaderArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
@@ -16,7 +17,7 @@ const ModelFiltersSchema = z.object({
   queryValue: z.string(),
 });
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
 
   /** Getting all the query parameters from url */
