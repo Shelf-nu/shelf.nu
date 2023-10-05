@@ -14,7 +14,7 @@
     "setup": "run-s setup:db setup:seed",
     "setup:db": "prisma generate && prisma migrate deploy",
     "setup:seed": "prisma db seed",
-    "start": "remix-serve build",
+    "start": "remix-serve build/index.js",
     "start:ci": "dotenv -- remix-serve build",
     "test": "vitest",
     "test:cov": "vitest --coverage",
