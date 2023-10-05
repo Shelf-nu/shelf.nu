@@ -4,7 +4,7 @@ import {
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
-import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
@@ -21,7 +21,7 @@ import { createOrganization } from "~/modules/organization";
 import { assertIsPost } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const { organizationId } = await requireAuthSession(request);
   // @TODO Here we need to check the subscription
 
@@ -34,7 +34,7 @@ export async function loader({ request }: LoaderArgs) {
 
 export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
 

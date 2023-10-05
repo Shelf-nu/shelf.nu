@@ -1,8 +1,8 @@
-import { json, type ActionArgs } from "@remix-run/node";
+import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { ShelfStackError } from "~/utils/error";
 
-export const action = async ({ request }: ActionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
   const formData = await request.formData();
   const organizationId = formData.get("organizationId");

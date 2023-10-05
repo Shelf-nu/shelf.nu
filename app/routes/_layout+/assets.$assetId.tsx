@@ -1,10 +1,10 @@
 import type { Location } from "@prisma/client";
 import type {
-  ActionArgs,
+  ActionFunctionArgs,
   LinksFunction,
-  LoaderArgs,
+  LoaderFunctionArgs,
   SerializeFrom,
-  V2_MetaFunction,
+  MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -48,7 +48,7 @@ import { ShelfStackError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 
-export async function loader({ request, params }: LoaderArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   const { userId, organizationId } = await requireAuthSession(request);
   const id = getRequiredParam(params, "assetId");
 
@@ -98,7 +98,7 @@ export async function loader({ request, params }: LoaderArgs) {
     header,
   });
 }
-export async function action({ request, params }: ActionArgs) {
+export async function action({ request, params }: ActionFunctionArgs) {
   assertIsDelete(request);
   const id = getRequiredParam(params, "assetId");
   const authSession = await requireAuthSession(request);
@@ -125,7 +125,7 @@ export async function action({ request, params }: ActionArgs) {
   });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title) },
 ];
 

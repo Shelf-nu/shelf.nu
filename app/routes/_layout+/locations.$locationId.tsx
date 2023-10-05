@@ -1,10 +1,10 @@
 import type { Asset, Category, Tag, Location } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
-  ActionArgs,
+  ActionFunctionArgs,
   LinksFunction,
-  LoaderArgs,
-  V2_MetaFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
 } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
@@ -41,7 +41,7 @@ import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
-export const loader = async ({ request, params }: LoaderArgs) => {
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { organizationId } = await requireAuthSession(request);
   const id = getRequiredParam(params, "locationId");
 
@@ -99,7 +99,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   );
 };
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title) },
 ];
 
@@ -112,7 +112,7 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
 ];
 
-export async function action({ request, params }: ActionArgs) {
+export async function action({ request, params }: ActionFunctionArgs) {
   assertIsDelete(request);
   const id = getRequiredParam(params, "locationId");
   const authSession = await requireAuthSession(request);

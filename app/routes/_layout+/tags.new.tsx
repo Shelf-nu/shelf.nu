@@ -1,4 +1,4 @@
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -21,7 +21,7 @@ export const NewTagFormSchema = z.object({
 
 const title = "New Tag";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
 
   const header = {
@@ -31,11 +31,11 @@ export async function loader({ request }: LoaderArgs) {
   return json({ header });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request }: LoaderArgs) {
+export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
   const formData = await request.formData();

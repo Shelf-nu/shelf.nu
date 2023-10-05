@@ -1,4 +1,4 @@
-import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData } from "@remix-run/react";
 import Input from "~/components/forms/input";
@@ -9,7 +9,7 @@ import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/custom-modal.css";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export const loader = async ({ request }: LoaderArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   await requireAuthSession(request);
 
   return json({
@@ -17,7 +17,7 @@ export const loader = async ({ request }: LoaderArgs) => {
   });
 };
 
-export const action = async ({ request, params }: ActionArgs) => {
+export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { userId } = await requireAuthSession(request);
   const formData = await request.formData();
   const orgId = params.orgId as string;

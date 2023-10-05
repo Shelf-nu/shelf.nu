@@ -1,6 +1,6 @@
 import type { Custody, TeamMember } from "@prisma/client";
 import { json } from "@remix-run/node";
-import type { V2_MetaFunction, LoaderArgs } from "@remix-run/node";
+import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -14,7 +14,7 @@ import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member";
 import { getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request, params }: LoaderArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   const { organizationId } = await requireAuthSession(request);
   const id = getRequiredParam(params, "orgId");
   const organization = await db.organization.findFirst({
@@ -70,7 +70,7 @@ export const handle = {
   breadcrumb: () => "single",
 };
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.organization.name) : "" },
 ];
 export const ErrorBoundary = () => <ErrorBoundryComponent />;

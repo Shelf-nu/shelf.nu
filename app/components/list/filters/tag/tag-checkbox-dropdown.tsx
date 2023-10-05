@@ -4,6 +4,7 @@ import { useSearchParams } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 
 import { useTagSearch } from "~/components/category/useTagSearch";
+import type { WithDateFields } from "~/modules/types";
 import Input from "../../../forms/input";
 import { CheckIcon, ChevronRight } from "../../../icons";
 
@@ -121,7 +122,7 @@ export const TagCheckboxDropdown = () => {
                 )}
               </div>
               <div className="">
-                {refinedTags.map((c: Category) => (
+                {refinedTags.map((c) => (
                   <CheckboxItem key={c.id} category={c} selected={items} />
                 ))}
               </div>
@@ -137,7 +138,7 @@ const CheckboxItem = ({
   category,
   selected,
 }: {
-  category: Category;
+  category: WithDateFields<Category, string>;
   selected: string[];
 }) => {
   const [, toggleIsFiltering] = useAtom(toggleIsFilteringTagsAtom);

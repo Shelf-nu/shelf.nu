@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import { OrganizationType } from "@prisma/client";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
@@ -19,6 +24,7 @@ import {
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
+import { getOrganizationByUserId } from "~/modules/organization";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -29,8 +35,16 @@ import {
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
-export async function loader({ request, params }: LoaderArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   const { userId, organizationId } = await requireAuthSession(request);
+  const organization = await getOrganizationByUserId({
+    userId,
+    orgType: OrganizationType.PERSONAL,
+  });
+
+  if (!organization) {
+    throw new Error("Organization not found");
+  }
 
   const { categories, tags, locations, customFields } =
     await getAllRelatedEntries({
@@ -60,7 +74,7 @@ export async function loader({ request, params }: LoaderArgs) {
   });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
@@ -68,7 +82,7 @@ export const handle = {
   breadcrumb: () => "single",
 };
 
-export async function action({ request, params }: ActionArgs) {
+export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
 

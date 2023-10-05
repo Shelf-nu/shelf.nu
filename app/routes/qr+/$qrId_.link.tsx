@@ -1,10 +1,10 @@
-import { json, type LoaderArgs } from "@remix-run/node";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { UnlinkIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { requireAuthSession } from "~/modules/auth";
 
-export const loader = async ({ request, params }: LoaderArgs) => {
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await requireAuthSession(request);
   const { qrId } = params;
   return json({ qrId });
