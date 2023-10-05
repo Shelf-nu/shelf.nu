@@ -1,5 +1,5 @@
 import { redirect, json } from "@remix-run/node";
-import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";
@@ -9,7 +9,7 @@ import { createScan, updateScan } from "~/modules/scan";
 import { assertIsPost } from "~/utils";
 import { ShelfStackError } from "~/utils/error";
 
-export const loader = async ({ request, params }: LoaderArgs) => {
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   /* Get the ID of the QR from the params */
   const id = params.qrId as string;
 
@@ -81,7 +81,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   );
 };
 
-export const action = async ({ request }: ActionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   assertIsPost(request);
   const formData = await request.formData();
   const latitude = formData.get("latitude") as string;

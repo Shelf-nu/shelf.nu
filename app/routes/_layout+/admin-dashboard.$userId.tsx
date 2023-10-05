@@ -1,5 +1,5 @@
 import type { Asset, Qr, User } from "@prisma/client";
-import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, Link } from "@remix-run/react";
 import { Button } from "~/components/shared";
@@ -23,7 +23,7 @@ export type UserWithQrCodes = User & {
   qrCodes: QrCodeWithAsset[];
 };
 
-export const loader = async ({ request, params }: LoaderArgs) => {
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   requireAdmin(request);
   const userId = params.userId as string;
   const user = (await db.user.findUnique({
@@ -49,7 +49,7 @@ export const handle = {
   breadcrumb: () => "User details",
 };
 
-export const action = async ({ request, params }: ActionArgs) => {
+export const action = async ({ request, params }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
   await requireAdmin(request);
   const formData = await request.formData();

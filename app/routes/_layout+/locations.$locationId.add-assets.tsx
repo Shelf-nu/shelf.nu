@@ -1,5 +1,5 @@
 import type { Asset } from "@prisma/client";
-import type { ActionArgs, LoaderArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useParams } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -16,7 +16,8 @@ import { requireAuthSession } from "~/modules/auth";
 import { assertIsPost } from "~/utils";
 import { ShelfStackError } from "~/utils/error";
 
-export const loader = async ({ request, params }: LoaderArgs) => {
+
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { userId, organizationId } = await requireAuthSession(request);
   const locationId = params.locationId as string;
   const location = await db.location.findUnique({
@@ -63,7 +64,7 @@ export const loader = async ({ request, params }: LoaderArgs) => {
   });
 };
 
-export const action = async ({ request, params }: ActionArgs) => {
+export const action = async ({ request, params }: ActionFunctionArgs) => {
   assertIsPost(request);
   await requireAuthSession(request);
   const { locationId } = params;

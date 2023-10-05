@@ -1,4 +1,8 @@
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -11,7 +15,7 @@ import { getAuthSession, sendResetPasswordLink } from "~/modules/auth";
 import { assertIsPost, isFormProcessing, tw, validEmail } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
   const title = "Forgot password?";
   const subHeading = "No worries, we’ll send you reset instructions.";
@@ -30,7 +34,7 @@ const ForgotPasswordSchema = z.object({
     })),
 });
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const formData = await request.formData();
@@ -83,7 +87,7 @@ export async function action({ request }: ActionArgs) {
   return json({ message: null, email, success: true });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 

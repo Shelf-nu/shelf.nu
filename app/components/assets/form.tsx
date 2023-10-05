@@ -1,4 +1,4 @@
-import type { Asset, CustomField, Qr } from "@prisma/client";
+import type { Asset, Qr } from "@prisma/client";
 import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
@@ -6,9 +6,11 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/assets.new";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { isFormProcessing } from "~/utils";
 
-import { mergedSchema } from "~/utils/custom-fields";
+import type { CustomFieldZodSchema } from "~/utils/custom-field-schema";
+import { mergedSchema } from "~/utils/custom-field-schema";
 import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
 
@@ -52,21 +54,20 @@ export const AssetForm = ({
 }: Props) => {
   const navigation = useNavigation();
 
-  const { customFields } = useLoaderData();
+  const customFields = useLoaderData<typeof loader>().customFields.map(
+    (cf) =>
+      cf.active && {
+        id: cf.id,
+        name: cf.name,
+        helpText: cf?.helpText || "",
+        required: cf.required,
+        type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+      }
+  ) as CustomFieldZodSchema[];
 
   const FormSchema = mergedSchema({
     baseSchema: NewAssetFormSchema,
-    customFields: customFields.map(
-      (cf: CustomField) =>
-        cf.active && {
-          id: cf.id,
-          name: cf.name,
-          helpText: cf?.helpText || "",
-          required: cf.required,
-          type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
-          options: cf.options,
-        }
-    ),
+    customFields,
   });
 
   const zo = useZorm("NewQuestionWizardScreen", FormSchema);

@@ -11,13 +11,15 @@ export const useTagSearch = () => {
   const [tagSearch, setTagSearch] = useAtom(searchAtom);
   const isSearchingTags = useAtomValue(isSearchingAtom);
 
-  /** Get the categories from the loader */
-  const { tags } = useLoaderData();
+  /** Get the tags from the loader */
+  const { tags } = useLoaderData<{
+    tags: Category[];
+  }>();
 
   const refinedTags = useMemo(
     () =>
       atom(
-        tags.filter((cat: Category) =>
+        tags.filter((cat) =>
           cat.name.toLowerCase().includes(tagSearch.toLowerCase())
         )
       ),

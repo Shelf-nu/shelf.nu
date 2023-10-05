@@ -1,15 +1,15 @@
-const { rest } = require("msw");
+import { rest } from "msw";
 
-const { USER_EMAIL, USER_ID, USER_PASSWORD } = require("./user");
+import { USER_EMAIL, USER_ID, USER_PASSWORD } from "./user";
 
-const supabaseAuthSession = {
+export const supabaseAuthSession = {
   user: { id: USER_ID, email: USER_EMAIL },
   refresh_token: "valid",
   access_token: "valid",
   expires_in: -1,
 };
 
-const authSession = {
+export const authSession = {
   refreshToken: "valid",
   accessToken: "valid",
   userId: USER_ID,
@@ -18,17 +18,17 @@ const authSession = {
   expiresAt: -1,
 };
 
-const authAccount = {
+export const authAccount = {
   id: USER_ID,
   email: USER_EMAIL,
 };
 
-const SUPABASE_URL = "https://supabase-project.supabase.co";
-const SUPABASE_AUTH_TOKEN_API = "/auth/v1/token";
-const SUPABASE_AUTH_USER_API = "/auth/v1/user";
-const SUPABASE_AUTH_ADMIN_USER_API = "/auth/v1/admin/users";
+export const SUPABASE_URL = "https://supabase-project.supabase.co";
+export const SUPABASE_AUTH_TOKEN_API = "/auth/v1/token";
+export const SUPABASE_AUTH_USER_API = "/auth/v1/user";
+export const SUPABASE_AUTH_ADMIN_USER_API = "/auth/v1/admin/users";
 
-const handlers = [
+export const handlers = [
   rest.post(
     `${SUPABASE_URL}${SUPABASE_AUTH_TOKEN_API}`,
     async (req, res, ctx) => {
@@ -67,14 +67,3 @@ const handlers = [
     async (_req, res, ctx) => res(ctx.status(200), ctx.json({}))
   ),
 ];
-
-module.exports = {
-  handlers,
-  SUPABASE_URL,
-  SUPABASE_AUTH_TOKEN_API,
-  SUPABASE_AUTH_USER_API,
-  SUPABASE_AUTH_ADMIN_USER_API,
-  authAccount,
-  authSession,
-  supabaseAuthSession,
-};

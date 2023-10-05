@@ -1,11 +1,11 @@
-import type { LoaderArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { CuboidIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { usePosition } from "~/hooks";
 
-export const loader = ({ params }: LoaderArgs) => {
+export const loader = ({ params }: LoaderFunctionArgs) => {
   const qrId = params.qrId as string;
   return json({ qrId });
 };

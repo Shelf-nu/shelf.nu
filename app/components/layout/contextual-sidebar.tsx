@@ -9,7 +9,10 @@ export default function ContextualSidebar() {
 
   /** We need the prev route, as we use it for navigating back/closing the sidebar */
   const prevRoute = matches[matches.length - 2];
-  const showSidebar = currentRoute?.data?.showSidebar;
+  const data = currentRoute?.data as {
+    showSidebar?: boolean;
+  };
+  const showSidebar = data.showSidebar || false;
 
   return (
     <AnimatePresence>

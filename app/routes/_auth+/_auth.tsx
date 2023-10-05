@@ -1,11 +1,11 @@
-import type { LoaderArgs, LoaderFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, useMatches } from "@remix-run/react";
 import { Outlet, redirect } from "react-router";
 import SubHeading from "~/components/shared/sub-heading";
 import { getAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
 
-export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await getAuthSession(request);
 
   const user = authSession
@@ -21,7 +21,12 @@ export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
 export default function App() {
   const matches = useMatches();
   /** Find the title and subHeading from current route */
-  const { title, subHeading } = matches[matches.length - 1].data;
+  const data = matches[matches.length - 1].data as {
+    title?: string;
+    subHeading?: string;
+  };
+  const { title, subHeading } = data;
+
   return (
     <div className="flex h-full min-h-screen flex-col ">
       <main className="flex h-full w-full ">

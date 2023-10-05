@@ -1,4 +1,4 @@
-import type { LoaderArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { fetchAssetsForExport } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { assertUserCanExportAssets } from "~/modules/tier";
@@ -15,7 +15,8 @@ const keysToSkip = [
   "mainImageExpiration",
 ];
 
-export const loader = async ({ request }: LoaderArgs) => {
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { userId, organizationId } = await requireAuthSession(request);
 
   await assertUserCanExportAssets({ userId });

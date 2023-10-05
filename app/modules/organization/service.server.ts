@@ -1,5 +1,7 @@
 import { OrganizationType } from "@prisma/client";
-import type { Organization, User } from "@prisma/client";
+import type { Prisma, Organization, User } from "@prisma/client";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+
 import { db } from "~/database";
 
 export const getOrganization = async ({ id }: { id: Organization["id"] }) =>

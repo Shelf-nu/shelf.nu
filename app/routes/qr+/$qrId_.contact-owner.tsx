@@ -1,5 +1,5 @@
 import type { Asset } from "@prisma/client";
-import { json, type ActionArgs } from "@remix-run/node";
+import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
@@ -22,7 +22,7 @@ export const NewReportSchema = z.object({
   content: z.string().min(3, "Content is required"),
 });
 
-export const action = async ({ request, params }: ActionArgs) => {
+export const action = async ({ request, params }: ActionFunctionArgs) => {
   assertIsPost(request);
   await requireAuthSession(request);
 
@@ -80,7 +80,7 @@ export const action = async ({ request, params }: ActionArgs) => {
 
 export default function ContactOwner() {
   const zo = useZorm("NewQuestionWizardScreen", NewReportSchema);
-  const data = useActionData();
+  const data = useActionData<typeof action>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   usePosition();
