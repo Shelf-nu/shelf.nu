@@ -1,5 +1,9 @@
 import type { OrganizationType } from "@prisma/client";
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
@@ -15,7 +19,7 @@ import { getUserOrganizationsWithDetailedData } from "~/modules/organization";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfStackError } from "~/utils/error";
 
-export const loader = async ({ request }: LoaderArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { userId, organizationId } = await requireAuthSession(request);
 
   const organizations = await getUserOrganizationsWithDetailedData({ userId });
@@ -38,7 +42,7 @@ export const loader = async ({ request }: LoaderArgs) => {
   });
 };
 
-export const action = async ({ request }: ActionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   await requireAuthSession(request);
 
   const formData = await request.formData();
@@ -52,7 +56,7 @@ export const action = async ({ request }: ActionArgs) => {
   return redirect(`/settings/workspace`);
 };
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
@@ -114,7 +118,7 @@ export default function WorkspacePage() {
                       image:
                         org.type === "PERSONAL"
                           ? user?.profilePicture || "/images/default_pfp.jpg"
-                          : `/api/image/${org.imageId}`, // @TODO this needs to be replaced with organizations image
+                          : `/api/image/${org.imageId}`,
                       _count: org._count,
                       type: org.type,
                     }}
@@ -139,8 +143,8 @@ const OrganizationRow = ({
     image: string;
     type: OrganizationType;
     _count: {
-      assets: number;
-      members: number;
+      assets: number | null;
+      members: number | null;
     };
   };
 }) => (
@@ -162,8 +166,8 @@ const OrganizationRow = ({
       </div>
     </Td>
     <Td>{item.type}</Td>
-    <Td>{item._count.assets}</Td>
+    <Td>{item._count?.assets || 0}</Td>
     <Td>""</Td>
-    <Td>{item._count.members}</Td>
+    <Td>{item._count?.members || 0}</Td>
   </>
 );

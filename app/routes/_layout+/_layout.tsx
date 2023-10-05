@@ -1,10 +1,5 @@
 import { Roles } from "@prisma/client";
-import type {
-  LinksFunction,
-  LoaderFunctionArgs,
-  LoaderFunction,
-} from "@remix-run/node";
-import { OrganizationType, Roles } from "@prisma/client";
+import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 
 import { json, redirect } from "@remix-run/node";
 import { Outlet } from "@remix-run/react";

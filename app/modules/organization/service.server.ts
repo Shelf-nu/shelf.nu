@@ -1,6 +1,5 @@
 import { OrganizationType } from "@prisma/client";
-import type { Prisma, Organization, User } from "@prisma/client";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { Organization, User } from "@prisma/client";
 
 import { db } from "~/database";
 

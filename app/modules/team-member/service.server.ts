@@ -1,5 +1,5 @@
 import type { Organization, Prisma, TeamMember } from "@prisma/client";
-import type { LoaderArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import {
   generatePageMeta,
@@ -112,7 +112,7 @@ export const getPaginatedAndFilterableTeamMembers = async ({
   request,
   organizationId,
 }: {
-  request: LoaderArgs["request"];
+  request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
 }) => {
   const searchParams = getCurrentSearchParams(request);
