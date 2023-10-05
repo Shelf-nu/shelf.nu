@@ -16,7 +16,6 @@ import { requireAuthSession } from "~/modules/auth";
 import { assertIsPost } from "~/utils";
 import { ShelfStackError } from "~/utils/error";
 
-
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { userId, organizationId } = await requireAuthSession(request);
   const locationId = params.locationId as string;

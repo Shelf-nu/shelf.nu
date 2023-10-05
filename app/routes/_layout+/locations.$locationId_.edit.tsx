@@ -27,7 +27,6 @@ import { MAX_SIZE } from "./locations.new";
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { organizationId } = await requireAuthSession(request);
 
-
   const id = getRequiredParam(params, "locationId");
 
   const { location } = await getLocation({ organizationId, id });

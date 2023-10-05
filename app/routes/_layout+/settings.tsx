@@ -44,7 +44,7 @@ export default function SettingsPage() {
   const shouldHideHeader =
     location.pathname === "/settings/custom-fields/new" ||
     /^\/settings\/workspace\/\w+$/.test(location.pathname);
-  
+
   const enablePremium = useMatchesData<{ enablePremium: boolean }>(
     "routes/_layout+/_layout"
   )?.enablePremium;

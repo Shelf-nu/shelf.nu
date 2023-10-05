@@ -15,7 +15,6 @@ const keysToSkip = [
   "mainImageExpiration",
 ];
 
-
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { userId, organizationId } = await requireAuthSession(request);
 
