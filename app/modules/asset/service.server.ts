@@ -314,8 +314,8 @@ interface UpdateAssetPayload {
   title?: Asset["title"];
   description?: Asset["description"];
   categoryId?: Asset["categoryId"];
-  newLocationId?: Asset["locationId"] | FormDataEntryValue;
-  currentLocationId?: Asset["locationId"] | FormDataEntryValue;
+  newLocationId?: Asset["locationId"];
+  currentLocationId?: Asset["locationId"];
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
   tags?: { set: { id: string }[] };

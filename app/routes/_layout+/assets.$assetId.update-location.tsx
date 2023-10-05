@@ -45,8 +45,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const id = getRequiredParam(params, "assetId");
 
   const formData = await request.formData();
-  const newLocationId = formData.get("newLocationId");
-  const currentLocationId = formData.get("currentLocationId");
+  const newLocationId = formData.get("newLocationId") as string;
+  const currentLocationId = formData.get("currentLocationId") as string;
 
   await updateAsset({
     id,
