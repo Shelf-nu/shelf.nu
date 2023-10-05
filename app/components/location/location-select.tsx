@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import type { Location } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared";
+import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { tw } from "~/utils";
 import { SearchInput } from "./search-input";
 import { useLocationSearch } from "./useLocationSearch";
@@ -28,7 +28,7 @@ export const LocationSelect = () => {
     () => refinedLocations.length > 0,
     [refinedLocations]
   );
-  const { asset } = useLoaderData();
+  const { asset } = useLoaderData<typeof loader>();
 
   return (
     <div className="relative w-full">
@@ -78,7 +78,7 @@ export const LocationSelect = () => {
                 </div>
 
                 <div className="border-b border-b-gray-300 py-2 ">
-                  {refinedLocations.map((c: Location) => (
+                  {refinedLocations.map((c) => (
                     <SelectItem value={c.id} key={c.id} className="p-2">
                       <div className="flex items-center gap-2">
                         <Image

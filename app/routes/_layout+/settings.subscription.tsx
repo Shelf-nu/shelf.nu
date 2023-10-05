@@ -1,4 +1,8 @@
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import type Stripe from "stripe";
@@ -30,7 +34,7 @@ import {
   getCustomerActiveSubscription,
 } from "~/utils/stripe.server";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
   const user = await getUserByID(userId);
 
@@ -75,7 +79,7 @@ export async function loader({ request }: LoaderArgs) {
   });
 }
 
-export const action = async ({ request }: ActionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   const { userId, email } = await requireAuthSession(request);
   const formData = await request.formData();
   const priceId = formData.get("priceId") as Stripe.Price["id"];
@@ -104,7 +108,7 @@ export const action = async ({ request }: ActionArgs) => {
   return redirect(stripeRedirectUrl);
 };
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 

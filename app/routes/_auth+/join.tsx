@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
@@ -9,7 +9,7 @@ import { getAuthSession, ContinueWithEmailForm } from "~/modules/auth";
 import { getCurrentSearchParams } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
   const searchParams = getCurrentSearchParams(request);
   const isResend = searchParams.get("resend") !== null;
@@ -24,7 +24,7 @@ export async function loader({ request }: LoaderArgs) {
   return json({ title, subHeading, isResend });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 

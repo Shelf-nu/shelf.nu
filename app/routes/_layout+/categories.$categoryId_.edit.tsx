@@ -1,5 +1,4 @@
-import { useState } from "react";
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -11,12 +10,7 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategory, updateCategory } from "~/modules/category";
-import {
-  assertIsPost,
-  isFormProcessing,
-  getRequiredParam,
-  handleInputChange,
-} from "~/utils";
+import { assertIsPost, isFormProcessing, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -29,7 +23,7 @@ export const UpdateCategoryFormSchema = z.object({
 
 const title = "Edit category";
 
-export async function loader({ request, params }: LoaderArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireAuthSession(request);
 
   const id = getRequiredParam(params, "categoryId");
@@ -44,11 +38,11 @@ export async function loader({ request, params }: LoaderArgs) {
   return json({ header, colorFromServer, category });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request, params }: LoaderArgs) {
+export async function action({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
   const formData = await request.formData();
@@ -89,14 +83,9 @@ export default function EditCategory() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateCategoryFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  const { colorFromServer, category } = useLoaderData();
+  const { colorFromServer, category } = useLoaderData<typeof loader>();
 
-  const [formData, setFormData] = useState<{ [key: string]: any }>({
-    name: category.name,
-    description: category.description,
-  });
-
-  return (
+  return category && colorFromServer ? (
     <>
       <Form
         method="post"
@@ -113,9 +102,8 @@ export default function EditCategory() {
             error={zo.errors.name()?.message}
             hideErrorText
             autoFocus
-            value={formData.name}
-            onChange={(e) => handleInputChange(e, setFormData, "name")}
             required={zodFieldIsRequired(UpdateCategoryFormSchema.shape.name)}
+            defaultValue={category.name}
           />
           <Input
             label="Description"
@@ -124,11 +112,10 @@ export default function EditCategory() {
             disabled={disabled}
             data-test-id="categoryDescription"
             className="mb-4 lg:mb-0"
-            value={formData.description}
-            onChange={(e) => handleInputChange(e, setFormData, "description")}
             required={zodFieldIsRequired(
               UpdateCategoryFormSchema.shape.description
             )}
+            defaultValue={category.description || undefined}
           />
           <div className="mb-6 lg:mb-0">
             <ColorInput
@@ -154,5 +141,5 @@ export default function EditCategory() {
         </div>
       </Form>
     </>
-  );
+  ) : null;
 }

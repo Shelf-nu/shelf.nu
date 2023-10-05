@@ -3,9 +3,8 @@ import { MetronomeLinks } from "@metronome-sh/react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
-  LoaderArgs,
-  LoaderFunction,
-  V2_MetaFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
@@ -48,13 +47,13 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: globalStylesheetUrl },
 ];
 
-export const meta: V2_MetaFunction = () => [
+export const meta: MetaFunction = () => [
   {
     title: "shelf.nu",
   },
 ];
 
-export const loader: LoaderFunction = async ({ request }: LoaderArgs) =>
+export const loader = async ({ request }: LoaderFunctionArgs) =>
   json({
     env: getBrowserEnv(),
     requestInfo: {
