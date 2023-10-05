@@ -1,4 +1,4 @@
-import { useRef, type ReactNode, useEffect } from "react";
+import { useRef, type ReactNode, useEffect, useMemo } from "react";
 import { Form, useLoaderData, useSearchParams } from "@remix-run/react";
 
 import { tw } from "~/utils";
@@ -14,36 +14,32 @@ export const Filters = ({
 }) => {
   const { search } = useLoaderData();
   const [searchParams] = useSearchParams();
-  const perPageParam = searchParams.get("per_page");
-
-  // const submit = useSubmit();
 
   const formRef = useRef<HTMLFormElement>(null);
+
+  const existingParamInputs = useMemo(() => {
+    const params: Record<string, string[]> = {};
+
+    for (const key of searchParams.keys()) {
+      if (key === "s") continue;
+      params[key] = searchParams.getAll(key);
+    }
+
+    return Object.entries(params)
+      .map(([key, value]) =>
+        value.map((_value) => (
+          <input key={key} type="hidden" name={key} value={_value} />
+        ))
+      )
+      .flat();
+  }, [searchParams]);
+
   useEffect(() => {
     /** If no search, clear the form and focus on the search field */
     if (!search) {
       formRef?.current?.reset();
     }
   }, [search]);
-
-  // /**
-  //  * Submit the form when the selected array changes
-  //  */
-  // useEffect(() => {
-  //   /** check the flag and if its true, submit the form. */
-  //   if (isFilteringCategories) {
-  //     submit(formRef.current);
-  //     toggleIsFilteringCategories();
-  //   }
-  // }, [submit, isFilteringCategories, toggleIsFilteringCategories]);
-
-  // useEffect(() => {
-  //   /** check the flag and if its true, submit the form. */
-  //   if (isFilteringTags) {
-  //     submit(formRef.current);
-  //     toggleIsFilteringTags();
-  //   }
-  // }, [submit, isFilteringTags, toggleIsFilteringTags]);
 
   return (
     <div
@@ -53,9 +49,7 @@ export const Filters = ({
       )}
     >
       <Form ref={formRef} className="w-full">
-        {perPageParam ? (
-          <input type="hidden" name="per_page" value={perPageParam} />
-        ) : null}
+        {existingParamInputs}
         <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
           <div className="flex items-center gap-5">
             <SearchForm />
