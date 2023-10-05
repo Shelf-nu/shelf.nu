@@ -1,5 +1,9 @@
 import type { Category } from "@prisma/client";
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { DeleteCategory } from "~/components/category/delete-category";
@@ -22,7 +26,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
 
   const searchParams = getCurrentSearchParams(request);
@@ -67,11 +71,11 @@ export async function loader({ request }: LoaderArgs) {
   );
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   const { userId } = await requireAuthSession(request);
   assertIsDelete(request);
   const formData = await request.formData();

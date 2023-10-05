@@ -3,10 +3,11 @@ import { MarkdownViewer } from "~/components/markdown";
 import { Switch } from "~/components/shared/switch";
 import { Tag } from "~/components/shared/tag";
 import { useUserData } from "~/hooks";
+import type { WithDateFields } from "~/modules/types";
 import { timeAgo } from "~/utils/time-ago";
 import { ActionsDopdown } from "./actions-dropdown";
 
-export type NoteWithDate = NoteType & {
+export type NoteWithDate = WithDateFields<NoteType, string> & {
   dateDisplay: string;
 };
 
@@ -27,14 +28,7 @@ export const Note = ({ note }: { note: NoteWithDate }) => {
   );
 };
 
-const Update = ({
-  note,
-}: {
-  note: NoteWithDate & {
-    dateDisplay: string;
-  };
-  when?: boolean;
-}) => (
+const Update = ({ note }: { note: NoteWithDate; when?: boolean }) => (
   <div className="flex px-3.5 py-3">
     <div className="message flex flex-1 items-start gap-2">
       <Tag>{note.dateDisplay}</Tag> <MarkdownViewer content={note.content} />
@@ -58,7 +52,7 @@ export const Comment = ({
         </span>{" "}
         <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
       </div>
-      <ActionsDopdown note={note} />
+      <ActionsDopdown noteId={note.id} />
     </header>
     <div className="message px-3.5 py-3">
       <MarkdownViewer content={note.content} />

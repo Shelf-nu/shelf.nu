@@ -1,7 +1,7 @@
 import { Prisma, Roles } from "@prisma/client";
 import type { Category, User } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import { json, type LoaderArgs } from "@remix-run/node";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import sharp from "sharp";
 import { db } from "~/database";
 
@@ -209,7 +209,7 @@ export async function updateUser(
 export const getPaginatedAndFilterableUsers = async ({
   request,
 }: {
-  request: LoaderArgs["request"];
+  request: LoaderFunctionArgs["request"];
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, search } = getParamsValues(searchParams);

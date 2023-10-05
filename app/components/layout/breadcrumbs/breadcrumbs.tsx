@@ -1,13 +1,19 @@
 import { useMatches } from "@remix-run/react";
 import { Breadcrumb } from "./breadcrumb";
 
+// Define an interface that extends RouteHandle with the 'breadcrumb' property
+interface HandleWithBreadcrumb {
+  breadcrumb?: any; // Change 'any' to the actual type of 'breadcrumb' if known
+}
+
 export function Breadcrumbs() {
   const matches = useMatches();
 
-  // skip routes that don't have a breadcrumb
+  // Filter matches to include only those with 'breadcrumb' property
   const breadcrumbs = matches.filter(
-    (match) => match.handle && match.handle.breadcrumb
+    (match) => (match.handle as HandleWithBreadcrumb)?.breadcrumb !== undefined
   );
+
   return (
     <div className="mb-5">
       <div className="breadcrumbs">

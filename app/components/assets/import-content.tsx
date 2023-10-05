@@ -1,6 +1,7 @@
 import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 import { useFetcher } from "@remix-run/react";
+import type { action } from "~/routes/_layout+/assets.import";
 import { isFormProcessing } from "~/utils";
 import Input from "../forms/input";
 import { Button } from "../shared";
@@ -111,9 +112,12 @@ export const ImportContent = () => (
 const FileForm = ({ intent }: { intent: string }) => {
   const [agreed, setAgreed] = useState<"I AGREE" | "">("");
   const formRef = useRef<HTMLFormElement>(null);
-  const fetcher = useFetcher();
-  const disabled = isFormProcessing(fetcher.state) || agreed !== "I AGREE";
-  const isSuccessful = fetcher.data?.success;
+  const fetcher = useFetcher<typeof action>();
+
+  const { data, state } = fetcher;
+  // const isSuccessFull = state === "idle" && data != null && !data?.error;
+  const disabled = isFormProcessing(state) || agreed !== "I AGREE";
+  const isSuccessful = data?.success;
 
   /** We use a controlled field for the file, because of the confirmation dialog we have.
    * That way we can disabled the confirmation dialog button until a file is selected

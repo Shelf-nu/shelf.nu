@@ -12,12 +12,14 @@ export const useCategorySearch = () => {
   const isSearchingCategories = useAtomValue(isSearchingAtom);
 
   /** Get the categories from the loader */
-  const categories = useLoaderData().categories;
+  const { categories } = useLoaderData<{
+    categories: Category[];
+  }>();
 
   const refinedCategories = useMemo(
     () =>
       atom(
-        categories.filter((cat: Category) =>
+        categories.filter((cat) =>
           cat.name.toLowerCase().includes(categorySearch.toLowerCase())
         )
       ),

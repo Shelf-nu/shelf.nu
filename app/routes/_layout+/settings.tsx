@@ -1,13 +1,9 @@
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import {
-  Link,
-  Outlet,
-  useLocation,
-  useRouteLoaderData,
-} from "@remix-run/react";
+import { Link, Outlet, useLocation } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -16,7 +12,7 @@ export const handle = {
   breadcrumb: () => <Link to="/settings">Settings</Link>,
 };
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
   const title = "Settings";
   const subHeading = "Manage your preferences here.";
@@ -27,7 +23,7 @@ export async function loader({ request }: LoaderArgs) {
   return json({ header });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
@@ -46,8 +42,10 @@ export default function SettingsPage() {
    * */
   const location = useLocation();
   const isCustomFieldsNew = location.pathname === "/settings/custom-fields/new";
+  const enablePremium = useMatchesData<{ enablePremium: boolean }>(
+    "routes/_layout+/_layout"
+  )?.enablePremium;
 
-  const { enablePremium } = useRouteLoaderData("routes/_layout+/_layout");
   if (enablePremium) {
     items.push({ to: "subscription", content: "Subscription" });
   }

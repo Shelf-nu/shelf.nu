@@ -1,4 +1,8 @@
-import type { ActionArgs, V2_MetaFunction, LoaderArgs } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  MetaFunction,
+  LoaderFunctionArgs,
+} from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -38,7 +42,7 @@ const OnboardingFormSchema = z
     }
   );
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
 
   const user = await getUserByID(authSession?.userId);
@@ -50,11 +54,11 @@ export async function loader({ request }: LoaderArgs) {
   return json({ title, subHeading, user });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
   const formData = await request.formData();
@@ -94,7 +98,7 @@ export async function action({ request }: ActionArgs) {
 
 export default function Onboarding() {
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
-  const { user } = useLoaderData();
+  const { user } = useLoaderData<typeof loader>();
 
   return (
     <div>
