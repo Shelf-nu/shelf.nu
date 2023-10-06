@@ -5,7 +5,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { Filters, List } from "~/components/list";
@@ -92,7 +92,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
+
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
+
+export const handle = {
+  breadcrumb: () => <Link to="/settings/workspace">Workspace</Link>,
+};
 
 export default function WorkspacePage() {
   const {
