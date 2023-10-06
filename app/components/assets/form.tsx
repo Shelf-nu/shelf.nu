@@ -9,8 +9,8 @@ import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { isFormProcessing } from "~/utils";
 
-import type { CustomFieldZodSchema } from "~/utils/custom-field-schema";
-import { mergedSchema } from "~/utils/custom-field-schema";
+import type { CustomFieldZodSchema } from "~/utils/custom-fields";
+import { mergedSchema } from "~/utils/custom-fields";
 import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
 
@@ -62,6 +62,7 @@ export const AssetForm = ({
         helpText: cf?.helpText || "",
         required: cf.required,
         type: cf.type.toLowerCase() as "text" | "number" | "date" | "boolean",
+        options: cf.options,
       }
   ) as CustomFieldZodSchema[];
 
