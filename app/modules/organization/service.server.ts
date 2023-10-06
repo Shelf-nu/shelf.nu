@@ -2,6 +2,7 @@ import { OrganizationType } from "@prisma/client";
 import type { Organization, User } from "@prisma/client";
 
 import { db } from "~/database";
+import { defaultUserCategories } from "../category/default-categories";
 
 export const getOrganization = async ({ id }: { id: Organization["id"] }) =>
   db.organization.findUnique({
@@ -65,6 +66,9 @@ export async function createOrganization({
   const data = {
     name,
     type: OrganizationType.TEAM,
+    categories: {
+      create: defaultUserCategories.map((c) => ({ ...c, userId })),
+    },
     owner: {
       connect: {
         id: userId,
