@@ -54,7 +54,7 @@ export const LocationSelect = () => {
 
           <div>
             <SelectContent
-              className=" w-[350px]"
+              className=" max-h-[300px] w-[350px] overflow-auto"
               position="popper"
               align="end"
               sideOffset={4}
