@@ -31,24 +31,16 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const { organizationId, userId } = await requireAuthSession(request);
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
   const { prev, next } = generatePageMeta(request);
-  const organization = await getOrganizationByUserId({
-    userId,
-    orgType: OrganizationType.PERSONAL,
-  });
-
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
 
   const { customFields, totalCustomFields } =
     await getFilteredAndPaginatedCustomFields({
-      organizationId: organization.id,
+      organizationId,
       page,
       perPage,
       search,
