@@ -15,16 +15,38 @@ import { Table, Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { useUserData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
-import { getUserOrganizationsWithDetailedData } from "~/modules/organization";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfStackError } from "~/utils/error";
+import { canCreateMoreOrganizations } from "~/utils/subscription";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { userId, organizationId } = await requireAuthSession(request);
 
-  const organizations = await getUserOrganizationsWithDetailedData({ userId });
+  const user = await db.user.findUnique({
+    where: {
+      id: userId,
+    },
+    select: {
+      firstName: true,
+      tier: {
+        include: { tierLimit: true },
+      },
+      organizations: {
+        include: {
+          _count: {
+            select: {
+              assets: true,
+              members: true,
+            },
+          },
+        },
+      },
+    },
+  });
 
-  if (organizations?.length < 1)
+  // const organizations = await getUserOrganizationsWithDetailedData({ userId });
+
+  if (!user || user.organizations?.length < 1)
     throw new ShelfStackError({ message: "Organization not found" });
 
   const modelName = {
@@ -34,9 +56,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return json({
     currentOrganizationId: organizationId,
-    organizations,
-    items: organizations,
-    totalItems: organizations.length,
+    canCreateMoreOrganizations: canCreateMoreOrganizations({
+      tierLimit: user?.tier?.tierLimit,
+      totalOrganizations: user?.organizations?.length,
+    }),
+    organizations: user?.organizations,
+    items: user.organizations,
+    totalItems: user.organizations.length,
     modelName,
     title: "Workspace",
   });
@@ -62,7 +88,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function WorkspacePage() {
-  const { organizations } = useLoaderData<typeof loader>();
+  const { organizations, canCreateMoreOrganizations } =
+    useLoaderData<typeof loader>();
   const user = useUserData();
   const navigate = useNavigate();
 
@@ -72,12 +99,13 @@ export default function WorkspacePage() {
         <div className="mb-2.5 flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
           <h2 className=" text-lg text-gray-900">Workspaces</h2>
           <PremiumFeatureButton
-            canUseFeature={true}
+            canUseFeature={canCreateMoreOrganizations}
             buttonContent={{
               title: "New workspace",
               message:
-                "You are not able to create more workspaces within your current plan.",
+                "You are currently able to create a max of 2 workspaces. If you want to create more than 1 Team workspace, please get in touch with sales",
             }}
+            skipCta
             buttonProps={{
               to: "new",
               role: "link",
