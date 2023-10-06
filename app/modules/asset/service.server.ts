@@ -369,6 +369,15 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     });
   }
 
+  /** disconnecting location relation if a user clears locations */
+  if (currentLocationId && !newLocationId) {
+    Object.assign(data, {
+      location: {
+        disconnect: true,
+      },
+    });
+  }
+
   /** If a tags is passed, link the category to the asset. */
   if (tags && tags?.set) {
     Object.assign(data, {
