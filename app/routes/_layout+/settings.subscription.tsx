@@ -4,7 +4,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import type Stripe from "stripe";
 import { InfoIcon } from "~/components/icons";
 import {
@@ -111,6 +111,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
+
+export const handle = {
+  breadcrumb: () => <Link to="/settings/subscription">Subscription</Link>,
+};
 
 export default function UserPage() {
   const { title, subTitle, prices, activeSubscription } =
