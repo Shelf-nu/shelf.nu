@@ -59,6 +59,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   await createCategory({
     ...result.data,
     userId: authSession.userId,
+    organizationId: authSession.organizationId,
   });
 
   sendNotification({

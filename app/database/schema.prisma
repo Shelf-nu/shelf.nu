@@ -72,8 +72,8 @@ model Asset {
   // Relationships
   user           User          @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId         String
-  organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
-  organizationId String?
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
   category       Category?     @relation(fields: [categoryId], references: [id])
   categoryId     String?
   location       Location?     @relation(fields: [locationId], references: [id])
@@ -119,18 +119,28 @@ model Category {
   assets Asset[]
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
 }
 
 model Tag {
   id          String   @id @default(cuid())
   name        String
   description String?
+
+  //relations
   assets      Asset[]
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
+
   // Datetime
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  
 }
 
 model Note {
@@ -299,6 +309,8 @@ model Organization {
   members TeamMember[]
   assets  Asset[]
   locations Location[]
+  categories Category[]
+  tags Tag[]
 
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt

@@ -680,7 +680,7 @@ export const getPaginatedAndFilterableAssets = async ({
   const { perPage } = cookie;
 
   const categories = await getAllCategories({
-    userId,
+    organizationId,
   });
 
   const tags = await getAllTags({
@@ -793,6 +793,7 @@ export const createAssetsFromContentImport = async ({
   const categories = await createCategoriesIfNotExists({
     data,
     userId,
+    organizationId,
   });
 
   const locations = await createLocationsIfNotExists({
@@ -809,6 +810,7 @@ export const createAssetsFromContentImport = async ({
   const tags = await createTagsIfNotExists({
     data,
     userId,
+    organizationId,
   });
 
   const customFields = await createCustomFieldsIfNotExists({
@@ -907,6 +909,7 @@ export const createAssetsFromBackupImport = async ({
       if (!existingCat) {
         const newCat = await db.category.create({
           data: {
+            organizationId,
             name: category.name,
             description: category.description || "",
             color: category.color,
@@ -1031,6 +1034,11 @@ export const createAssetsFromBackupImport = async ({
               user: {
                 connect: {
                   id: userId,
+                },
+              },
+              organization: {
+                connect: {
+                  id: organizationId,
                 },
               },
             },
