@@ -45,14 +45,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const id = getRequiredParam(params, "assetId");
 
   const formData = await request.formData();
-<<<<<<< HEAD
   const newLocationId = formData.get("newLocationId") as string;
   const currentLocationId = formData.get("currentLocationId") as string;
-=======
-  const newLocationId = formData.get("newLocationId");
-  const currentLocationId = formData.get("currentLocationId");
->>>>>>> 24dcd5d (added update location functionality as a quick action in actions dropdown in asset id page)
-
   await updateAsset({
     id,
     newLocationId,
