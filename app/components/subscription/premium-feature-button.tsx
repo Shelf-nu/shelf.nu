@@ -14,6 +14,7 @@ export const PremiumFeatureButton = ({
     message: "This feature is not available on the free tier of shelf.",
   },
   buttonProps,
+  skipCta = false,
 }: {
   canUseFeature: boolean;
   buttonContent: {
@@ -21,6 +22,7 @@ export const PremiumFeatureButton = ({
     message: string;
   };
   buttonProps: ButtonProps;
+  skipCta?: boolean;
 }) =>
   canUseFeature ? (
     <Button {...buttonProps}>{buttonContent.title}</Button>
@@ -30,17 +32,20 @@ export const PremiumFeatureButton = ({
         ...buttonContent,
         variant: buttonProps.variant || "primary",
       }}
+      skipCta={skipCta}
     />
   );
 
 const HoverMessage = ({
   buttonContent,
+  skipCta,
 }: {
   buttonContent: {
     title: string;
     message: string;
     variant?: ButtonVariant;
   };
+  skipCta: boolean;
 }) => (
   <HoverCard>
     <HoverCardTrigger className="disabled inline-flex cursor-not-allowed items-center justify-center border-none p-0 text-text-sm font-semibold text-primary-700 hover:text-primary-800">
@@ -50,10 +55,15 @@ const HoverMessage = ({
     </HoverCardTrigger>
     <HoverCardContent>
       <p>
-        {buttonContent.message} Please consider{" "}
-        <Button to="/settings/subscription" variant={"link"}>
-          upgrading to a paid plan
-        </Button>
+        {buttonContent.message}
+        {!skipCta ? (
+          <span>
+            Please consider{" "}
+            <Button to="/settings/subscription" variant={"link"}>
+              upgrading to a paid plan
+            </Button>
+          </span>
+        ) : null}
         .
       </p>
     </HoverCardContent>
