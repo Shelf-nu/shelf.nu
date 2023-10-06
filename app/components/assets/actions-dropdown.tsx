@@ -5,6 +5,7 @@ import { useHydrated } from "remix-utils";
 import {
   ChevronRight,
   DuplicateIcon,
+  LocationMarkerIcon,
   PenIcon,
   UserIcon,
   UserXIcon,
@@ -81,7 +82,7 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-lg bg-white p-0 text-right md:static md:w-[180px] md:rounded-lg"
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-lg bg-white p-0 text-right md:static md:w-[180px] md:rounded-lg">
-            <DropdownMenuItem className="mb-2.5 border-b p-4 md:mb-0 md:p-0">
+            <DropdownMenuItem className="border-b p-4 md:mb-0 md:p-0">
               {!assetIsAvailable ? (
                 <Button
                   to="release-custody"
@@ -110,6 +111,20 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
                   </span>
                 </Button>
               )}
+            </DropdownMenuItem>
+            <DropdownMenuItem className="mb-2.5 border-b p-4 md:mb-0 md:p-0">
+              <Button
+                to="update-location"
+                role="link"
+                variant="link"
+                className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                width="full"
+                onClick={() => setOpen(false)}
+              >
+                <span className="flex items-center gap-2">
+                  <LocationMarkerIcon /> Update Location
+                </span>
+              </Button>
             </DropdownMenuItem>
             <DropdownMenuItem className="px-4 py-1 md:p-0">
               <Button

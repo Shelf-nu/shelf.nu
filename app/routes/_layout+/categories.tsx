@@ -29,7 +29,6 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 export async function loader({ request }: LoaderFunctionArgs) {
   const { organizationId } = await requireAuthSession(request);
 
-
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);

@@ -26,7 +26,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-
 export async function loader({ request }: LoaderFunctionArgs) {
   const { organizationId } = await requireAuthSession(request);
 
@@ -74,7 +73,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
-
 
 export async function action({ request }: ActionFunctionArgs) {
   const { userId, organizationId } = await requireAuthSession(request);
