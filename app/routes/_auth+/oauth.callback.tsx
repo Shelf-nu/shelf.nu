@@ -90,7 +90,10 @@ export async function action({ request }: ActionFunctionArgs) {
   return redirect(safeRedirectTo, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, {
-        authSession,
+        authSession: {
+          ...authSession,
+          organizationId: user.organizations[0].id,
+        },
       }),
     },
   });

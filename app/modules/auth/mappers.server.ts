@@ -19,21 +19,28 @@ export async function mapAuthSession(
    * In the future we could store the preference for organization from the user in the userPrefs cookie and set it like this
    * This will also be more perfomant because we dont need to query, however there will be some edge cases and safety concerns we would have to address
    */
-  const org = await getOrganizationByUserId({
+  let org = await getOrganizationByUserId({
     userId: supabaseAuthSession.user.id,
     orgType: "PERSONAL",
   });
-  if (!org || !org.id)
-    throw new ShelfStackError({
-      message:
-        "Something went wrong with logging you in. Please try again and if the issue persists, contact support.",
-    });
+
+  // console.log(supabaseAuthSession.user);
+  // @TODO this is problematic as when the user loggs in for the first time it does it via the auth and there is no organization yet
+  // We could on theory create the organization here but that would be a bit hacky
+  // and hard to maintain.
+  // For now I will just set organizationId to "" and then update the session after the user is created
+
+  // if (!org || !org.id)
+  //   throw new ShelfStackError({
+  //     message:
+  //       "Something went wrong with logging you in. Please try again and if the issue persists, contact support.",
+  //   });
 
   return {
     accessToken: supabaseAuthSession.access_token,
     refreshToken: supabaseAuthSession.refresh_token,
     userId: supabaseAuthSession.user.id,
-    organizationId: org.id,
+    organizationId: org?.id || "",
     email: supabaseAuthSession.user.email,
     expiresIn: supabaseAuthSession.expires_in ?? -1,
     expiresAt: supabaseAuthSession.expires_at ?? -1,

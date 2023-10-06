@@ -109,6 +109,9 @@ export async function createUser({
           },
         },
       },
+      include: {
+        organizations: true,
+      },
     })
     .then((user) => user)
     .catch(() => null);
