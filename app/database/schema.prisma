@@ -364,7 +364,7 @@ model CustomField {
   options String[]
 
   // Relationships
-  organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String
 
   createdBy User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
