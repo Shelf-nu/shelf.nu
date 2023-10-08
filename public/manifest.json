@@ -1,0 +1,19 @@
+{
+  "name": "shelf-webapp",
+  "lang": "en-US",
+  "short_name": "shelf",
+  "description": "Modern Open Source Asset Management System",
+  "start_url": "/",
+  "display": "standalone",
+  "scope": "/",
+  "theme_color": "#EF6820",
+  "background_color": "#FFFFFF",
+  "icons": [
+    {
+      "src": "/images/shelf-symbol-desktop.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
