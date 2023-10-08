@@ -6,7 +6,7 @@ import { tw } from "~/utils";
 import { resetFetcher } from "~/utils/fetcher";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons";
-import { Badge, Button } from "../shared";
+import { Button } from "../shared";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +33,11 @@ type Props = {
     /** name of key for which we have to search the value */
     key: string;
   };
+  showSearch?: boolean;
+  renderItem?: (options: {
+    item: DropdownItem;
+    checked: boolean;
+  }) => React.ReactNode;
 };
 
 export default function DynamicDropdown({
@@ -44,6 +49,8 @@ export default function DynamicDropdown({
   model,
   initialDataKey,
   countKey,
+  showSearch = true,
+  renderItem,
 }: Props) {
   const initialData = useLoaderData();
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -99,31 +106,31 @@ export default function DynamicDropdown({
         <DropdownMenuContent
           align="end"
           className={tw(
-            "max-h-[300px] w-[290px] overflow-y-auto md:w-[350px]",
+            "max-h-[300px] w-[290px] overflow-y-auto p-0 md:w-[350px]",
             className
           )}
           style={style}
         >
-          <div>
-            <div className="mb-[6px] flex items-center justify-between">
-              <div className="text-xs text-gray-500">{label}</div>
-              <When truthy={itemInParams.length > 0}>
-                <Button
-                  as="button"
-                  variant="link"
-                  className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
-                  onClick={() => {
-                    setSearchParams((prev) => {
-                      prev.delete(model.name);
-                      return prev;
-                    });
-                  }}
-                >
-                  Clear filter
-                </Button>
-              </When>
-            </div>
-            <div className="filters-form relative">
+          <div className="mb-[6px] flex items-center justify-between p-3">
+            <div className="text-xs text-gray-500">{label}</div>
+            <When truthy={itemInParams.length > 0}>
+              <Button
+                as="button"
+                variant="link"
+                className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
+                onClick={() => {
+                  setSearchParams((prev) => {
+                    prev.delete(model.name);
+                    return prev;
+                  });
+                }}
+              >
+                Clear filter
+              </Button>
+            </When>
+          </div>
+          <When truthy={showSearch}>
+            <div className="filters-form relative mx-3">
               <Input
                 type="text"
                 label={`Search ${label?.toLocaleString()}`}
@@ -160,39 +167,60 @@ export default function DynamicDropdown({
                 />
               </When>
             </div>
-            <div>
-              {items.map((item) => (
+          </When>
+          <div>
+            {items.map((item) => {
+              const checked = itemInParams.includes(item.id);
+              if (typeof renderItem === "function") {
+                return (
+                  <label
+                    key={item.id}
+                    htmlFor={item.id}
+                    className="relative flex cursor-default select-none items-center rounded-lg px-2 py-1.5 text-sm font-medium outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 "
+                  >
+                    {renderItem({ item, checked })}
+                    <input
+                      id={item.id}
+                      type="checkbox"
+                      value={item.id}
+                      className="hidden"
+                      checked={checked}
+                      onChange={handleSelectItemChange}
+                    />
+                    <When truthy={checked}>
+                      <CheckIcon className="text-primary" />
+                    </When>
+                  </label>
+                );
+              }
+
+              return (
                 <label
                   key={item.id}
                   htmlFor={item.id}
-                  className="relative flex cursor-default select-none items-center rounded-lg px-2 py-1.5 text-sm font-medium outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 "
+                  className="flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 "
                 >
-                  <Badge color={item.color ?? "red"} noBg>
-                    {item.name}
-                  </Badge>
+                  {item.name}
                   <input
                     id={item.id}
                     type="checkbox"
                     value={item.id}
                     className="hidden"
-                    checked={itemInParams.includes(item.id)}
+                    checked={checked}
                     onChange={handleSelectItemChange}
                   />
-                  {itemInParams.includes(item.id) ? (
-                    <span className="absolute right-2 flex  items-center justify-center text-primary">
-                      <CheckIcon />
-                    </span>
-                  ) : null}
+                  <When truthy={checked}>
+                    <CheckIcon className="text-primary" />
+                  </When>
                 </label>
-              ))}
-            </div>
-            <When truthy={totalItems > 4}>
-              <div className="my-2 text-gray-500">
-                Showing 4 out of {initialData[countKey]}, type to search for
-                more
-              </div>
-            </When>
+              );
+            })}
           </div>
+          <When truthy={totalItems > 4}>
+            <div className="p-3 text-gray-500">
+              Showing 4 out of {initialData[countKey]}, type to search for more
+            </div>
+          </When>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

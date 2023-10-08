@@ -219,6 +219,13 @@ export default function AssetIndexPage() {
                 label="Filter by category"
                 initialDataKey="categories"
                 countKey="totalCategories"
+                renderItem={({ item }) => (
+                  <div className="px-4 py-2">
+                    <Badge color={item.color!} noBg>
+                      {item.name}
+                    </Badge>
+                  </div>
+                )}
               />
               <DynamicDropdown
                 trigger={
