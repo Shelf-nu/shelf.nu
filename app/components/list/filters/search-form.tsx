@@ -9,13 +9,12 @@ import { Button } from "~/components/shared/button";
 import { SearchFieldTooltip } from "./search-field-tooltip";
 
 export const SearchForm = () => {
-  const [params] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
 
   const { search, modelName, searchFieldLabel } = useLoaderData();
   const { singular } = modelName;
   const state = useNavigation().state;
-  const isSearching =
-    state === "loading" && (params.has("s") || params.has("category"));
+  const isSearching = state === "loading";
 
   const label = searchFieldLabel
     ? searchFieldLabel
@@ -39,14 +38,17 @@ export const SearchForm = () => {
         />
         {search ? (
           <Button
-            to="#"
             icon="x"
             variant="tertiary"
             disabled={isSearching}
-            name="intent"
-            value="clearSearch"
             title="Clear search"
             className="absolute right-3.5 top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
+            onClick={() => {
+              setSearchParams((prev) => {
+                prev.delete("s");
+                return prev;
+              });
+            }}
           />
         ) : (
           <SearchFieldTooltip />
