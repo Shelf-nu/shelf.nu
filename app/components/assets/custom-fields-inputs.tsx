@@ -116,7 +116,7 @@ export default function AssetCustomFields({
               </div>
             </Button>
           </PopoverTrigger>
-          <PopoverContent side="top" className="z-100 w-auto p-0" align="end">
+          <PopoverContent side="top" className="z-[100] w-auto p-0" align="end">
             <Calendar
               name={`cf-${field.id}`}
               mode="single"
