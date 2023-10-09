@@ -237,6 +237,7 @@ export async function createAsset({
               version: 0,
               errorCorrection: ErrorCorrection["L"],
               user,
+              organization,
             },
           ],
         };
@@ -897,6 +898,7 @@ export const createAssetsFromBackupImport = async ({
               version: 0,
               errorCorrection: ErrorCorrection["L"],
               userId,
+              organizationId,
             },
           ],
         },

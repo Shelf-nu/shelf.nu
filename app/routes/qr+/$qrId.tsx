@@ -4,8 +4,12 @@ import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
-import { belongsToCurrentUser } from "~/modules/qr/utils.server";
+import {
+  belongsToCurrentUser,
+  belongsToCurrentUsersOrg,
+} from "~/modules/qr/utils.server";
 import { createScan, updateScan } from "~/modules/scan";
+import { getUserByID, getUserByIDWithOrg } from "~/modules/user";
 import { assertIsPost } from "~/utils";
 import { ShelfStackError } from "~/utils/error";
 
@@ -63,10 +67,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
    */
 
   /**
-   * Does the QR code belong to LOGGED IN user
+   * Does the QR code belong to LOGGED IN user's any of organizations?
    * Redirect to page to report if found.
    */
-  if (!belongsToCurrentUser(qr, authSession.userId)) {
+  const user = await getUserByIDWithOrg(authSession.userId);
+  if (!belongsToCurrentUsersOrg(qr, user?.organizations)) {
     return redirect(`contact-owner?scanId=${scan.id}`);
   }
 

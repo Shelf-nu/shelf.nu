@@ -15,7 +15,7 @@ import { getCurrentSearchParams, slugify } from "~/utils";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const { userId, organizationId } = await requireAuthSession(request);
   const { assetId } = params as { assetId: string };
   const searchParams = getCurrentSearchParams(request);
   const size = (searchParams.get("size") || "medium") as SizeKeys;
@@ -23,7 +23,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   let qr = await getQrByAssetId({ assetId });
   if (!qr) {
     /** If for some reason there is no QR, we create one and return it */
-    qr = await createQr({ assetId, userId });
+    qr = await createQr({ assetId, userId, organizationId });
   }
 
   // Create a QR code with a URL
