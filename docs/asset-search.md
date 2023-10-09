@@ -1,11 +1,11 @@
 # Asset search using Prisma DB's Full text search
 
-We wanted to implement a simple yet powerful search solution that will allows the users(in the short term) to quick search assets not just based on name but also based on related entries.
+We wanted to implement a simple yet powerful search solution that will allow the users(in the short term) to quick search assets not just based on name but also based on related entries.
 After doing some research we chose an approach that might not be the most performant due to multiple JOINS but it works great in combination with Prisma's Full Text Search.
 
 ## The strategy
 
-1. Create a `pg veiw` called `AssetSearchView` which has a `searchVector` field
+1. Create a `pg view` called `AssetSearchView` which has a `searchVector` field
 2. The view has a relation to Asset model
 3. Populate the view with the correct query. Here is the example query we used as a start:
 
