@@ -68,6 +68,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect("/admin-dashboard");
   } else {
     await generateOrphanedCodes({
+      organizationId: authSession.organizationId,
       userId,
       amount: Number(formData.get("amount")),
     });

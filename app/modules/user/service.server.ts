@@ -36,6 +36,13 @@ export async function getUserByID(id: User["id"]) {
   return db.user.findUnique({ where: { id } });
 }
 
+export async function getUserByIDWithOrg(id: User["id"], includeOrg?: boolean) {
+  return db.user.findUnique({
+    where: { id },
+    include: { organizations: true },
+  });
+}
+
 export async function createUser({
   email,
   userId,

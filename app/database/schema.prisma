@@ -180,6 +180,8 @@ model Qr {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -311,6 +313,7 @@ model Organization {
   locations Location[]
   categories Category[]
   tags Tag[]
+  qrCodes Qr[]
 
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
