@@ -1,4 +1,4 @@
-import { json, type LoaderArgs } from "@remix-run/node";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 import type { NotificationIcon } from "~/atoms/notifications";
@@ -11,7 +11,7 @@ export const ClientNotificationSchema = z.object({
   icon: z.custom<NotificationIcon>(),
 });
 
-export async function action({ request }: LoaderArgs) {
+export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
 
   const formData = await request.formData();

@@ -1,4 +1,8 @@
-import type { ActionArgs, V2_MetaFunction, LoaderArgs } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  MetaFunction,
+  LoaderFunctionArgs,
+} from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -42,7 +46,7 @@ function createOnboardingSchema(userSignedUpWithPassword: boolean) {
     );
 }
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
 
   const authUser = await getAuthUserByAccessToken(authSession.accessToken);
@@ -66,11 +70,11 @@ export async function loader({ request }: LoaderArgs) {
   });
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const authSession = await requireAuthSession(request);
@@ -115,7 +119,7 @@ export async function action({ request }: ActionArgs) {
 }
 
 export default function Onboarding() {
-  const { user, userSignedUpWithPassword } = useLoaderData();
+  const { user, userSignedUpWithPassword } = useLoaderData<typeof loader>();
 
   const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
 

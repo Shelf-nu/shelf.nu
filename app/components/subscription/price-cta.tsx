@@ -1,5 +1,4 @@
 import { Form } from "@remix-run/react";
-import type Stripe from "stripe";
 import { CustomerPortalForm } from "./customer-portal-form";
 import type { Price } from "./prices";
 import { Button } from "../shared";
@@ -9,7 +8,7 @@ export const PriceCta = ({
   activeSubscription,
 }: {
   price: Price;
-  activeSubscription: Stripe.Subscription | null;
+  activeSubscription: Object | null;
 }) => {
   if (price.id === "free") return null;
 

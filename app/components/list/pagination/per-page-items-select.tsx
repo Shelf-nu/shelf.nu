@@ -11,12 +11,13 @@ import {
   SelectContent,
   SelectItem,
 } from "~/components/forms";
+import type { loader } from "~/routes/_layout+/assets._index";
 
 export default function PerPageItemsSelect() {
   const perPageValues = ["20", "50", "100"];
   const submit = useSubmit();
   const [searchParams] = useSearchParams();
-  const { perPage } = useLoaderData();
+  const { perPage } = useLoaderData<typeof loader>();
 
   return (
     <div className="relative">

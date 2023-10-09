@@ -1,16 +1,15 @@
 import React from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
-import { useTypedFetcher } from "~/hooks/use-fetcher";
 import type { action } from "~/routes/_auth+/send-magic-link";
 
 export function ContinueWithEmailForm() {
   const ref = React.useRef<HTMLFormElement>(null);
   const { isResend } = useLoaderData();
 
-  const sendMagicLink = useTypedFetcher<typeof action>();
+  const sendMagicLink = useFetcher<typeof action>();
   const { data, state } = sendMagicLink;
   const isSuccessFull = state === "idle" && data != null && !data?.error;
   const isLoading = state === "submitting" || state === "loading";
@@ -27,12 +26,7 @@ export function ContinueWithEmailForm() {
   }, [isSuccessFull]);
 
   return (
-    <sendMagicLink.Form
-      method="post"
-      action="/send-magic-link"
-      replace={false}
-      ref={ref}
-    >
+    <sendMagicLink.Form method="post" action="/send-magic-link" ref={ref}>
       <Input
         label="Magic link"
         hideLabel={true}

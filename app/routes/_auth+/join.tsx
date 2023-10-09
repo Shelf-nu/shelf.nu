@@ -1,10 +1,5 @@
 import * as React from "react";
-
-import type {
-  ActionArgs,
-  LoaderArgs,
-  V2_MetaFunction as MetaFunction,
-} from "@remix-run/node";
+import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import {
   Form,
@@ -24,7 +19,7 @@ import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { getUserByEmail } from "~/modules/user";
 import { assertIsPost, isFormProcessing } from "~/utils";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
 
   const title = "Create an account";
@@ -109,10 +104,8 @@ export async function action({ request }: ActionArgs) {
   );
 }
 
-export const meta: MetaFunction = ({ data }) => [
-  {
-    title: data.title,
-  },
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
 export default function Join() {

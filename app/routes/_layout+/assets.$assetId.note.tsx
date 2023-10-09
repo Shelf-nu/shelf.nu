@@ -1,4 +1,4 @@
-import type { LoaderArgs, ActionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { parseFormAny } from "react-zorm";
 import { NewNoteSchema } from "~/components/assets/notes/new";
@@ -7,11 +7,11 @@ import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { assertIsDelete, assertIsPost, isDelete, isPost } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export const loader = async ({ params }: LoaderArgs) =>
+export const loader = async ({ params }: LoaderFunctionArgs) =>
   /** makes sure that if the user navigates to that url, it redirects back to asset */
   redirect(`/assets/${params.assetId}`);
 
-export const action = async ({ request, params }: ActionArgs) => {
+export const action = async ({ request, params }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
   const formData = await request.formData();
 

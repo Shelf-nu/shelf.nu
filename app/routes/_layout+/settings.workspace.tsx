@@ -1,7 +1,11 @@
 import type { Custody, TeamMember } from "@prisma/client";
-import type { ActionArgs, LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { Filters, List } from "~/components/list";
@@ -20,7 +24,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
-export const loader = async ({ request }: LoaderArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { userId } = await requireAuthSession(request);
   const { organization, totalAssets, totalLocations } =
     await getUserPersonalOrganizationData({ userId });
@@ -71,7 +75,7 @@ export const loader = async ({ request }: LoaderArgs) => {
   );
 };
 
-export const action = async ({ request }: ActionArgs) => {
+export const action = async ({ request }: ActionFunctionArgs) => {
   await requireAuthSession(request);
 
   const formData = await request.formData();
@@ -85,10 +89,15 @@ export const action = async ({ request }: ActionArgs) => {
   return redirect(`/settings/workspace`);
 };
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
+
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
+
+export const handle = {
+  breadcrumb: () => <Link to="/settings/workspace">Workspace</Link>,
+};
 
 export default function WorkspacePage() {
   const {
@@ -106,8 +115,8 @@ export default function WorkspacePage() {
           <p className="text-sm text-gray-600">Manage your workspace.</p>
         </div>
       </div>
-      <div className="mb-6 flex gap-16">
-        <div className="w-1/4">
+      <div className="mb-6 lg:flex lg:gap-16">
+        <div className="mb-4 lg:mb-0 lg:w-1/4">
           <div className="text-text-sm font-medium text-gray-700">
             Workspace
           </div>
@@ -116,7 +125,7 @@ export default function WorkspacePage() {
           </p>
         </div>
         <div className="flex-1 rounded-[12px] border">
-          <div className="border-b px-6 py-4">
+          <div className="border-b px-6 py-3 md:py-4">
             <span className="text-text-xs font-medium">Name</span>
           </div>
           <div className="px-6 py-3">
@@ -134,8 +143,8 @@ export default function WorkspacePage() {
           </div>
         </div>
       </div>
-      <div className="mb-10 flex gap-16">
-        <div className="w-1/4">
+      <div className="mb-10 lg:flex lg:gap-16">
+        <div className="mb-4 lg:mb-0 lg:w-1/4">
           <div className="text-text-sm font-medium text-gray-700">Admins</div>
           <p className="text-sm text-gray-600">
             Currently it’s only possible to have a single admin account per
@@ -143,7 +152,7 @@ export default function WorkspacePage() {
           </p>
         </div>
         <div className="flex-1 rounded-[12px] border">
-          <div className="border-b px-6 py-4">
+          <div className="border-b px-6 py-3 md:py-4">
             <span className="text-text-xs font-medium">Name</span>
           </div>
           <div className="px-6 py-3">
@@ -160,20 +169,24 @@ export default function WorkspacePage() {
           </div>
         </div>
       </div>
-      <div className="mb-6 flex justify-between border-b pb-5">
-        <div>
+      <div className="mb-6 border-b pb-5 md:flex md:items-center md:justify-between md:gap-3">
+        <div className="mb-4 md:mb-0">
           <h3 className="text-text-lg font-semibold">Team</h3>
           <p className="text-sm text-gray-600">
             Manage your existing team and give team members custody to certain
             assets.
           </p>
         </div>
-        <Button variant="primary" to={`${organization.id}/add-member`}>
+        <Button
+          variant="primary"
+          to={`${organization.id}/add-member`}
+          className="shrink-0"
+        >
           Add team member
         </Button>
       </div>
-      <div className="mb-6 flex gap-16">
-        <div className="w-1/4">
+      <div className="mb-6 lg:flex lg:gap-16">
+        <div className="mb-4 lg:mb-0 lg:w-1/4">
           <div className="text-text-sm font-medium text-gray-700">
             Team members
           </div>

@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import type { Category } from "@prisma/client";
 import { CategorySelectNoCategories } from "./category-select-no-categories";
 import { FilterInput } from "./filter-input";
 import { useCategorySearch } from "./useCategorySearch";
@@ -63,7 +62,7 @@ export const CategorySelect = ({ defaultValue }: { defaultValue?: string }) => {
                 </div>
 
                 <div className="border-b border-b-gray-300 py-2 ">
-                  {refinedCategories.map((c: Category) => (
+                  {refinedCategories.map((c) => (
                     <SelectItem value={c.id} key={c.id}>
                       <Badge color={c.color} noBg withDot={false}>
                         {c.name}

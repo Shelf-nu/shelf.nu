@@ -12,7 +12,7 @@ import type {
   CustomField,
 } from "@prisma/client";
 import { AssetStatus, ErrorCorrection } from "@prisma/client";
-import { type LoaderArgs } from "@remix-run/node";
+import { type LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import {
@@ -369,6 +369,15 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     });
   }
 
+  /** disconnecting location relation if a user clears locations */
+  if (currentLocationId && !newLocationId) {
+    Object.assign(data, {
+      location: {
+        disconnect: true,
+      },
+    });
+  }
+
   /** If a tags is passed, link the category to the asset. */
   if (tags && tags?.set) {
     Object.assign(data, {
@@ -664,7 +673,7 @@ export const getPaginatedAndFilterableAssets = async ({
   request,
   userId,
 }: {
-  request: LoaderArgs["request"];
+  request: LoaderFunctionArgs["request"];
   userId: User["id"];
 }) => {
   const searchParams = getCurrentSearchParams(request);

@@ -1,11 +1,11 @@
 import { ErrorCorrection } from "@prisma/client";
-import { type LoaderArgs } from "@remix-run/node";
+import { type LoaderFunctionArgs } from "@remix-run/node";
 import JSZip from "jszip";
 import QRCode from "qrcode-generator";
 import { db } from "~/database";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderArgs) => {
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   requireAdmin(request);
   const { userId } = params;
   const url = new URL(request.url);

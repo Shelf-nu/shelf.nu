@@ -1,11 +1,10 @@
-import type { LoaderArgs, LoaderFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
 
 import { getAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
 
-export const loader: LoaderFunction = async ({ request }: LoaderArgs) => {
-
+export const loader = async ({ request }: LoaderFunctionArgs) => {
     const authSession = await getAuthSession(request);
 
     if (!authSession) {

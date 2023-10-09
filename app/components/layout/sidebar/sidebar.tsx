@@ -120,11 +120,7 @@ export default function Sidebar() {
         </div>
 
         <div className="mt-auto">
-          <SidebarBottom
-            user={{
-              ...user,
-            }}
-          />
+          <SidebarBottom user={user} />
         </div>
       </aside>
     </>

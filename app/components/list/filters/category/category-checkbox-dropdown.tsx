@@ -5,6 +5,7 @@ import { useAtom, useAtomValue } from "jotai";
 
 import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
 
+import type { WithDateFields } from "~/modules/types";
 import { useCategorySearch } from "../../../category/useCategorySearch";
 import Input from "../../../forms/input";
 import { CheckIcon, ChevronRight } from "../../../icons";
@@ -120,7 +121,7 @@ export const CategoryCheckboxDropdown = () => {
                 )}
               </div>
               <div className="">
-                {refinedCategories.map((c: Category) => (
+                {refinedCategories.map((c) => (
                   <CheckboxItem key={c.id} category={c} selected={items} />
                 ))}
               </div>
@@ -136,7 +137,7 @@ const CheckboxItem = ({
   category,
   selected,
 }: {
-  category: Category;
+  category: WithDateFields<Category, string>;
   selected: string[];
 }) => {
   const [, toggleIsFiltering] = useAtom(toggleIsFilteringCategoriesAtom);
