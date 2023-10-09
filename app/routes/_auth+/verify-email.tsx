@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { LoaderArgs, V2_MetaFunction } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Link, useSearchParams } from "@remix-run/react";
 import { GreenCheckMarkIcon } from "~/components/icons/library";
@@ -7,7 +7,7 @@ import { Button } from "~/components/shared";
 import { getAuthSession } from "~/modules/auth/session.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request }: LoaderArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
 
   const title = "Check your email";
@@ -90,6 +90,6 @@ export default function VerifyEmailPage() {
   );
 }
 
-export const meta: V2_MetaFunction<typeof loader> = ({ data }) => [
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];

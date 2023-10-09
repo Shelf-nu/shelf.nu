@@ -7,7 +7,12 @@ import { db } from "~/database";
 
 import type { AuthSession } from "~/modules/auth";
 
-import { deleteAuthAccount, updateAccountPassword } from "~/modules/auth";
+import {
+  createEmailAuthAccount,
+  deleteAuthAccount,
+  signInWithEmail,
+  updateAccountPassword,
+} from "~/modules/auth";
 import {
   dateTimeInUnix,
   generatePageMeta,
@@ -329,4 +334,34 @@ export async function deleteUser(id: User["id"]) {
   }
 
   await deleteAuthAccount(id);
+}
+
+/** THis function is used just for integration tests as it combines the creation of auth accound and user entry */
+export async function createUserAccountForTesting(
+  email: string,
+  password: string,
+  username: string
+): Promise<AuthSession | null> {
+  const authAccount = await createEmailAuthAccount(email, password);
+  // ok, no user account created
+  if (!authAccount) return null;
+
+  const { authSession } = await signInWithEmail(email, password);
+
+  // user account created but no session 😱
+  // we should delete the user account to allow retry create account again
+  if (!authSession) {
+    await deleteAuthAccount(authAccount.id);
+    return null;
+  }
+
+  const user = await tryCreateUser({
+    email: authSession.email,
+    userId: authSession.userId,
+    username,
+  });
+
+  if (!user) return null;
+
+  return authSession;
 }

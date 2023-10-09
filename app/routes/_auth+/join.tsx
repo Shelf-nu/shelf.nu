@@ -1,5 +1,9 @@
 import * as React from "react";
-import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from "@remix-run/node";
+import type {
+  LoaderFunctionArgs,
+  ActionFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import {
   Form,
@@ -7,7 +11,6 @@ import {
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
-// import { useTranslation } from "react-i18next";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 
@@ -18,6 +21,7 @@ import { getAuthSession, ContinueWithEmailForm } from "~/modules/auth";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { getUserByEmail } from "~/modules/user";
 import { assertIsPost, isFormProcessing } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
@@ -51,7 +55,7 @@ const JoinFormSchema = z
     }
   });
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
   const formData = await request.formData();
   const result = await JoinFormSchema.safeParseAsync(parseFormAny(formData));
@@ -71,7 +75,12 @@ export async function action({ request }: ActionArgs) {
 
   if (existingUser) {
     return json(
-      { errors: { email: "User with this Email already exits, login instead", password: null } },
+      {
+        errors: {
+          email: "User with this Email already exits, login instead",
+          password: null,
+        },
+      },
       { status: 400 }
     );
   }
@@ -147,7 +156,7 @@ export default function Join() {
             autoComplete="new-password"
             disabled={disabled}
             inputClassName="w-full"
-            error={zo.errors.password()?.message }
+            error={zo.errors.password()?.message}
           />
           <PasswordInput
             label="Confirm Password"

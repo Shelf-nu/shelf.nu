@@ -68,36 +68,39 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const signInResult = await signInWithEmail(email, password);
 
-  if (signInResult.status === "error" && signInResult.message === "Email not confirmed") {
+  if (
+    signInResult.status === "error" &&
+    signInResult.message === "Email not confirmed"
+  ) {
     return redirect(`/verify-email?email=${encodeURIComponent(email)}`);
   }
 
-
-    if (signInResult.status === "error" && signInResult.message === "Invalid login credentials") {
-      return json(
-        {
-          errors: {
-            email: null,
-            password: "incorrect Username and password",
-          },
+  if (
+    signInResult.status === "error" &&
+    signInResult.message === "Invalid login credentials"
+  ) {
+    return json(
+      {
+        errors: {
+          email: null,
+          password: "incorrect Username and password",
         },
-        { status: 400 }
-      );}
+      },
+      { status: 400 }
+    );
+  }
 
-      
-
-      if (signInResult.status === "error" ) {
-        return json(
-          {
-            errors: {
-              email: signInResult.message,
-              password: null,
-            },
-          },
-          { status: 400 }
-        );}
-   
-  
+  if (signInResult.status === "error") {
+    return json(
+      {
+        errors: {
+          email: signInResult.message,
+          password: null,
+        },
+      },
+      { status: 400 }
+    );
+  }
 
   // Ensure that user property exists before proceeding
   if (signInResult.status === "success" && signInResult.authSession) {
@@ -161,7 +164,7 @@ export default function IndexLoginForm() {
           autoComplete="new-password"
           disabled={disabled}
           inputClassName="w-full"
-          error={zo.errors.password()?.message || data?.errors?.password }
+          error={zo.errors.password()?.message || data?.errors?.password}
         />
 
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />

@@ -131,7 +131,7 @@ export default function Onboarding() {
         <input
           type="hidden"
           name="userSignedUpWithPassword"
-          value={userSignedUpWithPassword}
+          value={String(userSignedUpWithPassword)}
         />
 
         <div className="flex gap-6">

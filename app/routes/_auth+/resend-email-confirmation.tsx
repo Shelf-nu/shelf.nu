@@ -1,4 +1,4 @@
-import type { ActionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
@@ -7,7 +7,7 @@ import { resendVerificationEmail } from "~/modules/auth/service.server";
 import { validEmail } from "~/utils";
 import { assertIsPost } from "~/utils/http.server";
 
-export async function action({ request }: ActionArgs) {
+export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const formData = await request.formData();

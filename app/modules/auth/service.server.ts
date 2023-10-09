@@ -54,28 +54,23 @@ export async function resendVerificationEmail(email: string) {
   return { status: "error", error: "Somthing went wring please try again" };
 }
 
-export async function signInWithEmail(
-  email: string,
-  password: string
-){
+export async function signInWithEmail(email: string, password: string) {
   const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({
     email,
     password,
   });
 
   if (error) {
-    return {status: "error", message: error.message };
-    
+    return { status: "error", message: error.message };
   }
-;
   if (!data.session) {
-    return { status: "error", message: "something went wrong try login again"};
+    return { status: "error", message: "something went wrong try login again" };
   }
 
   const mappedSession = mapAuthSession(data.session);
 
   if (!mappedSession) {
-    return { status: "error",  message: "something went wrong try login again"};
+    return { status: "error", message: "something went wrong try login again" };
   }
 
   return { status: "success", authSession: mappedSession };

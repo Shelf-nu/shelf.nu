@@ -5,13 +5,13 @@ import { getAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-    const authSession = await getAuthSession(request);
+  const authSession = await getAuthSession(request);
 
-    if (!authSession) {
-      return redirect("login");
-    }
+  if (!authSession) {
+    return redirect("login");
+  }
 
-    const user = authSession
+  const user = authSession
     ? await getUserByEmail(authSession?.email)
     : undefined;
 
