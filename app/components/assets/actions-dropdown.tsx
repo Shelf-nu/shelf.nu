@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Asset } from "@prisma/client";
 import { useSearchParams } from "@remix-run/react";
-import { useHydrated } from "remix-utils";
+import { useHydrated } from "remix-utils/use-hydrated";
 import {
   ChevronRight,
   DuplicateIcon,

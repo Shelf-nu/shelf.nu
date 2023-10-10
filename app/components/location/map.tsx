@@ -1,7 +1,7 @@
 import maplibregl from "maplibre-gl";
 import { Marker, ScaleControl } from "react-map-gl";
 import Map from "react-map-gl/maplibre";
-import { ClientOnly } from "remix-utils";
+import { ClientOnly } from "remix-utils/client-only";
 
 export const ShelfMap = ({
   latitude,
