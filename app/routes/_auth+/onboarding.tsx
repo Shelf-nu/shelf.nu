@@ -89,7 +89,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ errors: updatedUser.errors }, { status: 400 });
   }
 
-  return redirect("/", {
+  return redirect("/welcome", {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
