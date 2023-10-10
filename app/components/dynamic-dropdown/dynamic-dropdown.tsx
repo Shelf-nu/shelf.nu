@@ -106,7 +106,7 @@ export default function DynamicDropdown({
         <DropdownMenuContent
           align="end"
           className={tw(
-            "max-h-[300px] w-[290px] overflow-y-auto p-0 md:w-[350px]",
+            "max-h-[400px] w-[290px] overflow-y-auto p-0 md:w-[350px]",
             className
           )}
           style={style}
@@ -168,7 +168,7 @@ export default function DynamicDropdown({
               </When>
             </div>
           </When>
-          <div>
+          <div className="divide-y">
             {items.map((item) => {
               const checked = itemInParams.includes(item.id);
               if (typeof renderItem === "function") {
