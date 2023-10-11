@@ -4,12 +4,9 @@ import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
-import {
-  belongsToCurrentUser,
-  belongsToCurrentUsersOrg,
-} from "~/modules/qr/utils.server";
+import { belongsToCurrentUsersOrg } from "~/modules/qr/utils.server";
 import { createScan, updateScan } from "~/modules/scan";
-import { getUserByID, getUserByIDWithOrg } from "~/modules/user";
+import { getUserByIDWithOrg } from "~/modules/user";
 import { assertIsPost } from "~/utils";
 import { ShelfStackError } from "~/utils/error";
 

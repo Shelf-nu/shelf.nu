@@ -67,7 +67,7 @@ export async function signInWithEmail(email: string, password: string) {
     return { status: "error", message: "something went wrong try login again" };
   }
 
-  const mappedSession = mapAuthSession(data.session);
+  const mappedSession = await mapAuthSession(data.session);
 
   if (!mappedSession) {
     return { status: "error", message: "something went wrong try login again" };

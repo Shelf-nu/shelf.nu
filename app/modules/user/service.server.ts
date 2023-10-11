@@ -9,7 +9,6 @@ import {
   deleteAuthAccount,
   type AuthSession,
   createEmailAuthAccount,
-  deleteAuthAccount,
   signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth";
@@ -37,7 +36,7 @@ export async function getUserByID(id: User["id"]) {
   return db.user.findUnique({ where: { id } });
 }
 
-export async function getUserByIDWithOrg(id: User["id"], includeOrg?: boolean) {
+export async function getUserByIDWithOrg(id: User["id"]) {
   return db.user.findUnique({
     where: { id },
     include: { organizations: true },
@@ -302,7 +301,6 @@ export async function deleteUser(id: User["id"]) {
 }
 export { defaultUserCategories };
 
-
 /** THis function is used just for integration tests as it combines the creation of auth accound and user entry */
 export async function createUserAccountForTesting(
   email: string,
@@ -332,4 +330,3 @@ export async function createUserAccountForTesting(
 
   return authSession;
 }
-
