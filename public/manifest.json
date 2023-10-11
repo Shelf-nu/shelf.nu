@@ -10,8 +10,8 @@
   "background_color": "#FFFFFF",
   "icons": [
     {
-      "src": "/images/shelf-symbol-desktop.png",
-      "sizes": "1024x1024",
+      "src": "/images/shelf-logo-x512.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     }
