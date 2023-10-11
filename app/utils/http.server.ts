@@ -37,7 +37,7 @@ function notAllowedMethod(message: string) {
   return new ShelfStackError({ message, status: 405 });
 }
 
-function badRequest(message: string) {
+export function badRequest(message: string) {
   return new ShelfStackError({ message, status: 400 });
 }
 

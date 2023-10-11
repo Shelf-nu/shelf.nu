@@ -32,6 +32,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
+
   if (authSession) return redirect("/");
   return json({ title, subHeading });
 }
@@ -65,14 +66,35 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const { email, password, redirectTo } = result.data;
 
-  const authSession = await signInWithEmail(email, password);
+  const signInResult = await signInWithEmail(email, password);
 
-  if (!authSession) {
+  if (
+    signInResult.status === "error" &&
+    signInResult.message === "Email not confirmed"
+  ) {
+    return redirect(`/verify-email?email=${encodeURIComponent(email)}`);
+  }
+
+  if (
+    signInResult.status === "error" &&
+    signInResult.message === "Invalid login credentials"
+  ) {
     return json(
       {
         errors: {
-          email:
-            "Wrong password. Forgot your password? Use the magic link below.",
+          email: null,
+          password: "incorrect Username and password",
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  if (signInResult.status === "error") {
+    return json(
+      {
+        errors: {
+          email: signInResult.message,
           password: null,
         },
       },
@@ -80,11 +102,25 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  return createAuthSession({
-    request,
-    authSession,
-    redirectTo: redirectTo || "/",
-  });
+  // Ensure that user property exists before proceeding
+  if (signInResult.status === "success" && signInResult.authSession) {
+    return createAuthSession({
+      request,
+      authSession: signInResult.authSession,
+      redirectTo: redirectTo || "/",
+    });
+  }
+
+  // Handle any unexpected scenarios
+  return json(
+    {
+      errors: {
+        email: "Something went wrong. Please try again later.",
+        password: null,
+      },
+    },
+    { status: 500 }
+  );
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -96,7 +132,7 @@ export default function IndexLoginForm() {
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
   const data = useActionData<{
-    errors: { email: string; password: string | null };
+    errors: { email: string; password: string };
   }>();
 
   const navigation = useNavigation();
@@ -117,7 +153,7 @@ export default function IndexLoginForm() {
             autoComplete="email"
             disabled={disabled}
             inputClassName="w-full"
-            error={zo.errors.email()?.message}
+            error={zo.errors.email()?.message || data?.errors?.email}
           />
         </div>
         <PasswordInput
@@ -128,7 +164,7 @@ export default function IndexLoginForm() {
           autoComplete="new-password"
           disabled={disabled}
           inputClassName="w-full"
-          error={zo.errors.password()?.message || data?.errors?.email}
+          error={zo.errors.password()?.message || data?.errors?.password}
         />
 
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />

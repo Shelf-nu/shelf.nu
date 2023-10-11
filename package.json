@@ -76,7 +76,7 @@
     "react-tag-autocomplete": "^7.0.0-rc.8",
     "react-to-print": "^2.14.13",
     "react-zorm": "^0.6.2",
-    "remix-utils": "^7.0.0-pre.3",
+    "remix-utils": "^7.0.2",
     "sharp": "^0.32.1",
     "stripe": "^12.16.0",
     "tailwind-merge": "^1.13.2",
@@ -124,12 +124,6 @@
     "typescript": "^5.1.0",
     "vite-tsconfig-paths": "^3.6.0",
     "vitest": "^0.24.5"
-  },
-  "overrides": {
-    "remix-utils": {
-      "@remix-run/react": "^2.0.1",
-      "@remix-run/server-runtime": "^2.0.1"
-    }
   },
   "engines": {
     "node": ">=18"

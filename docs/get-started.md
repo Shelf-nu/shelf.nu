@@ -111,7 +111,7 @@ Prior to your first deployment, you'll need to do a few things:
 
   ```sh
   fly apps create supa-fly-stack-template
-  fly apps create supa-fly-stack-template-staging  # ** not mandatory if you don't want a staging environnement **
+  fly apps create supa-fly-stack-template-staging  # ** not mandatory if you don't want a staging environment **
   ```
 
   > **Note:** For production app, make sure this name matches the `app` set in your `fly.toml` file. Otherwise, you will not be able to deploy.
@@ -179,7 +179,7 @@ For File storage we use the S3 buckets service provided by supabase. We do this 
 2. Make it a public bucket
 3. Implement a policy for `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'profile-pictures'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
 
-### Asssets
+### Assets
 
 1. Create a bucket called `assets`
 2. Implement a policy for `SELECT`, `INSERT`, `UPDATE` & `DELETE`. The policy expression is: `((bucket_id = 'assets'::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))` and target roles should be set to `authenticated`
@@ -192,7 +192,7 @@ We use GitHub Actions for continuous integration and deployment. Anything that g
 
 👉 **You have to add some env secrets for playwright.** 👈
 
-Add a `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`,`SUPABASE_ANON_PUBLIC`, `SERVER_URL` and `DATABASE_URL` to [your repo secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets)
+Add a `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`, `SUPABASE_ANON_PUBLIC`, `SERVER_URL` and `DATABASE_URL` to [your repo secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets)
 Please make sure that the `SERVER_URL` is set to `"http://localhost:3000"`. This will ensure that the magic link works when running playwright tests during Github actions.
 
 ## Testing
@@ -203,7 +203,7 @@ We use Playwright for our End-to-End tests in this project. You'll find those in
 
 To run these tests in development, complete your `.env` and run `npm run test:e2e:dev` which will start the dev server for the app as well as the Playwright client. Make sure the database is running in docker as described above.
 
-NOTE: We currently don't have a utility to delete users created by the tests so you will have to delete those manually for now. We will at some point create a utility that runs after all tests and deltes the user that was created during the test.
+NOTE: We currently don't have a utility to delete users created by the tests so you will have to delete those manually for now. We will at some point create a utility that runs after all tests and deletes the user that was created during the test.
 
 ### Vitest
 
@@ -257,7 +257,7 @@ In my benchmark, it makes my pages twice slower. (~+200ms compared to a direct q
 
 In order to make the register/login with magic link work, you will need to add some configuration to your Supabase.
 You need to add the site url as well as the redirect urls of your local, test and live app that will be used for oauth
-To do that navigate to Authentication > URL configiration and add the folowing values:
+To do that navigate to Authentication > URL configuration and add the following values:
 
 - https://localhost:3000/oauth/callback
 - https://localhost:3000/reset-password
