@@ -148,6 +148,7 @@ export default function DynamicDropdown({
                         model: model.name,
                         queryKey: model.key as string,
                         queryValue: e.currentTarget.value,
+                        selectedValues: itemInParams,
                       },
                       { method: "GET", action: "/api/model-filters" }
                     );
@@ -172,26 +173,7 @@ export default function DynamicDropdown({
             {items.map((item) => {
               const checked = itemInParams.includes(item.id);
               if (typeof renderItem === "function") {
-                return (
-                  <label
-                    key={item.id}
-                    htmlFor={item.id}
-                    className="relative flex cursor-default select-none items-center rounded-lg px-2 py-1.5 text-sm font-medium outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 "
-                  >
-                    {renderItem({ item, checked })}
-                    <input
-                      id={item.id}
-                      type="checkbox"
-                      value={item.id}
-                      className="hidden"
-                      checked={checked}
-                      onChange={handleSelectItemChange}
-                    />
-                    <When truthy={checked}>
-                      <CheckIcon className="text-primary" />
-                    </When>
-                  </label>
-                );
+                return renderItem({ item, checked });
               }
 
               return (

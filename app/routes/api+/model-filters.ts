@@ -15,6 +15,9 @@ const ModelFiltersSchema = z.object({
 
   /** Actual value */
   queryValue: z.string(),
+
+  /** What user have already selected, so that we can exclude them */
+  selectedValues: z.string().optional(),
 });
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -41,6 +44,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         mode: "insensitive",
       },
       userId,
+      id: { notIn: (result.data.selectedValues ?? "").split(",") },
     },
     take: 4,
   })) as Array<Record<string, string>>;

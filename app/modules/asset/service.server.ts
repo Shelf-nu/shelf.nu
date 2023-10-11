@@ -686,7 +686,17 @@ export const getPaginatedAndFilterableAssets = async ({
   const { perPage } = cookie;
 
   const [categories, totalCategories, tags, totalTags] = await db.$transaction([
-    db.category.findMany({ where: { userId }, take: 4 }),
+    db.category.findMany({
+      where: { userId },
+      take: 4,
+      orderBy: {
+        _relevance: {
+          fields: ["id"],
+          sort: "desc",
+          search: categoriesIds.join(" "),
+        },
+      },
+    }),
     db.category.count({ where: { userId } }),
     db.tag.findMany({ where: { userId }, take: 4 }),
     db.tag.count({ where: { userId } }),
