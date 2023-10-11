@@ -9,6 +9,7 @@ import {
   deleteAuthAccount,
   type AuthSession,
   createEmailAuthAccount,
+  deleteAuthAccount,
   signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth";
@@ -99,31 +100,6 @@ export async function tryCreateUser({
   return user;
 }
 
-export async function createUserAccount(
-  email: string,
-  password: string,
-  username: string
-): Promise<AuthSession | null> {
-  const authAccount = await createEmailAuthAccount(email, password);
-  // ok, no user account created
-  if (!authAccount) return null;
-
-  const authSession = await signInWithEmail(email, password);
-
-  // user account created but no session 😱
-  // we should delete the user account to allow retry create account again
-  if (!authSession) {
-    await deleteAuthAccount(authAccount.id);
-    return null;
-  }
-
-  const user = await tryCreateUser({ ...authSession, username });
-
-  if (!user) return null;
-
-  return authSession;
-}
-
 export async function updateUser(
   updateUserPayload: UpdateUserPayload
 ): Promise<UpdateUserResponse> {
@@ -144,7 +120,10 @@ export async function updateUser(
       },
     });
 
-    if (updateUserPayload.password) {
+    if (
+      updateUserPayload.password &&
+      updateUserPayload.password.trim() !== ""
+    ) {
       await updateAccountPassword(
         updateUserPayload.id,
         updateUserPayload.password
@@ -322,3 +301,35 @@ export async function deleteUser(id: User["id"]) {
   await deleteAuthAccount(id);
 }
 export { defaultUserCategories };
+
+
+/** THis function is used just for integration tests as it combines the creation of auth accound and user entry */
+export async function createUserAccountForTesting(
+  email: string,
+  password: string,
+  username: string
+): Promise<AuthSession | null> {
+  const authAccount = await createEmailAuthAccount(email, password);
+  // ok, no user account created
+  if (!authAccount) return null;
+
+  const { authSession } = await signInWithEmail(email, password);
+
+  // user account created but no session 😱
+  // we should delete the user account to allow retry create account again
+  if (!authSession) {
+    await deleteAuthAccount(authAccount.id);
+    return null;
+  }
+
+  const user = await tryCreateUser({
+    email: authSession.email,
+    userId: authSession.userId,
+    username,
+  });
+
+  if (!user) return null;
+
+  return authSession;
+}
+

@@ -4,8 +4,8 @@ import {
   type Prisma,
   type User,
 } from "@prisma/client";
-import { badRequest } from "remix-utils";
 import { db } from "~/database";
+import { badRequest } from "~/utils";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
@@ -174,7 +174,7 @@ export async function upsertCustomField(
 
   return customFields;
 }
-//returns {name:customField}
+
 export async function createCustomFieldsIfNotExists({
   data,
   userId,

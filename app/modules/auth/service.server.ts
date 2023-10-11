@@ -16,15 +16,64 @@ export async function createEmailAuthAccount(email: string, password: string) {
   return data.user;
 }
 
+export async function signUpWithEmailPass(email: string, password: string) {
+  const { data, error } = await getSupabaseAdmin().auth.signUp({
+    email: email,
+    password: password,
+    options: {
+      emailRedirectTo: `${SERVER_URL}/oauth/callback`,
+      data: {
+        signup_method: "email-password",
+      },
+    },
+  });
+
+  if (!data || error)
+    return { status: "error", error: "Unable to create account" };
+
+  return { status: "Email verification_required", user: data.user };
+}
+
+export async function resendVerificationEmail(email: string) {
+  const { data, error } = await getSupabaseAdmin().auth.resend({
+    type: "signup",
+    email: email,
+  });
+
+  if (error) {
+    return { status: "error", error: error.message };
+  }
+
+  if (data) {
+    return {
+      status: "success",
+      message: "Verification email resent successfully",
+    };
+  }
+
+  return { status: "error", error: "Somthing went wring please try again" };
+}
+
 export async function signInWithEmail(email: string, password: string) {
   const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({
     email,
     password,
   });
 
-  if (!data.session || error) return null;
+  if (error) {
+    return { status: "error", message: error.message };
+  }
+  if (!data.session) {
+    return { status: "error", message: "something went wrong try login again" };
+  }
 
-  return await mapAuthSession(data.session);
+  const mappedSession = mapAuthSession(data.session);
+
+  if (!mappedSession) {
+    return { status: "error", message: "something went wrong try login again" };
+  }
+
+  return { status: "success", authSession: mappedSession };
 }
 
 export async function sendMagicLink(email: string) {
@@ -61,7 +110,7 @@ export async function deleteAuthAccount(userId: string) {
   return true;
 }
 
-export async function getAuthAccountByAccessToken(accessToken: string) {
+export async function getAuthUserByAccessToken(accessToken: string) {
   const { data, error } = await getSupabaseAdmin().auth.getUser(accessToken);
 
   if (!data.user || error) return null;
@@ -69,6 +118,9 @@ export async function getAuthAccountByAccessToken(accessToken: string) {
   return data.user;
 }
 
+export async function getAuthResponseByAccessToken(accessToken: string) {
+  return await getSupabaseAdmin().auth.getUser(accessToken);
+}
 export async function refreshAccessToken(
   refreshToken?: string
 ): Promise<AuthSession | null> {
@@ -84,7 +136,7 @@ export async function refreshAccessToken(
 }
 
 export async function verifyAuthSession(authSession: AuthSession) {
-  const authAccount = await getAuthAccountByAccessToken(
+  const authAccount = await getAuthResponseByAccessToken(
     authSession.accessToken
   );
 
