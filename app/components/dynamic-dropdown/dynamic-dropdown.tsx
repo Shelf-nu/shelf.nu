@@ -200,7 +200,8 @@ export default function DynamicDropdown({
           </div>
           <When truthy={totalItems > 4}>
             <div className="p-3 text-gray-500">
-              Showing 4 out of {initialData[countKey]}, type to search for more
+              Showing {items.length} out of {initialData[countKey]}, type to
+              search for more
             </div>
           </When>
         </DropdownMenuContent>

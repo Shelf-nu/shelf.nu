@@ -685,20 +685,22 @@ export const getPaginatedAndFilterableAssets = async ({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
-  const [categories, totalCategories, tags, totalTags] = await db.$transaction([
+  const [
+    categoryExcludedSelected,
+    selectedCategories,
+    totalCategories,
+    tagsExcludedSelected,
+    selectedTags,
+    totalTags,
+  ] = await db.$transaction([
     db.category.findMany({
-      where: { userId },
+      where: { userId, id: { notIn: categoriesIds } },
       take: 4,
-      orderBy: {
-        _relevance: {
-          fields: ["id"],
-          sort: "desc",
-          search: categoriesIds.join(" "),
-        },
-      },
     }),
+    db.category.findMany({ where: { userId, id: { in: categoriesIds } } }),
     db.category.count({ where: { userId } }),
-    db.tag.findMany({ where: { userId }, take: 4 }),
+    db.tag.findMany({ where: { userId, id: { notIn: tagsIds } }, take: 4 }),
+    db.tag.findMany({ where: { userId, id: { in: tagsIds } }, take: 4 }),
     db.tag.count({ where: { userId } }),
   ]);
 
@@ -719,9 +721,9 @@ export const getPaginatedAndFilterableAssets = async ({
     totalAssets,
     prev,
     next,
-    categories,
+    categories: [...selectedCategories, ...categoryExcludedSelected],
     totalCategories,
-    tags,
+    tags: [...selectedTags, ...tagsExcludedSelected],
     totalTags,
     assets,
     totalPages,
