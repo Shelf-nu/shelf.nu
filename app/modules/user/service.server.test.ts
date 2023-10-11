@@ -12,7 +12,10 @@ import { USER_EMAIL, USER_ID, USER_PASSWORD } from "mocks/user";
 import { db } from "~/database";
 
 import { randomUsernameFromEmail } from "~/utils";
-import { createUserAccount, defaultUserCategories } from "./service.server";
+import {
+  createUserAccountForTesting,
+  defaultUserCategories,
+} from "./service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -26,7 +29,7 @@ vitest.mock("~/database", () => ({
   },
 }));
 
-describe(createUserAccount.name, () => {
+describe(createUserAccountForTesting.name, () => {
   it("should return null if no auth account created", async () => {
     expect.assertions(3);
     const fetchAuthAdminUserAPI = new Map();
@@ -50,7 +53,11 @@ describe(createUserAccount.name, () => {
           )
       )
     );
-    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, "");
+    const result = await createUserAccountForTesting(
+      USER_EMAIL,
+      USER_PASSWORD,
+      ""
+    );
     server.events.removeAllListeners();
     expect(result).toBeNull();
     expect(fetchAuthAdminUserAPI.size).toEqual(1);
@@ -93,7 +100,11 @@ describe(createUserAccount.name, () => {
           )
       )
     );
-    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, "");
+    const result = await createUserAccountForTesting(
+      USER_EMAIL,
+      USER_PASSWORD,
+      ""
+    );
     server.events.removeAllListeners();
     expect(result).toBeNull();
     expect(fetchAuthTokenAPI.size).toEqual(1);
@@ -134,7 +145,11 @@ describe(createUserAccount.name, () => {
     });
     //@ts-expect-error missing vitest type
     db.user.create.mockResolvedValue(null);
-    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, "");
+    const result = await createUserAccountForTesting(
+      USER_EMAIL,
+      USER_PASSWORD,
+      ""
+    );
     server.events.removeAllListeners();
     expect(result).toBeNull();
     expect(fetchAuthTokenAPI.size).toEqual(1);
@@ -170,7 +185,11 @@ describe(createUserAccount.name, () => {
     //@ts-expect-error missing vitest type
     db.user.create.mockResolvedValue({ id: USER_ID, email: USER_EMAIL });
     const username = randomUsernameFromEmail(USER_EMAIL);
-    const result = await createUserAccount(USER_EMAIL, USER_PASSWORD, username);
+    const result = await createUserAccountForTesting(
+      USER_EMAIL,
+      USER_PASSWORD,
+      username
+    );
     // we don't want to test the implementation of the function
     result!.expiresAt = -1;
     server.events.removeAllListeners();
