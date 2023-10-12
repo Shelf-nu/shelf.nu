@@ -29,6 +29,7 @@ declare global {
       STRIPE_SECRET_KEY: string;
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
+      FORMBRICKS_ENV_ID: string;
     }
   }
 }
