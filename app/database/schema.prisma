@@ -63,6 +63,7 @@ model Asset {
   mainImage           String?
   mainImageExpiration DateTime?
   status              AssetStatus @default(AVAILABLE)
+  valuation           Float?      @map("value") // Field to store the monetary value of an asset
 
   // Datetime
   createdAt DateTime @default(now())
@@ -289,6 +290,8 @@ model Organization {
   owner  User   @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId String
 
+  currency Currency @default(USD)
+
   members TeamMember[]
   assets  Asset[]
 
@@ -378,4 +381,27 @@ model AssetCustomFieldValue {
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+enum Currency {
+  USD  // United States Dollar
+  EUR  // Euro
+  GBP  // British Pound Sterling
+  JPY  // Japanese Yen
+  AUD  // Australian Dollar
+  CAD  // Canadian Dollar
+  CHF  // Swiss Franc
+  CNY  // Chinese Yuan
+  INR  // Indian Rupee
+  ZAR  // South African Rand
+  BRL  // Brazilian Real
+  MXN  // Mexican Peso
+  SGD  // Singapore Dollar
+  NZD  // New Zealand Dollar
+  SEK  // Swedish Krona
+  NOK  // Norwegian Krone
+  KRW  // South Korean Won
+  RUB  // Russian Ruble
+  HKD  // Hong Kong Dollar
+  SAR  // Saudi Riyal
 }
