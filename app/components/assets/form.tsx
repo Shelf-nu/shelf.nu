@@ -15,6 +15,7 @@ import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
 
 import { CategorySelect } from "../category/category-select";
+import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { LocationSelect } from "../location/location-select";
@@ -138,7 +139,13 @@ export const AssetForm = ({
         className="border-b-0 pb-[10px]"
         required={zodFieldIsRequired(FormSchema.shape.category)}
       >
-        <CategorySelect defaultValue={category || undefined} />
+        <DynamicSelect
+          defaultValue={category || undefined}
+          model={{ name: "category", key: "name" }}
+          label="Categories"
+          initialDataKey="categories"
+          countKey="totalCategories"
+        />
       </FormRow>
 
       <FormRow
@@ -154,7 +161,14 @@ export const AssetForm = ({
         className="border-b-0 py-[10px]"
         required={zodFieldIsRequired(FormSchema.shape.tags)}
       >
-        <TagsAutocomplete existingTags={tags || []} />
+        <DynamicSelect
+          defaultValue={tags}
+          model={{ name: "tag", key: "name" }}
+          label="Tags"
+          initialDataKey="tags"
+          countKey="totalTags"
+          multi
+        />
       </FormRow>
 
       <FormRow

@@ -79,8 +79,12 @@ export function useModelFilters({
     }
   };
 
-  const clearFilters = () => {
+  const resetModelFiltersFetcher = () => {
     resetFetcher(fetcher);
+  };
+
+  const clearFilters = () => {
+    resetModelFiltersFetcher();
     setSearchParams((prev) => {
       prev.delete(model.name);
       return prev;
@@ -95,6 +99,7 @@ export function useModelFilters({
     selectedItems,
     handleSelectItemChange,
     handleSearchQueryChange,
+    resetModelFiltersFetcher,
     clearFilters,
   };
 }

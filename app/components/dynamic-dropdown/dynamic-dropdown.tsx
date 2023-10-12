@@ -17,7 +17,7 @@ type Props = ModelFilterProps & {
   className?: string;
   style?: React.CSSProperties;
   trigger: React.ReactElement;
-  label?: React.ReactNode;
+  label?: string;
   searchIcon?: Icon;
   showSearch?: boolean;
   renderItem?: (options: {
@@ -47,6 +47,7 @@ export default function DynamicDropdown({
     items,
     handleSelectItemChange,
     clearFilters,
+    resetModelFiltersFetcher,
   } = useModelFilters({
     model,
     countKey,
@@ -79,7 +80,7 @@ export default function DynamicDropdown({
         >
           <div className="mb-[6px] flex items-center justify-between p-3">
             <div className="text-xs text-gray-500">{label}</div>
-            <When truthy={selectedItems.length > 0}>
+            <When truthy={selectedItems.length > 0 && showSearch}>
               <Button
                 as="button"
                 variant="link"
@@ -94,8 +95,8 @@ export default function DynamicDropdown({
             <div className="filters-form relative mx-3">
               <Input
                 type="text"
-                label={`Search ${label?.toLocaleString()}`}
-                placeholder={`Search ${label?.toLocaleString()}`}
+                label={`Search ${label}`}
+                placeholder={`Search ${label}`}
                 hideLabel
                 className="mb-2 text-gray-500"
                 icon={searchIcon}
@@ -109,6 +110,7 @@ export default function DynamicDropdown({
                   variant="tertiary"
                   disabled={Boolean(searchQuery)}
                   onClick={() => {
+                    resetModelFiltersFetcher();
                     setSearchQuery("");
                   }}
                   className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
