@@ -1,8 +1,8 @@
 {
-  "name": "shelf-webapp",
+  "name": "shelf",
   "lang": "en-US",
   "short_name": "shelf",
-  "description": "Modern Open Source Asset Management System",
+  "description": "Open Source Asset and Equipment tracking software that lets you create QR asset labels, manage and overview your assets across locations.",
   "start_url": "/",
   "display": "standalone",
   "scope": "/",
