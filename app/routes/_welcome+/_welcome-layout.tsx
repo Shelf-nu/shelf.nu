@@ -1,18 +1,5 @@
 import { Outlet } from "react-router";
 
-// export const loader = async ({ request }: LoaderFunctionArgs) => {
-//   const authSession = await getAuthSession(request);
-
-//   const user = authSession
-//     ? await getUserByEmail(authSession?.email)
-//     : undefined;
-
-//   if (user && user.onboarded) {
-//     return redirect("assets");
-//   }
-//   return null;
-// };
-
 export default function OnboardingLayout() {
   return (
     <div className="flex h-full min-h-screen flex-col ">
