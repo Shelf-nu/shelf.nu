@@ -39,17 +39,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!organization) {
     throw new Error("Organization not found");
   }
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
-      organizationId: organization.id,
-    });
+  const {
+    categories,
+    totalCategories,
+    tags,
+    totalTags,
+    locations,
+    customFields,
+  } = await getAllRelatedEntries({
+    userId,
+    organizationId: organization.id,
+  });
 
   const header = {
     title,
   };
 
-  return json({ header, categories, tags, locations, customFields });
+  return json({
+    header,
+    categories,
+    totalCategories,
+    tags,
+    totalTags,
+    locations,
+    customFields,
+  });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

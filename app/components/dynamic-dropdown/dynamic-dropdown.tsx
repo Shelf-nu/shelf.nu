@@ -173,7 +173,26 @@ export default function DynamicDropdown({
             {items.map((item) => {
               const checked = itemInParams.includes(item.id);
               if (typeof renderItem === "function") {
-                return renderItem({ item, checked });
+                return (
+                  <label
+                    key={item.id}
+                    htmlFor={item.id}
+                    className="flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 "
+                  >
+                    {renderItem({ item, checked })}
+                    <input
+                      id={item.id}
+                      type="checkbox"
+                      value={item.id}
+                      className="hidden"
+                      checked={checked}
+                      onChange={handleSelectItemChange}
+                    />
+                    <When truthy={checked}>
+                      <CheckIcon className="text-primary" />
+                    </When>
+                  </label>
+                );
               }
 
               return (

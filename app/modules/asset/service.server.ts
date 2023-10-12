@@ -647,16 +647,27 @@ export async function getAllRelatedEntries({
   organizationId: Organization["id"];
 }): Promise<{
   categories: Category[];
+  totalCategories: number;
   tags: Tag[];
+  totalTags: number;
   locations: Location[];
   customFields: CustomField[];
 }> {
-  const [categories, tags, locations, customFields] = await db.$transaction([
+  const [
+    categories,
+    totalCategories,
+    tags,
+    totalTags,
+    locations,
+    customFields,
+  ] = await db.$transaction([
     /** Get the categories */
     db.category.findMany({ where: { userId }, take: 4 }),
+    db.category.count({ where: { userId } }),
 
     /** Get the tags */
     db.tag.findMany({ where: { userId }, take: 4 }),
+    db.tag.count({ where: { userId } }),
 
     /** Get the locations */
     db.location.findMany({ where: { userId }, take: 4 }),
@@ -667,7 +678,14 @@ export async function getAllRelatedEntries({
       take: 4,
     }),
   ]);
-  return { categories, tags, locations, customFields };
+  return {
+    categories,
+    totalCategories,
+    tags,
+    totalTags,
+    locations,
+    customFields,
+  };
 }
 
 export const getPaginatedAndFilterableAssets = async ({
