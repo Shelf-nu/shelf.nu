@@ -340,7 +340,7 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   return tags && tags?.length > 0 ? (
     <div className="">
       {visibleTags?.map((tag) => (
-        <TagBadge key={tag.name} className="mr-2">
+        <TagBadge key={tag.id} className="mr-2">
           {tag.name}
         </TagBadge>
       ))}

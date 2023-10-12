@@ -28,7 +28,7 @@ export const Filters = ({
     return Object.entries(params)
       .map(([key, value]) =>
         value.map((_value) => (
-          <input key={key} type="hidden" name={key} value={_value} />
+          <input key={_value} type="hidden" name={key} value={_value} />
         ))
       )
       .flat();
