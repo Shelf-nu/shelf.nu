@@ -10,6 +10,7 @@ declare global {
       MICROSOFT_CLARITY_ID: string;
       CRISP_WEBSITE_ID: string;
       ENABLE_PREMIUM_FEATURES: string;
+      FORMBRICKS_ENV_ID: string;
     };
   }
 }
@@ -86,6 +87,10 @@ export const MICROSOFT_CLARITY_ID = getEnv("MICROSOFT_CLARITY_ID", {
   isSecret: false,
   isRequired: false,
 });
+export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
+  isSecret: false,
+  isRequired: false,
+});
 
 export const ENABLE_PREMIUM_FEATURES =
   getEnv("ENABLE_PREMIUM_FEATURES", {
@@ -102,5 +107,6 @@ export function getBrowserEnv() {
     CRISP_WEBSITE_ID,
     MICROSOFT_CLARITY_ID,
     ENABLE_PREMIUM_FEATURES,
+    FORMBRICKS_ENV_ID,
   };
 }

@@ -1,4 +1,5 @@
 import type { PropsWithChildren } from "react";
+import formbricks from "@formbricks/js";
 import { MetronomeLinks } from "@metronome-sh/react";
 import type { User } from "@prisma/client";
 import type {
@@ -62,6 +63,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) =>
   });
 
 export const shouldRevalidate = () => false;
+
+if (typeof window !== "undefined") {
+  formbricks.init({
+    environmentId: window.env.FORMBRICKS_ENV_ID,
+    apiHost: "https://app.formbricks.com",
+    debug: true, // remove when in production
+  });
+}
 
 function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
   const { env } = useLoaderData<typeof loader>();
