@@ -1,9 +1,7 @@
-import type { ChangeEvent } from "react";
-import { cloneElement, useCallback, useMemo, useState } from "react";
-import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
-import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { cloneElement } from "react";
+import type { ModelFilterItems, ModelFilterProps } from "~/hooks";
+import { useModelFilters } from "~/hooks";
 import { tw } from "~/utils";
-import { resetFetcher } from "~/utils/fetcher";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons";
 import { Button } from "../shared";
@@ -15,27 +13,15 @@ import {
 import type { Icon } from "../shared/icons-map";
 import When from "../when/when";
 
-type DropdownItem = { id: string; name: string; color?: string };
-
-type Props = {
+type Props = ModelFilterProps & {
   className?: string;
   style?: React.CSSProperties;
   trigger: React.ReactElement;
   label?: React.ReactNode;
   searchIcon?: Icon;
-  /** name of key in loader which is used to pass initial data */
-  initialDataKey: string;
-  /** name of key in loader which passing the total count */
-  countKey: string;
-  model: {
-    /** name of the model for which the query has to run */
-    name: AllowedModelNames;
-    /** name of key for which we have to search the value */
-    key: string;
-  };
   showSearch?: boolean;
   renderItem?: (options: {
-    item: DropdownItem;
+    item: ModelFilterItems;
     checked: boolean;
   }) => React.ReactNode;
 };
@@ -52,40 +38,20 @@ export default function DynamicDropdown({
   showSearch = true,
   renderItem,
 }: Props) {
-  const initialData = useLoaderData();
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [searchParams, setSearchParams] = useSearchParams();
-  const itemInParams = searchParams.getAll(model.name);
-  const totalItems = initialData[countKey];
-  const fetcher = useFetcher<Array<DropdownItem>>();
-
-  const items = useMemo(() => {
-    if (fetcher.data) {
-      return fetcher.data;
-    }
-
-    return (initialData[initialDataKey] ?? []) as Array<DropdownItem>;
-  }, [fetcher.data, initialData, initialDataKey]);
-
-  const handleSelectItemChange = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      const value = e.currentTarget.value;
-      /** If item is already there in search params then remove it */
-      if (itemInParams.includes(value)) {
-        setSearchParams((prev) => {
-          prev.delete(model.name, value);
-          return prev;
-        });
-      } else {
-        /** Otherwise, add the item in search params */
-        setSearchParams((prev) => {
-          prev.append(model.name, value);
-          return prev;
-        });
-      }
-    },
-    [itemInParams, model.name, setSearchParams]
-  );
+  const {
+    selectedItems,
+    searchQuery,
+    setSearchQuery,
+    handleSearchQueryChange,
+    totalItems,
+    items,
+    handleSelectItemChange,
+    clearFilters,
+  } = useModelFilters({
+    model,
+    countKey,
+    initialDataKey,
+  });
 
   return (
     <div className="relative w-full">
@@ -96,9 +62,9 @@ export default function DynamicDropdown({
         >
           <div>
             {cloneElement(trigger)}
-            <When truthy={itemInParams.length > 0}>
+            <When truthy={selectedItems.length > 0}>
               <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
-                {itemInParams.length}
+                {selectedItems.length}
               </div>
             </When>
           </div>
@@ -113,17 +79,12 @@ export default function DynamicDropdown({
         >
           <div className="mb-[6px] flex items-center justify-between p-3">
             <div className="text-xs text-gray-500">{label}</div>
-            <When truthy={itemInParams.length > 0}>
+            <When truthy={selectedItems.length > 0}>
               <Button
                 as="button"
                 variant="link"
                 className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
-                onClick={() => {
-                  setSearchParams((prev) => {
-                    prev.delete(model.name);
-                    return prev;
-                  });
-                }}
+                onClick={clearFilters}
               >
                 Clear filter
               </Button>
@@ -140,20 +101,7 @@ export default function DynamicDropdown({
                 icon={searchIcon}
                 autoFocus
                 value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.currentTarget.value);
-                  if (e.currentTarget.value) {
-                    fetcher.submit(
-                      {
-                        model: model.name,
-                        queryKey: model.key as string,
-                        queryValue: e.currentTarget.value,
-                        selectedValues: itemInParams,
-                      },
-                      { method: "GET", action: "/api/model-filters" }
-                    );
-                  }
-                }}
+                onChange={handleSearchQueryChange}
               />
               <When truthy={Boolean(searchQuery)}>
                 <Button
@@ -161,7 +109,6 @@ export default function DynamicDropdown({
                   variant="tertiary"
                   disabled={Boolean(searchQuery)}
                   onClick={() => {
-                    resetFetcher(fetcher);
                     setSearchQuery("");
                   }}
                   className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
@@ -171,7 +118,7 @@ export default function DynamicDropdown({
           </When>
           <div className="divide-y">
             {items.map((item) => {
-              const checked = itemInParams.includes(item.id);
+              const checked = selectedItems.includes(item.id);
               if (typeof renderItem === "function") {
                 return (
                   <label
@@ -219,8 +166,8 @@ export default function DynamicDropdown({
           </div>
           <When truthy={totalItems > 4}>
             <div className="p-3 text-gray-500">
-              Showing {items.length} out of {initialData[countKey]}, type to
-              search for more
+              Showing {items.length} out of {totalItems}, type to search for
+              more
             </div>
           </When>
         </DropdownMenuContent>

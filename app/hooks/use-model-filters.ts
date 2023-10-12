@@ -1,0 +1,100 @@
+import type { ChangeEvent } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
+import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { resetFetcher } from "~/utils/fetcher";
+
+export type ModelFilterItems = {
+  id: string;
+  name: string;
+  color?: string;
+  metadata?: Record<string, any>;
+};
+
+export type ModelFilterProps = {
+  /** name of key in loader which is used to pass initial data */
+  initialDataKey: string;
+  /** name of key in loader which passing the total count */
+  countKey: string;
+  model: {
+    /** name of the model for which the query has to run */
+    name: AllowedModelNames;
+    /** name of key for which we have to search the value */
+    key: string;
+  };
+};
+
+export function useModelFilters({
+  model,
+  countKey,
+  initialDataKey,
+}: ModelFilterProps) {
+  const initialData = useLoaderData();
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedItems = searchParams.getAll(model.name);
+  const totalItems = initialData[countKey];
+  const fetcher = useFetcher<Array<ModelFilterItems>>();
+
+  const items = useMemo(() => {
+    if (fetcher.data) {
+      return fetcher.data;
+    }
+
+    return (initialData[initialDataKey] ?? []) as Array<ModelFilterItems>;
+  }, [fetcher.data, initialData, initialDataKey]);
+
+  const handleSelectItemChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const value = e.currentTarget.value;
+      /** If item is already there in search params then remove it */
+      if (selectedItems.includes(value)) {
+        setSearchParams((prev) => {
+          prev.delete(model.name, value);
+          return prev;
+        });
+      } else {
+        /** Otherwise, add the item in search params */
+        setSearchParams((prev) => {
+          prev.append(model.name, value);
+          return prev;
+        });
+      }
+    },
+    [selectedItems, model.name, setSearchParams]
+  );
+
+  const handleSearchQueryChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.currentTarget.value);
+    if (e.currentTarget.value) {
+      fetcher.submit(
+        {
+          model: model.name,
+          queryKey: model.key as string,
+          queryValue: e.currentTarget.value,
+          selectedValues: selectedItems,
+        },
+        { method: "GET", action: "/api/model-filters" }
+      );
+    }
+  };
+
+  const clearFilters = () => {
+    resetFetcher(fetcher);
+    setSearchParams((prev) => {
+      prev.delete(model.name);
+      return prev;
+    });
+  };
+
+  return {
+    searchQuery,
+    setSearchQuery,
+    totalItems,
+    items,
+    selectedItems,
+    handleSelectItemChange,
+    handleSearchQueryChange,
+    clearFilters,
+  };
+}
