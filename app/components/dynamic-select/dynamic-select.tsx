@@ -1,6 +1,5 @@
-import React, { useState } from "react";
+import React from "react";
 import { Separator } from "@radix-ui/react-select";
-import { ReactTags, type Tag } from "react-tag-autocomplete";
 import { useModelFilters, type ModelFilterProps } from "~/hooks";
 import { tw } from "~/utils";
 import {
@@ -21,8 +20,7 @@ type Props = ModelFilterProps & {
   label?: React.ReactNode;
   searchIcon?: Icon;
   showSearch?: boolean;
-  defaultValue?: string | Tag[];
-  multi?: boolean;
+  defaultValue?: string;
   extraContent?: React.ReactNode;
 };
 
@@ -33,7 +31,6 @@ export default function DynamicSelect({
   searchIcon = "search",
   showSearch = true,
   defaultValue,
-  multi = false,
   model,
   countKey,
   initialDataKey,
@@ -54,43 +51,9 @@ export default function DynamicSelect({
     initialDataKey,
   });
 
-  const [selected, setSelected] = useState<Tag[]>(
-    Array.isArray(defaultValue) ? defaultValue : []
-  );
-
-  const onAdd = (newTag: Tag) => {
-    setSelected([...selected, newTag]);
-  };
-
-  const onDelete = (tagIndex: number) => {
-    setSelected(selected.filter((_, i) => i !== tagIndex));
-  };
-
-  if (multi) {
-    return (
-      <>
-        <input
-          type="hidden"
-          name="tags"
-          value={selected.map((tag) => tag.value).join(",")}
-        />
-        <ReactTags
-          selected={selected}
-          suggestions={items.map((item) => ({
-            value: item.id,
-            label: item.name,
-          }))}
-          onAdd={onAdd}
-          onDelete={onDelete}
-          noOptionsText="No matching tags"
-        />
-      </>
-    );
-  }
-
   return (
     <div className="relative w-full">
-      <Select name="category" defaultValue={defaultValue as string}>
+      <Select name="category" defaultValue={defaultValue}>
         <SelectTrigger>
           <SelectValue placeholder={`Select ${model.name}`} />
         </SelectTrigger>

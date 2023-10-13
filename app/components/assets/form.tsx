@@ -161,14 +161,7 @@ export const AssetForm = ({
         className="border-b-0 py-[10px]"
         required={zodFieldIsRequired(FormSchema.shape.tags)}
       >
-        <DynamicSelect
-          defaultValue={tags}
-          model={{ name: "tag", key: "name" }}
-          label="Tags"
-          initialDataKey="tags"
-          countKey="totalTags"
-          multi
-        />
+        <TagsAutocomplete existingTags={tags ?? []} />
       </FormRow>
 
       <FormRow
