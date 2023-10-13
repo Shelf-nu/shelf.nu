@@ -189,8 +189,12 @@ export async function createAsset({
   qrId,
   tags,
   custodian,
+  valuation,
   customFieldsValues,
-}: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
+}: Pick<
+  Asset,
+  "description" | "title" | "categoryId" | "userId" | "valuation"
+> & {
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
@@ -232,6 +236,7 @@ export async function createAsset({
     description,
     user,
     qrCodes,
+    valuation,
   };
 
   /** If a categoryId is passed, link the category to the asset. */
@@ -612,6 +617,7 @@ export async function duplicateAsset({
       locationId: asset.locationId ?? undefined,
       custodian: asset?.custody?.custodian.id ?? undefined,
       tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
+      valuation: asset.valuation,
     });
 
     if (asset.mainImage) {
@@ -855,6 +861,7 @@ export const createAssetsFromContentImport = async ({
                 .map((t) => ({ id: tags[t] })),
             }
           : undefined,
+      valuation: asset.valuation || null,
       customFieldsValues,
     });
   }

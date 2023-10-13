@@ -1,4 +1,4 @@
-import type { Location } from "@prisma/client";
+import { OrganizationType, type Location } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -31,6 +31,7 @@ import { usePosition, useUserData } from "~/hooks";
 import { deleteAsset, getAsset } from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { getOrganizationByUserId } from "~/modules/organization";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
@@ -50,6 +51,14 @@ import { deleteAssets } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { userId } = await requireAuthSession(request);
+  const organization = await getOrganizationByUserId({
+    userId,
+    orgType: OrganizationType.PERSONAL,
+  });
+
+  if (!organization) {
+    throw new Error("Organization not found");
+  }
   const id = getRequiredParam(params, "assetId");
 
   const asset = await getAsset({ userId, id });
@@ -93,6 +102,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ...asset,
       custody,
       notes,
+      currency: organization.currency,
     },
     lastScan,
     header,
@@ -275,6 +285,18 @@ export default function AssetDetailsPage() {
                         {tag.name}
                       </Tag>
                     ))}
+                  </div>
+                </li>
+              ) : null}
+              {asset.valuation ? (
+                <li className="mb-2 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Value
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Tag key={asset.valuation} className="mb-2 ml-2">
+                      {asset.currency + " " + asset.valuation}
+                    </Tag>
                   </div>
                 </li>
               ) : null}

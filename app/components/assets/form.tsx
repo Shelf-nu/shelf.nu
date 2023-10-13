@@ -1,4 +1,4 @@
-import type { Asset, Qr } from "@prisma/client";
+import type { Asset, Organization, Qr } from "@prisma/client";
 import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
@@ -33,6 +33,10 @@ export const NewAssetFormSchema = z.object({
   currentLocationId: z.string().optional(),
   qrId: z.string().optional(),
   tags: z.string().optional(),
+  valuation: z
+    .string()
+    .optional()
+    .transform((val) => (val ? +val : null)),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -41,15 +45,19 @@ interface Props {
   category?: Asset["categoryId"];
   location?: Asset["locationId"];
   description?: Asset["description"];
+  valuation?: Asset["valuation"];
   qrId?: Qr["id"] | null;
   tags?: Tag[];
+  currency: Organization["currency"];
 }
 
 export const AssetForm = ({
   title,
   category,
   description,
+  valuation,
   qrId,
+  currency,
   tags,
 }: Props) => {
   const navigation = useNavigation();
@@ -168,10 +176,43 @@ export const AssetForm = ({
             </Link>
           </p>
         }
-        className="pt-[10px]"
+        className="border-b-0 py-[10px]"
         required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
       >
         <LocationSelect />
+      </FormRow>
+
+      <FormRow
+        rowLabel={"Value"}
+        subHeading={
+          <p>
+            Specify the value of assets to get an idea of the total value of
+            your inventory.
+          </p>
+        }
+        className="border-b-0 py-[10px]"
+        required={zodFieldIsRequired(FormSchema.shape.valuation)}
+      >
+        <div className="relative w-full">
+          <Input
+            type="number"
+            label="value"
+            inputClassName="pl-[70px]"
+            hideLabel
+            name={zo.fields.valuation()}
+            disabled={disabled}
+            error={zo.errors.valuation()?.message}
+            autoFocus
+            step="any"
+            min={0}
+            className="w-full"
+            defaultValue={valuation || ""}
+            required={zodFieldIsRequired(FormSchema.shape.valuation)}
+          />
+          <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
+            {currency}
+          </span>
+        </div>
       </FormRow>
 
       <div>

@@ -166,5 +166,6 @@ export const getOrganizationByUserId = async ({
       id: true,
       name: true,
       type: true,
+      currency: true,
     },
   });

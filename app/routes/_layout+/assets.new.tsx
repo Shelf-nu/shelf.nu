@@ -1,7 +1,7 @@
 import { OrganizationType } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useSearchParams } from "@remix-run/react";
+import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { titleAtom } from "~/atoms/assets.new";
@@ -49,7 +49,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     title,
   };
 
-  return json({ header, categories, tags, locations, customFields });
+  return json({
+    header,
+    categories,
+    tags,
+    locations,
+    currency: organization.currency,
+    customFields,
+  });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -105,7 +112,8 @@ export async function action({ request }: LoaderFunctionArgs) {
     );
   }
 
-  const { title, description, category, qrId, newLocationId } = result.data;
+  const { title, description, category, qrId, newLocationId, valuation } =
+    result.data;
 
   const customFieldsValues = extractCustomFieldValuesFromResults({
     result,
@@ -123,6 +131,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     locationId: newLocationId,
     qrId,
     tags,
+    valuation: valuation,
     customFieldsValues,
   });
 
@@ -160,12 +169,13 @@ export default function NewAssetPage() {
   const title = useAtomValue(titleAtom);
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
+  const { currency } = useLoaderData<typeof loader>();
 
   return (
     <>
       <Header title={title} />
       <div>
-        <AssetForm qrId={qrId} />
+        <AssetForm qrId={qrId} currency={currency} />
       </div>
     </>
   );

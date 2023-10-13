@@ -70,6 +70,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     categories,
     tags,
     locations,
+    currency: organization.currency,
     customFields,
   });
 }
@@ -167,7 +168,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 export default function AssetEditPage() {
   const title = useAtomValue(titleAtom);
   const hasTitle = title !== "Untitled asset";
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, currency } = useLoaderData<typeof loader>();
   const tags = useMemo(
     () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],
     [asset.tags]
@@ -182,7 +183,9 @@ export default function AssetEditPage() {
           category={asset.categoryId}
           location={asset.locationId}
           description={asset.description}
+          valuation={asset.valuation}
           tags={tags}
+          currency={currency}
         />
       </div>
     </>
