@@ -11,39 +11,49 @@ import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { getAuthUserByAccessToken } from "~/modules/auth/service.server";
 import { getUserByID, updateUser } from "~/modules/user";
 import type { UpdateUserPayload } from "~/modules/user/types";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-const OnboardingFormSchema = z
-  .object({
-    username: z
-      .string()
-      .min(4, { message: "Must be at least 4 characters long" }),
-    firstName: z.string().min(1, { message: "First name is required" }),
-    lastName: z.string().min(1, { message: "Last name is required" }),
-    password: z.string().min(8, "Password is too short. Minimum 8 characters."),
-    confirmPassword: z
-      .string()
-      .min(8, "Password is too short. Minimum 8 characters."),
-  })
-  .superRefine(
-    ({ password, confirmPassword, username, firstName, lastName }, ctx) => {
-      if (password !== confirmPassword) {
-        return ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Password and confirm password must match",
-          path: ["confirmPassword"],
-        });
+function createOnboardingSchema(userSignedUpWithPassword: boolean) {
+  return z
+    .object({
+      username: z
+        .string()
+        .min(4, { message: "Must be at least 4 characters long" }),
+      firstName: z.string().min(1, { message: "First name is required" }),
+      lastName: z.string().min(1, { message: "Last name is required" }),
+      password: userSignedUpWithPassword
+        ? z.string().optional()
+        : z.string().min(8, "Password is too short. Minimum 8 characters."),
+      confirmPassword: userSignedUpWithPassword
+        ? z.string().optional()
+        : z.string().min(8, "Password is too short. Minimum 8 characters."),
+    })
+    .superRefine(
+      ({ password, confirmPassword, username, firstName, lastName }, ctx) => {
+        if (password !== confirmPassword) {
+          return ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Password and confirm password must match",
+            path: ["confirmPassword"],
+          });
+        }
+        return { password, confirmPassword, username, firstName, lastName };
       }
-
-      return { password, confirmPassword, username, firstName, lastName };
-    }
-  );
+    );
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
+
+  const authUser = await getAuthUserByAccessToken(authSession.accessToken);
+
+  const userSignedUpWithPassword =
+    authUser?.user_metadata?.signup_method === "email-password";
+  const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
 
   const user = await getUserByID(authSession?.userId);
 
@@ -51,7 +61,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const title = "Set up your account";
   const subHeading =
     "You are almost ready to use Shelf. We just need some basic information to get you started.";
-  return json({ title, subHeading, user });
+  return json({
+    title,
+    subHeading,
+    user,
+    userSignedUpWithPassword,
+    OnboardingFormSchema,
+  });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -60,8 +76,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
+
   const authSession = await requireAuthSession(request);
   const formData = await request.formData();
+
+  const userSignedUpWithPassword =
+    formData.get("userSignedUpWithPassword") === "true";
+  const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
+
   const result = await OnboardingFormSchema.safeParseAsync(
     parseFormAny(formData)
   );
@@ -97,12 +119,21 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Onboarding() {
+  const { user, userSignedUpWithPassword } = useLoaderData<typeof loader>();
+
+  const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
+
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
-  const { user } = useLoaderData<typeof loader>();
 
   return (
     <div>
       <Form className="flex flex-col gap-5" method="post" ref={zo.ref}>
+        <input
+          type="hidden"
+          name="userSignedUpWithPassword"
+          value={String(userSignedUpWithPassword)}
+        />
+
         <div className="flex gap-6">
           <Input
             label="First name"
@@ -133,27 +164,30 @@ export default function Onboarding() {
             inputClassName="flex-1"
           />
         </div>
+        {!userSignedUpWithPassword && (
+          <>
+            <PasswordInput
+              label="Password"
+              placeholder="********"
+              data-test-id="password"
+              name={zo.fields.password()}
+              type="password"
+              autoComplete="new-password"
+              inputClassName="w-full"
+              error={zo.errors.password()?.message}
+            />
 
-        <PasswordInput
-          label="Password"
-          placeholder="********"
-          data-test-id="password"
-          name={zo.fields.password()}
-          type="password"
-          autoComplete="new-password"
-          inputClassName="w-full"
-          error={zo.errors.password()?.message}
-        />
-
-        <PasswordInput
-          label="Confirm password"
-          data-test-id="confirmPassword"
-          placeholder="********"
-          name={zo.fields.confirmPassword()}
-          type="password"
-          autoComplete="new-password"
-          error={zo.errors.confirmPassword()?.message}
-        />
+            <PasswordInput
+              label="Confirm password"
+              data-test-id="confirmPassword"
+              placeholder="********"
+              name={zo.fields.confirmPassword()}
+              type="password"
+              autoComplete="new-password"
+              error={zo.errors.confirmPassword()?.message}
+            />
+          </>
+        )}
         <div>
           <Button data-test-id="onboard" type="submit" width="full">
             Submit

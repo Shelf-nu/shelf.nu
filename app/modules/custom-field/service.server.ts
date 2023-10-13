@@ -4,8 +4,8 @@ import {
   type Prisma,
   type User,
 } from "@prisma/client";
-import { badRequest } from "remix-utils";
 import { db } from "~/database";
+import { badRequest } from "~/utils";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset";
@@ -174,7 +174,7 @@ export async function upsertCustomField(
 
   return customFields;
 }
-//returns {name:customField}
+
 export async function createCustomFieldsIfNotExists({
   data,
   userId,
@@ -189,7 +189,7 @@ export async function createCustomFieldsIfNotExists({
   //{CF header: definition to create}
   const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {};
   for (let item of data) {
-    Object.keys(item).map((k) => {
+    for (let k of Object.keys(item)) {
       if (k.startsWith("cf:")) {
         const def = getDefinitionFromCsvHeader(k);
         if (!fieldToDefDraftMap[k]) {
@@ -199,7 +199,7 @@ export async function createCustomFieldsIfNotExists({
           optionMap[k] = (optionMap[k] || []).concat([item[k]]);
         }
       }
-    });
+    }
   }
 
   for (const [customFieldDefStr, def] of Object.entries(fieldToDefDraftMap)) {
