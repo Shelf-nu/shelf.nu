@@ -29,7 +29,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     code.make();
     const svg = code.createSvgTag({ cellSize: 3, margin: 0, scalable: true });
 
-    zip.file(`${index + 1} - ${c.id}.svg`, svg);
+    const dateString = `${c.createdAt.getFullYear().toString()}${(
+      c.createdAt.getMonth() + 1
+    )
+      .toString()
+      .padStart(2, "0")}${c.createdAt.getDate().toString().padStart(2, "0")}`;
+
+    zip.file(`${dateString} - ${c.id}.svg`, svg);
   });
 
   const zipBlob = await zip.generateAsync({ type: "blob" });
