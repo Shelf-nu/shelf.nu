@@ -197,7 +197,7 @@ export const AssetForm = ({
           <Input
             type="number"
             label="value"
-            inputClassName="pl-[70px]"
+            inputClassName="pl-[70px] valuation-input"
             hideLabel
             name={zo.fields.valuation()}
             disabled={disabled}

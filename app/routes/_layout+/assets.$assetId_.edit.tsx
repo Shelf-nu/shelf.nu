@@ -133,8 +133,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
     userId: authSession.userId,
   });
 
-  const { title, description, category, newLocationId, currentLocationId } =
-    result.data;
+  const {
+    title,
+    description,
+    category,
+    newLocationId,
+    currentLocationId,
+    valuation,
+  } = result.data;
 
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
@@ -149,6 +155,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     currentLocationId,
     userId: authSession.userId,
     customFieldsValues,
+    valuation,
   });
 
   sendNotification({

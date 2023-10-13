@@ -323,6 +323,7 @@ interface UpdateAssetPayload {
   currentLocationId?: Asset["locationId"];
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
+  valuation?: Asset["valuation"];
   tags?: { set: { id: string }[] };
   userId?: User["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
@@ -340,6 +341,7 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     newLocationId,
     currentLocationId,
     userId,
+    valuation,
     customFieldsValues: customFieldsValuesFromForm,
   } = payload;
   const isChangingLocation =
@@ -348,6 +350,7 @@ export async function updateAsset(payload: UpdateAssetPayload) {
   const data = {
     title,
     description,
+    valuation,
     mainImage,
     mainImageExpiration,
   };
