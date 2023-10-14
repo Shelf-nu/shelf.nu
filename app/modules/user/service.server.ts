@@ -1,5 +1,5 @@
 import { Prisma, Roles } from "@prisma/client";
-import type { User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import sharp from "sharp";
@@ -40,6 +40,27 @@ export async function getUserByIDWithOrg(id: User["id"]) {
   return db.user.findUnique({
     where: { id },
     include: { organizations: true },
+  });
+}
+
+export async function createUserOrAttachOrg({
+  email,
+  organizationId,
+}: Pick<User, "email"> & { organizationId: Organization["id"] }) {
+  const organizations = {
+    connect: {
+      id: organizationId,
+    },
+  };
+  return db.user.upsert({
+    where: { email },
+    update: {
+      organizations,
+    },
+    create: {
+      email,
+      organizations,
+    },
   });
 }
 

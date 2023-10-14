@@ -1,1 +1,2 @@
 export const MAX_DUPLICATES_ALLOWED = 10;
+export const INVITE_EXPIRY_TTL_DAYS = 5;

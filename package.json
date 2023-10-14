@@ -64,6 +64,7 @@
     "intl-parse-accept-language": "^1.0.0",
     "isbot": "^3.6.12",
     "jotai": "^2.2.1",
+    "jsonwebtoken": "^9.0.2",
     "jszip": "^3.10.1",
     "mapbox-gl": "^2.15.0",
     "maplibre-gl": "^3.1.0",
@@ -88,6 +89,7 @@
     "zod": "^3.21.4"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.3",
     "@faker-js/faker": "^7.6.0",
     "@playwright/test": "^1.34.3",
     "@remix-run/dev": "^2.0.1",
