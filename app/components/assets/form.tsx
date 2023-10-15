@@ -7,19 +7,17 @@ import { z } from "zod";
 import { updateTitleAtom } from "~/atoms/assets.new";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing, tw } from "~/utils";
 
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
-
-import { CategorySelect } from "../category/category-select";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
-import { LocationSelect } from "../location/location-select";
 import { Button } from "../shared";
+import { Image } from "../shared/image";
 import { Spinner } from "../shared/spinner";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
 
@@ -145,11 +143,21 @@ export const AssetForm = ({
           label="Categories"
           initialDataKey="categories"
           countKey="totalCategories"
+          extraContent={
+            <Button
+              to="/categories/new"
+              variant="link"
+              icon="plus"
+              className="w-full justify-start pt-4"
+            >
+              Create new category
+            </Button>
+          }
         />
       </FormRow>
 
       <FormRow
-        rowLabel={"Tags"}
+        rowLabel="Tags"
         subHeading={
           <p>
             Tags can help you organise your database. They can be combined.{" "}
@@ -165,7 +173,7 @@ export const AssetForm = ({
       </FormRow>
 
       <FormRow
-        rowLabel={"Location"}
+        rowLabel="Location"
         subHeading={
           <p>
             A location is a place where an item is supposed to be located. This
@@ -178,7 +186,36 @@ export const AssetForm = ({
         className="pt-[10px]"
         required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
       >
-        <LocationSelect />
+        <DynamicSelect
+          defaultValue={category || undefined}
+          model={{ name: "location", key: "name" }}
+          label="Locations"
+          initialDataKey="locations"
+          countKey="totalLocations"
+          extraContent={
+            <Button
+              to="/locations/new"
+              variant="link"
+              icon="plus"
+              className="w-full justify-start pt-4"
+            >
+              Create new location
+            </Button>
+          }
+          renderItem={({ name, metadata }) => (
+            <div className="flex items-center gap-2">
+              <Image
+                imageId={metadata.imageId}
+                alt="img"
+                className={tw(
+                  "h-6 w-6 rounded-[2px] object-cover",
+                  metadata.description ? "rounded-b-none border-b-0" : ""
+                )}
+              />
+              <div>{name}</div>
+            </div>
+          )}
+        />
       </FormRow>
 
       <div>

@@ -1,5 +1,5 @@
 import { cloneElement } from "react";
-import type { ModelFilterItems, ModelFilterProps } from "~/hooks";
+import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
 import { useModelFilters } from "~/hooks";
 import { tw } from "~/utils";
 import Input from "../forms/input";
@@ -21,7 +21,7 @@ type Props = ModelFilterProps & {
   searchIcon?: Icon;
   showSearch?: boolean;
   renderItem?: (options: {
-    item: ModelFilterItems;
+    item: ModelFilterItem;
     checked: boolean;
   }) => React.ReactNode;
 };

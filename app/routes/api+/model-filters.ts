@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 
-export type AllowedModelNames = "asset" | "tag" | "category";
+export type AllowedModelNames = "asset" | "tag" | "category" | "location";
 
 const ModelFiltersSchema = z.object({
   /** Models that are allowed to filter */
@@ -54,6 +54,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       id: item.id,
       name: item[result.data.queryKey],
       color: item?.color,
+      metadata: item,
     }))
   );
 }

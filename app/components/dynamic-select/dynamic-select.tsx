@@ -1,6 +1,6 @@
 import React from "react";
-import { Separator } from "@radix-ui/react-select";
-import { useModelFilters, type ModelFilterProps } from "~/hooks";
+import { useModelFilters } from "~/hooks";
+import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
 import { tw } from "~/utils";
 import {
   Select,
@@ -21,6 +21,7 @@ type Props = ModelFilterProps & {
   searchIcon?: Icon;
   showSearch?: boolean;
   defaultValue?: string;
+  renderItem?: (item: ModelFilterItem) => React.ReactNode;
   extraContent?: React.ReactNode;
 };
 
@@ -34,6 +35,7 @@ export default function DynamicSelect({
   model,
   countKey,
   initialDataKey,
+  renderItem,
   extraContent,
 }: Props) {
   const {
@@ -112,9 +114,15 @@ export default function DynamicSelect({
               <SelectItem
                 value={item.id}
                 key={item.id}
-                className="flex cursor-pointer select-none items-center justify-between rounded-none px-6 py-4 text-sm font-medium outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100"
+                className="cursor-pointer select-none px-6 py-4 outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100"
               >
-                {item.name}
+                {typeof renderItem === "function" ? (
+                  renderItem({ ...item, metadata: item })
+                ) : (
+                  <div className="flex items-center text-sm font-medium">
+                    {item.name}
+                  </div>
+                )}
               </SelectItem>
             ))}
           </div>
@@ -125,8 +133,9 @@ export default function DynamicSelect({
             </div>
           </When>
 
-          <Separator />
-          {extraContent}
+          {typeof extraContent !== "undefined" ? (
+            <div className="border-t px-3 pb-3">{extraContent}</div>
+          ) : null}
         </SelectContent>
       </Select>
     </div>

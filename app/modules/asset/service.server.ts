@@ -651,6 +651,7 @@ export async function getAllRelatedEntries({
   tags: Tag[];
   totalTags: number;
   locations: Location[];
+  totalLocations: number;
   customFields: CustomField[];
 }> {
   const [
@@ -659,6 +660,7 @@ export async function getAllRelatedEntries({
     tags,
     totalTags,
     locations,
+    totalLocations,
     customFields,
   ] = await db.$transaction([
     /** Get the categories */
@@ -671,6 +673,7 @@ export async function getAllRelatedEntries({
 
     /** Get the locations */
     db.location.findMany({ where: { userId }, take: 4 }),
+    db.location.count({ where: { userId } }),
 
     /** Get the custom fields */
     db.customField.findMany({
@@ -684,6 +687,7 @@ export async function getAllRelatedEntries({
     tags,
     totalTags,
     locations,
+    totalLocations,
     customFields,
   };
 }

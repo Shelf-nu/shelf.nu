@@ -4,11 +4,11 @@ import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { resetFetcher } from "~/utils/fetcher";
 
-export type ModelFilterItems = {
+export type ModelFilterItem = {
   id: string;
   name: string;
   color?: string;
-  metadata?: Record<string, any>;
+  metadata: Record<string, any>;
 };
 
 export type ModelFilterProps = {
@@ -34,14 +34,14 @@ export function useModelFilters({
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedItems = searchParams.getAll(model.name);
   const totalItems = initialData[countKey];
-  const fetcher = useFetcher<Array<ModelFilterItems>>();
+  const fetcher = useFetcher<Array<ModelFilterItem>>();
 
   const items = useMemo(() => {
     if (fetcher.data) {
       return fetcher.data;
     }
 
-    return (initialData[initialDataKey] ?? []) as Array<ModelFilterItems>;
+    return (initialData[initialDataKey] ?? []) as Array<ModelFilterItem>;
   }, [fetcher.data, initialData, initialDataKey]);
 
   const handleSelectItemChange = useCallback(

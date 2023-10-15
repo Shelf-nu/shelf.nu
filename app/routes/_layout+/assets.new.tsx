@@ -45,6 +45,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     tags,
     totalTags,
     locations,
+    totalLocations,
     customFields,
   } = await getAllRelatedEntries({
     userId,
@@ -62,6 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     tags,
     totalTags,
     locations,
+    totalLocations,
     customFields,
   });
 }
