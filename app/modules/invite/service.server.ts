@@ -1,4 +1,4 @@
-import type { Invite, Roles } from "@prisma/client";
+import type { Invite, Roles, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import { db } from "~/database";
@@ -34,18 +34,28 @@ export async function createInvite({
   inviteeEmail,
   inviterId,
   roles,
-}: Pick<Invite, "inviterId" | "inviteeEmail" | "organizationId" | "roles">) {
-  const activeInvite = await getExisitingActiveInvite({
-    organizationId,
-    inviteeEmail,
+  teamMemberName,
+}: Pick<Invite, "inviterId" | "inviteeEmail" | "organizationId" | "roles"> & {
+  teamMemberName: TeamMember["name"];
+}) {
+  const previousInvite = await db.invite.findFirst({
+    where: {
+      organizationId,
+      inviteeEmail,
+    },
   });
-  if (activeInvite) {
-    throw new ShelfStackError({
-      message: `user ${inviteeEmail} has already been invited to the current organization`,
-      status: 400,
-      title: `Invalid invite attempt`,
+  let teamMemberId: Invite["teamMemberId"];
+  if (previousInvite?.teamMemberId) {
+    //we already invited this user before, so dont create 1 more team member
+    teamMemberId = previousInvite.teamMemberId;
+  } else {
+    const member = await createTeamMember({
+      name: teamMemberName,
+      organizationId,
     });
+    teamMemberId = member.id;
   }
+
   const inviter = {
     connect: {
       id: inviterId,
@@ -57,9 +67,16 @@ export async function createInvite({
     },
   };
 
+  const inviteeTeamMember = {
+    connect: {
+      id: teamMemberId,
+    },
+  };
+
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
   const data = {
+    inviteeTeamMember,
     organization,
     inviter,
     inviteeEmail,
@@ -96,7 +113,7 @@ export async function updateInviteStatus({
     where: {
       id,
       status: InviteStatuses.PENDING,
-      expiresAt: { lte: new Date() },
+      expiresAt: { gt: new Date() },
     },
   });
   if (!invite) {
@@ -106,40 +123,31 @@ export async function updateInviteStatus({
       status: 404,
     });
   }
+  const data = { status };
   if (status === "ACCEPTED") {
-    const data = { status };
-    if (invite.roles.find((r) => r === "TEAM_MEMBER")) {
-      const teamMember = await createTeamMember({
-        name: invite.inviteeEmail,
-        organizationId: invite.organizationId,
-      });
-      Object.assign(data, {
-        inviteeTeamMember: {
-          connect: {
-            id: teamMember.id,
-          },
+    const user = await createUserOrAttachOrg({
+      email: invite.inviteeEmail,
+      organizationId: invite.organizationId,
+      roles: invite.roles,
+    });
+    Object.assign(data, {
+      inviteeUser: {
+        connect: {
+          id: user.id,
         },
-      });
-    } else {
-      const user = await createUserOrAttachOrg({
-        email: invite.inviteeEmail,
-        organizationId: invite.organizationId,
-      });
-      Object.assign(data, {
-        inviteeUser: {
-          connect: {
-            id: user.id,
-          },
-        },
-      });
-    }
-    await db.invite.update({ where: { id }, data });
-  } else {
-    await db.invite.update({
-      where: { id },
-      data: {
-        status,
       },
     });
   }
+  const updatedInvite = await db.invite.update({ where: { id }, data });
+  //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we reject all of them if user rejects 1
+  //because user doesnt or want to join that org, so we should update all pending invite to show the same
+  await db.invite.updateMany({
+    where: {
+      status: InviteStatuses.PENDING,
+      inviteeEmail: invite.inviteeEmail,
+      organizationId: invite.organizationId,
+    },
+    data: { status: InviteStatuses.INVALIDATED },
+  });
+  return updatedInvite;
 }

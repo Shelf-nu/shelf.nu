@@ -154,7 +154,9 @@ export default function WorkspacePage() {
                   <tbody>
                     {items.map((item) => (
                       <ListItem item={item} key={item.id}>
-                        <TeamMemberRow item={item} />
+                        <TeamMemberRow
+                          item={item as unknown as TeamMemberWithCustodies}
+                        />
                       </ListItem>
                     ))}
                   </tbody>
