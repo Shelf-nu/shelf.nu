@@ -1,15 +1,12 @@
 import type { OrganizationType } from "@prisma/client";
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
+import { Badge } from "~/components/shared";
 import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
 import { Table, Td, Th } from "~/components/table";
 import { db } from "~/database";
@@ -66,20 +63,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     modelName,
     title: "Workspace",
   });
-};
-
-export const action = async ({ request }: ActionFunctionArgs) => {
-  await requireAuthSession(request);
-
-  const formData = await request.formData();
-  const teamMemberId = formData.get("teamMemberId") as string;
-
-  await db.teamMember.delete({
-    where: {
-      id: teamMemberId,
-    },
-  });
-  return redirect(`/settings/workspace`);
 };
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -139,6 +122,7 @@ export default function WorkspacePage() {
                 >
                   <OrganizationRow
                     item={{
+                      id: org.id,
                       name:
                         org.type === "PERSONAL"
                           ? `${user?.firstName}'s workspace`
@@ -167,6 +151,7 @@ const OrganizationRow = ({
   item,
 }: {
   item: {
+    id: string;
     name: string;
     image: string;
     type: OrganizationType;
@@ -175,27 +160,39 @@ const OrganizationRow = ({
       members: number | null;
     };
   };
-}) => (
-  <>
-    <Td className="w-full p-0 md:p-0">
-      <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center">
-            <img
-              src={item.image || "/images/default_pfp.jpg"}
-              alt={`${item.name}`}
-              className="h-12 w-12 rounded-[4px] object-cover"
-            />
-          </div>
-          <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-            <div className="font-medium">{item.name}</div>
+}) => {
+  const { currentOrganizationId } = useLoaderData<typeof loader>();
+  return (
+    <>
+      <Td className="w-full p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center">
+              <img
+                src={item.image || "/images/default_pfp.jpg"}
+                alt={`${item.name}`}
+                className="h-12 w-12 rounded-[4px] object-cover"
+              />
+            </div>
+            <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
+              <div className="font-medium">
+                {item.name}
+                {currentOrganizationId === item?.id ? (
+                  <span className="ml-2">
+                    <Badge color={"#0dec5d"} withDot={false}>
+                      current
+                    </Badge>
+                  </span>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </Td>
-    <Td>{item.type}</Td>
-    <Td>{item._count?.assets || 0}</Td>
-    <Td>""</Td>
-    <Td>{item._count?.members || 0}</Td>
-  </>
-);
+      </Td>
+      <Td>{item.type}</Td>
+      <Td>{item._count?.assets || 0}</Td>
+      <Td>""</Td>
+      <Td>{item._count?.members || 0}</Td>
+    </>
+  );
+};

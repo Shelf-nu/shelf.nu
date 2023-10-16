@@ -60,7 +60,7 @@ export const OrganizationSelect = () => {
             ))}
             <SelectSeparator className="mx-0" />
             <Button
-              to="/settings"
+              to="/settings/workspace"
               icon="settings"
               variant="link"
               className=" w-full select-none justify-start rounded-lg p-2 text-left font-medium text-gray-900 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-50 hover:text-gray-800 "

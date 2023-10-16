@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { TeamMember } from "@prisma/client";
-import { Form } from "@remix-run/react";
+import { Form, useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -14,7 +14,8 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 
-import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.workspace.$orgId";
+import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.team";
+import { isFormProcessing, tw } from "~/utils";
 import { XIcon } from "../icons";
 
 export const DeleteMember = ({
@@ -52,36 +53,45 @@ export const DeleteMember = ({
   );
 };
 
-const DeleteMemberContent = ({ id }: { id: TeamMember["id"] }) => (
-  <AlertDialogContent className="relative">
-    <AlertDialogHeader className="mb-8">
-      <AlertDialogTitle>Delete team member</AlertDialogTitle>
-      <AlertDialogDescription>
-        After deleting a team member you will no longer be able to give them
-        custody over an asset.
-      </AlertDialogDescription>
-      <AlertDialogCancel
-        asChild
-        className="absolute right-5 top-5 cursor-pointer"
-      >
-        <XIcon />
-      </AlertDialogCancel>
-    </AlertDialogHeader>
-    <AlertDialogFooter>
-      <Form method="post" className="w-full">
-        <input type="hidden" name="teamMemberId" value={id} />
-        <Button
-          className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
-          type="submit"
-          width="full"
-          data-test-id="confirmdeleteAssetButton"
+const DeleteMemberContent = ({ id }: { id: TeamMember["id"] }) => {
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
+
+  return (
+    <AlertDialogContent className="relative">
+      <AlertDialogHeader className="mb-8">
+        <AlertDialogTitle>Delete team member</AlertDialogTitle>
+        <AlertDialogDescription>
+          After deleting a team member you will no longer be able to give them
+          custody over an asset.
+        </AlertDialogDescription>
+        <AlertDialogCancel
+          asChild
+          className="absolute right-5 top-5 cursor-pointer"
         >
-          Delete team member
-        </Button>
-      </Form>
-    </AlertDialogFooter>
-  </AlertDialogContent>
-);
+          <XIcon />
+        </AlertDialogCancel>
+      </AlertDialogHeader>
+      <AlertDialogFooter>
+        <Form method="post" className="w-full">
+          <input type="hidden" name="teamMemberId" value={id} />
+          <Button
+            className={tw(
+              "border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800",
+              disabled ? "pointer-events-none opacity-50" : ""
+            )}
+            type="submit"
+            width="full"
+            data-test-id="confirmdeleteAssetButton"
+            disabled={disabled}
+          >
+            Delete team member
+          </Button>
+        </Form>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  );
+};
 
 const UnableToDeleteMemberContent = ({
   custodiesCount,

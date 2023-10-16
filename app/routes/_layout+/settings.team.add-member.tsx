@@ -1,12 +1,13 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData } from "@remix-run/react";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/custom-modal.css";
+import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -17,17 +18,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { userId } = await requireAuthSession(request);
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { userId, organizationId } = await requireAuthSession(request);
   const formData = await request.formData();
-  const orgId = params.orgId as string;
 
   const teamMember = await db.teamMember.create({
     data: {
       name: formData.get("name") as string,
       organizations: {
         connect: {
-          id: orgId,
+          id: organizationId,
         },
       },
     },
@@ -43,7 +43,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     senderId: userId,
   });
 
-  return redirect(`/settings/workspace`);
+  return redirect(`/settings/team`);
 };
 
 export function links() {
@@ -52,6 +52,8 @@ export function links() {
 
 export default function AddMember() {
   const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
   return (
     <>
       <div className="modal-content-wrapper">
@@ -75,7 +77,12 @@ export default function AddMember() {
             required
             autoFocus
           />
-          <Button variant="primary" width="full" type="submit">
+          <Button
+            variant="primary"
+            width="full"
+            type="submit"
+            disabled={disabled}
+          >
             Add team member
           </Button>
         </Form>

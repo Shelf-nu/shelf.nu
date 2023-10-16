@@ -5,7 +5,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
-import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.workspace.$orgId";
+import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.team";
 import { DeleteMember } from "./delete-member";
 
 export function ActionsDropdown({
