@@ -1,4 +1,4 @@
-import type { Invite, Roles } from "@prisma/client";
+import type { Invite } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import { db } from "~/database";

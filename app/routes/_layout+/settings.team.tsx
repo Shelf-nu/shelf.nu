@@ -65,7 +65,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     search,
     prev,
     next,
-    items: teamMembers,
+    items: teamMembers as TeamMemberWithCustodies[],
     totalPages,
     totalItems: totalTeamMembers,
     cookie,
@@ -154,7 +154,19 @@ export default function WorkspacePage() {
                   <tbody>
                     {items.map((item) => (
                       <ListItem item={item} key={item.id}>
-                        <TeamMemberRow item={item} />
+                        <>
+                          <Td className="w-full">
+                            <div className="flex items-center justify-between">
+                              <span className="text-text-sm font-medium text-gray-900">
+                                {item.name}
+                              </span>
+                            </div>
+                          </Td>
+                          <Td className="text-right">
+                            {/* @ts-ignore */}
+                            <ActionsDropdown teamMember={item} />
+                          </Td>
+                        </>
                       </ListItem>
                     ))}
                   </tbody>
@@ -171,21 +183,4 @@ export default function WorkspacePage() {
 
 export interface TeamMemberWithCustodies extends TeamMember {
   custodies: Custody[];
-}
-
-function TeamMemberRow({ item }: { item: TeamMemberWithCustodies }) {
-  return (
-    <>
-      <Td className="w-full">
-        <div className="flex items-center justify-between">
-          <span className="text-text-sm font-medium text-gray-900">
-            {item.name}
-          </span>
-        </div>
-      </Td>
-      <Td className="text-right">
-        <ActionsDropdown teamMember={item} />
-      </Td>
-    </>
-  );
 }
