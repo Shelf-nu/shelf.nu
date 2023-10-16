@@ -1,4 +1,4 @@
-import type { Asset, Organization, Qr } from "@prisma/client";
+import type { Asset, Qr } from "@prisma/client";
 import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
@@ -48,7 +48,6 @@ interface Props {
   valuation?: Asset["valuation"];
   qrId?: Qr["id"] | null;
   tags?: Tag[];
-  currency: Organization["currency"];
 }
 
 export const AssetForm = ({
@@ -57,7 +56,6 @@ export const AssetForm = ({
   description,
   valuation,
   qrId,
-  currency,
   tags,
 }: Props) => {
   const navigation = useNavigation();
@@ -86,6 +84,8 @@ export const AssetForm = ({
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   const [, updateTitle] = useAtom(updateTitleAtom);
+
+  const { currency } = useLoaderData<typeof loader>();
 
   return (
     <Form
@@ -202,7 +202,6 @@ export const AssetForm = ({
             name={zo.fields.valuation()}
             disabled={disabled}
             error={zo.errors.valuation()?.message}
-            autoFocus
             step="any"
             min={0}
             className="w-full"

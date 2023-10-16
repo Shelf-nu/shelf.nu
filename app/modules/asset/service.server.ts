@@ -63,6 +63,11 @@ export async function getAsset({
           custodian: true,
         },
       },
+      organization: {
+        select: {
+          currency: true,
+        },
+      },
       customFields: {
         where: {
           customField: {

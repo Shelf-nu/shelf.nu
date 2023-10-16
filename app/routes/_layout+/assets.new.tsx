@@ -1,7 +1,7 @@
 import { OrganizationType } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { titleAtom } from "~/atoms/assets.new";
@@ -169,13 +169,12 @@ export default function NewAssetPage() {
   const title = useAtomValue(titleAtom);
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
-  const { currency } = useLoaderData<typeof loader>();
 
   return (
     <>
       <Header title={title} />
       <div>
-        <AssetForm qrId={qrId} currency={currency} />
+        <AssetForm qrId={qrId} />
       </div>
     </>
   );
