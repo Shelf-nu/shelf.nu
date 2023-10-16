@@ -9,6 +9,25 @@ import {
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
+export async function createTeamMember({
+  name,
+  organizationId,
+}: {
+  name: TeamMember["name"];
+  organizationId: Organization["id"];
+}) {
+  return db.teamMember.create({
+    data: {
+      name,
+      organizations: {
+        connect: {
+          id: organizationId,
+        },
+      },
+    },
+  });
+}
+
 export async function createTeamMemberIfNotExists({
   data,
   organizationId,
@@ -38,15 +57,9 @@ export async function createTeamMemberIfNotExists({
 
     if (!existingTeamMember) {
       // if the teamMember doesn't exist, we create a new one
-      const newTeamMember = await db.teamMember.create({
-        data: {
-          name: teamMember as string,
-          organizations: {
-            connect: {
-              id: organizationId,
-            },
-          },
-        },
+      const newTeamMember = await createTeamMember({
+        name: teamMember as string,
+        organizationId,
       });
       teamMembers.set(teamMember, newTeamMember.id);
     } else {
