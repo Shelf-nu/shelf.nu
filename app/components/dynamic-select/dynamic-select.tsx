@@ -55,7 +55,7 @@ export default function DynamicSelect({
 
   return (
     <div className="relative w-full">
-      <Select name="category" defaultValue={defaultValue}>
+      <Select name={model.name} defaultValue={defaultValue}>
         <SelectTrigger>
           <SelectValue placeholder={`Select ${model.name}`} />
         </SelectTrigger>
