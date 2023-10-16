@@ -692,6 +692,48 @@ export async function getAllRelatedEntries({
   };
 }
 
+export async function getAllEntriesForCreateAndEdit({
+  userId,
+  organizationId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  const [
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  ] = await db.$transaction([
+    /** Get the categories */
+    db.category.findMany({ where: { userId }, take: 4 }),
+    db.category.count({ where: { userId } }),
+
+    /** Get the tags */
+    db.tag.findMany({ where: { userId } }),
+
+    /** Get the locations */
+    db.location.findMany({ where: { userId }, take: 4 }),
+    db.location.count({ where: { userId } }),
+
+    /** Get the custom fields */
+    db.customField.findMany({
+      where: { organizationId, active: { equals: true } },
+    }),
+  ]);
+
+  return {
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  };
+}
+
 export const getPaginatedAndFilterableAssets = async ({
   request,
   userId,

@@ -16,7 +16,7 @@ import { ErrorBoundryComponent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
-  getAllRelatedEntries,
+  getAllEntriesForCreateAndEdit,
   getAsset,
   updateAsset,
   updateAssetMainImage,
@@ -46,11 +46,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Error("Organization not found");
   }
 
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
-      organizationId: organization.id,
-    });
+  const {
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  } = await getAllEntriesForCreateAndEdit({
+    userId,
+    organizationId: organization.id,
+  });
 
   const id = getRequiredParam(params, "assetId");
 
@@ -68,8 +74,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     asset,
     header,
     categories,
+    totalCategories,
     tags,
+    totalTags: tags.length,
     locations,
+    totalLocations,
     customFields,
   });
 }

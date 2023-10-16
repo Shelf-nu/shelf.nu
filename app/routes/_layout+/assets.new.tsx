@@ -12,7 +12,7 @@ import Header from "~/components/layout/header";
 import {
   createAsset,
   createNote,
-  getAllRelatedEntries,
+  getAllEntriesForCreateAndEdit,
   updateAssetMainImage,
 } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
@@ -43,11 +43,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     categories,
     totalCategories,
     tags,
-    totalTags,
     locations,
     totalLocations,
     customFields,
-  } = await getAllRelatedEntries({
+  } = await getAllEntriesForCreateAndEdit({
     userId,
     organizationId: organization.id,
   });
@@ -61,7 +60,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     categories,
     totalCategories,
     tags,
-    totalTags,
+    totalTags: tags.length,
     locations,
     totalLocations,
     customFields,
