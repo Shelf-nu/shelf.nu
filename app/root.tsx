@@ -28,6 +28,7 @@ import styles from "./tailwind.css";
 import { ClientHintCheck, getHints } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
 import { useNonce } from "./utils/nonce-provider";
+import { splashScreenLinks } from "./utils/splash-screen-links";
 export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
@@ -45,6 +46,8 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: styles },
   { rel: "stylesheet", href: fontsStylesheetUrl },
   { rel: "stylesheet", href: globalStylesheetUrl },
+  { rel: "manifest", href: "/manifest.json" },
+  ...splashScreenLinks
 ];
 
 export const meta: MetaFunction = () => [
