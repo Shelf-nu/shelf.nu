@@ -80,7 +80,7 @@ export default function NewCategory() {
   const zo = useZorm("NewQuestionWizardScreen", NewCategoryFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-  const { colorFromServer } = useLoaderData();
+  const { colorFromServer } = useLoaderData<typeof loader>();
 
   return (
     <>
