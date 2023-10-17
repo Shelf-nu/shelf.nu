@@ -31,7 +31,7 @@ import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
-import { isPersonalOrg } from "~/utils/organization.servers";
+import { isPersonalOrg } from "~/utils/organization";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {

@@ -9,7 +9,7 @@ import type { WithDateFields } from "~/modules/types";
 import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.team";
 import { DeleteMember } from "./delete-member";
 
-export function ActionsDropdown({
+export function TeamMembersActionsDropdown({
   teamMember,
 }: {
   teamMember: WithDateFields<TeamMemberWithCustodies, string>;

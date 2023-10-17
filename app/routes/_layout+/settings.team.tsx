@@ -1,4 +1,5 @@
-import type { Custody, TeamMember } from "@prisma/client";
+import { useMemo } from "react";
+import type { Custody, TeamMember, User } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -9,17 +10,14 @@ import { useLoaderData } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
-import { EmptyState } from "~/components/list/empty-state";
-import { ListHeader } from "~/components/list/list-header";
-import { ListItem } from "~/components/list/list-item";
-import { Button } from "~/components/shared";
-import { Table, Td, Th } from "~/components/table";
-import { ActionsDropdown } from "~/components/workspace/actions-dropdown";
+import { TeamMembersTable } from "~/components/workspace/team-members-table";
+import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
-import { getPaginatedAndFilterableTeamMembers } from "~/modules/team-member";
-import { tw } from "~/utils";
+import type { WithDateFields } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
+import { partition } from "~/utils/partition";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { organizationId } = await requireAuthSession(request);
@@ -33,20 +31,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw new Error("Organization not found");
   }
 
-  const {
-    page,
-    perPage,
-    search,
-    prev,
-    next,
-    teamMembers,
-    totalPages,
-    totalTeamMembers,
-    cookie,
-  } = await getPaginatedAndFilterableTeamMembers({
-    request,
-    organizationId: organization.id,
+  const allTeamMembers = await db.teamMember.findMany({
+    where: {
+      organizations: { some: { id: organizationId } },
+    },
+    include: {
+      custodies: true,
+      user: true,
+    },
   });
+
+  const [teamMembersWithUser, teamMembers] = partition(
+    allTeamMembers,
+    (item) => item.userId !== null
+  );
 
   const header: HeaderData = {
     title: `Settings - ${organization.name}`,
@@ -56,19 +54,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     currentOrganizationId: organizationId,
     organization,
     header,
-    modelName: {
-      singular: "team member",
-      plural: "team members",
-    },
-    page,
-    perPage,
-    search,
-    prev,
-    next,
-    items: teamMembers as TeamMemberWithCustodies[],
-    totalPages,
-    totalItems: totalTeamMembers,
-    cookie,
+    teamMembers,
+    teamMembersWithUser,
   });
 }
 
@@ -96,148 +83,39 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function WorkspacePage() {
-  const { organization, items } = useLoaderData<typeof loader>();
-  const hasItems = items.length > 0;
+  const { organization, teamMembers, teamMembersWithUser } =
+    useLoaderData<typeof loader>();
+  const isPersonalOrg = useMemo(
+    () => checkIsPersonalOrg(organization),
+    [organization]
+  );
 
   return organization ? (
     <div>
-      <h1>{organization.name} workspace</h1>
       <div className="my-6 flex justify-between border-b pb-5">
         <div>
-          <h3 className="text-text-lg font-semibold">Team</h3>
+          <h3 className="text-text-lg font-semibold">
+            {isPersonalOrg ? "Team" : `${organization.name}'s team`}
+          </h3>
           <p className="text-sm text-gray-600">
             Manage your existing team and give team members custody to certain
             assets.
           </p>
         </div>
       </div>
-      <div className="mb-6 flex gap-16">
-        <div className="w-1/4">
-          <div className="text-text-sm font-medium text-gray-700">Users</div>
-          <p className="text-sm text-gray-600">
-            User linked to your workspace.
-          </p>
-        </div>
-        <div className="flex flex-1 flex-col gap-2">
-          <div
-            className={tw(
-              "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded-[12px]"
-            )}
-          >
-            {!hasItems ? (
-              <EmptyState
-                customContent={{
-                  title: "No team members on database",
-                  text: "What are you waiting for? Add your first team member now!",
-                  newButtonRoute: `add-member`,
-                  newButtonContent: "Add team member",
-                }}
-              />
-            ) : (
-              <>
-                <Table>
-                  <ListHeader
-                    children={
-                      <>
-                        <Th className="hidden md:table-cell">
-                          <Button variant="primary" to={`add-member`}>
-                            <span className=" whitespace-nowrap">
-                              Add team member
-                            </span>
-                          </Button>
-                        </Th>
-                      </>
-                    }
-                  />
-                  <tbody>
-                    {items.map((item) => (
-                      <ListItem item={item} key={item.id}>
-                        <>
-                          <Td className="w-full">
-                            <div className="flex items-center justify-between">
-                              <span className="text-text-sm font-medium text-gray-900">
-                                {item.name}
-                              </span>
-                            </div>
-                          </Td>
-                          <Td className="text-right">
-                            {/* @ts-ignore */}
-                            <ActionsDropdown teamMember={item} />
-                          </Td>
-                        </>
-                      </ListItem>
-                    ))}
-                  </tbody>
-                </Table>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="mb-6 flex gap-16">
-        <div className="w-1/4">
-          <div className="text-text-sm font-medium text-gray-700">
-            Team members
-          </div>
-          <p className="text-sm text-gray-600">
-            Team members are part of your workspace but do not have an account.
-          </p>
-        </div>
-        <div className="flex flex-1 flex-col gap-2">
-          <div
-            className={tw(
-              "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded-[12px]"
-            )}
-          >
-            {!hasItems ? (
-              <EmptyState
-                customContent={{
-                  title: "No team members on database",
-                  text: "What are you waiting for? Add your first team member now!",
-                  newButtonRoute: `add-member`,
-                  newButtonContent: "Add team member",
-                }}
-              />
-            ) : (
-              <>
-                <Table>
-                  <ListHeader
-                    children={
-                      <>
-                        <Th className="hidden md:table-cell">
-                          <Button variant="primary" to={`add-member`}>
-                            <span className=" whitespace-nowrap">
-                              Add team member
-                            </span>
-                          </Button>
-                        </Th>
-                      </>
-                    }
-                  />
-                  {/* <tbody>
-                    {items.map((item) => (
-                      <ListItem item={item} key={item.id}>
-                        <>
-                          <Td className="w-full">
-                            <div className="flex items-center justify-between">
-                              <span className="text-text-sm font-medium text-gray-900">
-                                {item.name}
-                              </span>
-                            </div>
-                          </Td>
-                          <Td className="text-right">
-                            <ActionsDropdown teamMember={item} />
-                          </Td>
-                        </>
-                      </ListItem>
-                    ))}
-                  </tbody> */}
-                </Table>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
+      {!isPersonalOrg ? (
+        <UsersTable
+          users={
+            teamMembersWithUser.map((tm) => tm?.user) as WithDateFields<
+              User,
+              string
+            >[]
+          }
+        />
+      ) : null}
+      <TeamMembersTable
+        teamMembers={teamMembers as WithDateFields<TeamMember, string>[]}
+      />
       <ContextualModal />
     </div>
   ) : null;
