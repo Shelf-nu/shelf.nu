@@ -5,13 +5,14 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
+import type { WithDateFields } from "~/modules/types";
 import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.team";
 import { DeleteMember } from "./delete-member";
 
 export function ActionsDropdown({
   teamMember,
 }: {
-  teamMember: TeamMemberWithCustodies;
+  teamMember: WithDateFields<TeamMemberWithCustodies, string>;
 }) {
   return (
     <DropdownMenu modal={false}>

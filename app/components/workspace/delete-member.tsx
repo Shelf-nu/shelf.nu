@@ -14,6 +14,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 
+import type { WithDateFields } from "~/modules/types";
 import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.team";
 import { isFormProcessing, tw } from "~/utils";
 import { XIcon } from "../icons";
@@ -21,7 +22,7 @@ import { XIcon } from "../icons";
 export const DeleteMember = ({
   teamMember,
 }: {
-  teamMember: TeamMemberWithCustodies;
+  teamMember: WithDateFields<TeamMemberWithCustodies, string>;
 }) => {
   const hasCustodies = useMemo(
     () => teamMember?.custodies?.length > 0,
