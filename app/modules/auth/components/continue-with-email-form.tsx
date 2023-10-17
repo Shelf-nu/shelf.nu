@@ -1,5 +1,5 @@
 import React from "react";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useFetcher } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
@@ -7,7 +7,6 @@ import type { action } from "~/routes/_auth+/send-magic-link";
 
 export function ContinueWithEmailForm() {
   const ref = React.useRef<HTMLFormElement>(null);
-  const { isResend } = useLoaderData();
 
   const sendMagicLink = useFetcher<typeof action>();
   const { data, state } = sendMagicLink;
@@ -15,8 +14,6 @@ export function ContinueWithEmailForm() {
   const isLoading = state === "submitting" || state === "loading";
   const buttonLabel = isLoading
     ? "Sending you a link..."
-    : isResend
-    ? "Resend confirmation email"
     : "Continue with Magic Link";
 
   React.useEffect(() => {

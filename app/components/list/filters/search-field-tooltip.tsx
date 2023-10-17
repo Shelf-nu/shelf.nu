@@ -6,9 +6,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import type { SearchableIndexResponse } from "~/modules/types";
 
 export const SearchFieldTooltip = () => {
-  const { searchFieldTooltip } = useLoaderData();
+  const { searchFieldTooltip } = useLoaderData<SearchableIndexResponse>();
   return searchFieldTooltip ? (
     <TooltipProvider>
       <Tooltip>

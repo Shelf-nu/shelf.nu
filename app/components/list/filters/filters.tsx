@@ -1,6 +1,7 @@
 import { useRef, type ReactNode, useEffect, useMemo } from "react";
 import { Form, useLoaderData, useSearchParams } from "@remix-run/react";
 
+import type { SearchableIndexResponse } from "~/modules/types";
 import { tw } from "~/utils";
 
 import { SearchForm } from "./search-form";
@@ -12,7 +13,7 @@ export const Filters = ({
   children?: ReactNode;
   className?: string;
 }) => {
-  const { search } = useLoaderData();
+  const { search } = useLoaderData<SearchableIndexResponse>();
   const [searchParams] = useSearchParams();
 
   const formRef = useRef<HTMLFormElement>(null);

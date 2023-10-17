@@ -6,12 +6,14 @@ import {
 
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import type { SearchableIndexResponse } from "~/modules/types";
 import { SearchFieldTooltip } from "./search-field-tooltip";
 
 export const SearchForm = () => {
   const [, setSearchParams] = useSearchParams();
 
-  const { search, modelName, searchFieldLabel } = useLoaderData();
+  const { search, modelName, searchFieldLabel } =
+    useLoaderData<SearchableIndexResponse>();
   const { singular } = modelName;
   const state = useNavigation().state;
   const isSearching = state === "loading";

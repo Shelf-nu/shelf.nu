@@ -1,5 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 
+import type { SearchableIndexResponse } from "~/modules/types";
 import { ClearSearch } from "./filters/clear-search";
 import { Button } from "../shared/button";
 export interface CustomEmptyState {
@@ -11,7 +12,7 @@ export interface CustomEmptyState {
   };
 }
 export const EmptyState = ({ customContent }: CustomEmptyState) => {
-  const { search, modelName } = useLoaderData();
+  const { search, modelName } = useLoaderData<SearchableIndexResponse>();
   const { singular, plural } = modelName;
 
   const texts = {
