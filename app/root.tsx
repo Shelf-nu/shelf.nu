@@ -47,7 +47,7 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: fontsStylesheetUrl },
   { rel: "stylesheet", href: globalStylesheetUrl },
   { rel: "manifest", href: "/manifest.json" },
-  ...splashScreenLinks
+  ...splashScreenLinks,
 ];
 
 export const meta: MetaFunction = () => [

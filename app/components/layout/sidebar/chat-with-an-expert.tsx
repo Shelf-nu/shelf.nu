@@ -1,9 +1,10 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
+import type { loader } from "~/routes/_layout+/_layout";
 
 export const ChatWithAnExpert = () => {
-  const { hideSupportBanner } = useLoaderData();
+  const { hideSupportBanner } = useLoaderData<typeof loader>();
 
   const fetcher = useFetcher();
   return hideSupportBanner ? null : (

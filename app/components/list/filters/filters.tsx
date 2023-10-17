@@ -7,6 +7,7 @@ import {
 } from "@remix-run/react";
 import { useAtom } from "jotai";
 
+import type { SearchableIndexResponse } from "~/modules/types";
 import { tw } from "~/utils";
 import {
   toggleIsFilteringCategoriesAtom,
@@ -21,7 +22,7 @@ export const Filters = ({
   children?: ReactNode;
   className?: string;
 }) => {
-  const { search } = useLoaderData();
+  const { search } = useLoaderData<SearchableIndexResponse>();
   const [searchParams] = useSearchParams();
   const perPageParam = searchParams.get("per_page");
 
