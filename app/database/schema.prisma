@@ -42,19 +42,21 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  assets          Asset[]
-  categories      Category[]
-  notes           Note[]
-  qrCodes         Qr[]
-  scans           Scan[]
-  tags            Tag[]
-  roles           Role[]
-  locations       Location[]
-  images          Image[]
-  organizations   Organization[]
-  customFields    CustomField[]
-  sentInvites     Invite[]       @relation("inviter")
-  receivedInvites Invite[]       @relation("invitee")
+  assets            Asset[]
+  categories        Category[]
+  notes             Note[]
+  qrCodes           Qr[]
+  scans             Scan[]
+  tags              Tag[]
+  roles             Role[]
+  locations         Location[]
+  images            Image[]
+  organizations     Organization[]
+  customFields      CustomField[]
+  sentInvites       Invite[]           @relation("inviter")
+  receivedInvites   Invite[]           @relation("invitee")
+  teamMembers       TeamMember[]
+  userOrganizations UserOrganization[]
 
   @@unique([email, username])
 }
@@ -277,12 +279,14 @@ model TeamMember {
   id   String @id @unique @default(cuid())
   name String
 
-  organizations Organization[]
-  custodies     Custody[]
-
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  organizations   Organization[]
+  custodies       Custody[]
   receivedInvites Invite[]
+  user            User?          @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  userId          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Custody {
@@ -310,17 +314,33 @@ model Organization {
   image   Image?  @relation(fields: [imageId], references: [id])
   imageId String? @unique
 
-  members    TeamMember[]
-  assets     Asset[]
-  locations  Location[]
-  categories Category[]
-  tags       Tag[]
-  qrCodes    Qr[]
-  invites    Invite[]
+  members           TeamMember[]
+  assets            Asset[]
+  locations         Location[]
+  categories        Category[]
+  tags              Tag[]
+  qrCodes           Qr[]
+  invites           Invite[]
+  userOrganizations UserOrganization[]
 
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   customFields CustomField[]
+}
+
+model UserOrganization {
+  id             String       @id @unique @default(cuid())
+  
+  user           User         @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  userId         String
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
+
+  roles     OrganizationRoles[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@unique([userId, organizationId])
 }
 
 enum OrganizationType {
@@ -331,6 +351,7 @@ enum OrganizationType {
 enum OrganizationRoles {
   ADMIN
   TEAM_MEMBER
+  OWNER
 }
 
 // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.
@@ -417,6 +438,7 @@ enum InviteStatuses {
   PENDING
   ACCEPTED
   REJECTED
+  INVALIDATED
 }
 
 model Invite {
@@ -429,8 +451,8 @@ model Invite {
   organizationId    String
   inviteeUser       User?        @relation("invitee", fields: [inviteeUserId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   inviteeUserId     String?
-  inviteeTeamMember TeamMember?  @relation(fields: [teamMemberId], references: [id])
-  teamMemberId      String?
+  inviteeTeamMember TeamMember   @relation(fields: [teamMemberId], references: [id])
+  teamMemberId      String
 
   inviteeEmail String
   status       InviteStatuses      @default(PENDING)

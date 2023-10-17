@@ -1,4 +1,4 @@
-import { OrganizationType } from "@prisma/client";
+import { OrganizationRoles, OrganizationType } from "@prisma/client";
 import type { Organization, User } from "@prisma/client";
 
 import { db } from "~/database";
@@ -68,6 +68,12 @@ export async function createOrganization({
     type: OrganizationType.TEAM,
     categories: {
       create: defaultUserCategories.map((c) => ({ ...c, userId })),
+    },
+    userOrganizations: {
+      create: {
+        userId,
+        roles: [OrganizationRoles.OWNER],
+      },
     },
     owner: {
       connect: {

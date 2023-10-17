@@ -1,5 +1,6 @@
-import { Prisma, Roles } from "@prisma/client";
-import type { Organization, User } from "@prisma/client";
+import type { PrismaClient, Organization, User } from "@prisma/client";
+import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import sharp from "sharp";
@@ -43,25 +44,75 @@ export async function getUserByIDWithOrg(id: User["id"]) {
   });
 }
 
+async function createUserOrgAssociation(
+  tx: Omit<PrismaClient, ITXClientDenyList>,
+  {
+    organizationId,
+    userId,
+    roles,
+  }: {
+    roles: OrganizationRoles[];
+    organizationId: Organization["id"];
+    userId: User["id"];
+  }
+) {
+  return tx.userOrganization.upsert({
+    where: {
+      userId_organizationId: {
+        userId,
+        organizationId,
+      },
+    },
+    create: {
+      userId,
+      organizationId,
+      roles,
+    },
+    update: {
+      roles: {
+        push: OrganizationRoles.OWNER,
+      },
+    },
+  });
+}
+
 export async function createUserOrAttachOrg({
   email,
   organizationId,
-}: Pick<User, "email"> & { organizationId: Organization["id"] }) {
-  const organizations = {
-    connect: {
-      id: organizationId,
+  roles,
+}: Pick<User, "email"> & {
+  organizationId: Organization["id"];
+  roles: OrganizationRoles[];
+}) {
+  const transaction = db.$transaction(
+    async (tx) => {
+      const organizations = {
+        connect: {
+          id: organizationId,
+        },
+      };
+
+      const user = await tx.user.upsert({
+        where: { email },
+        update: {
+          organizations,
+        },
+        create: {
+          email,
+          organizations,
+        },
+      });
+      await createUserOrgAssociation(tx, {
+        userId: user.id,
+        organizationId,
+        roles,
+      });
+      return user;
     },
-  };
-  return db.user.upsert({
-    where: { email },
-    update: {
-      organizations,
-    },
-    create: {
-      email,
-      organizations,
-    },
-  });
+    { maxWait: 6000, timeout: 10000 }
+  );
+
+  return transaction;
 }
 
 export async function createUser({
@@ -69,34 +120,51 @@ export async function createUser({
   userId,
   username,
 }: Pick<AuthSession & { username: string }, "userId" | "email" | "username">) {
-  return db.user
-    .create({
-      data: {
-        email,
-        id: userId,
-        username,
-        organizations: {
-          create: [
-            {
-              name: "Personal",
-              categories: {
-                create: defaultUserCategories.map((c) => ({ ...c, userId })),
+  return db
+    .$transaction(
+      async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            email,
+            id: userId,
+            username,
+            organizations: {
+              create: [
+                {
+                  name: "Personal",
+                  categories: {
+                    create: defaultUserCategories.map((c) => ({
+                      ...c,
+                      userId,
+                    })),
+                  },
+                },
+              ],
+            },
+            roles: {
+              connect: {
+                name: Roles["USER"],
               },
             },
-          ],
-        },
-        roles: {
-          connect: {
-            name: Roles["USER"],
           },
-        },
+          include: {
+            organizations: true,
+          },
+        });
+        await createUserOrgAssociation(tx, {
+          userId: user.id,
+          organizationId: user.organizations[0].id,
+          roles: [OrganizationRoles.ADMIN],
+        });
+        return user;
       },
-      include: {
-        organizations: true,
-      },
-    })
+      { maxWait: 6000, timeout: 10000 }
+    )
     .then((user) => user)
-    .catch(() => null);
+    .catch((err) => {
+      console.log(err);
+      return null;
+    });
 }
 
 export async function tryCreateUser({
