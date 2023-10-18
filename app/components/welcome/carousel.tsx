@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+
+//@ts-ignore
+//as formbricks has TS issues which they will be resolving later on
 import formbricks from "@formbricks/js";
 import type { LinksFunction } from "@remix-run/node";
 import { ClientOnly } from "remix-utils/client-only";
