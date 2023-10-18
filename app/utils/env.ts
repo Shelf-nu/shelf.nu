@@ -4,6 +4,7 @@ import { isBrowser } from "./is-browser";
 declare global {
   interface Window {
     env: {
+      NODE_ENV: "development" | "production" | "test";
       SUPABASE_URL: string;
       SUPABASE_ANON_PUBLIC: string;
       MAPTILER_TOKEN: string;
@@ -18,6 +19,7 @@ declare global {
 declare global {
   namespace NodeJS {
     interface ProcessEnv {
+      NODE_ENV: "development" | "production" | "test";
       SUPABASE_URL: string;
       SUPABASE_SERVICE_ROLE: string;
       SERVER_URL: string;
