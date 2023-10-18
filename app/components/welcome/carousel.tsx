@@ -24,11 +24,13 @@ export default function WelcomeCarousel() {
 function Carousel() {
   const [reachedLastSlide, setReachedLastSlide] = useState(false);
   useEffect(() => {
-    formbricks.init({
-      environmentId: FORMBRICKS_ENV_ID,
-      apiHost: "https://app.formbricks.com",
-      debug: NODE_ENV === "development",
-    });
+    if (FORMBRICKS_ENV_ID) {
+      formbricks.init({
+        environmentId: FORMBRICKS_ENV_ID,
+        apiHost: "https://app.formbricks.com",
+        debug: NODE_ENV === "development",
+      });
+    }
   });
   return (
     <>
@@ -114,13 +116,14 @@ function Carousel() {
             variant="primary"
             className="carousel-next-btn mt-5"
             width="full"
-            onClick={() => formbricks.track("Next Button Clicked")}
+            onClick={() =>
+              FORMBRICKS_ENV_ID && formbricks.track("Next Button Clicked")
+            }
           >
             Next
           </Button>
         )}
       </div>
-      {/* <FormbricksProvider /> */}
     </>
   );
 }
