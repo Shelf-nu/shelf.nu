@@ -883,6 +883,7 @@ export interface CreateAssetFromContentImportPayload
   tags: string[];
   location?: string;
   custodian?: string;
+  valuation?: number;
 }
 
 export const createAssetsFromBackupImport = async ({
@@ -919,6 +920,7 @@ export const createAssetsFromBackupImport = async ({
             },
           ],
         },
+        valuation: asset.valuation || null,
       },
     };
 
@@ -1131,6 +1133,7 @@ export interface CreateAssetFromBackupImportPayload
   id: string;
   title: string;
   description?: string;
+  valuation?: number;
   category:
     | {
         id: string;
