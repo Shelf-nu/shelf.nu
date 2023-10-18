@@ -18,7 +18,7 @@ import { Button } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { requireAuthSession } from "~/modules/auth";
-import { getExisitingActiveInvite } from "~/modules/invite";
+import { createInvite, getExisitingActiveInvite } from "~/modules/invite";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing, tw, validEmail } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -64,6 +64,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     inviteeEmail: email,
   });
 
+  console.log(existingInvite);
+
   if (existingInvite) {
     return json({
       errors: {
@@ -71,6 +73,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
   }
+
+  await createInvite({
+    organizationId,
+    inviteeEmail: email,
+    inviterId: userId,
+    roles: [OrganizationRoles.ADMIN],
+    teamMemberName: email.split("@")[0],
+  });
 
   sendNotification({
     title: "Successfully invited user",
@@ -190,7 +200,7 @@ export default function InviteUser() {
               Cancel
             </Button>
             <Button type="submit" size="sm" width="full">
-              Update
+              Send Invite
             </Button>
           </div>
         </Form>

@@ -33,6 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           user: true,
         },
       },
+      invites: true,
     },
   });
 
@@ -42,7 +43,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const [teamMembersWithUser, teamMembers] = partition(
     organization.members,
-    (item) => item.userId !== null
+    (item) =>
+      item.userId !== null ||
+      organization.invites.some(
+        (inv) => inv.inviteeUserId === item.userId && inv.status === "PENDING"
+      )
   );
 
   const header: HeaderData = {

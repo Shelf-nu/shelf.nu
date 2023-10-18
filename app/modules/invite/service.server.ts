@@ -1,4 +1,4 @@
-import type { Invite, Roles, TeamMember } from "@prisma/client";
+import type { Invite, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import { db } from "~/database";
@@ -99,7 +99,7 @@ export async function createInvite({
   await sendEmail({
     to: inviteeEmail,
     subject: `You have been invited to ${invite.organization.name}`,
-    text: `click to accept ${SERVER_URL}/invite-respond?token=${token}`, //TODO change path if needed
+    text: `click to accept ${SERVER_URL}/accept-invite/${invite.id}?token=${token}`, //TODO change path if needed
   }); //TODO: user template and embed token as part of button url
   return invite;
 }

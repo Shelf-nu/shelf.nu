@@ -90,7 +90,7 @@ export async function action({ request }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/settings/workspace/${org.id}`, {
+  return redirect(`/settings/workspace/`, {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
