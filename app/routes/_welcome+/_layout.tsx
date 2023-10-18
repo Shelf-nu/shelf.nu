@@ -5,7 +5,7 @@ export default function OnboardingLayout() {
     <div className="flex h-full min-h-screen flex-col ">
       <main className="relative flex h-full w-full">
         <div className="flex h-full w-full flex-col items-center justify-center p-6 lg:p-10">
-          <div className="w-[300px] rounded-xl bg-white shadow-xl sm:w-[400px]">
+          <div className="w-[300px] rounded-xl shadow-xl sm:w-[400px]">
             <Outlet />
           </div>
         </div>
