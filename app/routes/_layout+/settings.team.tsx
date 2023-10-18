@@ -25,24 +25,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     where: {
       id: organizationId,
     },
+    include: {
+      owner: true,
+      members: {
+        include: {
+          custodies: true,
+          user: true,
+        },
+      },
+    },
   });
 
   if (!organization) {
     throw new Error("Organization not found");
   }
 
-  const allTeamMembers = await db.teamMember.findMany({
-    where: {
-      organizations: { some: { id: organizationId } },
-    },
-    include: {
-      custodies: true,
-      user: true,
-    },
-  });
-
   const [teamMembersWithUser, teamMembers] = partition(
-    allTeamMembers,
+    organization.members,
     (item) => item.userId !== null
   );
 
@@ -54,6 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     currentOrganizationId: organizationId,
     organization,
     header,
+    owner: organization.owner,
     teamMembers,
     teamMembersWithUser,
   });

@@ -161,10 +161,7 @@ export async function createUser({
       { maxWait: 6000, timeout: 10000 }
     )
     .then((user) => user)
-    .catch((err) => {
-      console.log(err);
-      return null;
-    });
+    .catch(() => null);
 }
 
 export async function tryCreateUser({
