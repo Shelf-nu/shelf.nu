@@ -119,7 +119,8 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Onboarding() {
-  const { user, userSignedUpWithPassword } = useLoaderData<typeof loader>();
+  const { user, userSignedUpWithPassword, title, subHeading } =
+    useLoaderData<typeof loader>();
 
   const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
 
@@ -127,7 +128,9 @@ export default function Onboarding() {
 
   return (
     <div className="p-6 sm:p-8">
-      <Form className="flex flex-col gap-5" method="post" ref={zo.ref}>
+      <h2 className="mb-1">{title}</h2>
+      <p>{subHeading}</p>
+      <Form className="mt-6 flex flex-col gap-5" method="post" ref={zo.ref}>
         <input
           type="hidden"
           name="userSignedUpWithPassword"
