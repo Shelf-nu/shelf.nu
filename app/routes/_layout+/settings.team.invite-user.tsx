@@ -17,7 +17,7 @@ import { UserIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
-import { requireAuthSession } from "~/modules/auth";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createInvite, getExisitingActiveInvite } from "~/modules/invite";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing, tw, validEmail } from "~/utils";
@@ -41,7 +41,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { userId, organizationId } = authSession;
   const formData = await request.formData();
   const result = await InviteUserFormSchema.safeParseAsync(
     parseFormAny(formData)
@@ -63,8 +64,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     organizationId,
     inviteeEmail: email,
   });
-
-  console.log(existingInvite);
 
   if (existingInvite) {
     return json({
@@ -89,7 +88,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     icon: { name: "success", variant: "success" },
     senderId: userId,
   });
-  return redirect("/settings/team");
+  return redirect("/settings/team", {
+    headers: {
+      "Set-Cookie": await commitAuthSession(request, { authSession }),
+    },
+  });
 };
 
 export function links() {

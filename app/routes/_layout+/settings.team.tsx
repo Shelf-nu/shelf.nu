@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Custody, TeamMember, User } from "@prisma/client";
+import type { Custody, TeamMember } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -14,7 +14,6 @@ import { TeamMembersTable } from "~/components/workspace/team-members-table";
 import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
-import type { WithDateFields } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { partition } from "~/utils/partition";
@@ -31,9 +30,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
         include: {
           custodies: true,
           user: true,
+          receivedInvites: {
+            select: {
+              id: true,
+              teamMemberId: true,
+              inviteeEmail: true,
+            },
+          },
         },
       },
-      invites: true,
     },
   });
 
@@ -41,13 +46,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw new Error("Organization not found");
   }
 
-  const [teamMembersWithUser, teamMembers] = partition(
+  // const teamMembers = organization.members.filter((member) => {
+  //   console.log(member);
+  // });
+
+  const [teamMembersWithUserOrInvite, teamMembers] = partition(
     organization.members,
-    (item) =>
-      item.userId !== null ||
-      organization.invites.some(
-        (inv) => inv.inviteeUserId === item.userId && inv.status === "PENDING"
-      )
+    (item) => item.userId === null && item.receivedInvites.length > 0
   );
 
   const header: HeaderData = {
@@ -60,7 +65,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     header,
     owner: organization.owner,
     teamMembers,
-    teamMembersWithUser,
+    teamMembersWithUserOrInvite,
   });
 }
 
@@ -88,8 +93,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function WorkspacePage() {
-  const { organization, teamMembers, teamMembersWithUser } =
-    useLoaderData<typeof loader>();
+  const { organization } = useLoaderData<typeof loader>();
   const isPersonalOrg = useMemo(
     () => checkIsPersonalOrg(organization),
     [organization]
@@ -108,19 +112,8 @@ export default function WorkspacePage() {
           </p>
         </div>
       </div>
-      {!isPersonalOrg ? (
-        <UsersTable
-          users={
-            teamMembersWithUser.map((tm) => tm?.user) as WithDateFields<
-              User,
-              string
-            >[]
-          }
-        />
-      ) : null}
-      <TeamMembersTable
-        teamMembers={teamMembers as WithDateFields<TeamMember, string>[]}
-      />
+      {!isPersonalOrg ? <UsersTable /> : null}
+      <TeamMembersTable />
       <ContextualModal />
     </div>
   ) : null;

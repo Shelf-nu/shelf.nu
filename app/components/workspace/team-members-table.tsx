@@ -1,5 +1,5 @@
-import type { TeamMember } from "@prisma/client";
-import type { WithDateFields } from "~/modules/types";
+import { useLoaderData } from "@remix-run/react";
+import type { loader } from "~/routes/_layout+/settings.team";
 import { tw } from "~/utils";
 import { TeamMembersActionsDropdown } from "./actions-dropdown";
 import { EmptyState } from "../list/empty-state";
@@ -7,12 +7,10 @@ import { ListItem } from "../list/list-item";
 import { Button } from "../shared";
 import { Table, Td, Th, Tr } from "../table";
 
-export const TeamMembersTable = ({
-  teamMembers,
-}: {
-  teamMembers: WithDateFields<TeamMember, string>[];
-}) => {
-  const hasItems = teamMembers.length > 0;
+export const TeamMembersTable = () => {
+  const { teamMembers } = useLoaderData<typeof loader>();
+  const hasItems = teamMembers?.length > 0;
+
   return (
     <div className="mb-6 flex gap-16">
       <div className="w-1/4">

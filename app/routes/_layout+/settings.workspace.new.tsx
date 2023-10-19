@@ -77,7 +77,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const file = formDataFile.get("image") as File | null;
   invariant(file instanceof File, "file not the right type");
 
-  const org = await createOrganization({
+  await createOrganization({
     name,
     userId: authSession.userId,
     image: file || null,
