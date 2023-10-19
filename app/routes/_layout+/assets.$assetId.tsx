@@ -61,10 +61,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
    */
   const lastScan = asset.qrCodes[0]?.id
     ? parseScanData({
-        scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
-        userId,
-        request,
-      })
+      scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
+      userId,
+      request,
+    })
     : null;
 
   const notes = asset.notes.map((note) => ({
@@ -251,7 +251,18 @@ export default function AssetDetailsPage() {
                     </Badge>
                   </div>
                 </li>
-              ) : null}
+              ) : (
+                <li className="mb-4 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Category
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Badge color={"#808080"} withDot={false}>
+                      Uncategorized
+                    </Badge>
+                  </div>
+                </li>
+              )}
               {location ? (
                 <li className="mb-2 flex justify-between">
                   <span className="text-[12px] font-medium text-gray-600">
