@@ -1,13 +1,8 @@
-import { useEffect, useState } from "react";
-
-//@ts-ignore
-//as formbricks has TS issues which they will be resolving later on
-import formbricks from "@formbricks/js";
+import { useState } from "react";
 import type { LinksFunction } from "@remix-run/node";
 import { ClientOnly } from "remix-utils/client-only";
 import { Pagination, Navigation } from "swiper/modules";
 import { Swiper, SwiperSlide } from "swiper/react";
-import { FORMBRICKS_ENV_ID, NODE_ENV } from "~/utils/env";
 import { Button } from "../shared/button";
 
 export const links: LinksFunction = () => [
@@ -23,15 +18,6 @@ export default function WelcomeCarousel() {
 
 function Carousel() {
   const [reachedLastSlide, setReachedLastSlide] = useState(false);
-  useEffect(() => {
-    if (FORMBRICKS_ENV_ID) {
-      formbricks.init({
-        environmentId: FORMBRICKS_ENV_ID,
-        apiHost: "https://app.formbricks.com",
-        debug: NODE_ENV === "development",
-      });
-    }
-  });
   return (
     <>
       <div className="p-4 sm:p-6">
@@ -116,9 +102,6 @@ function Carousel() {
             variant="primary"
             className="carousel-next-btn mt-5"
             width="full"
-            onClick={() =>
-              FORMBRICKS_ENV_ID && formbricks.track("Next Button Clicked")
-            }
           >
             Next
           </Button>

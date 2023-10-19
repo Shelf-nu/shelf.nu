@@ -15,7 +15,7 @@ export const links: LinksFunction = () => [
 
 export default function Welcome() {
   return (
-    <div className="rounded-xl bg-white">
+    <div>
       <WelcomeCarousel />
     </div>
   );

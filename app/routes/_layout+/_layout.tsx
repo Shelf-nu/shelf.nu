@@ -1,3 +1,7 @@
+import { useEffect } from "react";
+//@ts-ignore
+//as formbricks has TS issues which they will be resolving later on
+import formbricks from "@formbricks/js";
 import { OrganizationType, Roles } from "@prisma/client";
 import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
@@ -12,7 +16,9 @@ import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/index.css";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 import { userPrefs } from "~/utils/cookies.server";
+import { FORMBRICKS_ENV_ID, NODE_ENV } from "~/utils/env";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
+
 import {
   getCustomerActiveSubscription,
   getStripeCustomer,
@@ -78,6 +84,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   useCrisp();
+  useEffect(() => {
+    if (FORMBRICKS_ENV_ID) {
+      formbricks.init({
+        environmentId: FORMBRICKS_ENV_ID,
+        apiHost: "https://app.formbricks.com",
+        debug: NODE_ENV === "development",
+      });
+    }
+  });
   return (
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
       <div className="flex flex-col md:flex-row">

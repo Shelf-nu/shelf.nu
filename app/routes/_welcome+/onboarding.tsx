@@ -126,7 +126,7 @@ export default function Onboarding() {
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
 
   return (
-    <div>
+    <div className="p-6 sm:p-8">
       <Form className="flex flex-col gap-5" method="post" ref={zo.ref}>
         <input
           type="hidden"
@@ -134,7 +134,7 @@ export default function Onboarding() {
           value={String(userSignedUpWithPassword)}
         />
 
-        <div className="flex gap-6">
+        <div className="md:flex md:gap-6">
           <Input
             label="First name"
             data-test-id="firstName"
@@ -142,6 +142,7 @@ export default function Onboarding() {
             placeholder="Zaans"
             name={zo.fields.firstName()}
             error={zo.errors.firstName()?.message}
+            className="mb-5 md:mb-0"
           />
           <Input
             label="Last name"
