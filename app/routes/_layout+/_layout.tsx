@@ -9,11 +9,13 @@ import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { Toaster } from "~/components/shared/toast";
 import { db } from "~/database";
+import { useFormbricks } from "~/hooks/use-formbricks";
 import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/index.css";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 import { userPrefs } from "~/utils/cookies.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
+
 import {
   getCustomerActiveSubscription,
   getStripeCustomer,
@@ -79,6 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   useCrisp();
+  useFormbricks();
   return (
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
       <div className="flex flex-col md:flex-row">

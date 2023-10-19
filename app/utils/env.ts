@@ -4,12 +4,14 @@ import { isBrowser } from "./is-browser";
 declare global {
   interface Window {
     env: {
+      NODE_ENV: "development" | "production" | "test";
       SUPABASE_URL: string;
       SUPABASE_ANON_PUBLIC: string;
       MAPTILER_TOKEN: string;
       MICROSOFT_CLARITY_ID: string;
       CRISP_WEBSITE_ID: string;
       ENABLE_PREMIUM_FEATURES: string;
+      FORMBRICKS_ENV_ID: string;
     };
   }
 }
@@ -17,6 +19,7 @@ declare global {
 declare global {
   namespace NodeJS {
     interface ProcessEnv {
+      NODE_ENV: "development" | "production" | "test";
       SUPABASE_URL: string;
       SUPABASE_SERVICE_ROLE: string;
       SERVER_URL: string;
@@ -29,6 +32,7 @@ declare global {
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
       INVITE_TOKEN_SECRET: string;
+      FORMBRICKS_ENV_ID: string;
     }
   }
 }
@@ -90,6 +94,10 @@ export const MICROSOFT_CLARITY_ID = getEnv("MICROSOFT_CLARITY_ID", {
   isSecret: false,
   isRequired: false,
 });
+export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
+  isSecret: false,
+  isRequired: false,
+});
 
 export const ENABLE_PREMIUM_FEATURES =
   getEnv("ENABLE_PREMIUM_FEATURES", {
@@ -106,5 +114,6 @@ export function getBrowserEnv() {
     CRISP_WEBSITE_ID,
     MICROSOFT_CLARITY_ID,
     ENABLE_PREMIUM_FEATURES,
+    FORMBRICKS_ENV_ID,
   };
 }
