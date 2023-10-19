@@ -128,7 +128,7 @@ export async function getAssets({
 
   if (categoriesIds && categoriesIds.length > 0 && where.asset) {
     if (categoriesIds.includes("uncategorized")) {
-      where.OR.asset = [
+      where.asset.OR = [
         {
           categoryId: {
             in: categoriesIds,
