@@ -59,19 +59,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const { email } = result.data;
 
-  // @TODO this still needs some more testing
-  const existingInvite = await getExisitingActiveInvite({
-    organizationId,
-    inviteeEmail: email,
-  });
+  // // @TODO this still needs some more testing
+  // const existingInvite = await getExisitingActiveInvite({
+  //   organizationId,
+  //   inviteeEmail: email,
+  // });
 
-  if (existingInvite) {
-    return json({
-      errors: {
-        invite: "Invitation already sent to this email",
-      },
-    });
-  }
+  // if (existingInvite) {
+  //   return json({
+  //     errors: {
+  //       invite: "Invitation already sent to this email",
+  //     },
+  //   });
+  // }
 
   await createInvite({
     organizationId,

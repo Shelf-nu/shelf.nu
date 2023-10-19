@@ -39,9 +39,12 @@ const InnerContent = ({ title, message, showReload }: ErrorContentProps) => {
       <div className="flex flex-col items-center text-center">
         <img src="/images/error-icon.svg" alt={title} className="mb-5" />
         <h2 className="mb-2">{title}</h2>
-        {NODE_ENV === "production"
-          ? "A server error has occured. Try refreshing the page. If the issue persists please get in touch with support."
-          : message}
+        <p className="max-w-[550px]">
+          {NODE_ENV === "production"
+            ? "A server error has occured. Try refreshing the page. If the issue persists please get in touch with support."
+            : message}
+        </p>
+
         <div className=" mt-8 flex gap-3">
           <Button to="/" variant="secondary" icon="home">
             Back to home
