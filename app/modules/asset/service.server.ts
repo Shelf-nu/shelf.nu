@@ -869,7 +869,7 @@ export const createAssetsFromContentImport = async ({
                 .map((t) => ({ id: tags[t] })),
             }
           : undefined,
-      valuation: asset.valuation || null,
+      valuation: asset.valuation ? +asset.valuation : null,
       customFieldsValues,
     });
   }
@@ -920,7 +920,7 @@ export const createAssetsFromBackupImport = async ({
             },
           ],
         },
-        valuation: asset.valuation || null,
+        valuation: asset.valuation ? +asset.valuation : null,
       },
     };
 
