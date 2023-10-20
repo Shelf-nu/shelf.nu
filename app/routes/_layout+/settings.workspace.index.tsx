@@ -28,13 +28,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       tier: {
         include: { tierLimit: true },
       },
-      organizations: {
+      userOrganizations: {
         include: {
-          _count: {
-            select: {
-              assets: true,
-              members: true,
-              locations: true,
+          organization: {
+            include: {
+              _count: {
+                select: {
+                  assets: true,
+                  members: true,
+                  locations: true,
+                },
+              },
             },
           },
         },
@@ -44,23 +48,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // const organizations = await getUserOrganizationsWithDetailedData({ userId });
 
-  if (!user || user.organizations?.length < 1)
+  if (!user || user.userOrganizations?.length < 1)
     throw new ShelfStackError({ message: "Organization not found" });
 
   const modelName = {
     singular: "Workspace",
     plural: "Workspaces",
   };
-
+  const organizations = user.userOrganizations.map((r) => r.organization);
   return json({
     currentOrganizationId: organizationId,
     canCreateMoreOrganizations: canCreateMoreOrganizations({
       tierLimit: user?.tier?.tierLimit,
-      totalOrganizations: user?.organizations?.length,
+      totalOrganizations: organizations?.length,
     }),
-    organizations: user?.organizations,
-    items: user.organizations,
-    totalItems: user.organizations.length,
+    organizations: organizations,
+    items: organizations,
+    totalItems: organizations.length,
     modelName,
     title: "Workspace",
   });
