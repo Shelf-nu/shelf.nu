@@ -448,10 +448,18 @@ export async function revokeAccessToOrganization({
    * 1. Remove relation between user and team member
    * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
    */
+  const teamMember = await db.teamMember.findFirst({
+    where: { userId, organizations: { some: { id: organizationId } } },
+  });
+
   const user = await db.user.update({
     where: { id: userId },
     data: {
-      // @TODO we have to remove the user from the TeamMember
+      teamMembers: {
+        disconnect: {
+          id: teamMember?.id,
+        },
+      },
       userOrganizations: {
         delete: {
           userId_organizationId: {
@@ -462,4 +470,5 @@ export async function revokeAccessToOrganization({
       },
     },
   });
+  return user;
 }
