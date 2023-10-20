@@ -230,14 +230,14 @@ export async function createAsset({
     qr && qr.userId === userId && qr.assetId === null
       ? { connect: { id: qrId } }
       : {
-        create: [
-          {
-            version: 0,
-            errorCorrection: ErrorCorrection["L"],
-            user,
-          },
-        ],
-      };
+          create: [
+            {
+              version: 0,
+              errorCorrection: ErrorCorrection["L"],
+              user,
+            },
+          ],
+        };
 
   /** Data object we send via prisma to create Asset */
   const data = {
@@ -361,12 +361,18 @@ export async function updateAsset(payload: UpdateAssetPayload) {
   };
 
   /** Delete the category id from the payload so we can use connect syntax from prisma */
-  if (categoryId) {
+  if (categoryId !== "uncategorized") {
     Object.assign(data, {
       category: {
         connect: {
           id: categoryId,
         },
+      },
+    });
+  } else {
+    Object.assign(data, {
+      category: {
+        disconnect: true,
       },
     });
   }
@@ -616,8 +622,9 @@ export async function duplicateAsset({
 
   for (const i of [...Array(amountOfDuplicates)].keys()) {
     const duplicatedAsset = await createAsset({
-      title: `${asset.title} (copy ${amountOfDuplicates > 1 ? i : ""
-        } ${Date.now()})`,
+      title: `${asset.title} (copy ${
+        amountOfDuplicates > 1 ? i : ""
+      } ${Date.now()})`,
       description: asset.description,
       userId,
       categoryId: asset.categoryId,
@@ -862,10 +869,10 @@ export const createAssetsFromContentImport = async ({
       tags:
         asset.tags.length > 0
           ? {
-            set: asset.tags
-              .filter((t) => tags[t])
-              .map((t) => ({ id: tags[t] })),
-          }
+              set: asset.tags
+                .filter((t) => tags[t])
+                .map((t) => ({ id: tags[t] })),
+            }
           : undefined,
       customFieldsValues,
     });
@@ -1072,8 +1079,8 @@ export const createAssetsFromBackupImport = async ({
         tags:
           asset.tags.length > 0
             ? {
-              connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
-            }
+                connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
+              }
             : undefined,
       });
     }
@@ -1129,28 +1136,28 @@ export interface CreateAssetFromBackupImportPayload
   title: string;
   description?: string;
   category:
-  | {
-    id: string;
-    name: string;
-    description: string;
-    color: string;
-    createdAt: string;
-    updatedAt: string;
-    userId: string;
-  }
-  | {};
+    | {
+        id: string;
+        name: string;
+        description: string;
+        color: string;
+        createdAt: string;
+        updatedAt: string;
+        userId: string;
+      }
+    | {};
   tags: {
     name: string;
   }[];
   location:
-  | {
-    name: string;
-    description?: string;
-    address?: string;
-    createdAt: string;
-    updatedAt: string;
-  }
-  | {};
+    | {
+        name: string;
+        description?: string;
+        address?: string;
+        createdAt: string;
+        updatedAt: string;
+      }
+    | {};
   customFields: AssetCustomFieldsValuesWithFields[];
 }
 
