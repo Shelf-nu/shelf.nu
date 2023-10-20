@@ -62,6 +62,11 @@ export const CategorySelect = ({ defaultValue }: { defaultValue?: string }) => {
                 </div>
 
                 <div className="border-b border-b-gray-300 py-2 ">
+                  <SelectItem value={"uncategorized"} key={"uncategorized"}>
+                    <Badge color={"#808080"} noBg withDot={false}>
+                      Uncategorized
+                    </Badge>
+                  </SelectItem>
                   {refinedCategories.map((c) => (
                     <SelectItem value={c.id} key={c.id}>
                       <Badge color={c.color} noBg withDot={false}>
