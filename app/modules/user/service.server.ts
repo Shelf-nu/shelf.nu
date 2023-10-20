@@ -3,6 +3,7 @@ import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 import sharp from "sharp";
 import { db } from "~/database";
 
@@ -80,10 +81,23 @@ export async function createUserOrAttachOrg({
   email,
   organizationId,
   roles,
+  password,
 }: Pick<User, "email"> & {
   organizationId: Organization["id"];
   roles: OrganizationRoles[];
+  password: string;
 }) {
+  const shelfUser = await db.user.findFirst({ where: { email } });
+  let authAccount: SupabaseUser | null = null;
+  if (!shelfUser?.id) {
+    authAccount = await createEmailAuthAccount(email, password);
+    if (!authAccount) {
+      throw new ShelfStackError({
+        status: 500,
+        message: "failed to create auth account",
+      });
+    }
+  }
   const transaction = db.$transaction(
     async (tx) => {
       const organizations = {
@@ -98,6 +112,7 @@ export async function createUserOrAttachOrg({
           organizations,
         },
         create: {
+          id: authAccount?.id,
           email,
           organizations,
         },

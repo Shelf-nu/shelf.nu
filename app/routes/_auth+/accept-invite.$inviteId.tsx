@@ -37,6 +37,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const updatedInvite = await updateInviteStatus({
     id: decodedInvite.id,
     status: InviteStatuses.ACCEPTED,
+    password: token,
   });
 
   if (updatedInvite?.status !== InviteStatuses.ACCEPTED) {

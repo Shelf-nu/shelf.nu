@@ -108,7 +108,8 @@ export async function createInvite({
 export async function updateInviteStatus({
   id,
   status,
-}: Pick<Invite, "id" | "status">) {
+  password,
+}: Pick<Invite, "id" | "status"> & { password: string }) {
   const invite = await db.invite.findFirst({
     where: {
       id,
@@ -125,16 +126,11 @@ export async function updateInviteStatus({
   }
   const data = { status };
   if (status === "ACCEPTED") {
-    /**
-     * @TODO here we have to do this a bit differently.
-     * We need to use the already existing functions as creating a user in supabase is a 2 step process
-     * 1. Create auth account - in this case I think we can set the email as confirmed already.  We can use this function {@link createEmailAuthAccount}
-     * 2. Create user in DB
-     */
     const user = await createUserOrAttachOrg({
       email: invite.inviteeEmail,
       organizationId: invite.organizationId,
       roles: invite.roles,
+      password,
     });
     Object.assign(data, {
       inviteeUser: {
