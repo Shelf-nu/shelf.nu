@@ -34,6 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             select: {
               assets: true,
               members: true,
+              locations: true,
             },
           },
         },
@@ -155,6 +156,7 @@ const OrganizationRow = ({
     _count: {
       assets: number | null;
       members: number | null;
+      locations: number | null;
     };
   };
 }) => {
@@ -188,7 +190,7 @@ const OrganizationRow = ({
       </Td>
       <Td>{item.type}</Td>
       <Td>{item._count?.assets || 0}</Td>
-      <Td>""</Td>
+      <Td>{item._count?.locations || 0}</Td>
       <Td>{item._count?.members || 0}</Td>
     </>
   );

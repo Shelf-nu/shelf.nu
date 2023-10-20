@@ -69,6 +69,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!user?.onboarded) {
     return redirect("onboarding");
   }
+  // @TODO we need to do the commiting of session on all routes, as now that we are updating the session when changing organizations, its causing issues
   return json(
     {
       user,

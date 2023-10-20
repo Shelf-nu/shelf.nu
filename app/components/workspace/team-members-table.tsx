@@ -1,7 +1,7 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/settings.team";
 import { tw } from "~/utils";
-import { TeamMembersActionsDropdown } from "./actions-dropdown";
+import { TeamMembersActionsDropdown } from "./nrm-actions-dropdown";
 import { EmptyState } from "../list/empty-state";
 import { ListItem } from "../list/list-item";
 import { Button } from "../shared";

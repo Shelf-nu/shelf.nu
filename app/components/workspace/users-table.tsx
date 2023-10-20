@@ -3,6 +3,7 @@ import type { Invite, InviteStatuses } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/settings.team";
 import { tw } from "~/utils";
+import { TeamUsersActionsDropdown } from "./users-actions-dropdown";
 import { Button } from "../shared";
 import { Table, Td, Th } from "../table";
 
@@ -107,6 +108,11 @@ const UserRow = ({
     <Td className=" text-gray-600">{role}</Td>
     <Td className="!pr-10">
       <InviteStatusBadge status={invite?.status || status} />
+    </Td>
+    <Td>
+      {role !== "Owner" ? (
+        <TeamUsersActionsDropdown inviteStatus={invite?.status || status} />
+      ) : null}
     </Td>
   </tr>
 );
