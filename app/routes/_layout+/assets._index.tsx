@@ -286,7 +286,11 @@ const ListAssetContent = ({
           <Badge color={category.color} withDot={false}>
             {category.name}
           </Badge>
-        ) : null}
+        ) : (
+          <Badge color={"#808080"} withDot={false}>
+            {"Uncategorized"}
+          </Badge>
+        )}
       </Td>
 
       {/* Tags */}
