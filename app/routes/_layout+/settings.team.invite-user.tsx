@@ -18,7 +18,7 @@ import { Button } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { createInvite, getExisitingActiveInvite } from "~/modules/invite";
+import { createInvite } from "~/modules/invite";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing, tw, validEmail } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

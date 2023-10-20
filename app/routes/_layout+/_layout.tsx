@@ -41,6 +41,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               imageId: true,
             },
           },
+          userOrganizations: {
+            where: {
+              userId: authSession.userId,
+            },
+            select: {
+              organization: true,
+            },
+          },
         },
       })
     : undefined;
@@ -57,13 +65,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
   cookie.perPage = 20;
+
   if (!user?.onboarded) {
     return redirect("onboarding");
   }
   return json(
     {
       user,
-      organizations: user?.organizations,
+      ownedOrganizations: user?.organizations,
+      belongingOrganizations: user.userOrganizations.map(
+        (userOrganization) => userOrganization.organization
+      ),
       currentOrganizationId: authSession.organizationId,
       subscription,
       enablePremium: ENABLE_PREMIUM_FEATURES,

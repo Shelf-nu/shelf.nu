@@ -58,6 +58,7 @@ export const UsersTable = () => {
                   // We just get the first one as we only need the email, and the email should be the same in all those receivedInvites
                   invite={tm.receivedInvites[0]}
                   role="Administrator"
+                  status={tm.userId ? "ACCEPTED" : "PENDING"}
                 />
               ))}
             </tbody>
@@ -78,7 +79,9 @@ const UserRow = ({
 }: {
   name: string;
   img?: string;
-  invite?: Pick<Invite, "id" | "teamMemberId" | "inviteeEmail"> | undefined;
+  invite?:
+    | Pick<Invite, "id" | "teamMemberId" | "inviteeEmail" | "status">
+    | undefined;
   email?: string;
   status?: InviteStatuses;
   role?: string;
@@ -103,7 +106,7 @@ const UserRow = ({
     </Td>
     <Td className=" text-gray-600">{role}</Td>
     <Td className="!pr-10">
-      <InviteStatusBadge status={status} />
+      <InviteStatusBadge status={invite?.status || status} />
     </Td>
   </tr>
 );

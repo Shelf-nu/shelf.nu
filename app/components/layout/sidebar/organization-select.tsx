@@ -14,10 +14,12 @@ import ProfilePicture from "~/components/user/profile-picture";
 import { tw } from "~/utils";
 
 export const OrganizationSelect = () => {
-  const { organizations, currentOrganizationId } = useLoaderData<{
-    organizations: Organization[];
-    currentOrganizationId: string;
-  }>();
+  const { ownedOrganizations, currentOrganizationId, belongingOrganizations } =
+    useLoaderData<{
+      ownedOrganizations: Organization[];
+      belongingOrganizations: Organization[];
+      currentOrganizationId: string;
+    }>();
   const fetcher = useFetcher();
 
   return (
@@ -39,7 +41,7 @@ export const OrganizationSelect = () => {
           align="start"
         >
           <div className=" max-h-[320px] overflow-auto">
-            {organizations.map((org) => (
+            {ownedOrganizations.map((org) => (
               <SelectItem value={org.id} key={org.id} className="p-2">
                 <div className="flex items-center gap-2">
                   {org.type === "PERSONAL" ? (

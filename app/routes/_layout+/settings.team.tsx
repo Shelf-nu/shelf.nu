@@ -35,6 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
               id: true,
               teamMemberId: true,
               inviteeEmail: true,
+              status: true,
             },
           },
         },

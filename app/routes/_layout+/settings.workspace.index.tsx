@@ -1,7 +1,7 @@
 import type { OrganizationType } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
@@ -74,7 +74,6 @@ export default function WorkspacePage() {
   const { organizations, canCreateMoreOrganizations } =
     useLoaderData<typeof loader>();
   const user = useUserData();
-  const navigate = useNavigate();
 
   return (
     <div>
