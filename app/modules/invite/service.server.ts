@@ -132,6 +132,13 @@ export async function updateInviteStatus({
       roles: invite.roles,
       password,
     });
+
+    if (!user) {
+      throw new ShelfStackError({
+        message: `There was an issue with creating/attaching user with email: ${invite.inviteeEmail}`,
+        status: 401,
+      });
+    }
     Object.assign(data, {
       inviteeUser: {
         connect: {

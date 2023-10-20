@@ -115,11 +115,7 @@ export default function WorkspacePage() {
             />
             <tbody>
               {organizations.map((org) => (
-                <ListItem
-                  item={org}
-                  key={org.id}
-                  navigate={(itemId) => navigate(itemId)}
-                >
+                <ListItem item={org} key={org.id}>
                   <OrganizationRow
                     item={{
                       id: org.id,
@@ -130,7 +126,9 @@ export default function WorkspacePage() {
                       image:
                         org.type === "PERSONAL"
                           ? user?.profilePicture || "/images/default_pfp.jpg"
-                          : `/api/image/${org.imageId}`,
+                          : org?.imageId
+                          ? `/api/image/${org.imageId}`
+                          : "/images/default_pfp.jpg",
                       _count: org._count,
                       type: org.type,
                     }}
@@ -169,7 +167,7 @@ const OrganizationRow = ({
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center">
               <img
-                src={item.image || "/images/default_pfp.jpg"}
+                src={item?.image || "/images/default_pfp.jpg"}
                 alt={`${item.name}`}
                 className="h-12 w-12 rounded-[4px] object-cover"
               />

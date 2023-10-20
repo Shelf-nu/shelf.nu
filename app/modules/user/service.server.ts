@@ -20,6 +20,7 @@ import {
   generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
+  randomUsernameFromEmail,
 } from "~/utils";
 import { ShelfStackError } from "~/utils/error";
 import {
@@ -89,6 +90,10 @@ export async function createUserOrAttachOrg({
 }) {
   const shelfUser = await db.user.findFirst({ where: { email } });
   let authAccount: SupabaseUser | null = null;
+
+  /**
+   * If user does not exist, create a new user and attach the org to it
+   */
   if (!shelfUser?.id) {
     authAccount = await createEmailAuthAccount(email, password);
     if (!authAccount) {
@@ -97,32 +102,25 @@ export async function createUserOrAttachOrg({
         message: "failed to create auth account",
       });
     }
+
+    const user = await createUser({
+      email,
+      userId: authAccount.id,
+      username: randomUsernameFromEmail(email),
+    });
+    return user;
   }
+
+  /** @TODO this needs some work as we dont need a transaction anymore
+   * This runs when the user already exists and we just link it to the org */
   const transaction = db.$transaction(
     async (tx) => {
-      const organizations = {
-        connect: {
-          id: organizationId,
-        },
-      };
-
-      const user = await tx.user.upsert({
-        where: { email },
-        update: {
-          organizations,
-        },
-        create: {
-          id: authAccount?.id,
-          email,
-          organizations,
-        },
-      });
       await createUserOrgAssociation(tx, {
-        userId: user.id,
+        userId: shelfUser.id,
         organizationId,
         roles,
       });
-      return user;
+      return shelfUser;
     },
     { maxWait: 6000, timeout: 10000 }
   );

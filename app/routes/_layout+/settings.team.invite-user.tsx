@@ -199,10 +199,16 @@ export default function InviteUser() {
             />
           </div>
           <div className="mt-7 flex gap-1">
-            <Button variant="secondary" to=".." size="sm" width="full">
+            <Button
+              variant="secondary"
+              to=".."
+              size="sm"
+              width="full"
+              disabled={disabled}
+            >
               Cancel
             </Button>
-            <Button type="submit" size="sm" width="full">
+            <Button type="submit" size="sm" width="full" disabled={disabled}>
               Send Invite
             </Button>
           </div>
