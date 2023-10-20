@@ -251,7 +251,18 @@ export default function AssetDetailsPage() {
                     </Badge>
                   </div>
                 </li>
-              ) : null}
+              ) : (
+                <li className="mb-4 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Category
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Badge color={"#808080"} withDot={false}>
+                      Uncategorized
+                    </Badge>
+                  </div>
+                </li>
+              )}
               {location ? (
                 <li className="mb-2 flex justify-between">
                   <span className="text-[12px] font-medium text-gray-600">

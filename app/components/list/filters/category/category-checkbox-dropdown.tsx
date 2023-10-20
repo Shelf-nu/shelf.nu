@@ -40,6 +40,12 @@ export const CategoryCheckboxDropdown = () => {
   const [, setInitialSelect] = useAtom(addInitialSelectedCategoriesAtom);
   const [, clearFilters] = useAtom(clearCategoryFiltersAtom);
 
+  const uncategorizedItemObj: any = {
+    id: "uncategorized",
+    name: "uncategorized",
+    color: "#808080",
+  };
+
   const hasCategories = useMemo(
     () => refinedCategories.length > 0,
     [refinedCategories]
@@ -121,6 +127,11 @@ export const CategoryCheckboxDropdown = () => {
                 )}
               </div>
               <div className="">
+                <CheckboxItem
+                  key={uncategorizedItemObj.id}
+                  category={uncategorizedItemObj}
+                  selected={items}
+                />
                 {refinedCategories.map((c) => (
                   <CheckboxItem key={c.id} category={c} selected={items} />
                 ))}
