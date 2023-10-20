@@ -216,11 +216,12 @@ export const AssetForm = ({
 
       <div>
         <FormRow
-          rowLabel="Description"
+          rowLabel={"Description"}
           subHeading={
             <p>
               This is the initial object description. It will be shown on the
-              asset’s overview page. You can always change it.
+              asset’s overview page. You can always change it. Maximum 1000
+              characters.
             </p>
           }
           className="border-b-0"
@@ -228,6 +229,7 @@ export const AssetForm = ({
         >
           <Input
             inputType="textarea"
+            maxLength={1000}
             label={zo.fields.description()}
             name={zo.fields.description()}
             defaultValue={description || ""}

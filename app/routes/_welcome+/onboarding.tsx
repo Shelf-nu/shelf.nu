@@ -111,7 +111,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ errors: updatedUser.errors }, { status: 400 });
   }
 
-  return redirect("/", {
+  return redirect("/welcome", {
     headers: {
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
@@ -119,22 +119,25 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function Onboarding() {
-  const { user, userSignedUpWithPassword } = useLoaderData<typeof loader>();
+  const { user, userSignedUpWithPassword, title, subHeading } =
+    useLoaderData<typeof loader>();
 
   const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
 
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
 
   return (
-    <div>
-      <Form className="flex flex-col gap-5" method="post" ref={zo.ref}>
+    <div className="p-6 sm:p-8">
+      <h2 className="mb-1">{title}</h2>
+      <p>{subHeading}</p>
+      <Form className="mt-6 flex flex-col gap-5" method="post" ref={zo.ref}>
         <input
           type="hidden"
           name="userSignedUpWithPassword"
           value={String(userSignedUpWithPassword)}
         />
 
-        <div className="flex gap-6">
+        <div className="md:flex md:gap-6">
           <Input
             label="First name"
             data-test-id="firstName"
@@ -142,6 +145,7 @@ export default function Onboarding() {
             placeholder="Zaans"
             name={zo.fields.firstName()}
             error={zo.errors.firstName()?.message}
+            className="mb-5 md:mb-0"
           />
           <Input
             label="Last name"
