@@ -56,6 +56,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   } = await getAllEntriesForCreateAndEdit({
     userId,
     organizationId: organization.id,
+    request,
   });
 
   const id = getRequiredParam(params, "assetId");

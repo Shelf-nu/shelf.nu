@@ -47,15 +47,23 @@ export default function DynamicSelect({
     clearFilters,
     selectedItems,
     resetModelFiltersFetcher,
+    handleSelectItemChange,
   } = useModelFilters({
     model,
     countKey,
     initialDataKey,
+    selectionMode: "set",
   });
 
   return (
     <div className="relative w-full">
-      <Select name={model.name} defaultValue={defaultValue}>
+      <Select
+        name={model.name}
+        defaultValue={defaultValue}
+        onValueChange={(value) => {
+          handleSelectItemChange(value);
+        }}
+      >
         <SelectTrigger>
           <SelectValue placeholder={`Select ${model.name}`} />
         </SelectTrigger>

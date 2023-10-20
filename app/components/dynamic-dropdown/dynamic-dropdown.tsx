@@ -135,7 +135,9 @@ export default function DynamicDropdown({
                       value={item.id}
                       className="hidden"
                       checked={checked}
-                      onChange={handleSelectItemChange}
+                      onChange={(e) => {
+                        handleSelectItemChange(e.currentTarget.value);
+                      }}
                     />
                     <When truthy={checked}>
                       <CheckIcon className="text-primary" />
@@ -157,7 +159,9 @@ export default function DynamicDropdown({
                     value={item.id}
                     className="hidden"
                     checked={checked}
-                    onChange={handleSelectItemChange}
+                    onChange={(e) => {
+                      handleSelectItemChange(e.currentTarget.value);
+                    }}
                   />
                   <When truthy={checked}>
                     <CheckIcon className="text-primary" />

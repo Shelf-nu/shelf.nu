@@ -49,6 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   } = await getAllEntriesForCreateAndEdit({
     userId,
     organizationId: organization.id,
+    request,
   });
 
   const header = {

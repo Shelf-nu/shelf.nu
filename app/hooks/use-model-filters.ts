@@ -22,12 +22,14 @@ export type ModelFilterProps = {
     /** name of key for which we have to search the value */
     key: string;
   };
+  selectionMode?: "append" | "set";
 };
 
 export function useModelFilters({
   model,
   countKey,
   initialDataKey,
+  selectionMode = "append",
 }: ModelFilterProps) {
   const initialData = useLoaderData();
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -45,8 +47,7 @@ export function useModelFilters({
   }, [fetcher.data, initialData, initialDataKey]);
 
   const handleSelectItemChange = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      const value = e.currentTarget.value;
+    (value: string) => {
       /** If item is already there in search params then remove it */
       if (selectedItems.includes(value)) {
         setSearchParams((prev) => {
@@ -56,12 +57,16 @@ export function useModelFilters({
       } else {
         /** Otherwise, add the item in search params */
         setSearchParams((prev) => {
-          prev.append(model.name, value);
+          if (selectionMode === "append") {
+            prev.append(model.name, value);
+          } else {
+            prev.set(model.name, value);
+          }
           return prev;
         });
       }
     },
-    [selectedItems, model.name, setSearchParams]
+    [selectedItems, model.name, setSearchParams, selectionMode]
   );
 
   const handleSearchQueryChange = (e: ChangeEvent<HTMLInputElement>) => {

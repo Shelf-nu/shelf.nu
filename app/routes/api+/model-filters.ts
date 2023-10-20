@@ -39,12 +39,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const model = result.data.model as AllowedModelNames;
   const queryData = (await db[model].dynamicFindMany({
     where: {
-      [result.data.queryKey]: {
-        contains: result.data.queryValue,
-        mode: "insensitive",
-      },
       userId,
-      id: { notIn: (result.data.selectedValues ?? "").split(",") },
+      OR: [
+        {
+          [result.data.queryKey]: {
+            contains: result.data.queryValue,
+            mode: "insensitive",
+          },
+        },
+        {
+          id: { in: (result.data.selectedValues ?? "").split(",") },
+        },
+      ],
     },
     take: 4,
   })) as Array<Record<string, string>>;

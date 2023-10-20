@@ -695,27 +695,43 @@ export async function getAllRelatedEntries({
 export async function getAllEntriesForCreateAndEdit({
   userId,
   organizationId,
+  request,
 }: {
   userId: User["id"];
   organizationId: Organization["id"];
+  request: LoaderFunctionArgs["request"];
 }) {
+  const searchParams = getCurrentSearchParams(request);
+  const categorySelected = searchParams.get("category") ?? "";
+  const locationSelected = searchParams.get("location") ?? "";
+
   const [
-    categories,
+    categoryExcludedSelected,
+    selectedCategories,
     totalCategories,
     tags,
-    locations,
+    locationExcludedSelected,
+    selectedLocation,
     totalLocations,
     customFields,
   ] = await db.$transaction([
     /** Get the categories */
-    db.category.findMany({ where: { userId }, take: 4 }),
+    db.category.findMany({
+      where: { userId, id: { not: categorySelected } },
+      take: 4,
+    }),
+    db.category.findMany({ where: { userId, id: categorySelected } }),
     db.category.count({ where: { userId } }),
 
     /** Get the tags */
     db.tag.findMany({ where: { userId } }),
 
     /** Get the locations */
-    db.location.findMany({ where: { userId }, take: 4 }),
+    db.location.findMany({
+      where: { userId, id: { not: locationSelected } },
+      take: 4,
+    }),
+    db.location.findMany({ where: { userId, id: locationSelected } }),
     db.location.count({ where: { userId } }),
 
     /** Get the custom fields */
@@ -725,10 +741,10 @@ export async function getAllEntriesForCreateAndEdit({
   ]);
 
   return {
-    categories,
+    categories: [...selectedCategories, ...categoryExcludedSelected],
     totalCategories,
     tags,
-    locations,
+    locations: [...selectedLocation, ...locationExcludedSelected],
     totalLocations,
     customFields,
   };
