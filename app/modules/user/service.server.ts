@@ -429,3 +429,31 @@ export async function createUserAccountForTesting(
 
   return authSession;
 }
+
+export async function revokeAccessToOrganization({
+  userId,
+  organizationId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  /**
+   * if I want to revoke access, i simply need to:
+   * 1. Remove relation between user and team member
+   * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
+   */
+  const user = await db.user.update({
+    where: { id: userId },
+    data: {
+      // @TODO we have to remove the user from the TeamMember
+      userOrganizations: {
+        delete: {
+          userId_organizationId: {
+            userId,
+            organizationId,
+          },
+        },
+      },
+    },
+  });
+}
