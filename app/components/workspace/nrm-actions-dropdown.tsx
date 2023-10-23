@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { SendIcon, VerticalDotsIcon } from "~/components/icons";
 import {
   DropdownMenu,
@@ -16,9 +17,18 @@ export function TeamMembersActionsDropdown({
 }: {
   teamMember: WithDateFields<TeamMemberWithCustodies, string>;
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className="outline-none focus-visible:border-0">
+    <DropdownMenu
+      modal={false}
+      onOpenChange={(open) => setOpen(open)}
+      open={open}
+    >
+      <DropdownMenuTrigger
+        className="outline-none focus-visible:border-0"
+        // onClick={() => setOpen(true)}
+      >
         <i className="inline-block px-3 py-0 text-gray-400 ">
           <VerticalDotsIcon />
         </i>
@@ -29,11 +39,12 @@ export function TeamMembersActionsDropdown({
       >
         <DropdownMenuItem className="mb-2.5 p-4 md:mb-0 md:p-0">
           <Button
-            to="update-location"
+            to={`invite-user?teamMemberId=${teamMember.id}`}
             role="link"
             variant="link"
             className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
             width="full"
+            onClick={() => setOpen(false)}
           >
             <span className="flex items-center gap-2">
               <SendIcon /> Invite user

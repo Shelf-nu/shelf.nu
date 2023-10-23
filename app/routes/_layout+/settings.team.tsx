@@ -35,6 +35,15 @@ export interface TeamMembersWithUserOrInvite {
   userId: string | null;
 }
 
+type InviteWithTeamMember = Pick<
+  Invite,
+  "id" | "teamMemberId" | "inviteeEmail" | "status"
+> & {
+  inviteeTeamMember: {
+    name: string;
+  };
+};
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const { organizationId } = await requireAuthSession(request);
 
@@ -71,6 +80,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           teamMemberId: true,
           inviteeEmail: true,
           status: true,
+          inviteeTeamMember: {
+            select: {
+              name: true,
+            },
+          },
         },
       }),
       /** Get the teamMembers */
@@ -109,12 +123,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }));
 
   /** Create the same structure for invites */
-  for (const invite of invites as Pick<
-    Invite,
-    "id" | "teamMemberId" | "inviteeEmail" | "status"
-  >[]) {
+  for (const invite of invites as InviteWithTeamMember[]) {
     teamMembersWithUserOrInvite.push({
-      name: invite.inviteeEmail,
+      name: invite.inviteeTeamMember.name,
       img: "/images/default_pfp.jpg",
       email: invite.inviteeEmail,
       status: invite.status,

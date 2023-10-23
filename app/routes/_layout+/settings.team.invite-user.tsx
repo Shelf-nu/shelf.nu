@@ -1,7 +1,12 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  useActionData,
+  useNavigation,
+  useSearchParams,
+} from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import z from "zod";
 import {
@@ -16,6 +21,7 @@ import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { Image } from "~/components/shared/image";
+import { db } from "~/database";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
@@ -30,6 +36,7 @@ const InviteUserFormSchema = z.object({
     .refine(validEmail, () => ({
       message: "Please enter a valid email",
     })),
+  teamMemberId: z.string().optional(),
 });
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -57,7 +64,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  const { email } = result.data;
+  const { email, teamMemberId } = result.data;
+  let teamMemberName = email.split("@")[0];
+  if (teamMemberId) {
+    const teamMember = await db.teamMember.findUnique({
+      where: { id: teamMemberId },
+    });
+    if (teamMember) {
+      teamMemberName = teamMember.name;
+    }
+  }
 
   // // @TODO this still needs some more testing
   // const existingInvite = await getExisitingActiveInvite({
@@ -78,7 +94,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     inviteeEmail: email,
     inviterId: userId,
     roles: [OrganizationRoles.ADMIN],
-    teamMemberName: email.split("@")[0],
+    teamMemberName,
+    teamMemberId,
   });
 
   sendNotification({
@@ -104,6 +121,8 @@ export default function InviteUser() {
   const zo = useZorm("NewQuestionWizardScreen", InviteUserFormSchema);
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+  const [searchParams] = useSearchParams();
+  const teamMemberId = searchParams.get("teamMemberId");
 
   const actionData = useActionData<typeof action>();
 
@@ -121,6 +140,9 @@ export default function InviteUser() {
           </p>
         </div>
         <Form method="post" className="flex flex-col gap-3" ref={zo.ref}>
+          {teamMemberId ? (
+            <input type="hidden" name="teamMemberId" value={teamMemberId} />
+          ) : null}
           <SelectGroup>
             <SelectLabel className="pl-0">Workspace</SelectLabel>
             <Select name="organizationId" defaultValue={organization.id}>
