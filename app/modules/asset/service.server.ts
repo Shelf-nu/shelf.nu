@@ -665,7 +665,6 @@ export async function duplicateAsset({
 
 /** Fetches all related entries required for creating a new asset */
 export async function getAllRelatedEntries({
-  userId,
   organizationId,
 }: {
   userId: User["id"];

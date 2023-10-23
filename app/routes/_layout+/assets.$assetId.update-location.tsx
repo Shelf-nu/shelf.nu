@@ -1,4 +1,3 @@
-import { OrganizationType } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useNavigation } from "@remix-run/react";
@@ -7,7 +6,6 @@ import { LocationSelect } from "~/components/location";
 import { Button } from "~/components/shared/button";
 import { getAllRelatedEntries, getAsset, updateAsset } from "~/modules/asset";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { getOrganizationByUserId } from "~/modules/organization";
 import styles from "~/styles/layout/custom-modal.css";
 import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
