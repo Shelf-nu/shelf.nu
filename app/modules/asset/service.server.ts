@@ -127,9 +127,22 @@ export async function getAssets({
   }
 
   if (categoriesIds && categoriesIds.length > 0 && where.asset) {
-    where.asset.categoryId = {
-      in: categoriesIds,
-    };
+    if (categoriesIds.includes("uncategorized")) {
+      where.asset.OR = [
+        {
+          categoryId: {
+            in: categoriesIds,
+          },
+        },
+        {
+          categoryId: null,
+        },
+      ];
+    } else {
+      where.asset.categoryId = {
+        in: categoriesIds,
+      };
+    }
   }
 
   if (tagsIds && tagsIds.length > 0 && where.asset) {
@@ -235,7 +248,7 @@ export async function createAsset({
   };
 
   /** If a categoryId is passed, link the category to the asset. */
-  if (categoryId) {
+  if (categoryId !== "uncategorized") {
     Object.assign(data, {
       category: {
         connect: {
@@ -313,6 +326,7 @@ interface UpdateAssetPayload {
   id: Asset["id"];
   title?: Asset["title"];
   description?: Asset["description"];
+  /** Pass 'uncategorized' to clear the category */
   categoryId?: Asset["categoryId"];
   newLocationId?: Asset["locationId"];
   currentLocationId?: Asset["locationId"];
@@ -347,8 +361,17 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     mainImageExpiration,
   };
 
-  /** Delete the category id from the payload so we can use connect syntax from prisma */
-  if (categoryId) {
+  /** If uncategorized is passed, disconnect the category */
+  if (categoryId === "uncategorized") {
+    Object.assign(data, {
+      category: {
+        disconnect: true,
+      },
+    });
+  }
+
+  // If category id is passed and is differenent than uncategorized, connect the category
+  if (categoryId && categoryId !== "uncategorized") {
     Object.assign(data, {
       category: {
         connect: {
@@ -358,7 +381,7 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     });
   }
 
-  /** Delete the category id from the payload so we can use connect syntax from prisma */
+  /** Connect the new location id */
   if (newLocationId) {
     Object.assign(data, {
       location: {
