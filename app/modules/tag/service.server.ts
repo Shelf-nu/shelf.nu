@@ -30,6 +30,7 @@ export async function getTags({
   /** Default value of where. Takes the items belonging to current user */
   let where: Prisma.TagWhereInput = { organizationId };
 
+
   /** If the search string exists, add it to the where object */
   if (search) {
     where.name = {

@@ -339,6 +339,22 @@ export async function createAsset({
   });
 }
 
+
+interface UpdateAssetPayload {
+  id: Asset["id"];
+  title?: Asset["title"];
+  description?: Asset["description"];
+  /** Pass 'uncategorized' to clear the category */
+  categoryId?: Asset["categoryId"];
+  newLocationId?: Asset["locationId"];
+  currentLocationId?: Asset["locationId"];
+  mainImage?: Asset["mainImage"];
+  mainImageExpiration?: Asset["mainImageExpiration"];
+  tags?: { set: { id: string }[] };
+  userId?: User["id"];
+  customFieldsValues?: ShelfAssetCustomFieldValueType[];
+}
+
 export async function updateAsset(payload: UpdateAssetPayload) {
   const {
     title,
@@ -362,16 +378,8 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     mainImageExpiration,
   };
 
-  /** Delete the category id from the payload so we can use connect syntax from prisma */
-  if (categoryId !== "uncategorized") {
-    Object.assign(data, {
-      category: {
-        connect: {
-          id: categoryId,
-        },
-      },
-    });
-  } else {
+  /** If uncategorized is passed, disconnect the category */
+  if (categoryId === "uncategorized") {
     Object.assign(data, {
       category: {
         disconnect: true,
@@ -379,7 +387,18 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     });
   }
 
-  /** Delete the category id from the payload so we can use connect syntax from prisma */
+  // If category id is passed and is differenent than uncategorized, connect the category
+  if (categoryId && categoryId !== "uncategorized") {
+    Object.assign(data, {
+      category: {
+        connect: {
+          id: categoryId,
+        },
+      },
+    });
+  }
+
+  /** Connect the new location id */
   if (newLocationId) {
     Object.assign(data, {
       location: {
