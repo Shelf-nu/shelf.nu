@@ -38,6 +38,7 @@ export const UsersTable = () => {
                 <Th className="hidden md:table-cell">Name</Th>
                 <Th className="hidden md:table-cell">Role</Th>
                 <Th className="hidden md:table-cell">Status</Th>
+                <Th> </Th>
               </tr>
             </thead>
             <tbody>
@@ -49,7 +50,7 @@ export const UsersTable = () => {
                 status="ACCEPTED"
               />
               {teamMembersWithUserOrInvite.map((tm) => {
-                console.log(tm.user);
+                console.log(tm);
                 return (
                   <UserRow
                     key={tm.id}

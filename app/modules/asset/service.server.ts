@@ -339,22 +339,6 @@ export async function createAsset({
   });
 }
 
-
-interface UpdateAssetPayload {
-  id: Asset["id"];
-  title?: Asset["title"];
-  description?: Asset["description"];
-  /** Pass 'uncategorized' to clear the category */
-  categoryId?: Asset["categoryId"];
-  newLocationId?: Asset["locationId"];
-  currentLocationId?: Asset["locationId"];
-  mainImage?: Asset["mainImage"];
-  mainImageExpiration?: Asset["mainImageExpiration"];
-  tags?: { set: { id: string }[] };
-  userId?: User["id"];
-  customFieldsValues?: ShelfAssetCustomFieldValueType[];
-}
-
 export async function updateAsset(payload: UpdateAssetPayload) {
   const {
     title,

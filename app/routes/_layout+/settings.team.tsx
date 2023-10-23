@@ -53,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const [teamMembersWithUserOrInvite, teamMembers] = partition(
     organization.members,
-    (item) => item.userId === null && item.receivedInvites.length > 0
+    (item) => item.userId !== null && item.receivedInvites.length > 0
   );
 
   const header: HeaderData = {

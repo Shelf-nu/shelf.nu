@@ -23,6 +23,7 @@ export interface UpdateAssetPayload {
   id: Asset["id"];
   title?: Asset["title"];
   description?: Asset["description"];
+  /** Pass 'uncategorized' to clear the category */
   categoryId?: Asset["categoryId"];
   newLocationId?: Asset["locationId"];
   currentLocationId?: Asset["locationId"];
