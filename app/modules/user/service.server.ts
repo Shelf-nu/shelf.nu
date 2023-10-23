@@ -49,33 +49,37 @@ export async function getUserByIDWithOrg(id: User["id"]) {
 async function createUserOrgAssociation(
   tx: Omit<PrismaClient, ITXClientDenyList>,
   {
-    organizationId,
+    organizationIds,
     userId,
     roles,
   }: {
     roles: OrganizationRoles[];
-    organizationId: Organization["id"];
+    organizationIds: Organization["id"][];
     userId: User["id"];
   }
 ) {
-  return tx.userOrganization.upsert({
-    where: {
-      userId_organizationId: {
-        userId,
-        organizationId,
-      },
-    },
-    create: {
-      userId,
-      organizationId,
-      roles,
-    },
-    update: {
-      roles: {
-        push: OrganizationRoles.OWNER,
-      },
-    },
-  });
+  return await Promise.all(
+    Array.from(new Set(organizationIds)).map((organizationId) =>
+      tx.userOrganization.upsert({
+        where: {
+          userId_organizationId: {
+            userId,
+            organizationId,
+          },
+        },
+        create: {
+          userId,
+          organizationId,
+          roles,
+        },
+        update: {
+          roles: {
+            push: roles,
+          },
+        },
+      })
+    )
+  );
 }
 
 export async function createUserOrAttachOrg({
@@ -107,32 +111,27 @@ export async function createUserOrAttachOrg({
       email,
       userId: authAccount.id,
       username: randomUsernameFromEmail(email),
+      organizationId,
     });
     return user;
   }
 
-  /** @TODO this needs some work as we dont need a transaction anymore
-   * This runs when the user already exists and we just link it to the org */
-  const transaction = db.$transaction(
-    async (tx) => {
-      await createUserOrgAssociation(tx, {
-        userId: shelfUser.id,
-        organizationId,
-        roles,
-      });
-      return shelfUser;
-    },
-    { maxWait: 6000, timeout: 10000 }
-  );
-
-  return transaction;
+  await createUserOrgAssociation(db, {
+    userId: shelfUser.id,
+    organizationIds: [organizationId],
+    roles,
+  });
+  return shelfUser;
 }
 
 export async function createUser({
   email,
   userId,
   username,
-}: Pick<AuthSession & { username: string }, "userId" | "email" | "username">) {
+  organizationId,
+}: Pick<AuthSession & { username: string }, "userId" | "email" | "username"> & {
+  organizationId?: Organization["id"];
+}) {
   return db
     .$transaction(
       async (tx) => {
@@ -164,10 +163,17 @@ export async function createUser({
             organizations: true,
           },
         });
+        const organizationIds: Organization["id"][] = [
+          user.organizations[0].id,
+        ];
+        if (organizationId) {
+          organizationIds.push(organizationId);
+        }
+
         await createUserOrgAssociation(tx, {
           userId: user.id,
-          organizationId: user.organizations[0].id,
-          roles: [OrganizationRoles.ADMIN],
+          organizationIds,
+          roles: [OrganizationRoles.OWNER],
         });
         return user;
       },
@@ -442,10 +448,18 @@ export async function revokeAccessToOrganization({
    * 1. Remove relation between user and team member
    * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
    */
+  const teamMember = await db.teamMember.findFirst({
+    where: { userId, organizations: { some: { id: organizationId } } },
+  });
+
   const user = await db.user.update({
     where: { id: userId },
     data: {
-      // @TODO we have to remove the user from the TeamMember
+      teamMembers: {
+        disconnect: {
+          id: teamMember?.id,
+        },
+      },
       userOrganizations: {
         delete: {
           userId_organizationId: {
@@ -456,4 +470,5 @@ export async function revokeAccessToOrganization({
       },
     },
   });
+  return user;
 }

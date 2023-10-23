@@ -41,7 +41,7 @@ export const OrganizationSelect = () => {
           align="start"
         >
           <div className=" max-h-[320px] overflow-auto">
-            {ownedOrganizations.map((org) => (
+            {belongingOrganizations.map((org) => (
               <SelectItem value={org.id} key={org.id} className="p-2">
                 <div className="flex items-center gap-2">
                   {org.type === "PERSONAL" ? (
