@@ -54,6 +54,7 @@
     "@stripe/stripe-js": "^1.54.2",
     "@supabase/supabase-js": "^2.26.0",
     "@zxing/library": "^0.20.0",
+    "changedpi": "^1.0.4",
     "cookie": "^0.5.0",
     "crisp-sdk-web": "^1.0.19",
     "csv-parse": "^5.4.0",
