@@ -13,19 +13,11 @@ import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { userId } = await requireAuthSession(request);
-  const organization = await getOrganizationByUserId({
-    userId,
-    orgType: OrganizationType.PERSONAL,
-  });
-
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
+  const { userId, organizationId } = await requireAuthSession(request);
 
   const { locations } = await getAllRelatedEntries({
     userId,
-    organizationId: organization.id,
+    organizationId,
   });
 
   const id = getRequiredParam(params, "assetId");

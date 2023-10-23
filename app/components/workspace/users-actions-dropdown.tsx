@@ -53,6 +53,7 @@ export function TeamUsersActionsDropdown({
             </DropdownMenuItem>
           ) : null}
           {inviteStatus === "ACCEPTED" ? (
+            // <DropdownMenuItem className="mb-2.5 p-4 md:mb-0 md:p-0" asChild>
             <Form method="post">
               {userId ? (
                 <input type="hidden" name="userId" value={userId} />
@@ -70,7 +71,8 @@ export function TeamUsersActionsDropdown({
                 </span>
               </Button>
             </Form>
-          ) : null}
+          ) : // </DropdownMenuItem>
+          null}
         </DropdownMenuContent>
       </DropdownMenu>
     </>

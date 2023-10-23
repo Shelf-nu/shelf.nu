@@ -3,7 +3,6 @@ import type {
   Custody,
   Invite,
   InviteStatuses,
-  OrganizationRoles,
   TeamMember,
 } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
@@ -105,7 +104,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       img: um.user.profilePicture || "/images/default_pfp.jpg",
       email: um.user.email,
       status: "ACCEPTED",
-      role: "Administrator",
+      role: um.user.id === organization.userId ? "Owner" : "Administrator",
       userId: um.user.id,
     }));
 

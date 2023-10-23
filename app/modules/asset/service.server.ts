@@ -678,10 +678,10 @@ export async function getAllRelatedEntries({
 }> {
   const [categories, tags, locations, customFields] = await db.$transaction([
     /** Get the categories */
-    db.category.findMany({ where: { userId } }),
+    db.category.findMany({ where: { organizationId } }),
 
     /** Get the tags */
-    db.tag.findMany({ where: { userId } }),
+    db.tag.findMany({ where: { organizationId } }),
 
     /** Get the locations */
     db.location.findMany({ where: { organizationId } }),

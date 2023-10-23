@@ -8,7 +8,7 @@ import { Button } from "../shared";
 import { Table, Td, Th } from "../table";
 
 export const UsersTable = () => {
-  const { owner, teamMembersWithUserOrInvite } = useLoaderData<typeof loader>();
+  const { teamMembersWithUserOrInvite } = useLoaderData<typeof loader>();
 
   return (
     <div className="mb-6 flex gap-16">
@@ -43,14 +43,6 @@ export const UsersTable = () => {
               </tr>
             </thead>
             <tbody>
-              <UserRow
-                name={`${owner.firstName} ${owner.lastName}`}
-                email={owner.email}
-                img={owner.profilePicture || "/images/default_pfp.jpg"}
-                role="Owner"
-                status="ACCEPTED"
-                userId={owner.id}
-              />
               {teamMembersWithUserOrInvite.map((tm) => (
                 <UserRow
                   key={tm.name}
@@ -58,7 +50,7 @@ export const UsersTable = () => {
                   email={tm.email}
                   userId={tm?.userId || null}
                   // We just get the first one as we only need the email, and the email should be the same in all those receivedInvites
-                  role="Administrator"
+                  role={tm.role}
                   status={tm.status}
                   img={tm?.img}
                 />
