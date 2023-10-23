@@ -48,20 +48,24 @@ export const UsersTable = () => {
                 role="Owner"
                 status="ACCEPTED"
               />
-              {teamMembersWithUserOrInvite.map((tm) => (
-                <UserRow
-                  key={tm.id}
-                  name={
-                    tm?.userId && tm.user
-                      ? `${tm.user.firstName} ${tm.user.lastName}`
-                      : tm.name
-                  }
-                  // We just get the first one as we only need the email, and the email should be the same in all those receivedInvites
-                  invite={tm.receivedInvites[0]}
-                  role="Administrator"
-                  status={tm.userId ? "ACCEPTED" : "PENDING"}
-                />
-              ))}
+              {teamMembersWithUserOrInvite.map((tm) => {
+                console.log(tm.user);
+                return (
+                  <UserRow
+                    key={tm.id}
+                    name={
+                      tm?.userId && tm.user
+                        ? `${tm.user.firstName} ${tm.user.lastName}`
+                        : tm.name
+                    }
+                    // We just get the first one as we only need the email, and the email should be the same in all those receivedInvites
+                    invite={tm.receivedInvites[0]}
+                    role="Administrator"
+                    status={tm.userId ? "ACCEPTED" : "PENDING"}
+                    img={tm?.user?.profilePicture || "/images/default_pfp.jpg"}
+                  />
+                );
+              })}
             </tbody>
           </Table>
         </div>

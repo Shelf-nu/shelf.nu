@@ -71,7 +71,6 @@ export interface IndexResponse {
 export async function loader({ request }: LoaderFunctionArgs) {
   const { userId, organizationId } = await requireAuthSession(request);
 
-  //@TODO avoid this call by saving user data in session
   const user = await db.user.findUnique({
     where: {
       id: userId,
@@ -81,19 +80,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
       tier: {
         include: { tierLimit: true },
       },
-      organizations: {
+      userOrganizations: {
+        where: {
+          userId,
+        },
         select: {
-          id: true,
-          name: true,
-          type: true,
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+            },
+          },
         },
       },
     },
   });
 
-  const currentOrganization = user?.organizations.find(
-    (org) => org.id === organizationId
-  );
+  const currentOrganization = user?.userOrganizations
+    .map((userOrganization) => userOrganization.organization)
+    .find((org) => org.id === organizationId);
 
   const {
     search,

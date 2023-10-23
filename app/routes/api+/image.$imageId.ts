@@ -16,6 +16,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     select: { contentType: true, blob: true, userId: true },
   });
 
+  // @TODO we need to fix this, in order to do it we should add the orgId also to the image
   /** If the image doesnt belong to the user who has the session. Throw an error. */
   if (image?.userId !== session.userId) {
     throw new ShelfStackError({

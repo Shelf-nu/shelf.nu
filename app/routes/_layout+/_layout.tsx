@@ -73,8 +73,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json(
     {
       user,
-      ownedOrganizations: user?.organizations,
-      belongingOrganizations: user.userOrganizations.map(
+      organizations: user.userOrganizations.map(
         (userOrganization) => userOrganization.organization
       ),
       currentOrganizationId: authSession.organizationId,

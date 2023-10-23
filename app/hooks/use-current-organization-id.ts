@@ -9,8 +9,7 @@ import { useMatchesData } from "./use-matches-data";
  */
 export function useCurrentOrganization(): Organization | undefined {
   const layoutData = useMatchesData<{
-    ownedOrganizations: Organization[];
-    belongingOrganizations: Organization[];
+    organisations: Organization[];
     currentOrganizationId: string;
   }>("routes/_layout+/_layout");
 
@@ -21,7 +20,7 @@ export function useCurrentOrganization(): Organization | undefined {
     });
   }
 
-  return layoutData.belongingOrganizations.find(
+  return layoutData.organisations.find(
     (organization) => organization.id === layoutData.currentOrganizationId
   );
 }
