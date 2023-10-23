@@ -42,24 +42,25 @@ export const TeamMembersTable = () => {
             />
           ) : (
             <>
+              <div className="flex w-full items-center justify-between border-b px-6 py-4">
+                <div>
+                  <div className=" text-md font-semibold text-gray-900">
+                    Non-registered members
+                  </div>
+                  <div>{teamMembers.length} items</div>
+                </div>
+                <div className="text-right">
+                  <Button variant="primary" to={`add-member`}>
+                    <span className=" whitespace-nowrap">Add NRM</span>
+                  </Button>
+                </div>
+              </div>
               <Table>
                 <thead>
-                  <Tr>
-                    <Th>
-                      <div className=" text-md font-semibold text-gray-900">
-                        Non-registered members
-                      </div>
-                      <div>
-                        {teamMembers.length}{" "}
-                        {teamMembers.length > 1 ? "items" : "item"}{" "}
-                      </div>
-                    </Th>
-                    <Th className="hidden md:table-cell">
-                      <Button variant="primary" to={`add-member`}>
-                        <span className=" whitespace-nowrap">Add NRM</span>
-                      </Button>
-                    </Th>
-                  </Tr>
+                  <tr>
+                    <Th className="hidden md:table-cell">Name</Th>
+                    <Th> </Th>
+                  </tr>
                 </thead>
                 <tbody>
                   {teamMembers.map((item) => (
