@@ -88,6 +88,8 @@ const DeleteMemberContent = ({ id }: { id: TeamMember["id"] }) => {
             width="full"
             data-test-id="confirmdeleteAssetButton"
             disabled={disabled}
+            name="intent"
+            value="delete"
           >
             Delete team member
           </Button>

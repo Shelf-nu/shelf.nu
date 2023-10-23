@@ -9,6 +9,7 @@ import { Table, Td, Th } from "../table";
 
 export const UsersTable = () => {
   const { owner, teamMembersWithUserOrInvite } = useLoaderData<typeof loader>();
+
   return (
     <div className="mb-6 flex gap-16">
       <div className="w-1/4">
@@ -48,20 +49,18 @@ export const UsersTable = () => {
                 img={owner.profilePicture || "/images/default_pfp.jpg"}
                 role="Owner"
                 status="ACCEPTED"
+                userId={owner.id}
               />
               {teamMembersWithUserOrInvite.map((tm) => (
                 <UserRow
-                  key={tm.id}
-                  name={
-                    tm?.userId && tm.user
-                      ? `${tm.user.firstName} ${tm.user.lastName}`
-                      : tm.name
-                  }
+                  key={tm.name}
+                  name={tm.name}
+                  email={tm.email}
+                  userId={tm?.userId || null}
                   // We just get the first one as we only need the email, and the email should be the same in all those receivedInvites
-                  invite={tm.receivedInvites[0]}
                   role="Administrator"
-                  status={tm.userId ? "ACCEPTED" : "PENDING"}
-                  img={tm?.user?.profilePicture || "/images/default_pfp.jpg"}
+                  status={tm.status}
+                  img={tm?.img}
                 />
               ))}
             </tbody>
@@ -79,6 +78,7 @@ const UserRow = ({
   email,
   status = "PENDING",
   role,
+  userId,
 }: {
   name: string;
   img?: string;
@@ -88,6 +88,7 @@ const UserRow = ({
   email?: string;
   status?: InviteStatuses;
   role?: string;
+  userId: string | null;
 }) => (
   <tr className={tw("hover:bg-gray-50")}>
     <Td className="w-full">
@@ -113,7 +114,10 @@ const UserRow = ({
     </Td>
     <Td>
       {role !== "Owner" ? (
-        <TeamUsersActionsDropdown inviteStatus={invite?.status || status} />
+        <TeamUsersActionsDropdown
+          inviteStatus={invite?.status || status}
+          userId={userId}
+        />
       ) : null}
     </Td>
   </tr>
