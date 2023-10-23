@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
 
-import { getAuthSession } from "~/modules/auth";
+import { destroyAuthSession, getAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -18,5 +18,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (user) {
     return redirect(user.onboarded ? "/assets" : "onboarding");
   }
-  return redirect("login");
+  /** Not finding user for the current session is sus
+   * So we just destroy the session and redirect to /
+   */
+  return destroyAuthSession(request);
 };
