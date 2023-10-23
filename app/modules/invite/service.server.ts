@@ -35,25 +35,28 @@ export async function createInvite({
   inviterId,
   roles,
   teamMemberName,
+  teamMemberId,
 }: Pick<Invite, "inviterId" | "inviteeEmail" | "organizationId" | "roles"> & {
   teamMemberName: TeamMember["name"];
+  teamMemberId?: Invite["teamMemberId"];
 }) {
-  const previousInvite = await db.invite.findFirst({
-    where: {
-      organizationId,
-      inviteeEmail,
-    },
-  });
-  let teamMemberId: Invite["teamMemberId"];
-  if (previousInvite?.teamMemberId) {
-    //we already invited this user before, so dont create 1 more team member
-    teamMemberId = previousInvite.teamMemberId;
-  } else {
-    const member = await createTeamMember({
-      name: teamMemberName,
-      organizationId,
+  if (!teamMemberId) {
+    const previousInvite = await db.invite.findFirst({
+      where: {
+        organizationId,
+        inviteeEmail,
+      },
     });
-    teamMemberId = member.id;
+    if (previousInvite?.teamMemberId) {
+      //we already invited this user before, so dont create 1 more team member
+      teamMemberId = previousInvite.teamMemberId;
+    } else {
+      const member = await createTeamMember({
+        name: teamMemberName,
+        organizationId,
+      });
+      teamMemberId = member.id;
+    }
   }
 
   const inviter = {
@@ -148,7 +151,7 @@ export async function updateInviteStatus({
     });
   }
   const updatedInvite = await db.invite.update({ where: { id }, data });
-  //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we reject all of them if user rejects 1
+  //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we invalidate all of them if user rejects 1
   //because user doesnt or want to join that org, so we should update all pending invite to show the same
   await db.invite.updateMany({
     where: {
