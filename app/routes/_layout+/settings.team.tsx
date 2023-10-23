@@ -47,10 +47,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw new Error("Organization not found");
   }
 
-  // const teamMembers = organization.members.filter((member) => {
-  //   console.log(member);
-  // });
-
   const [teamMembersWithUserOrInvite, teamMembers] = partition(
     organization.members,
     (item) => item.userId !== null || item.receivedInvites.length > 0
