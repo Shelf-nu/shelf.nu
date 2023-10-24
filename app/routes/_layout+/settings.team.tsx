@@ -1,9 +1,10 @@
 import { useMemo } from "react";
-import type {
-  Custody,
-  Invite,
+import {
+  OrganizationRoles,
+  type Custody,
+  type Invite,
   InviteStatuses,
-  TeamMember,
+  type TeamMember,
 } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
@@ -19,6 +20,7 @@ import { TeamMembersTable } from "~/components/workspace/team-members-table";
 import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
+import { createInvite } from "~/modules/invite";
 import { revokeAccessToOrganization } from "~/modules/user";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -72,9 +74,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: {
           organizationId,
           status: {
-            not: "ACCEPTED",
+            notIn: [InviteStatuses.ACCEPTED, InviteStatuses.INVALIDATED],
+          },
+          inviteeEmail: {
+            not: "",
           },
         },
+        distinct: ["inviteeEmail"],
         select: {
           id: true,
           teamMemberId: true,
@@ -96,22 +102,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           },
           userId: null,
-          OR: [
-            {
-              receivedInvites: {
-                none: {},
-              },
-            },
-            {
-              receivedInvites: {
-                none: {
-                  status: {
-                    in: ["ACCEPTED", "PENDING"],
-                  },
-                },
-              },
-            },
-          ],
+          // OR: [
+          //   {
+          //     receivedInvites: {
+          //       none: {},
+          //     },
+          //   },
+          //   {
+          //     receivedInvites: {
+          //       none: {
+          //         status: {
+          //           in: ["ACCEPTED", "PENDING"],
+          //         },
+          //       },
+          //     },
+          //   },
+          // ],
         },
       }),
     ]);
@@ -161,7 +167,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { organizationId } = await requireAuthSession(request);
+  const { organizationId, userId } = await requireAuthSession(request);
 
   const formData = await request.formData();
   const intent = formData.get("intent") as ActionIntent;
@@ -176,9 +182,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       return redirect(`/settings/team`);
     case "revoke":
-      const userId = formData.get("userId") as string;
+      const targetUserId = formData.get("userId") as string;
       const user = await revokeAccessToOrganization({
-        userId,
+        userId: targetUserId,
         organizationId,
       });
 
@@ -196,14 +202,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       return redirect("/settings/team");
     case "resend":
-
-    // await createInvite({
-    //   organizationId,
-    //   teamMemberId,
-    //   inviteeEmail: formData.get("email") as string,
-    // });
-
-    // return handleResend(teamMemberId);
+      await createInvite({
+        organizationId,
+        inviteeEmail: formData.get("email") as string,
+        teamMemberName: formData.get("name") as string,
+        teamMemberId,
+        inviterId: userId,
+        roles: [OrganizationRoles.ADMIN],
+      });
+      sendNotification({
+        title: "Successfully invited user",
+        message:
+          "They will receive an email in which they can complete their registration.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+      return null;
     default:
       throw new ShelfStackError({ message: "Invalid action" });
   }

@@ -25,7 +25,7 @@ export const UsersTable = () => {
           <div className="flex w-full items-center justify-between border-b px-6 py-4">
             <div>
               <div className=" text-md font-semibold text-gray-900">Users</div>
-              <div>{teamMembersWithUserOrInvite.length + 1} items</div>
+              <div>{teamMembersWithUserOrInvite.length} items</div>
             </div>
             <div className="text-right">
               <Button variant="primary" to={`invite-user`}>
@@ -77,7 +77,7 @@ const UserRow = ({
   invite?:
     | Pick<Invite, "id" | "teamMemberId" | "inviteeEmail" | "status">
     | undefined;
-  email?: string;
+  email: string;
   status?: InviteStatuses;
   role?: string;
   userId: string | null;
@@ -109,6 +109,8 @@ const UserRow = ({
         <TeamUsersActionsDropdown
           inviteStatus={invite?.status || status}
           userId={userId}
+          name={name}
+          email={email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
         />
       ) : null}
     </Td>

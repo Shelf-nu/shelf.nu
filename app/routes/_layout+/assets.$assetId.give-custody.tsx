@@ -1,4 +1,4 @@
-import { AssetStatus, OrganizationType } from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";

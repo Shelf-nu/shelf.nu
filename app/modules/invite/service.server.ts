@@ -130,7 +130,6 @@ export async function updateInviteStatus({
   }
   const data = { status };
   if (status === "ACCEPTED") {
-    console.log("invite", invite);
     const user = await createUserOrAttachOrg({
       email: invite.inviteeEmail,
       organizationId: invite.organizationId,

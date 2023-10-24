@@ -8,7 +8,6 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
@@ -18,9 +17,13 @@ import { Button } from "../shared";
 export function TeamUsersActionsDropdown({
   userId,
   inviteStatus,
+  name,
+  email,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
+  name?: string;
+  email: string;
 }) {
   return (
     <>
@@ -37,10 +40,11 @@ export function TeamUsersActionsDropdown({
           <Form method="post">
             {/* Only show resend button if the invite is not accepted */}
             {inviteStatus !== "ACCEPTED" ? (
-              <DropdownMenuItem className="mb-2.5 p-4 md:mb-0 md:p-0">
+              <>
+                <input type="hidden" name="name" value={name} />
+                <input type="hidden" name="email" value={email} />
                 <Button
-                  to="update-location"
-                  role="link"
+                  type="submit"
                   variant="link"
                   className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
@@ -51,7 +55,7 @@ export function TeamUsersActionsDropdown({
                     <RefreshIcon /> Resend invite
                   </span>
                 </Button>
-              </DropdownMenuItem>
+              </>
             ) : null}
             {inviteStatus === "ACCEPTED" ? (
               <>
