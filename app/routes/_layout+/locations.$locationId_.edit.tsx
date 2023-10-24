@@ -95,6 +95,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     description,
     address,
     image: file || null,
+    organizationId: authSession.organizationId,
   });
 
   sendNotification({

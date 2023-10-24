@@ -82,21 +82,29 @@ export async function createOrganization({
     },
   };
 
+  const org = await db.organization.create({ data });
   if (image?.size && image?.size > 0) {
-    Object.assign(data, {
-      image: {
-        create: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
-          user: {
-            connect: {
-              id: userId,
-            },
+    await db.image.create({
+      data: {
+        blob: Buffer.from(await image.arrayBuffer()),
+        contentType: image.type,
+        ownerOrg: {
+          connect: {
+            id: org.id,
+          },
+        },
+        organization: {
+          connect: {
+            id: org.id,
+          },
+        },
+        user: {
+          connect: {
+            id: userId,
           },
         },
       },
     });
   }
-
-  return db.organization.create({ data });
+  return org;
 }
