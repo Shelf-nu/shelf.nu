@@ -108,6 +108,9 @@ export default function WorkspacePage() {
             <ListHeader
               children={
                 <>
+                  <Th className="hidden whitespace-nowrap md:table-cell">
+                    Owner
+                  </Th>
                   <Th className="hidden md:table-cell">Type</Th>
                   <Th className="hidden md:table-cell">Assets</Th>
                   <Th className="hidden md:table-cell">Locations</Th>
@@ -192,6 +195,8 @@ const OrganizationRow = ({
           </div>
         </div>
       </Td>
+      <Td> </Td>
+
       <Td>{item.type}</Td>
       <Td>{item._count?.assets || 0}</Td>
       <Td>{item._count?.locations || 0}</Td>

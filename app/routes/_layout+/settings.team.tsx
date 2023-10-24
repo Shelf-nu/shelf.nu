@@ -74,7 +74,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: {
           organizationId,
           status: {
-            notIn: [InviteStatuses.ACCEPTED, InviteStatuses.INVALIDATED],
+            in: [InviteStatuses.PENDING],
           },
           inviteeEmail: {
             not: "",
@@ -102,12 +102,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           },
           userId: null,
-          // OR: [
-          //   {
-          //     receivedInvites: {
-          //       none: {},
+
+          /**
+           * @TODO We need team members that:
+           * 1. Don't have any invites
+           * 2. If they have invites, they should not be accepted or pending
+           */
+          // receivedInvites: {
+          //   none: {
+          //     status: {
+          //       in: ["ACCEPTED", "PENDING"],
           //     },
           //   },
+          // },
+          // OR: [
+          //   //   {
+          //   //     receivedInvites: {
+          //   //       none: {},
+          //   //     },
+          //   //   },
           //   {
           //     receivedInvites: {
           //       none: {
