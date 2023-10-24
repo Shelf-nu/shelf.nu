@@ -13,7 +13,7 @@ import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { userId } = await requireAuthSession(request);
+  const { organizationId } = await requireAuthSession(request);
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({
     where: { id: assetId },
@@ -32,10 +32,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     where: {
       organizations: {
         some: {
-          type: OrganizationType.PERSONAL,
-          owner: { id: userId },
+          id: organizationId,
         },
       },
+    },
+    include: {
+      user: true,
     },
   });
 

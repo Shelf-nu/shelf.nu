@@ -35,14 +35,30 @@ export default function CustodianSelect() {
                     key={member.id}
                     value={JSON.stringify({ id: member.id, name: member.name })}
                   >
-                    <div className="flex items-center gap-3 py-3.5">
-                      <i>
-                        <UserIcon />
-                      </i>
-                      <span className=" flex-1 font-medium text-gray-900">
-                        {member.name}
-                      </span>
-                    </div>
+                    {member.user ? (
+                      <div className="flex items-center gap-3 py-3.5">
+                        <img
+                          src={
+                            member.user.profilePicture ||
+                            "/images/default_pfp.jpg"
+                          }
+                          className={"w-[20px] rounded-[4px]"}
+                          alt={`${member.user.firstName} ${member.user.lastName}'s profile`}
+                        />
+                        <span className=" flex-1 font-medium text-gray-900">
+                          {member.user.firstName} {member.user.lastName}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-3 py-3.5">
+                        <i>
+                          <UserIcon />
+                        </i>
+                        <span className=" flex-1 font-medium text-gray-900">
+                          {member.name}
+                        </span>
+                      </div>
+                    )}
                   </SelectItem>
                 ))}
               </div>
