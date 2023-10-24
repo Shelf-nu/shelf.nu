@@ -15,10 +15,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     where: { id: params.imageId },
     select: { ownerOrgId: true, contentType: true, blob: true, userId: true },
   });
+  if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
 
-  // @TODO we need to fix this, in order to do it we should add the orgId also to the image
-  /** If the image doesnt belong to the user who has the session. Throw an error. */
-  if (image?.ownerOrgId !== session.organizationId) {
+  const orgIds = await db.organization.findMany({
+    where: { userId: session.userId },
+    select: { id: true },
+  });
+
+  if (orgIds.map((o) => o.id).includes(image.ownerOrgId)) {
     throw new ShelfStackError({
       message: "Unauthorized. This resource doesn't belong to you.",
       status: 403,
