@@ -17,12 +17,17 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   });
   if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
 
-  const orgIds = await db.organization.findMany({
+  const userOrganizations = await db.userOrganization.findMany({
     where: { userId: session.userId },
-    select: { id: true },
+    select: {
+      organization: {
+        select: { id: true },
+      },
+    },
   });
+  const orgIds = userOrganizations.map((uo) => uo.organization.id);
 
-  if (orgIds.map((o) => o.id).includes(image.ownerOrgId)) {
+  if (!orgIds.includes(image.ownerOrgId)) {
     throw new ShelfStackError({
       message: "Unauthorized. This resource doesn't belong to you.",
       status: 403,

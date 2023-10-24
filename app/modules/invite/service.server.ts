@@ -86,6 +86,7 @@ export async function createInvite({
     expiresAt,
     inviteCode: generateRandomCode(6),
   };
+
   if (roles.length) {
     Object.assign(data, {
       roles,
@@ -129,6 +130,7 @@ export async function updateInviteStatus({
   }
   const data = { status };
   if (status === "ACCEPTED") {
+    console.log("invite", invite);
     const user = await createUserOrAttachOrg({
       email: invite.inviteeEmail,
       organizationId: invite.organizationId,

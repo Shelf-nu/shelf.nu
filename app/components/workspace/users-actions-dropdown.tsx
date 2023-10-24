@@ -34,45 +34,48 @@ export function TeamUsersActionsDropdown({
           align="end"
           className="order w-[180px] rounded-md bg-white p-[6px] text-right"
         >
-          {/* Only show resend button if the invite is not accepted */}
-          {inviteStatus !== "ACCEPTED" ? (
-            <DropdownMenuItem className="mb-2.5 p-4 md:mb-0 md:p-0">
-              <Button
-                to="update-location"
-                role="link"
-                variant="link"
-                className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                width="full"
-                name="intent"
-                value="resend"
-              >
-                <span className="flex items-center gap-2">
-                  <RefreshIcon /> Resend invite
-                </span>
-              </Button>
-            </DropdownMenuItem>
-          ) : null}
-          {inviteStatus === "ACCEPTED" ? (
-            // <DropdownMenuItem className="mb-2.5 p-4 md:mb-0 md:p-0" asChild>
-            <Form method="post">
-              {userId ? (
-                <input type="hidden" name="userId" value={userId} />
-              ) : null}
-              <Button
-                type="submit"
-                variant="link"
-                className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                width="full"
-                name="intent"
-                value="revoke"
-              >
-                <span className="flex items-center gap-2">
-                  <RemoveUserIcon /> Revoke access
-                </span>
-              </Button>
-            </Form>
-          ) : // </DropdownMenuItem>
-          null}
+          <Form method="post">
+            {/* Only show resend button if the invite is not accepted */}
+            {inviteStatus !== "ACCEPTED" ? (
+              <DropdownMenuItem className="mb-2.5 p-4 md:mb-0 md:p-0">
+                <Button
+                  to="update-location"
+                  role="link"
+                  variant="link"
+                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  width="full"
+                  name="intent"
+                  value="resend"
+                >
+                  <span className="flex items-center gap-2">
+                    <RefreshIcon /> Resend invite
+                  </span>
+                </Button>
+              </DropdownMenuItem>
+            ) : null}
+            {inviteStatus === "ACCEPTED" ? (
+              <>
+                {/* // @TODO check this */}
+                {/* // <DropdownMenuItem className="mb-2.5 p-4 md:mb-0 md:p-0" asChild> */}
+                {userId ? (
+                  <input type="hidden" name="userId" value={userId} />
+                ) : null}
+                <Button
+                  type="submit"
+                  variant="link"
+                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  width="full"
+                  name="intent"
+                  value="revoke"
+                >
+                  <span className="flex items-center gap-2">
+                    <RemoveUserIcon /> Revoke access
+                  </span>
+                </Button>
+              </>
+            ) : // </DropdownMenuItem>
+            null}
+          </Form>
         </DropdownMenuContent>
       </DropdownMenu>
     </>

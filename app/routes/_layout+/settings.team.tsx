@@ -96,9 +96,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           },
           userId: null,
-          receivedInvites: {
-            none: {},
-          },
+          OR: [
+            {
+              receivedInvites: {
+                none: {},
+              },
+            },
+            {
+              receivedInvites: {
+                none: {
+                  status: {
+                    in: ["ACCEPTED", "PENDING"],
+                  },
+                },
+              },
+            },
+          ],
         },
       }),
     ]);
@@ -133,6 +146,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       userId: null,
     });
   }
+
+  // console.log("teamMembersWithUserOrInvite", teamMembersWithUserOrInvite);
+  // console.log("teamMembers", teamMembers);
 
   return json({
     currentOrganizationId: organizationId,
@@ -180,9 +196,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       return redirect("/settings/team");
     case "resend":
+
+    // await createInvite({
+    //   organizationId,
+    //   teamMemberId,
+    //   inviteeEmail: formData.get("email") as string,
+    // });
+
     // return handleResend(teamMemberId);
-    case "invite":
-    // return handleInvite(teamMemberId);
     default:
       throw new ShelfStackError({ message: "Invalid action" });
   }
