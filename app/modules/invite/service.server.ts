@@ -149,6 +149,10 @@ export async function updateInviteStatus({
         },
       },
     });
+    await db.teamMember.update({
+      where: { id: invite.teamMemberId },
+      data: { user: { connect: { id: user.id } } },
+    });
   }
   const updatedInvite = await db.invite.update({ where: { id }, data });
   //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we invalidate all of them if user rejects 1

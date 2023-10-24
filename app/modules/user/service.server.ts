@@ -455,11 +455,13 @@ export async function revokeAccessToOrganization({
   const user = await db.user.update({
     where: { id: userId },
     data: {
-      teamMembers: {
-        disconnect: {
-          id: teamMember?.id,
+      ...(teamMember?.id && {
+        teamMembers: {
+          disconnect: {
+            id: teamMember.id,
+          },
         },
-      },
+      }),
       userOrganizations: {
         delete: {
           userId_organizationId: {

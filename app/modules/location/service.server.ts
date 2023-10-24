@@ -159,6 +159,11 @@ export async function createLocation({
         create: {
           blob: Buffer.from(await image.arrayBuffer()),
           contentType: image.type,
+          ownerOrg: {
+            connect: {
+              id: organizationId,
+            },
+          },
           user: {
             connect: {
               id: userId,
@@ -193,8 +198,10 @@ export async function updateLocation(payload: {
   description?: Location["description"];
   image: File | null;
   userId: User["id"];
+  organizationId: Organization["id"];
 }) {
-  const { id, name, address, description, image, userId } = payload;
+  const { id, name, address, description, image, userId, organizationId } =
+    payload;
   const data = {
     name,
     description,
@@ -205,6 +212,11 @@ export async function updateLocation(payload: {
     const imageData = {
       blob: Buffer.from(await image.arrayBuffer()),
       contentType: image.type,
+      ownerOrg: {
+        connect: {
+          id: organizationId,
+        },
+      },
       user: {
         connect: {
           id: userId,
