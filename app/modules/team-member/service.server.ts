@@ -50,6 +50,7 @@ export async function createTeamMemberIfNotExists({
   for (const [teamMember, _] of teamMembers) {
     const existingTeamMember = await db.teamMember.findFirst({
       where: {
+        deletedAt: null,
         name: teamMember,
         organizations: { some: { id: organizationId } },
       },
@@ -92,6 +93,7 @@ export async function getTeamMembers({
 
   /** Default value of where. Takes the assetss belonging to current user */
   let where: Prisma.TeamMemberWhereInput = {
+    deletedAt: null,
     organizations: { some: { id: organizationId } },
   };
 

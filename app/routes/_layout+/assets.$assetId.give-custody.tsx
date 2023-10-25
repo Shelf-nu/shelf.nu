@@ -30,6 +30,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   /** We get all the team members that are part of the user's personal organization */
   const teamMembers = await db.teamMember.findMany({
     where: {
+      deletedAt: null,
       organizations: {
         some: {
           id: organizationId,

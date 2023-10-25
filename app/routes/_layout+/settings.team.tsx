@@ -99,6 +99,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
        */
       db.teamMember.findMany({
         where: {
+          deletedAt: null,
           organizations: {
             some: {
               id: organizationId,
@@ -168,9 +169,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   switch (intent) {
     case "delete":
-      await db.teamMember.delete({
+      await db.teamMember.update({
         where: {
           id: teamMemberId,
+        },
+        data: {
+          deletedAt: new Date(),
         },
       });
       return redirect(`/settings/team`);

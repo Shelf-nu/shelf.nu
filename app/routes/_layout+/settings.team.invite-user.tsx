@@ -68,7 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   let teamMemberName = email.split("@")[0];
   if (teamMemberId) {
     const teamMember = await db.teamMember.findUnique({
-      where: { id: teamMemberId },
+      where: { deletedAt: null, id: teamMemberId },
     });
     if (teamMember) {
       teamMemberName = teamMember.name;
