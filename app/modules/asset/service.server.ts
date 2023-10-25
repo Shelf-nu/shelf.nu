@@ -1004,6 +1004,7 @@ export const createAssetsFromBackupImport = async ({
 
       const existingCustodian = await db.teamMember.findFirst({
         where: {
+          deletedAt: null,
           organizations: {
             some: {
               id: organizationId,

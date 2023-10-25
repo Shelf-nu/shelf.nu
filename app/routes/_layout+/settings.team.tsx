@@ -48,7 +48,6 @@ type InviteWithTeamMember = Pick<
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { organizationId } = await requireAuthSession(request);
-
   const [organization, userMembers, invites, teamMembers] =
     await db.$transaction([
       /** Get the org */
@@ -94,47 +93,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       }),
       /** Get the teamMembers */
+      /**
+       * 1. Don't have any invites(userId:null)
+       * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
+       */
       db.teamMember.findMany({
         where: {
+          deletedAt: null,
           organizations: {
             some: {
               id: organizationId,
             },
           },
           userId: null,
-
-          /**
-           * @TODO We need team members that:
-           * 1. Don't have any invites
-           * 2. If they have invites, they should not be accepted or pending
-           */
-          // receivedInvites: {
-          //   none: {
-          //     status: {
-          //       in: ["ACCEPTED", "PENDING"],
-          //     },
-          //   },
-          // },
-          // OR: [
-          //   //   {
-          //   //     receivedInvites: {
-          //   //       none: {},
-          //   //     },
-          //   //   },
-          //   {
-          //     receivedInvites: {
-          //       none: {
-          //         status: {
-          //           in: ["ACCEPTED", "PENDING"],
-          //         },
-          //       },
-          //     },
-          //   },
-          // ],
+          receivedInvites: {
+            none: {
+              status: {
+                in: [InviteStatuses.PENDING],
+              },
+            },
+          },
         },
       }),
     ]);
-
   if (!organization) {
     throw new Error("Organization not found");
   }
@@ -188,9 +169,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   switch (intent) {
     case "delete":
-      await db.teamMember.delete({
+      await db.teamMember.update({
         where: {
           id: teamMemberId,
+        },
+        data: {
+          deletedAt: new Date(),
         },
       });
       return redirect(`/settings/team`);
