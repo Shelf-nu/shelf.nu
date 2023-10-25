@@ -53,7 +53,6 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
                 const qrId = match[4]; // Get the last segment of the URL as the QR id
 
                 setScanCompleted(true); // Set the scanCompleted state to true
-
                 // window.location.href = scannedData;
 
                 navigate(`/qr/${qrId}`);
@@ -78,7 +77,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
 
   return (
     <>
-      {!scanCompleted ? (
+      {!scanCompleted && (
         <div className="relative">
           <video ref={videoRef} width="100%" height="720px" autoPlay={true} />
           <button
@@ -89,11 +88,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
             <XIcon />
           </button>
         </div>
-      ) : (
-        <div className="my-4 flex items-center justify-center rounded border border-green-300 bg-green-100 p-4 text-green-700">
-          Asset scanned successfully...
-        </div>
-      )}{" "}
+      )}
     </>
   );
 };
