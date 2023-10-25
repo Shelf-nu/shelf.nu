@@ -5,7 +5,7 @@ import { TeamMembersActionsDropdown } from "./nrm-actions-dropdown";
 import { EmptyState } from "../list/empty-state";
 import { ListItem } from "../list/list-item";
 import { Button } from "../shared";
-import { Table, Td, Th, Tr } from "../table";
+import { Table, Td, Th } from "../table";
 
 export const TeamMembersTable = () => {
   const { teamMembers } = useLoaderData<typeof loader>();

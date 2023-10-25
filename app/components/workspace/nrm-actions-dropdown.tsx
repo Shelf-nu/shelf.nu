@@ -25,10 +25,7 @@ export function TeamMembersActionsDropdown({
       onOpenChange={(open) => setOpen(open)}
       open={open}
     >
-      <DropdownMenuTrigger
-        className="outline-none focus-visible:border-0"
-        // onClick={() => setOpen(true)}
-      >
+      <DropdownMenuTrigger className="outline-none focus-visible:border-0">
         <i className="inline-block px-3 py-0 text-gray-400 ">
           <VerticalDotsIcon />
         </i>

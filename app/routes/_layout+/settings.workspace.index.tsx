@@ -1,4 +1,4 @@
-import type { OrganizationType } from "@prisma/client";
+import type { Organization } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -7,6 +7,7 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
 import { Badge } from "~/components/shared";
+import { UserBadge } from "~/components/shared/user-badge";
 import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
 import { Table, Td, Th } from "~/components/table";
 import { db } from "~/database";
@@ -39,14 +40,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                   locations: true,
                 },
               },
+              owner: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  profilePicture: true,
+                },
+              },
             },
           },
         },
       },
     },
   });
-
-  // const organizations = await getUserOrganizationsWithDetailedData({ userId });
 
   if (!user || user.userOrganizations?.length < 1)
     throw new ShelfStackError({ message: "Organization not found" });
@@ -62,7 +69,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       tierLimit: user?.tier?.tierLimit,
       totalOrganizations: organizations?.length,
     }),
-    organizations: organizations,
     items: organizations,
     totalItems: organizations.length,
     modelName,
@@ -76,7 +82,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function WorkspacePage() {
-  const { organizations, canCreateMoreOrganizations } =
+  const { items: organizations, canCreateMoreOrganizations } =
     useLoaderData<typeof loader>();
   const user = useUserData();
 
@@ -138,6 +144,7 @@ export default function WorkspacePage() {
                           : "/images/default_pfp.jpg",
                       _count: org._count,
                       type: org.type,
+                      owner: org.owner,
                     }}
                   />
                 </ListItem>
@@ -155,15 +162,18 @@ export default function WorkspacePage() {
 const OrganizationRow = ({
   item,
 }: {
-  item: {
-    id: string;
-    name: string;
-    image: string;
-    type: OrganizationType;
+  item: Pick<Organization, "id" | "name" | "type"> & {
+    image: string; // We dont pick that one as sometimes we send an id sometimes we send a placeholder
     _count: {
       assets: number | null;
       members: number | null;
       locations: number | null;
+    };
+    owner: {
+      id: string;
+      firstName: string | null;
+      lastName: string | null;
+      profilePicture: string | null;
     };
   };
 }) => {
@@ -195,7 +205,12 @@ const OrganizationRow = ({
           </div>
         </div>
       </Td>
-      <Td> </Td>
+      <Td>
+        <UserBadge
+          img={item.owner.profilePicture}
+          name={`${item.owner.firstName} ${item.owner.lastName}`}
+        />
+      </Td>
 
       <Td>{item.type}</Td>
       <Td>{item._count?.assets || 0}</Td>

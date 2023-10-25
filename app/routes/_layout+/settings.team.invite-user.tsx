@@ -65,6 +65,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const { email, teamMemberId } = result.data;
+
   let teamMemberName = email.split("@")[0];
   if (teamMemberId) {
     const teamMember = await db.teamMember.findUnique({

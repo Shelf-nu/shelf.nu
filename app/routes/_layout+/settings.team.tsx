@@ -25,6 +25,7 @@ import { revokeAccessToOrganization } from "~/modules/user";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { sendEmail } from "~/utils/mail.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 
 type ActionIntent = "delete" | "revoke" | "resend" | "invite";
@@ -127,7 +128,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   /** Create a structure for the users org members and merge it with invites */
   const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
     userMembers.map((um) => ({
-      name: `${um.user.firstName} ${um.user.lastName}`,
+      name: `${um.user.firstName ? um.user.firstName : ""} ${
+        um.user.lastName ? um.user.lastName : ""
+      }`,
       img: um.user.profilePicture || "/images/default_pfp.jpg",
       email: um.user.email,
       status: "ACCEPTED",
@@ -146,9 +149,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       userId: null,
     });
   }
-
-  // console.log("teamMembersWithUserOrInvite", teamMembersWithUserOrInvite);
-  // console.log("teamMembers", teamMembers);
 
   return json({
     currentOrganizationId: organizationId,
@@ -190,6 +190,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           message: "User not found",
         });
       }
+
+      const org = await db.organization.findUnique({
+        where: {
+          id: organizationId,
+        },
+        select: {
+          name: true,
+        },
+      });
+
+      if (!org) {
+        throw new ShelfStackError({
+          message: "Organization not found",
+        });
+      }
+
+      await sendEmail({
+        to: user.email,
+        subject: `Access revoked`,
+        text: `Your access to ${org.name}'s workspace has been revoked.`,
+      });
 
       sendNotification({
         title: `Access revoked`,

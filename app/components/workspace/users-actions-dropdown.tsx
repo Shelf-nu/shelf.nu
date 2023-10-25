@@ -1,5 +1,6 @@
+import { useState } from "react";
 import type { InviteStatuses, User } from "@prisma/client";
-import { Form } from "@remix-run/react";
+import { Form, useNavigation } from "@remix-run/react";
 import {
   RefreshIcon,
   RemoveUserIcon,
@@ -11,7 +12,9 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
+import { isFormProcessing } from "~/utils";
 import { Button } from "../shared";
+import { Spinner } from "../shared/spinner";
 
 // @TODO do we need the user here?
 export function TeamUsersActionsDropdown({
@@ -25,19 +28,33 @@ export function TeamUsersActionsDropdown({
   name?: string;
   email: string;
 }) {
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
+  const [open, setOpen] = useState(false);
+
   return (
     <>
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger className="outline-none focus-visible:border-0">
+      <DropdownMenu
+        modal={false}
+        onOpenChange={(open) => setOpen(open)}
+        open={open}
+      >
+        <DropdownMenuTrigger className="h-6 w-6 pr-2 outline-none focus-visible:border-0">
           <i className="inline-block px-3 py-0 text-gray-400 ">
-            <VerticalDotsIcon />
+            {disabled ? <Spinner className="h-4 w-4" /> : <VerticalDotsIcon />}
           </i>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
           className="order w-[180px] rounded-md bg-white p-[6px] text-right"
+          asChild
         >
-          <Form method="post">
+          <Form
+            method="post"
+            onSubmit={() => {
+              setOpen(false);
+            }}
+          >
             {/* Only show resend button if the invite is not accepted */}
             {inviteStatus !== "ACCEPTED" ? (
               <>
@@ -46,10 +63,11 @@ export function TeamUsersActionsDropdown({
                 <Button
                   type="submit"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className="justify-start px-4 py-3  text-gray-700 focus:bg-slate-100 hover:bg-slate-100 hover:text-gray-700"
                   width="full"
                   name="intent"
                   value="resend"
+                  disabled={disabled}
                 >
                   <span className="flex items-center gap-2">
                     <RefreshIcon /> Resend invite
@@ -59,26 +77,24 @@ export function TeamUsersActionsDropdown({
             ) : null}
             {inviteStatus === "ACCEPTED" ? (
               <>
-                {/* // @TODO check this */}
-                {/* // <DropdownMenuItem className="mb-2.5 p-4 md:mb-0 md:p-0" asChild> */}
                 {userId ? (
                   <input type="hidden" name="userId" value={userId} />
                 ) : null}
                 <Button
                   type="submit"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className="justify-start px-4 py-3  text-gray-700 focus:bg-slate-100 hover:bg-slate-100 hover:text-gray-700"
                   width="full"
                   name="intent"
                   value="revoke"
+                  disabled={disabled}
                 >
                   <span className="flex items-center gap-2">
                     <RemoveUserIcon /> Revoke access
                   </span>
                 </Button>
               </>
-            ) : // </DropdownMenuItem>
-            null}
+            ) : null}
           </Form>
         </DropdownMenuContent>
       </DropdownMenu>

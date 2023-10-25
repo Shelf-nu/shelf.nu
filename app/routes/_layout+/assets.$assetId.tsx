@@ -26,7 +26,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
-import ProfilePicture from "~/components/user/profile-picture";
+import { UserBadge } from "~/components/shared/user-badge";
 import { usePosition, useUserData } from "~/hooks";
 import { deleteAsset, getAsset } from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
@@ -293,14 +293,10 @@ export default function AssetDetailsPage() {
                 <span className="text-[12px] font-medium text-gray-600">
                   Owner
                 </span>
-                <div className="max-w-[250px]">
-                  <span className="mb-1 ml-1 inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
-                    <ProfilePicture width="w-4" height="h-4" />
-                    <span className="ml-1.5 text-[12px] font-medium text-gray-700">
-                      {user?.firstName} {user?.lastName}
-                    </span>
-                  </span>
-                </div>
+                <UserBadge
+                  name={`${user?.firstName} ${user?.lastName}`}
+                  img={user?.profilePicture || "/images/default_pfp.jpg"}
+                />
               </li>
             </ul>
           </Card>

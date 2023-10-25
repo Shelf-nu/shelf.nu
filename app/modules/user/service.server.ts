@@ -238,6 +238,18 @@ export async function updateUser(
       where: { id: updateUserPayload.id },
       data: {
         ...cleanClone,
+        teamMembers: {
+          updateMany: {
+            where: { userId: updateUserPayload.id },
+            data: {
+              name: `${
+                updateUserPayload.firstName ? updateUserPayload.firstName : ""
+              } ${
+                updateUserPayload.lastName ? updateUserPayload.lastName : ""
+              }`,
+            },
+          },
+        },
       },
     });
 
