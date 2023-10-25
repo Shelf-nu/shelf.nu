@@ -3,6 +3,7 @@ import type { Asset } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
+import { changeDpiDataUrl } from "changedpi";
 import domtoimage from "dom-to-image";
 import { useReactToPrint } from "react-to-print";
 import { XIcon } from "~/components/icons";
@@ -11,7 +12,6 @@ import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
 import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
 import { getCurrentSearchParams, slugify } from "~/utils";
-
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -67,16 +67,27 @@ export default function QRPreview() {
     // making sure that the captureDiv and downloadBtn exists in DOM
     if (captureDiv && downloadBtn) {
       e.preventDefault();
-      domtoimage.toPng(captureDiv).then((dataUrl: string) => {
-        const downloadLink = document.createElement("a");
-        downloadLink.href = dataUrl;
-        downloadLink.download = fileName;
-        // Trigger a click event to initiate the download
-        downloadLink.click();
+      domtoimage
+        .toPng(captureDiv, {
+          height: captureDiv.offsetHeight * 2,
+          width: captureDiv.offsetWidth * 2,
+          style: {
+            transform: `scale(${2})`,
+            transformOrigin: "top left",
+            width: `${captureDiv.offsetWidth}px`,
+            height: `${captureDiv.offsetHeight}px`,
+          },
+        })
+        .then((dataUrl: string) => {
+          const downloadLink = document.createElement("a");
+          downloadLink.href = changeDpiDataUrl(dataUrl, 300);
+          downloadLink.download = fileName;
+          // Trigger a click event to initiate the download
+          downloadLink.click();
 
-        // Clean up the object URL after the download
-        URL.revokeObjectURL(downloadLink.href);
-      });
+          // Clean up the object URL after the download
+          URL.revokeObjectURL(downloadLink.href);
+        });
     }
   }
 
@@ -175,17 +186,16 @@ const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>((props, ref) => {
       className="flex h-auto max-w-[244px] flex-col justify-center gap-3 rounded-md border-[5px] border-[#E3E4E8] bg-white px-3 py-[17px]"
       ref={ref}
     >
-      <div className="z-50 max-w-full truncate  text-center text-[12px]">
+      <div className="z-50 max-w-full truncate  text-center text-[12px] font-semibold text-black">
         {title}
       </div>
       <figure className="qr-code z-[49] flex justify-center">
         <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
       </figure>
       <div className="w-full text-center text-[12px]">
-        <span className="block  text-gray-600">{data.qr.id}</span>
-        <span className="block text-gray-500">
-          Powered by{" "}
-          <span className="font-semibold text-gray-600">shelf.nu</span>
+        <span className="block  font-semibold text-black">{data.qr.id}</span>
+        <span className="block text-black">
+          Powered by <span className="font-semibold text-black">shelf.nu</span>
         </span>
       </div>
     </div>

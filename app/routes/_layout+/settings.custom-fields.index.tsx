@@ -122,17 +122,19 @@ function TeamMemberRow({ item }: { item: CustomField }) {
   return (
     <>
       <Td className="w-full">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex-1">
-            <Link
-              to={`${item.id}/edit`}
-              className="block text-text-sm font-medium text-gray-900"
-            >
-              {item.name}
-            </Link>
-            <span className="text-gray-600">{FIELD_TYPE_NAME[item.type]}</span>
+        <Link
+          to={`${item.id}/edit`}
+          className="block text-text-sm font-medium text-gray-900"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex-1">
+              <span className="block">{item.name}</span>
+              <span className="text-gray-600">
+                {FIELD_TYPE_NAME[item.type]}
+              </span>
+            </div>
           </div>
-        </div>
+        </Link>
       </Td>
       <Td>
         <span className="text-text-sm font-medium capitalize text-gray-600">
