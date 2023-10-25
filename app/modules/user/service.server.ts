@@ -87,7 +87,8 @@ export async function createUserOrAttachOrg({
   organizationId,
   roles,
   password,
-}: Pick<User, "email"> & {
+  firstName,
+}: Pick<User, "email" | "firstName"> & {
   organizationId: Organization["id"];
   roles: OrganizationRoles[];
   password: string;
@@ -112,6 +113,8 @@ export async function createUserOrAttachOrg({
       userId: authAccount.id,
       username: randomUsernameFromEmail(email),
       organizationId,
+      roles,
+      firstName,
     });
     return user;
   }
@@ -129,8 +132,12 @@ export async function createUser({
   userId,
   username,
   organizationId,
+  roles,
+  firstName,
 }: Pick<AuthSession & { username: string }, "userId" | "email" | "username"> & {
   organizationId?: Organization["id"];
+  roles?: OrganizationRoles[];
+  firstName?: User["firstName"];
 }) {
   return db
     .$transaction(
@@ -140,6 +147,7 @@ export async function createUser({
             email,
             id: userId,
             username,
+            firstName,
             organizations: {
               create: [
                 {
@@ -170,11 +178,20 @@ export async function createUser({
           organizationIds.push(organizationId);
         }
 
-        await createUserOrgAssociation(tx, {
-          userId: user.id,
-          organizationIds,
-          roles: [OrganizationRoles.OWNER],
-        });
+        await Promise.all([
+          createUserOrgAssociation(tx, {
+            userId: user.id,
+            organizationIds: [user.organizations[0].id],
+            roles: [OrganizationRoles.OWNER],
+          }),
+          organizationId &&
+            roles?.length &&
+            createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [organizationId],
+              roles,
+            }),
+        ]);
         return user;
       },
       { maxWait: 6000, timeout: 10000 }
