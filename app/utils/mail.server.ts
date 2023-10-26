@@ -32,6 +32,10 @@ export const sendEmail = async ({
     },
     logger: true,
     debug: true,
+    tls: {
+      // do not fail on invalid certs
+      rejectUnauthorized: false,
+    },
     // tls: { rejectUnauthorized: false }, // Only check the certificate in production
   });
 
