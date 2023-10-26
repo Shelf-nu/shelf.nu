@@ -34,15 +34,13 @@ export const sendEmail = async ({
     debug: true,
     tls: {
       // do not fail on invalid certs
-      rejectUnauthorized: false,
+      // Remove this if you do NOT use self-signed certs
+      rejectUnauthorized: true,
     },
-    // tls: { rejectUnauthorized: false }, // Only check the certificate in production
   });
 
-  console.log("transporter: ", transporter);
-
   // send mail with defined transport object
-  const info = await transporter.sendMail({
+  await transporter.sendMail({
     from: '"Shelf.nu" <no-reply@shelf.nu>', // sender address
     to, // list of receivers
     subject, // Subject line
@@ -50,8 +48,6 @@ export const sendEmail = async ({
     html: html || "", // html body
   });
 
-  console.log("Message sent:", info);
-  console.log("Message sent: %s", info.messageId);
   // Message sent: <b658f8ca-6296-ccf4-8306-87d57a0b4321@example.com>
 
   // Preview only available when sending through an Ethereal account
