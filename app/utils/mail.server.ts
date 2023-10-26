@@ -30,8 +30,12 @@ export const sendEmail = async ({
       user: SMTP_USER,
       pass: SMTP_PWD,
     },
+    logger: true,
+    debug: true,
     // tls: { rejectUnauthorized: false }, // Only check the certificate in production
   });
+
+  console.log("transporter: ", transporter);
 
   // send mail with defined transport object
   const info = await transporter.sendMail({
