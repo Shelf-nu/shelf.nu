@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
+import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
 
 export const sendEmail = async ({
   to,
@@ -30,11 +30,10 @@ export const sendEmail = async ({
       user: SMTP_USER,
       pass: SMTP_PWD,
     },
-    logger: true,
-    debug: true,
+    logger: NODE_ENV === "development",
+    debug: NODE_ENV === "development",
     tls: {
       // do not fail on invalid certs
-      // Remove this if you do NOT use self-signed certs
       rejectUnauthorized: true,
     },
   });
