@@ -28,6 +28,7 @@ export const UsersTable = () => {
               <div>{teamMembersWithUserOrInvite.length} items</div>
             </div>
             <div className="text-right">
+              {/* @TODO this needs to be controlled based on the package they have */}
               <Button variant="primary" to={`invite-user`}>
                 <span className=" whitespace-nowrap">Invite a user</span>
               </Button>
