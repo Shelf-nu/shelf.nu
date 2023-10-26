@@ -1,5 +1,5 @@
 import { InviteStatuses } from "@prisma/client";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import { Spinner } from "~/components/shared/spinner";
 import { createAuthSession, signInWithEmail } from "~/modules/auth";
@@ -21,7 +21,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // @TODO here we are having some polifyll issues with the jwt library
   // I think its because we also have client side code in this. What we have to try is abstracting the verify to a .server.ts file to see if the issue persists
-  var decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET);
+  const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET);
 
   // @TODO I am not sure why verify can return a string. It throws an Error if token is invalid which is being captured by the our error handler
   // This is a temporary fix.
@@ -51,10 +51,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     password
   );
 
-  if (signInResult.status === "error" && signInResult?.message) {
-    throw new ShelfStackError({
-      message: signInResult.message,
-    });
+  if (signInResult.status === "error") {
+    //user could already be registered and hence loggin in with our password failed, redirect to home and let user login or go to home
+    //TODO better UX like redirecting to accept success page and then to home?
+    return redirect("/");
   }
 
   // Ensure that user property exists before proceeding
