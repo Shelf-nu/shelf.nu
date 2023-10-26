@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
+import { SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
 
 export const sendEmail = async ({
   to,
@@ -30,11 +30,11 @@ export const sendEmail = async ({
       user: SMTP_USER,
       pass: SMTP_PWD,
     },
-    tls: { rejectUnauthorized: NODE_ENV === "production" }, // Only check the certificate in production
+    tls: { rejectUnauthorized: false }, // Only check the certificate in production
   });
 
   // send mail with defined transport object
-  await transporter.sendMail({
+  const info = await transporter.sendMail({
     from: '"Shelf.nu" <no-reply@shelf.nu>', // sender address
     to, // list of receivers
     subject, // Subject line
@@ -42,7 +42,8 @@ export const sendEmail = async ({
     html: html || "", // html body
   });
 
-  // console.log("Message sent: %s", info.messageId);
+  console.log("Message sent:", info);
+  console.log("Message sent: %s", info.messageId);
   // Message sent: <b658f8ca-6296-ccf4-8306-87d57a0b4321@example.com>
 
   // Preview only available when sending through an Ethereal account
