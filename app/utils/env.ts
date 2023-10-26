@@ -33,6 +33,9 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       INVITE_TOKEN_SECRET: string;
       FORMBRICKS_ENV_ID: string;
+      SMTP_PWD: string;
+      SMTP_HOST: string;
+      SMTP_USER: string;
     }
   }
 }
@@ -71,6 +74,9 @@ export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
   isSecret: true,
   isRequired: false,
 });
+export const SMTP_PWD = getEnv("SMTP_PWD");
+export const SMTP_HOST = getEnv("SMTP_HOST");
+export const SMTP_USER = getEnv("SMTP_USER");
 
 /**
  * Shared envs

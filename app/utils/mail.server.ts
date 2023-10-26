@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { NODE_ENV } from ".";
+import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
 
 export const sendEmail = async ({
   to,
@@ -23,12 +23,12 @@ export const sendEmail = async ({
 
   // create reusable transporter object using the default SMTP transport
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
+    host: SMTP_HOST,
     port: 465,
     secure: true, // true for 465, false for other ports
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PWD,
+      user: SMTP_USER,
+      pass: SMTP_PWD,
     },
     tls: { rejectUnauthorized: NODE_ENV === "production" }, // Only check the certificate in production
   });
