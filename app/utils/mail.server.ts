@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { NODE_ENV } from ".";
 
 export const sendEmail = async ({
   to,
@@ -29,6 +30,7 @@ export const sendEmail = async ({
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PWD,
     },
+    tls: { rejectUnauthorized: NODE_ENV === "production" }, // Only check the certificate in production
   });
 
   // send mail with defined transport object
