@@ -18,9 +18,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         "The invitation link doesn't have a token provided. Please try clicking the link in your email again or request a new invite. If the issue persists, feel free to contact support",
     });
   }
-
-  // @TODO here we are having some polifyll issues with the jwt library
-  // I think its because we also have client side code in this. What we have to try is abstracting the verify to a .server.ts file to see if the issue persists
   const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET);
 
   // @TODO I am not sure why verify can return a string. It throws an Error if token is invalid which is being captured by the our error handler
@@ -54,7 +51,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (signInResult.status === "error") {
     //user could already be registered and hence loggin in with our password failed, redirect to home and let user login or go to home
     //TODO better UX like redirecting to accept success page and then to home?
-    return redirect("/");
+    return redirect("/login?acceptedInvite=yes");
   }
 
   // Ensure that user property exists before proceeding
