@@ -9,10 +9,10 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import { usePosition } from "~/hooks";
 import { getAsset } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
 import { createReport, sendReportEmails } from "~/modules/report-found";
 import { getUserByID } from "~/modules/user";
 import { assertIsPost, getRequiredParam, isFormProcessing, tw } from "~/utils";
+import { ShelfStackError } from "~/utils/error";
 
 export const NewReportSchema = z.object({
   email: z
@@ -24,7 +24,6 @@ export const NewReportSchema = z.object({
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   assertIsPost(request);
-  await requireAuthSession(request);
 
   /** Get the QR id from the url */
   const qrId = getRequiredParam(params, "qrId");
@@ -62,14 +61,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     content,
     assetId: qr.asset.id,
   });
-  if (!report) return new Response("Something went wrong", { status: 500 });
+  if (!report) return new ShelfStackError({ message: "Something went wrong" });
 
   /**
    * Here we send 2 emails.
    * 1. To the owner of the asset
    * 2. To the person who reported the asset as found
    */
-  sendReportEmails({
+
+  await sendReportEmails({
     owner,
     asset: asset as Asset,
     message: report.content,
@@ -122,7 +122,7 @@ export default function ContactOwner() {
               the asset can contact you.
             </p>
           </div>
-          <Button width="full" disabled={disabled}>
+          <Button type="submit" width="full" disabled={disabled}>
             Send
           </Button>
         </Form>

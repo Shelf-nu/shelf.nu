@@ -102,11 +102,11 @@ export async function createInvite({
   const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
     expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
   }); //keep only needed data in token to maintain the size
-  // await sendEmail({
-  //   to: inviteeEmail,
-  //   subject: `You have been invited to ${invite.organization.name}`,
-  //   text: `click to accept ${SERVER_URL}/accept-invite/${invite.id}?token=${token}`, //TODO change path if needed
-  // });
+  await sendEmail({
+    to: inviteeEmail,
+    subject: `You have been invited to ${invite.organization.name}`,
+    text: `click to accept ${SERVER_URL}/accept-invite/${invite.id}?token=${token}`, //TODO change path if needed
+  });
 
   //TODO: user template and embed token as part of button url
   return invite;
