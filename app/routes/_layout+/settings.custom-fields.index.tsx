@@ -1,4 +1,4 @@
-import { OrganizationType, type CustomField } from "@prisma/client";
+import { type CustomField } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
@@ -11,7 +11,6 @@ import { PremiumFeatureButton } from "~/components/subscription/premium-feature-
 import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";
 import { getFilteredAndPaginatedCustomFields } from "~/modules/custom-field";
-import { getOrganizationByUserId } from "~/modules/organization";
 import { getUserTierLimit } from "~/modules/tier";
 
 import {

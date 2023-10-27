@@ -25,6 +25,7 @@ import { db } from "~/database";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
+import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing, tw, validEmail } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -40,8 +41,8 @@ const InviteUserFormSchema = z.object({
 });
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
-
+  const { organizationId } = await requireAuthSession(request);
+  await assertUserCanInviteUsersToWorkspace({ organizationId });
   return json({
     showModal: true,
   });

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useLoaderData } from "@remix-run/react";
 import { SendIcon, VerticalDotsIcon } from "~/components/icons";
 import {
   DropdownMenu,
@@ -8,16 +9,26 @@ import {
 } from "~/components/shared/dropdown";
 
 import type { WithDateFields } from "~/modules/types";
-import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.team";
+import type {
+  TeamMemberWithCustodies,
+  loader,
+} from "~/routes/_layout+/settings.team";
+import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { DeleteMember } from "./delete-member";
 import { Button } from "../shared";
+import { PremiumFeatureButton } from "../subscription/premium-feature-button";
 
 export function TeamMembersActionsDropdown({
   teamMember,
 }: {
   teamMember: WithDateFields<TeamMemberWithCustodies, string>;
 }) {
+  const { organization } = useLoaderData<typeof loader>();
   const [open, setOpen] = useState(false);
+  const isPersonalOrg = useMemo(
+    () => checkIsPersonalOrg(organization),
+    [organization]
+  );
 
   return (
     <DropdownMenu
@@ -34,20 +45,27 @@ export function TeamMembersActionsDropdown({
         align="end"
         className="order w-[180px] rounded-md bg-white p-[6px] text-right "
       >
-        <DropdownMenuItem className="mb-2.5 p-4 md:mb-0 md:p-0">
-          <Button
-            to={`invite-user?teamMemberId=${teamMember.id}`}
-            role="link"
-            variant="link"
-            className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-            width="full"
-            onClick={() => setOpen(false)}
-          >
-            <span className="flex items-center gap-2">
-              <SendIcon /> Invite user
-            </span>
-          </Button>
+        {/* {!isPersonalOrg && ( */}
+        <DropdownMenuItem className="text-gray-700hover:text-gray-700 p-4 hover:bg-slate-100">
+          <PremiumFeatureButton
+            canUseFeature={!isPersonalOrg}
+            buttonContent={{
+              title: "Invite user",
+              message:
+                "You are not able to invite users within your current plan. ",
+            }}
+            buttonProps={{
+              to: `invite-user?teamMemberId=${teamMember.id}`,
+              role: "link",
+              variant: "link",
+              className:
+                "justify-start px-4 py-3 text-gray-700 hover:text-gray-700",
+              width: "full",
+              onClick: () => setOpen(false),
+            }}
+          />
         </DropdownMenuItem>
+
         <DeleteMember teamMember={teamMember} />
       </DropdownMenuContent>
     </DropdownMenu>

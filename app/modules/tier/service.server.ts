@@ -1,5 +1,7 @@
-import type { User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import { db } from "~/database";
+import { ShelfStackError } from "~/utils/error";
+import { isPersonalOrg } from "~/utils/organization";
 import {
   canCreateMoreCustomFields,
   canExportAssets,
@@ -81,3 +83,33 @@ export const assertUserCanCreateMoreCustomFields = async ({
     throw new Error("Your user cannot create more custom fields");
   }
 };
+
+/**
+ * This validates if more users can be invited to organization
+ * It simply checks the organization type
+ */
+export async function assertUserCanInviteUsersToWorkspace({
+  organizationId,
+}: {
+  organizationId: Organization["id"];
+}) {
+  /** Get the tier limit and check if they can export */
+  // const tierLimit = await getUserTierLimit(userId);
+  const org = await db.organization.findUnique({
+    where: { id: organizationId },
+    select: {
+      type: true,
+    },
+  });
+
+  if (!org) {
+    throw new ShelfStackError({ message: "Organization not found" });
+  }
+
+  if (isPersonalOrg(org)) {
+    throw new ShelfStackError({
+      message:
+        "You cannot invite other users to a personal workspace. Please create a Team workspace.",
+    });
+  }
+}
