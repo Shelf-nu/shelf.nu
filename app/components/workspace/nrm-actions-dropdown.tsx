@@ -15,7 +15,6 @@ import type {
 } from "~/routes/_layout+/settings.team";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { DeleteMember } from "./delete-member";
-import { Button } from "../shared";
 import { PremiumFeatureButton } from "../subscription/premium-feature-button";
 
 export function TeamMembersActionsDropdown({
@@ -50,16 +49,19 @@ export function TeamMembersActionsDropdown({
           <PremiumFeatureButton
             canUseFeature={!isPersonalOrg}
             buttonContent={{
-              title: "Invite user",
+              title: (
+                <span className="flex items-center gap-2 text-gray-700">
+                  <SendIcon /> Invite user
+                </span>
+              ),
               message:
-                "You are not able to invite users within your current plan. ",
+                "You are not able to invite users to a personal workspace. ",
             }}
             buttonProps={{
               to: `invite-user?teamMemberId=${teamMember.id}`,
               role: "link",
               variant: "link",
-              className:
-                "justify-start px-4 py-3 text-gray-700 hover:text-gray-700",
+              className: "justify-start  !text-gray-700 !hover:text-gray-700",
               width: "full",
               onClick: () => setOpen(false),
             }}

@@ -18,7 +18,7 @@ export const PremiumFeatureButton = ({
 }: {
   canUseFeature: boolean;
   buttonContent: {
-    title: string;
+    title: string | JSX.Element | JSX.Element[];
     message: string;
   };
   buttonProps: ButtonProps;
@@ -41,7 +41,7 @@ const HoverMessage = ({
   skipCta,
 }: {
   buttonContent: {
-    title: string;
+    title: string | JSX.Element | JSX.Element[];
     message: string;
     variant?: ButtonVariant;
   };

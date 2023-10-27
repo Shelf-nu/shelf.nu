@@ -22,6 +22,7 @@ import {
   DownloadIcon,
   PrintIcon,
   SettingsIcon,
+  SendIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -47,7 +48,8 @@ export type Icon =
   | "asset"
   | "download"
   | "print"
-  | "settings";
+  | "settings"
+  | "send";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -76,6 +78,7 @@ export const iconsMap: IconsMap = {
   download: <DownloadIcon />,
   print: <PrintIcon />,
   settings: <SettingsIcon />,
+  send: <SendIcon />,
 };
 
 export default iconsMap;
