@@ -257,6 +257,9 @@ const ListAssetContent = ({
     custody: Custody & {
       custodian: {
         name: string;
+        user?: {
+          profilePicture: string | null;
+        };
       };
     };
     location: {
@@ -322,7 +325,23 @@ const ListAssetContent = ({
 
       {/* Custodian */}
       <Td className="hidden md:table-cell">
-        {custody ? <GrayBadge>{custody.custodian.name}</GrayBadge> : null}
+        {custody ? (
+          <GrayBadge>
+            <>
+              {custody.custodian?.user ? (
+                <img
+                  src={
+                    custody.custodian?.user?.profilePicture ||
+                    "/images/default_pfp.jpg"
+                  }
+                  className="mr-1 h-4 w-4 rounded-full"
+                  alt=""
+                />
+              ) : null}
+              <span className="mt-[1px]">{custody.custodian.name}</span>
+            </>
+          </GrayBadge>
+        ) : null}
       </Td>
 
       {/* Location */}
@@ -356,8 +375,12 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   ) : null;
 };
 
-const GrayBadge = ({ children }: { children: string | JSX.Element }) => (
-  <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
+const GrayBadge = ({
+  children,
+}: {
+  children: string | JSX.Element | JSX.Element[];
+}) => (
+  <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
     {children}
   </span>
 );

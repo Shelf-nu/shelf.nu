@@ -183,6 +183,11 @@ export async function getAssets({
                 custodian: {
                   select: {
                     name: true,
+                    user: {
+                      select: {
+                        profilePicture: true,
+                      },
+                    },
                   },
                 },
               },

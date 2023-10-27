@@ -40,6 +40,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     include: {
       user: true,
     },
+    orderBy: {
+      userId: "asc",
+    },
   });
 
   return json({
