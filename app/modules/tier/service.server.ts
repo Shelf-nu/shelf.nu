@@ -26,8 +26,10 @@ export async function getUserTierLimit(id: User["id"]) {
 
 export async function assertUserCanImportAssets({
   userId,
+  organizationId,
 }: {
   userId: User["id"];
+  organizationId: Organization["id"];
 }) {
   const user = await db.user.findUnique({
     where: {
@@ -45,8 +47,9 @@ export async function assertUserCanImportAssets({
       },
     },
   });
-
-  if (!canImportAssets(user?.tier?.tierLimit)) {
+  const currentOrg = user?.organizations.find((o) => o.id === organizationId);
+  //to have a team org you need subscription hence we only assert for personal org for now
+  if (currentOrg?.type !== "TEAM" && !canImportAssets(user?.tier?.tierLimit)) {
     throw new Error("Your user cannot import assets");
   }
   return { user };
