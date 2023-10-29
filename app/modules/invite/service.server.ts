@@ -40,6 +40,22 @@ export async function createInvite({
   teamMemberName: TeamMember["name"];
   teamMemberId?: Invite["teamMemberId"];
 }) {
+  const existingUser = await db.user.findFirst({
+    where: {
+      email: inviteeEmail,
+      userOrganizations: {
+        some: { organizationId },
+      },
+    },
+  });
+  if (existingUser) {
+    //if email is already part of organization, we dont allow new invite
+    throw new ShelfStackError({
+      status: 400,
+      message: `user ${inviteeEmail} is already part of the organization`,
+      title: `Invalid invite attempt`,
+    });
+  }
   if (!teamMemberId) {
     const previousInvite = await db.invite.findFirst({
       where: {
@@ -56,6 +72,23 @@ export async function createInvite({
         organizationId,
       });
       teamMemberId = member.id;
+    }
+  } else {
+    const previousActiveInvite = await db.invite.findFirst({
+      where: {
+        organizationId,
+        inviteeEmail,
+        status: InviteStatuses.PENDING,
+        expiresAt: { gt: new Date() },
+      },
+    });
+    if (previousActiveInvite?.teamMemberId !== teamMemberId) {
+      //there is already an active invite for different team member, so dont allow new invte
+      throw new ShelfStackError({
+        status: 400,
+        message: `user ${inviteeEmail} is already has an active invite linked to diffrent NRM`,
+        title: `Invalid invite attempt`,
+      });
     }
   }
 
