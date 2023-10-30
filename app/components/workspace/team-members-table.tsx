@@ -12,8 +12,8 @@ export const TeamMembersTable = () => {
   const hasItems = teamMembers?.length > 0;
 
   return (
-    <div className="mb-6 flex gap-16">
-      <div className="w-1/4">
+    <div className="mb-6 flex flex-col gap-6 xl:flex-row xl:gap-16">
+      <div className="xl:w-1/4">
         <div className="text-text-sm font-medium text-gray-700">
           Non-registered members (NRM)
         </div>
@@ -58,7 +58,7 @@ export const TeamMembersTable = () => {
               <Table>
                 <thead>
                   <tr>
-                    <Th className="hidden md:table-cell">Name</Th>
+                    <Th>Name</Th>
                     <Th> </Th>
                   </tr>
                 </thead>
