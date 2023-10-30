@@ -136,7 +136,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? user?.firstName
         ? `${user.firstName}'s inventory`
         : `Your inventory`
-      : `${currentOrganization?.name}'s inventory`,
+      : currentOrganization?.name
+      ? `${currentOrganization?.name}'s inventory`
+      : "Your inventory",
   };
 
   const modelName = {
@@ -167,9 +169,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     },
     {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
+      headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
     }
   );
 }

@@ -29,7 +29,6 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
     ? await db.user.findUnique({
@@ -95,16 +94,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
     },
     {
-      // headers: {
-      //   "Set-Cookie": `${await userPrefs.serialize(
-      //     cookie
-      //   )}; ${await commitAuthSession(request, {
-      //     authSession: {
-      //       ...authSession,
-      //       organizationId: currentOrganizationId,
-      //     },
-      //   })}`,
-      // },
       headers: [
         ["Set-Cookie", await userPrefs.serialize(cookie)],
         [
@@ -124,6 +113,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function App() {
   useCrisp();
   useFormbricks();
+
   return (
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
       <div className="flex flex-col md:flex-row">

@@ -89,7 +89,10 @@ export async function createInvite({
         expiresAt: { gt: new Date() },
       },
     });
-    if (previousActiveInvite?.teamMemberId !== teamMemberId) {
+    if (
+      previousActiveInvite &&
+      previousActiveInvite.teamMemberId !== teamMemberId
+    ) {
       //there is already an active invite for different team member, so dont allow new invte
       sendNotification({
         title: `Cannot invite user ${inviteeEmail}`,
