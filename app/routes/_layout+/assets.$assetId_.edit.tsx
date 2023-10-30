@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -24,7 +23,6 @@ import {
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganizationByUserId } from "~/modules/organization";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -37,14 +35,6 @@ import { ShelfStackError } from "~/utils/error";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { userId, organizationId } = await requireAuthSession(request);
-  const organization = await getOrganizationByUserId({
-    userId,
-    orgType: OrganizationType.PERSONAL,
-  });
-
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
 
   const { categories, tags, locations, customFields } =
     await getAllRelatedEntries({
