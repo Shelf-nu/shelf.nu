@@ -81,7 +81,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const formData = await clonedRequest.formData();
 
   const customFields = await getActiveCustomFields({
-    userId: authSession.userId,
+    organizationId: authSession.organizationId,
   });
 
   const FormSchema = mergedSchema({
