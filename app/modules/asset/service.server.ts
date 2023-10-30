@@ -770,8 +770,6 @@ export const createLocationChangeNote = async ({
   userId: User["id"];
   isRemoving: boolean;
 }) => {
-  console.log("currentLocation", currentLocation);
-  console.log("newLocation", newLocation);
   /**
    * WE have a few cases to handle:
    * 1. Setting the first location
