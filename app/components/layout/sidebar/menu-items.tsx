@@ -5,6 +5,7 @@ import { useAtom } from "jotai";
 import {
   AssetsIcon,
   CategoriesIcon,
+  GraphIcon,
   LocationMarkerIcon,
   QuestionsIcon,
   SettingsIcon,
@@ -18,6 +19,11 @@ import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
 
 const menuItemsTop = [
+  {
+    icon: <GraphIcon />,
+    to: "dashboard",
+    label: "Dashboard",
+  },
   {
     icon: <AssetsIcon />,
     to: "assets",
