@@ -4,7 +4,7 @@ import type {
   LoaderFunctionArgs,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
+import { Form, useLoaderData, useSearchParams } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -48,14 +48,18 @@ function createOnboardingSchema(userSignedUpWithPassword: boolean) {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
+  const user = await getUserByID(authSession?.userId);
+
+  /** If the user is already onboarded, we assume they finished the process so we send them to the index */
+  if (user?.onboarded) {
+    return redirect("/");
+  }
 
   const authUser = await getAuthUserByAccessToken(authSession.accessToken);
 
   const userSignedUpWithPassword =
     authUser?.user_metadata?.signup_method === "email-password";
   const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
-
-  const user = await getUserByID(authSession?.userId);
 
   // If not auth session redirect to login
   const title = "Set up your account";
@@ -111,17 +115,28 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ errors: updatedUser.errors }, { status: 400 });
   }
 
-  return redirect("/welcome", {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  const organizationId = (formData.get("organizationId") as string) || null;
+
+  return redirect(
+    `/welcome${organizationId ? `?organizationId=${organizationId}` : ""}`,
+    {
+      headers: {
+        "Set-Cookie": await commitAuthSession(request, {
+          authSession: {
+            ...authSession,
+            organizationId: organizationId || authSession.organizationId,
+          },
+        }),
+      },
+    }
+  );
 }
 
 export default function Onboarding() {
   const { user, userSignedUpWithPassword, title, subHeading } =
     useLoaderData<typeof loader>();
 
+  const [searchParams] = useSearchParams();
   const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
 
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
@@ -135,6 +150,11 @@ export default function Onboarding() {
           type="hidden"
           name="userSignedUpWithPassword"
           value={String(userSignedUpWithPassword)}
+        />
+        <input
+          type="hidden"
+          name="organizationId"
+          value={searchParams.get("organizationId") || ""}
         />
 
         <div className="md:flex md:gap-6">

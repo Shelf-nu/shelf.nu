@@ -58,8 +58,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (signInResult.status === "success" && signInResult.authSession) {
     return createAuthSession({
       request,
-      authSession: signInResult.authSession,
-      redirectTo: "/onboarding",
+      authSession: {
+        ...signInResult.authSession,
+        organizationId: updatedInvite.organizationId,
+      },
+      redirectTo: `/onboarding?organizationId=${updatedInvite.organizationId}`,
     });
   }
 
