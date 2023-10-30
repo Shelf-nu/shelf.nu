@@ -179,3 +179,7 @@ dialog {
 .horizontal-menu::-webkit-scrollbar {
   display: none;
 }
+
+.react-tags {
+  @apply bg-white;
+}

@@ -30,7 +30,7 @@ export const OrganizationSelect = () => {
       }}
     >
       <Select name="organizationId" defaultValue={currentOrganizationId}>
-        <SelectTrigger className="px-3.5 py-3">
+        <SelectTrigger className="p-3">
           <SelectValue />
         </SelectTrigger>
         <SelectContent
@@ -52,7 +52,7 @@ export const OrganizationSelect = () => {
                     />
                   )}
 
-                  <div className=" ml-[1px] text-sm text-gray-900">
+                  <div className="ml-[3px] line-clamp-1 max-w-[265px] text-ellipsis text-sm text-gray-900">
                     {org.name}
                   </div>
                 </div>

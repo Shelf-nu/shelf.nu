@@ -11,8 +11,8 @@ export const UsersTable = () => {
   const { teamMembersWithUserOrInvite } = useLoaderData<typeof loader>();
 
   return (
-    <div className="mb-6 flex gap-16">
-      <div className="w-1/4">
+    <div className="mb-14 flex flex-col gap-6 xl:flex-row xl:gap-16">
+      <div className="xl:w-1/4">
         <div className="text-text-sm font-medium text-gray-700">Users</div>
         <p className="text-sm text-gray-600">User linked to your workspace.</p>
       </div>
@@ -37,9 +37,9 @@ export const UsersTable = () => {
           <Table>
             <thead>
               <tr>
-                <Th className="hidden md:table-cell">Name</Th>
-                <Th className="hidden md:table-cell">Role</Th>
-                <Th className="hidden md:table-cell">Status</Th>
+                <Th>Name</Th>
+                <Th>Role</Th>
+                <Th>Status</Th>
                 <Th> </Th>
               </tr>
             </thead>
@@ -91,11 +91,11 @@ const UserRow = ({
           className={"h-10 w-10 rounded-[4px]"}
           alt={`${name}'s profile`}
         />
-        <div className="user-credentials flex-1 text-[14px] transition-all duration-200 ease-linear">
+        <div className="user-credentials min-w-[240px] flex-1 text-[14px] transition-all duration-200 ease-linear">
           <div className="line-clamp-1 block text-ellipsis font-semibold">
             {name}
           </div>
-          <p className="line-clamp-1 block text-ellipsis">
+          <p className="line-clamp-1 block max-w-[200px] text-ellipsis md:max-w-none">
             {email || invite?.inviteeEmail}
           </p>
         </div>

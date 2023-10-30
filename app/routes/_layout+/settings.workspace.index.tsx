@@ -109,20 +109,16 @@ export default function WorkspacePage() {
             }}
           />
         </div>
-        <div className="flex-1 rounded-[12px] border">
+        <div className="flex-1 overflow-x-auto rounded-[12px] border bg-white">
           <Table>
             <ListHeader
               children={
                 <>
-                  <Th className="hidden whitespace-nowrap md:table-cell">
-                    Owner
-                  </Th>
-                  <Th className="hidden md:table-cell">Type</Th>
-                  <Th className="hidden md:table-cell">Assets</Th>
-                  <Th className="hidden md:table-cell">Locations</Th>
-                  <Th className="hidden whitespace-nowrap md:table-cell">
-                    Team members
-                  </Th>
+                  <Th className="whitespace-nowrap">Owner</Th>
+                  <Th>Type</Th>
+                  <Th>Assets</Th>
+                  <Th>Locations</Th>
+                  <Th className="whitespace-nowrap">Team members</Th>
                 </>
               }
             />
