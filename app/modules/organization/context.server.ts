@@ -17,6 +17,7 @@ const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
   sameSite: "lax",
   secrets: [SESSION_SECRET],
   secure: NODE_ENV === "production",
+  maxAge: 60 * 60 * 24 * 365, // 1 year
 });
 
 type SelectedOrganizationId = string;
