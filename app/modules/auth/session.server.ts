@@ -163,28 +163,6 @@ export async function requireAuthSession(
     return refreshAuthSession(request);
   }
 
-  /** There could be a case when you get removed from an organization while browsing it.
-   * In this case what we do is we set the current organization to the first one in the list
-   */
-  const userOrganizations = await db.userOrganization.findMany({
-    where: { userId: authSession.userId },
-    select: {
-      organization: {
-        select: { id: true },
-      },
-    },
-  });
-
-  const organizations = userOrganizations.map(
-    (userOrganization) => userOrganization.organization
-  );
-
-  let currentOrganizationId = authSession.organizationId;
-  if (!organizations.find((org) => org.id === currentOrganizationId)) {
-    // Return the updated session with the first available organization
-    return { ...authSession, organizationId: organizations[0].id };
-  }
-
   // finally, we have a valid session, let's return it
   return authSession;
 }
