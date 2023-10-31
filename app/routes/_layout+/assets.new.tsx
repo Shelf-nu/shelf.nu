@@ -66,7 +66,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   const formData = await clonedRequest.formData();
 
   const customFields = await getActiveCustomFields({
-    userId: authSession.userId,
+    organizationId: authSession.organizationId,
   });
 
   const FormSchema = mergedSchema({
