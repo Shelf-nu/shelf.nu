@@ -1,6 +1,5 @@
 import { createCookieSessionStorage, redirect } from "@remix-run/node";
 
-import { db } from "~/database";
 import {
   getCurrentPath,
   isGet,
