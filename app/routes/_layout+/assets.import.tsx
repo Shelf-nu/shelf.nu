@@ -1,4 +1,3 @@
-import { OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   MetaFunction,
