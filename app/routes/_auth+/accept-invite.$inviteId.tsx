@@ -2,10 +2,16 @@ import { InviteStatuses } from "@prisma/client";
 import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import { Spinner } from "~/components/shared/spinner";
-import { createAuthSession, signInWithEmail } from "~/modules/auth";
+import { commitAuthSession, signInWithEmail } from "~/modules/auth";
 import { updateInviteStatus } from "~/modules/invite";
 import { generateRandomCode } from "~/modules/invite/helpers";
-import { INVITE_TOKEN_SECRET, getCurrentSearchParams } from "~/utils";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import {
+  INVITE_TOKEN_SECRET,
+  getCurrentSearchParams,
+  safeRedirect,
+} from "~/utils";
+import { setCookie } from "~/utils/cookies";
 import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -56,14 +62,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Ensure that user property exists before proceeding
   if (signInResult.status === "success" && signInResult.authSession) {
-    return createAuthSession({
-      request,
-      authSession: {
-        ...signInResult.authSession,
-        organizationId: updatedInvite.organizationId,
-      },
-      redirectTo: `/onboarding?organizationId=${updatedInvite.organizationId}`,
-    });
+    const { authSession } = signInResult;
+
+    return redirect(
+      safeRedirect(
+        `/onboarding?organizationId=${updatedInvite.organizationId}`
+      ),
+      {
+        headers: [
+          setCookie(await setSelectedOrganizationIdCookie(updatedInvite.id)),
+          setCookie(
+            await commitAuthSession(request, {
+              authSession,
+              flashErrorMessage: null,
+            })
+          ),
+        ],
+      }
+    );
   }
 
   return json({ title: "Accept team invite" });

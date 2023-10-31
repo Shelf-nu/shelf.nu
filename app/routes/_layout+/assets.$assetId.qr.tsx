@@ -10,12 +10,16 @@ import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
 import { getCurrentSearchParams, slugify } from "~/utils";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
+
   const { assetId } = params as { assetId: string };
   const searchParams = getCurrentSearchParams(request);
   const size = (searchParams.get("size") || "medium") as SizeKeys;

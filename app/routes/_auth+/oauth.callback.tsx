@@ -14,8 +14,11 @@ import {
   commitAuthSession,
   getAuthSession,
 } from "~/modules/auth";
+import { getOrganizationByUserId } from "~/modules/organization";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { tryCreateUser, getUserByEmail } from "~/modules/user";
 import { assertIsPost, randomUsernameFromEmail, safeRedirect } from "~/utils";
+import { setCookie } from "~/utils/cookies";
 
 // imagine a user go back after OAuth login success or type this URL
 // we don't want him to fall in a black hole 👽
@@ -65,12 +68,22 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // user have an account, skip creation part and just commit session
   if (await getUserByEmail(authSession.email)) {
+    const personalOrganization = await getOrganizationByUserId({
+      userId: authSession.userId,
+      orgType: "PERSONAL",
+    });
+
     return redirect(safeRedirectTo, {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, {
-          authSession,
-        }),
-      },
+      headers: [
+        setCookie(
+          await setSelectedOrganizationIdCookie(personalOrganization.id)
+        ),
+        setCookie(
+          await commitAuthSession(request, {
+            authSession,
+          })
+        ),
+      ],
     });
   }
   const username = randomUsernameFromEmail(authSession.email);
@@ -87,15 +100,17 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
+  const personalOrganization = user.organizations[0];
+
   return redirect(safeRedirectTo, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, {
-        authSession: {
-          ...authSession,
-          organizationId: user.organizations[0].id,
-        },
-      }),
-    },
+    headers: [
+      setCookie(await setSelectedOrganizationIdCookie(personalOrganization.id)),
+      setCookie(
+        await commitAuthSession(request, {
+          authSession,
+        })
+      ),
+    ],
   });
 }
 

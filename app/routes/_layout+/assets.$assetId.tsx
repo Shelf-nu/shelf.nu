@@ -31,6 +31,7 @@ import { usePosition, useUserData } from "~/hooks";
 import { deleteAsset, getAsset } from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
@@ -49,7 +50,10 @@ import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
+
   const id = getRequiredParam(params, "assetId");
 
   const asset = await getAsset({ organizationId, id });
@@ -102,10 +106,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
   assertIsDelete(request);
   const id = getRequiredParam(params, "assetId");
   const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
   const formData = await request.formData();
   const mainImageUrl = formData.get("mainImage") as string;
 
-  await deleteAsset({ organizationId: authSession.organizationId, id });
+  await deleteAsset({ organizationId, id });
   await deleteAssetImage({
     url: mainImageUrl,
     bucketName: "assets",

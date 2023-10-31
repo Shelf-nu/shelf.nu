@@ -18,11 +18,13 @@ import {
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createOrganization } from "~/modules/organization";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
   // @TODO Here we need to check the subscription
 
   const header: HeaderData = {

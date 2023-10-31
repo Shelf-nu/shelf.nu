@@ -122,10 +122,7 @@ export async function action({ request }: ActionFunctionArgs) {
     {
       headers: {
         "Set-Cookie": await commitAuthSession(request, {
-          authSession: {
-            ...authSession,
-            organizationId: organizationId || authSession.organizationId,
-          },
+          authSession,
         }),
       },
     }

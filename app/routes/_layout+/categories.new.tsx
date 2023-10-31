@@ -10,6 +10,7 @@ import { Button } from "~/components/shared/button";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createCategory } from "~/modules/category";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost, getRandomColor, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -41,6 +42,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
   assertIsPost(request);
   const formData = await request.formData();
   const result = await NewCategoryFormSchema.safeParseAsync(
@@ -59,7 +61,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   await createCategory({
     ...result.data,
     userId: authSession.userId,
-    organizationId: authSession.organizationId,
+    organizationId,
   });
 
   sendNotification({

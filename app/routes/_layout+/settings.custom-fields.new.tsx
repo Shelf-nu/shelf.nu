@@ -12,6 +12,7 @@ import Header from "~/components/layout/header";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createCustomField } from "~/modules/custom-field";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 
 import { assertIsPost } from "~/utils";
@@ -45,6 +46,7 @@ export const handle = {
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
   assertIsPost(request);
   await assertUserCanCreateMoreCustomFields({ userId: authSession.userId });
 
@@ -75,7 +77,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     required,
     type,
     active,
-    organizationId: authSession.organizationId,
+    organizationId,
     userId: authSession.userId,
     options,
   });

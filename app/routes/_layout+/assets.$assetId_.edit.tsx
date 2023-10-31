@@ -23,6 +23,7 @@ import {
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -34,7 +35,9 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
   const { categories, tags, locations, customFields } =
     await getAllRelatedEntries({
@@ -75,13 +78,14 @@ export const handle = {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
 
   const id = getRequiredParam(params, "assetId");
   const clonedRequest = request.clone();
   const formData = await clonedRequest.formData();
 
   const customFields = await getActiveCustomFields({
-    organizationId: authSession.organizationId,
+    organizationId,
   });
 
   const FormSchema = mergedSchema({
