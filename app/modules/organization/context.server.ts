@@ -22,7 +22,7 @@ const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
 
 type SelectedOrganizationId = string;
 
-export async function getSelectedOrganizationIdCookie(request: Request) {
+async function getSelectedOrganizationIdCookie(request: Request) {
   return parseCookie<SelectedOrganizationId>(
     selectedOrganizationIdCookie,
     request
