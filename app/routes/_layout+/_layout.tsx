@@ -11,10 +11,12 @@ import { Toaster } from "~/components/shared/toast";
 import { db } from "~/database";
 import { useFormbricks } from "~/hooks/use-formbricks";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 import {
   initializePerPageCookieOnLayout,
+  setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
@@ -77,10 +79,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   /** There could be a case when you get removed from an organization while browsing it.
    * In this case what we do is we set the current organization to the first one in the list
    */
-  let currentOrganizationId = authSession.organizationId;
-  if (!organizations.find((org) => org.id === currentOrganizationId)) {
-    currentOrganizationId = organizations[0].id;
-  }
+  const currentOrganizationId = await requireOrganisationId(
+    authSession,
+    request
+  );
 
   return json(
     {
@@ -95,16 +97,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
     {
       headers: [
-        ["Set-Cookie", await userPrefs.serialize(cookie)],
-        [
-          "Set-Cookie",
+        setCookie(await userPrefs.serialize(cookie)),
+        setCookie(
           await commitAuthSession(request, {
-            authSession: {
-              ...authSession,
-              organizationId: currentOrganizationId,
-            },
-          }),
-        ],
+            authSession,
+          })
+        ),
       ],
     }
   );

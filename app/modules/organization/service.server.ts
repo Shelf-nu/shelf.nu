@@ -16,7 +16,7 @@ export const getOrganizationByUserId = async ({
   userId: User["id"];
   orgType: OrganizationType;
 }) =>
-  await db.organization.findFirst({
+  await db.organization.findFirstOrThrow({
     where: {
       owner: {
         is: {
@@ -31,6 +31,10 @@ export const getOrganizationByUserId = async ({
       type: true,
     },
   });
+
+export type UserOrganization = Awaited<
+  ReturnType<typeof getOrganizationByUserId>
+>;
 
 export const getUserOrganizationsWithDetailedData = async ({
   userId,
@@ -108,3 +112,16 @@ export async function createOrganization({
   }
   return org;
 }
+
+export const getUserOrganizations = async ({ userId }: { userId: string }) => {
+  const userOrganizations = await db.userOrganization.findMany({
+    where: { userId },
+    select: {
+      organization: {
+        select: { id: true, type: true },
+      },
+    },
+  });
+
+  return userOrganizations.map((uo) => uo.organization);
+};

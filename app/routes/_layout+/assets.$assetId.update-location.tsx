@@ -6,12 +6,15 @@ import { LocationSelect } from "~/components/location";
 import { Button } from "~/components/shared/button";
 import { getAllRelatedEntries, getAsset, updateAsset } from "~/modules/asset";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/custom-modal.css";
 import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
   const { locations } = await getAllRelatedEntries({
     userId,

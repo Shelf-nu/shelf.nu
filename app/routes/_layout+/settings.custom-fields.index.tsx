@@ -11,6 +11,7 @@ import { PremiumFeatureButton } from "~/components/subscription/premium-feature-
 import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";
 import { getFilteredAndPaginatedCustomFields } from "~/modules/custom-field";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { getUserTierLimit } from "~/modules/tier";
 
 import {
@@ -30,7 +31,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId, userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);

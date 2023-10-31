@@ -1,5 +1,7 @@
 import { type ActionFunctionArgs, redirect } from "@remix-run/node";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -10,14 +12,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     throw new ShelfStackError({ message: "Organization ID is required" });
 
   return redirect("/", {
-    headers: {
-      // Update the organizationId in the auth session
-      "Set-Cookie": await commitAuthSession(request, {
-        authSession: {
-          ...authSession,
-          organizationId: organizationId as string,
-        },
-      }),
-    },
+    headers: [
+      setCookie(
+        await setSelectedOrganizationIdCookie(organizationId as string)
+      ),
+      setCookie(
+        await commitAuthSession(request, {
+          authSession,
+        })
+      ),
+    ],
   });
 };

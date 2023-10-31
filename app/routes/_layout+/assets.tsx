@@ -14,10 +14,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         [
           "Set-Cookie",
           await commitAuthSession(request, {
-            authSession: {
-              ...authSession,
-              organizationId: authSession.organizationId,
-            },
+            authSession,
           }),
         ],
       ],

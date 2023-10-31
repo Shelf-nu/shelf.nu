@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { fetchAssetsForExport } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanExportAssets } from "~/modules/tier";
 import { buildCsvDataFromAssets } from "~/utils";
 
@@ -16,7 +17,9 @@ const keysToSkip = [
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
   await assertUserCanExportAssets({ userId });
 

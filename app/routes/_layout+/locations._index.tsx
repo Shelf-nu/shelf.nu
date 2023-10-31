@@ -12,6 +12,7 @@ import { Td, Th } from "~/components/table";
 
 import { requireAuthSession } from "~/modules/auth";
 import { getLocations } from "~/modules/location";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
   generatePageMeta,
   getCurrentSearchParams,
@@ -22,8 +23,8 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId } = await requireAuthSession(request);
-
+  const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);

@@ -33,6 +33,7 @@ import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
@@ -76,8 +77,9 @@ export interface IndexResponse {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
 
-  const { userId, organizationId } = authSession;
+  const { userId } = authSession;
 
   const user = await db.user.findUnique({
     where: {
@@ -185,10 +187,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         [
           "Set-Cookie",
           await commitAuthSession(request, {
-            authSession: {
-              ...authSession,
-              organizationId: currentOrganization?.id || organizations[0].id, // This handles client side navigation
-            },
+            authSession,
           }),
         ],
       ],

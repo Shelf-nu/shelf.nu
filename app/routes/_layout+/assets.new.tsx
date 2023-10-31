@@ -16,6 +16,7 @@ import {
 } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -28,7 +29,9 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 const title = "New Asset";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
   const { categories, tags, locations, customFields } =
     await getAllRelatedEntries({
@@ -53,6 +56,7 @@ export const handle = {
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
+  const organizationId = await requireOrganisationId(authSession, request);
   assertIsPost(request);
 
   /** Here we need to clone the request as we need 2 different streams:
@@ -66,7 +70,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   const formData = await clonedRequest.formData();
 
   const customFields = await getActiveCustomFields({
-    organizationId: authSession.organizationId,
+    organizationId,
   });
 
   const FormSchema = mergedSchema({
@@ -107,7 +111,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   const tags = buildTagsSet(result.data.tags);
 
   const asset = await createAsset({
-    organizationId: authSession.organizationId,
+    organizationId,
     title,
     description,
     userId: authSession.userId,
