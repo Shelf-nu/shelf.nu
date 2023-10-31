@@ -10,6 +10,7 @@ import { Badge } from "~/components/shared";
 import { UserBadge } from "~/components/shared/user-badge";
 import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
 import { Table, Td, Th } from "~/components/table";
+import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
 import { db } from "~/database";
 import { useUserData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
@@ -119,6 +120,7 @@ export default function WorkspacePage() {
                   <Th>Assets</Th>
                   <Th>Locations</Th>
                   <Th className="whitespace-nowrap">Team members</Th>
+                  <Th>Actions</Th>
                 </>
               }
             />
@@ -212,6 +214,9 @@ const OrganizationRow = ({
       <Td>{item._count?.assets || 0}</Td>
       <Td>{item._count?.locations || 0}</Td>
       <Td>{item._count?.members || 0}</Td>
+      <Td>
+        <WorkspaceActionsDropdown workspaceId={item.id} />
+      </Td>
     </>
   );
 };
