@@ -11,7 +11,7 @@ import {
   SESSION_SECRET,
 } from "~/utils";
 
-import { setCookie } from "~/utils/cookies";
+import { setCookie } from "~/utils/cookies.server";
 import { refreshAccessToken, verifyAuthSession } from "./service.server";
 import type { AuthSession } from "./types";
 import { destroySelectedOrganizationIdCookie } from "../organization/context.server";

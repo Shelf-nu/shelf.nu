@@ -14,9 +14,9 @@ import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils";
-import { setCookie } from "~/utils/cookies";
 import {
   initializePerPageCookieOnLayout,
+  setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";

@@ -5,7 +5,7 @@ import {
   parseCookie,
   serializeCookie,
   setCookie,
-} from "~/utils/cookies";
+} from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
 import { getUserOrganizations } from "./service.server";

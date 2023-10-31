@@ -34,7 +34,7 @@ import {
   validEmail,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies";
+import { setCookie } from "~/utils/cookies.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);

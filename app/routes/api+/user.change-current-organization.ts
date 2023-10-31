@@ -1,7 +1,7 @@
 import { type ActionFunctionArgs, redirect } from "@remix-run/node";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { setCookie } from "~/utils/cookies";
+import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
 export const action = async ({ request }: ActionFunctionArgs) => {

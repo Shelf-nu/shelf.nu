@@ -11,7 +11,7 @@ import {
   getCurrentSearchParams,
   safeRedirect,
 } from "~/utils";
-import { setCookie } from "~/utils/cookies";
+import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
