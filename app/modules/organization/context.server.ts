@@ -83,5 +83,5 @@ export async function requireOrganisationId(
     });
   }
 
-  return organizationId;
+  return { organizationId, organizations: userOrganizations };
 }

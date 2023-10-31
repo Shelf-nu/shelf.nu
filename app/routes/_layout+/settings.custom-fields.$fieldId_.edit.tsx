@@ -23,7 +23,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const id = getRequiredParam(params, "fieldId");
 
   const { customField } = await getCustomField({ organizationId, id });

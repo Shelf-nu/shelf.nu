@@ -46,7 +46,7 @@ export const handle = {
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   assertIsPost(request);
   await assertUserCanCreateMoreCustomFields({ userId: authSession.userId });
 

@@ -18,7 +18,7 @@ const keysToSkip = [
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
 
   await assertUserCanExportAssets({ userId });

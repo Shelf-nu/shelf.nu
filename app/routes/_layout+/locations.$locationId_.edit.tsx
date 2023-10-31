@@ -27,7 +27,7 @@ import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const id = getRequiredParam(params, "locationId");
 
   const { location } = await getLocation({ organizationId, id });
@@ -56,7 +56,7 @@ export const handle = {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const clonedRequest = request.clone();
 
   const id = getRequiredParam(params, "locationId");

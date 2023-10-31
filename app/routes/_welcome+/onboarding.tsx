@@ -12,10 +12,12 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getAuthUserByAccessToken } from "~/modules/auth/service.server";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user";
 import type { UpdateUserPayload } from "~/modules/user/types";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 
 function createOnboardingSchema(userSignedUpWithPassword: boolean) {
   return z
@@ -120,11 +122,17 @@ export async function action({ request }: ActionFunctionArgs) {
   return redirect(
     `/welcome${organizationId ? `?organizationId=${organizationId}` : ""}`,
     {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, {
-          authSession,
-        }),
-      },
+      headers: [
+        organizationId
+          ? setCookie(await setSelectedOrganizationIdCookie(organizationId))
+          : ["", ""],
+        setCookie(
+          await commitAuthSession(request, {
+            authSession,
+            flashErrorMessage: null,
+          })
+        ),
+      ],
     }
   );
 }

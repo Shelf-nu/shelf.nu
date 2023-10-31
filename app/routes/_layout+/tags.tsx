@@ -29,7 +29,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -78,7 +78,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function action({ request }: ActionFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
 
   assertIsDelete(request);

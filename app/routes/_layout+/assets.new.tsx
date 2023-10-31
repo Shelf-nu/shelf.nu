@@ -30,7 +30,7 @@ const title = "New Asset";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
 
   const { categories, tags, locations, customFields } =
@@ -56,7 +56,7 @@ export const handle = {
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   assertIsPost(request);
 
   /** Here we need to clone the request as we need 2 different streams:

@@ -51,7 +51,7 @@ import { deleteAssetImage } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
 
   const id = getRequiredParam(params, "assetId");
@@ -106,7 +106,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   assertIsDelete(request);
   const id = getRequiredParam(params, "assetId");
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const formData = await request.formData();
   const mainImageUrl = formData.get("mainImage") as string;
 

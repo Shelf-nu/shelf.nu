@@ -17,7 +17,7 @@ type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
 
   const { assetId } = params as { assetId: string };

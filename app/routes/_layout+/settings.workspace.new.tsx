@@ -24,7 +24,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   // @TODO Here we need to check the subscription
 
   const header: HeaderData = {

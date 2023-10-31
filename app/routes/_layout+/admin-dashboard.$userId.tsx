@@ -52,7 +52,7 @@ export const handle = {
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   await requireAdmin(request);
   const formData = await request.formData();
   /** ID of the target user we are generating codes for */

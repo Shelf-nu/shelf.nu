@@ -72,14 +72,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return redirect("onboarding");
   }
 
-  const organizations = user.userOrganizations.map(
-    (userOrganization) => userOrganization.organization
-  );
-
   /** There could be a case when you get removed from an organization while browsing it.
    * In this case what we do is we set the current organization to the first one in the list
    */
-  const currentOrganizationId = await requireOrganisationId(
+  const { organizationId, organizations } = await requireOrganisationId(
     authSession,
     request
   );
@@ -88,7 +84,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     {
       user,
       organizations,
-      currentOrganizationId,
+      currentOrganizationId: organizationId,
       subscription,
       enablePremium: ENABLE_PREMIUM_FEATURES,
       hideSupportBanner: cookie.hideSupportBanner,

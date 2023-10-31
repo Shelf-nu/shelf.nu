@@ -44,7 +44,7 @@ import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const id = getRequiredParam(params, "locationId");
 
   const searchParams = getCurrentSearchParams(request);

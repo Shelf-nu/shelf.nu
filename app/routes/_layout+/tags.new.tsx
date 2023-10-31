@@ -38,7 +38,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   assertIsPost(request);
   const formData = await request.formData();
   const result = await NewTagFormSchema.safeParseAsync(parseFormAny(formData));

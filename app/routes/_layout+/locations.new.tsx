@@ -47,7 +47,7 @@ export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
 export async function action({ request }: ActionFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   assertIsPost(request);
 
   /** Here we need to clone the request as we need 2 different streams:

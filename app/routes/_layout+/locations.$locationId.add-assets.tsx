@@ -19,7 +19,7 @@ import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const organizationId = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
   const locationId = params.locationId as string;
   const location = await db.location.findUnique({
