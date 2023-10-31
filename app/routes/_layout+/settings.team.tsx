@@ -220,21 +220,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       return redirect("/settings/team");
     case "resend":
-      await createInvite({
+      const invite = await createInvite({
         organizationId,
         inviteeEmail: formData.get("email") as string,
         teamMemberName: formData.get("name") as string,
         teamMemberId,
         inviterId: userId,
         roles: [OrganizationRoles.ADMIN],
+        userId,
       });
-      sendNotification({
-        title: "Successfully invited user",
-        message:
-          "They will receive an email in which they can complete their registration.",
-        icon: { name: "success", variant: "success" },
-        senderId: userId,
-      });
+      if (invite) {
+        sendNotification({
+          title: "Successfully invited user",
+          message:
+            "They will receive an email in which they can complete their registration.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+      }
       return null;
     default:
       throw new ShelfStackError({ message: "Invalid action" });

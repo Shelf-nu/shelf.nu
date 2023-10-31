@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { db } from "~/database";
 import { INVITE_TOKEN_SECRET, SERVER_URL } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { generateRandomCode } from "./helpers";
@@ -36,9 +37,11 @@ export async function createInvite({
   roles,
   teamMemberName,
   teamMemberId,
+  userId,
 }: Pick<Invite, "inviterId" | "inviteeEmail" | "organizationId" | "roles"> & {
   teamMemberName: TeamMember["name"];
   teamMemberId?: Invite["teamMemberId"];
+  userId: string;
 }) {
   const existingUser = await db.user.findFirst({
     where: {
@@ -50,11 +53,15 @@ export async function createInvite({
   });
   if (existingUser) {
     //if email is already part of organization, we dont allow new invite
-    throw new ShelfStackError({
-      status: 400,
-      message: `user ${inviteeEmail} is already part of the organization`,
-      title: `Invalid invite attempt`,
+
+    sendNotification({
+      title: `Cannot invite user ${inviteeEmail}`,
+      message:
+        "There is a user with same email already part of the organization",
+      icon: { name: "x", variant: "error" },
+      senderId: userId,
     });
+    return null;
   }
   if (!teamMemberId) {
     const previousInvite = await db.invite.findFirst({
@@ -82,13 +89,19 @@ export async function createInvite({
         expiresAt: { gt: new Date() },
       },
     });
-    if (previousActiveInvite?.teamMemberId !== teamMemberId) {
+    if (
+      previousActiveInvite &&
+      previousActiveInvite.teamMemberId !== teamMemberId
+    ) {
       //there is already an active invite for different team member, so dont allow new invte
-      throw new ShelfStackError({
-        status: 400,
-        message: `user ${inviteeEmail} is already has an active invite linked to diffrent NRM`,
-        title: `Invalid invite attempt`,
+      sendNotification({
+        title: `Cannot invite user ${inviteeEmail}`,
+        message:
+          "There is an active invite for this user linked to different NRM",
+        icon: { name: "x", variant: "error" },
+        senderId: userId,
       });
+      return null;
     }
   }
 

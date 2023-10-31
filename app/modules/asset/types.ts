@@ -30,7 +30,7 @@ export interface UpdateAssetPayload {
   mainImage?: Asset["mainImage"];
   mainImageExpiration?: Asset["mainImageExpiration"];
   tags?: { set: { id: string }[] };
-  userId?: User["id"];
+  userId: User["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
 }
 

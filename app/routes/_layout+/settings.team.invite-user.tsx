@@ -77,41 +77,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  // // @TODO this still needs some more testing
-  // const existingInvite = await getExisitingActiveInvite({
-  //   organizationId,
-  //   inviteeEmail: email,
-  // });
-
-  // if (existingInvite) {
-  //   return json({
-  //     errors: {
-  //       invite: "Invitation already sent to this email",
-  //     },
-  //   });
-  // }
-
-  await createInvite({
+  const invite = await createInvite({
     organizationId,
     inviteeEmail: email,
     inviterId: userId,
     roles: [OrganizationRoles.ADMIN],
     teamMemberName,
     teamMemberId,
+    userId,
   });
 
-  sendNotification({
-    title: "Successfully invited user",
-    message:
-      "They will receive an email in which they can complete their registration.",
-    icon: { name: "success", variant: "success" },
-    senderId: userId,
-  });
-  return redirect("/settings/team", {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  if (invite) {
+    sendNotification({
+      title: "Successfully invited user",
+      message:
+        "They will receive an email in which they can complete their registration.",
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+    return redirect("/settings/team", {
+      headers: {
+        "Set-Cookie": await commitAuthSession(request, { authSession }),
+      },
+    });
+  }
+  return null;
 };
 
 export function links() {

@@ -356,9 +356,9 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     newLocationId,
     currentLocationId,
     customFieldsValues: customFieldsValuesFromForm,
+    userId,
   } = payload;
-  const isChangingLocation =
-    newLocationId && currentLocationId && newLocationId !== currentLocationId;
+  const isChangingLocation = newLocationId !== currentLocationId;
 
   const data = {
     title,
@@ -452,45 +452,48 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     include: { location: true, tags: true },
   });
 
-  // /** If the location id was passed, we create a note for the move */
+  /** If the location id was passed, we create a note for the move */
   if (isChangingLocation) {
     /**
      * Create a note for the move
      * Here we actually need to query the locations so we can print their names
      * */
 
-    const [currentLocation, newLocation] = await db.$transaction([
-      /** Get the items */
-      db.location.findFirst({
-        where: {
-          id: currentLocationId,
-        },
-      }),
+    const user = await db.user.findFirst({
+      where: {
+        id: userId,
+      },
+      select: {
+        firstName: true,
+        lastName: true,
+      },
+    });
 
-      db.location.findFirst({
-        where: {
-          id: newLocationId,
-        },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
+    const currentLocation = currentLocationId
+      ? await db.location.findFirst({
+          where: {
+            id: currentLocationId,
           },
-        },
-      }),
-    ]);
+        })
+      : null;
+
+    const newLocation = newLocationId
+      ? await db.location.findFirst({
+          where: {
+            id: newLocationId,
+          },
+        })
+      : null;
 
     await createLocationChangeNote({
       currentLocation,
-      newLocation: newLocation as Location,
-      firstName: newLocation?.user.firstName || "",
-      lastName: newLocation?.user.lastName || "",
+      newLocation,
+      firstName: user?.firstName || "",
+      lastName: user?.lastName || "",
       assetName: asset?.title,
       assetId: asset.id,
-      userId: newLocation?.userId as string,
-      isRemoving: false,
+      userId,
+      isRemoving: newLocationId === null,
     });
   }
 
@@ -759,7 +762,7 @@ export const createLocationChangeNote = async ({
   isRemoving,
 }: {
   currentLocation: Location | null;
-  newLocation: Location;
+  newLocation: Location | null;
   firstName: string;
   lastName: string;
   assetName: Asset["title"];
@@ -774,11 +777,16 @@ export const createLocationChangeNote = async ({
    * 3. Removing the location
    */
 
-  let message = currentLocation
-    ? `**${firstName} ${lastName}** updated the location of **${assetName}** from **${currentLocation.name}** to **${newLocation.name}**` // updating location
-    : `**${firstName} ${lastName}** set the location of **${assetName}** to **${newLocation.name}**`; // setting to first location
+  let message = "";
+  if (currentLocation && newLocation) {
+    message = `**${firstName} ${lastName}** updated the location of **${assetName}** from **${currentLocation.name}** to **${newLocation.name}**`; // updating location
+  }
 
-  if (isRemoving) {
+  if (newLocation && !currentLocation) {
+    message = `**${firstName} ${lastName}** set the location of **${assetName}** to **${newLocation.name}**`; // setting to first location
+  }
+
+  if (isRemoving || !newLocation) {
     message = `**${firstName} ${lastName}** removed  **${assetName}** from location **${currentLocation?.name}**`; // removing location
   }
   await createNote({

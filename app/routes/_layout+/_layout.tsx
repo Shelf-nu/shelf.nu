@@ -10,10 +10,13 @@ import { useCrisp } from "~/components/marketing/crisp";
 import { Toaster } from "~/components/shared/toast";
 import { db } from "~/database";
 import { useFormbricks } from "~/hooks/use-formbricks";
-import { requireAuthSession } from "~/modules/auth";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/index.css";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils";
-import { userPrefs } from "~/utils/cookies.server";
+import {
+  initializePerPageCookieOnLayout,
+  userPrefs,
+} from "~/utils/cookies.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
@@ -26,7 +29,6 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
     ? await db.user.findUnique({
@@ -62,21 +64,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     subscription = getCustomerActiveSubscription({ customer });
   }
 
-  const cookieHeader = request.headers.get("Cookie");
-  const cookie = (await userPrefs.parse(cookieHeader)) || {};
-  cookie.perPage = 20;
+  const cookie = await initializePerPageCookieOnLayout(request);
 
   if (!user?.onboarded) {
     return redirect("onboarding");
   }
-  // @TODO we need to do the commiting of session on all routes, as now that we are updating the session when changing organizations, its causing issues
+
+  const organizations = user.userOrganizations.map(
+    (userOrganization) => userOrganization.organization
+  );
+
+  /** There could be a case when you get removed from an organization while browsing it.
+   * In this case what we do is we set the current organization to the first one in the list
+   */
+  let currentOrganizationId = authSession.organizationId;
+  if (!organizations.find((org) => org.id === currentOrganizationId)) {
+    currentOrganizationId = organizations[0].id;
+  }
+
   return json(
     {
       user,
-      organizations: user.userOrganizations.map(
-        (userOrganization) => userOrganization.organization
-      ),
-      currentOrganizationId: authSession.organizationId,
+      organizations,
+      currentOrganizationId,
       subscription,
       enablePremium: ENABLE_PREMIUM_FEATURES,
       hideSupportBanner: cookie.hideSupportBanner,
@@ -84,9 +94,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
     },
     {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
+      headers: [
+        ["Set-Cookie", await userPrefs.serialize(cookie)],
+        [
+          "Set-Cookie",
+          await commitAuthSession(request, {
+            authSession: {
+              ...authSession,
+              organizationId: currentOrganizationId,
+            },
+          }),
+        ],
+      ],
     }
   );
 };
@@ -94,6 +113,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function App() {
   useCrisp();
   useFormbricks();
+
   return (
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
       <div className="flex flex-col md:flex-row">

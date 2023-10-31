@@ -22,3 +22,14 @@ export async function updateCookieWithPerPage(
   }
   return cookie;
 }
+
+/**
+ * Used to set the perPage cookie on the first load of the page if it doesn't exist
+ *
+ */
+export async function initializePerPageCookieOnLayout(request: Request) {
+  const cookieHeader = request.headers.get("Cookie");
+  const cookie = (await userPrefs.parse(cookieHeader)) || {};
+  cookie.perPage = 20;
+  return cookie;
+}

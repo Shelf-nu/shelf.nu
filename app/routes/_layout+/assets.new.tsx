@@ -1,4 +1,3 @@
-import { OrganizationType } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
@@ -17,7 +16,6 @@ import {
 } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -30,19 +28,12 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 const title = "New Asset";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
-  const organization = await getOrganizationByUserId({
-    userId,
-    orgType: OrganizationType.PERSONAL,
-  });
+  const { userId, organizationId } = await requireAuthSession(request);
 
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
   const { categories, tags, locations, customFields } =
     await getAllRelatedEntries({
       userId,
-      organizationId: organization.id,
+      organizationId,
     });
 
   const header = {

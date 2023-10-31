@@ -1,20 +1,33 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 
-import { requireAuthSession } from "~/modules/auth";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
 
-  return null;
+  return json(
+    {},
+    {
+      headers: [
+        [
+          "Set-Cookie",
+          await commitAuthSession(request, {
+            authSession: {
+              ...authSession,
+              organizationId: authSession.organizationId,
+            },
+          }),
+        ],
+      ],
+    }
+  );
 }
 
 export const handle = {
   breadcrumb: () => <Link to="/assets">Assets</Link>,
 };
-
-// export const shouldRevalidate = () => false;
 
 export default function AssetsPage() {
   return <Outlet />;
