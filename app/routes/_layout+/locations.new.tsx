@@ -19,6 +19,7 @@ import { LocationForm, NewLocationFormSchema } from "~/components/location";
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createLocation } from "~/modules/location";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -46,6 +47,7 @@ export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
 export async function action({ request }: ActionFunctionArgs) {
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   assertIsPost(request);
 
   /** Here we need to clone the request as we need 2 different streams:
@@ -92,7 +94,7 @@ export async function action({ request }: ActionFunctionArgs) {
     description,
     address,
     userId: authSession.userId,
-    organizationId: authSession.organizationId,
+    organizationId,
     image: file || null,
   });
 

@@ -15,6 +15,7 @@ import { Th, Td } from "~/components/table";
 import { DeleteTag } from "~/components/tag/delete-tag";
 
 import { requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { deleteTag, getTags } from "~/modules/tag";
 import {
   assertIsDelete,
@@ -27,7 +28,8 @@ import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -75,7 +77,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
   assertIsDelete(request);
   const formData = await request.formData();

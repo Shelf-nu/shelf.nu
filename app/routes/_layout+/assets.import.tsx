@@ -1,4 +1,3 @@
-import { OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -22,6 +21,7 @@ import {
   createAssetsFromContentImport,
 } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanImportAssets } from "~/modules/tier";
 import { csvDataFromRequest } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -31,7 +31,10 @@ import {
 } from "~/utils/import.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
+
   const error = {
     message: "",
     details: {
@@ -86,7 +89,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
   await assertUserCanImportAssets({ userId, organizationId });
 
   return json({

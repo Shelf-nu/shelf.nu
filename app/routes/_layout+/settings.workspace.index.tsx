@@ -14,12 +14,15 @@ import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actio
 import { db } from "~/database";
 import { useUserData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfStackError } from "~/utils/error";
 import { canCreateMoreOrganizations } from "~/utils/subscription";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
   const user = await db.user.findUnique({
     where: {

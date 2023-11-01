@@ -8,3 +8,7 @@ export function generateRandomCode(length: number): string {
   }
   return code;
 }
+
+// export const inviteText = (invite: Invite) => `
+
+// `

@@ -19,7 +19,8 @@ import { OrganizationSelect } from "./organization-select";
 import Overlay from "./overlay";
 
 export default function Sidebar() {
-  const { user, minimizedSidebar } = useLoaderData<typeof loader>();
+  const { user, minimizedSidebar, currentOrganizationId } =
+    useLoaderData<typeof loader>();
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);
 
@@ -103,7 +104,7 @@ export default function Sidebar() {
             </Link>
           </div>
           <div className="">
-            <OrganizationSelect />
+            <OrganizationSelect key={currentOrganizationId} />
           </div>
           <div className="flex-1">
             <MenuItems fetcher={sidebarFetcher} />

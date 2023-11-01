@@ -1,6 +1,5 @@
 import { createCookieSessionStorage, redirect } from "@remix-run/node";
 
-import { db } from "~/database";
 import {
   getCurrentPath,
   isGet,
@@ -11,8 +10,10 @@ import {
   SESSION_SECRET,
 } from "~/utils";
 
+import { setCookie } from "~/utils/cookies.server";
 import { refreshAccessToken, verifyAuthSession } from "./service.server";
 import type { AuthSession } from "./types";
+import { destroySelectedOrganizationIdCookie } from "../organization/context.server";
 
 const SESSION_KEY = "authenticated";
 const SESSION_ERROR_KEY = "error";
@@ -35,6 +36,10 @@ const sessionStorage = createCookieSessionStorage({
   },
 });
 
+/**
+ *
+ * @deprecated
+ */
 export async function createAuthSession({
   request,
   authSession,
@@ -92,9 +97,10 @@ export async function commitAuthSession(
 export async function destroyAuthSession(request: Request) {
   const session = await getSession(request);
   return redirect("/", {
-    headers: {
-      "Set-Cookie": await sessionStorage.destroySession(session),
-    },
+    headers: [
+      setCookie(await destroySelectedOrganizationIdCookie()),
+      setCookie(await sessionStorage.destroySession(session)),
+    ],
   });
 }
 
@@ -161,28 +167,6 @@ export async function requireAuthSession(
   // let's try to refresh, in case of 🧐
   if (!isValidSession || isExpiringSoon(authSession.expiresAt)) {
     return refreshAuthSession(request);
-  }
-
-  /** There could be a case when you get removed from an organization while browsing it.
-   * In this case what we do is we set the current organization to the first one in the list
-   */
-  const userOrganizations = await db.userOrganization.findMany({
-    where: { userId: authSession.userId },
-    select: {
-      organization: {
-        select: { id: true },
-      },
-    },
-  });
-
-  const organizations = userOrganizations.map(
-    (userOrganization) => userOrganization.organization
-  );
-
-  let currentOrganizationId = authSession.organizationId;
-  if (!organizations.find((org) => org.id === currentOrganizationId)) {
-    // Return the updated session with the first available organization
-    return { ...authSession, organizationId: organizations[0].id };
   }
 
   // finally, we have a valid session, let's return it

@@ -12,10 +12,15 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getAuthUserByAccessToken } from "~/modules/auth/service.server";
+import {
+  requireOrganisationId,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user";
 import type { UpdateUserPayload } from "~/modules/user/types";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 
 function createOnboardingSchema(userSignedUpWithPassword: boolean) {
   return z
@@ -82,6 +87,7 @@ export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const formData = await request.formData();
 
   const userSignedUpWithPassword =
@@ -115,19 +121,25 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ errors: updatedUser.errors }, { status: 400 });
   }
 
-  const organizationId = (formData.get("organizationId") as string) || null;
+  const organizationIdFromForm =
+    (formData.get("organizationId") as string) || null;
 
   return redirect(
     `/welcome${organizationId ? `?organizationId=${organizationId}` : ""}`,
     {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, {
-          authSession: {
-            ...authSession,
-            organizationId: organizationId || authSession.organizationId,
-          },
-        }),
-      },
+      headers: [
+        setCookie(
+          await setSelectedOrganizationIdCookie(
+            organizationIdFromForm || organizationId
+          )
+        ),
+        setCookie(
+          await commitAuthSession(request, {
+            authSession,
+            flashErrorMessage: null,
+          })
+        ),
+      ],
     }
   );
 }

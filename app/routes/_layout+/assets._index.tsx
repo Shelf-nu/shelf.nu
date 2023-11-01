@@ -1,4 +1,10 @@
-import type { Category, Asset, Tag, Custody } from "@prisma/client";
+import type {
+  Category,
+  Asset,
+  Tag,
+  Custody,
+  Organization,
+} from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
@@ -26,7 +32,8 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
@@ -69,7 +76,10 @@ export interface IndexResponse {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId, organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+
+  const { userId } = authSession;
 
   const user = await db.user.findUnique({
     where: {
@@ -97,9 +107,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
-  const currentOrganization = user?.userOrganizations
-    .map((userOrganization) => userOrganization.organization)
-    .find((org) => org.id === organizationId);
+  const organizations = user?.userOrganizations.map(
+    (userOrganization) => userOrganization.organization
+  ) as Organization[];
+  const currentOrganization = organizations.find(
+    (org) => org.id === organizationId
+  );
 
   const {
     search,
@@ -169,7 +182,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     },
     {
-      headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
+      headers: [
+        ["Set-Cookie", await userPrefs.serialize(cookie)],
+        [
+          "Set-Cookie",
+          await commitAuthSession(request, {
+            authSession,
+          }),
+        ],
+      ],
     }
   );
 }

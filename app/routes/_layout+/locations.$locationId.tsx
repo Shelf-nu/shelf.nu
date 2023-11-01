@@ -26,6 +26,7 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { deleteLocation, getLocation } from "~/modules/location";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import assetCss from "~/styles/asset.css";
 import {
   assertIsDelete,
@@ -42,7 +43,8 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const id = getRequiredParam(params, "locationId");
 
   const searchParams = getCurrentSearchParams(request);

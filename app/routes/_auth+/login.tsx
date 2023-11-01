@@ -20,13 +20,21 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 
 import {
-  createAuthSession,
   getAuthSession,
   signInWithEmail,
   ContinueWithEmailForm,
+  commitAuthSession,
 } from "~/modules/auth";
-import { assertIsPost, isFormProcessing, validEmail } from "~/utils";
+import { getOrganizationByUserId } from "~/modules/organization";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import {
+  assertIsPost,
+  isFormProcessing,
+  safeRedirect,
+  validEmail,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
@@ -104,10 +112,24 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // Ensure that user property exists before proceeding
   if (signInResult.status === "success" && signInResult.authSession) {
-    return createAuthSession({
-      request,
-      authSession: signInResult.authSession,
-      redirectTo: redirectTo || "/",
+    const { authSession } = signInResult;
+    const personalOrganization = await getOrganizationByUserId({
+      userId: authSession.userId,
+      orgType: "PERSONAL",
+    });
+
+    return redirect(safeRedirect(redirectTo || "/"), {
+      headers: [
+        setCookie(
+          await setSelectedOrganizationIdCookie(personalOrganization.id)
+        ),
+        setCookie(
+          await commitAuthSession(request, {
+            authSession,
+            flashErrorMessage: null,
+          })
+        ),
+      ],
     });
   }
 

@@ -21,6 +21,7 @@ import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { revokeAccessToOrganization } from "~/modules/user";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -48,7 +49,8 @@ type InviteWithTeamMember = Pick<
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const [organization, userMembers, invites, teamMembers] =
     await db.$transaction([
       /** Get the org */
@@ -161,7 +163,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { organizationId, userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
   const formData = await request.formData();
   const intent = formData.get("intent") as ActionIntent;

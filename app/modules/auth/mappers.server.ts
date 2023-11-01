@@ -2,7 +2,7 @@ import type { SupabaseAuthSession } from "~/integrations/supabase";
 
 import { ShelfStackError } from "~/utils/error";
 import type { AuthSession } from "./types";
-import { getOrganizationByUserId } from "../organization";
+// import { getOrganizationByUserId } from "../organization";
 
 export async function mapAuthSession(
   supabaseAuthSession: SupabaseAuthSession | null
@@ -19,10 +19,10 @@ export async function mapAuthSession(
    * In the future we could store the preference for organization from the user in the userPrefs cookie and set it like this
    * This will also be more perfomant because we dont need to query, however there will be some edge cases and safety concerns we would have to address
    */
-  let org = await getOrganizationByUserId({
-    userId: supabaseAuthSession.user.id,
-    orgType: "PERSONAL",
-  });
+  // let org = await getOrganizationByUserId({
+  //   userId: supabaseAuthSession.user.id,
+  //   orgType: "PERSONAL",
+  // });
 
   // console.log(supabaseAuthSession.user);
   // @TODO this is problematic as when the user loggs in for the first time it does it via the auth and there is no organization yet
@@ -40,7 +40,7 @@ export async function mapAuthSession(
     accessToken: supabaseAuthSession.access_token,
     refreshToken: supabaseAuthSession.refresh_token,
     userId: supabaseAuthSession.user.id,
-    organizationId: org?.id || "",
+    // organizationId: org?.id || "",
     email: supabaseAuthSession.user.email,
     expiresIn: supabaseAuthSession.expires_in ?? -1,
     expiresAt: supabaseAuthSession.expires_at ?? -1,

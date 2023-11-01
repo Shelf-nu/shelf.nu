@@ -8,12 +8,15 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import { createNote } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { organizationId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({
     where: { id: assetId },

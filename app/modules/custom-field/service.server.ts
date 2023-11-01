@@ -211,10 +211,14 @@ export async function createCustomFieldsIfNotExists({
   return upsertCustomField(Object.values(fieldToDefDraftMap));
 }
 
-export async function getActiveCustomFields({ userId }: { userId: string }) {
+export async function getActiveCustomFields({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
   return await db.customField.findMany({
     where: {
-      userId,
+      organizationId,
       active: true,
     },
   });

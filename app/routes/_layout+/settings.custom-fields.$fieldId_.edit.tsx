@@ -16,13 +16,14 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getCustomField, updateCustomField } from "~/modules/custom-field";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { organizationId } = await requireAuthSession(request);
-
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const id = getRequiredParam(params, "fieldId");
 
   const { customField } = await getCustomField({ organizationId, id });

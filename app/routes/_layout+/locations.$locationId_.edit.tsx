@@ -18,6 +18,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getLocation, updateLocation } from "~/modules/location";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -25,8 +26,8 @@ import { ShelfStackError } from "~/utils/error";
 import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { organizationId } = await requireAuthSession(request);
-
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const id = getRequiredParam(params, "locationId");
 
   const { location } = await getLocation({ organizationId, id });
@@ -55,6 +56,7 @@ export const handle = {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const clonedRequest = request.clone();
 
   const id = getRequiredParam(params, "locationId");
@@ -95,7 +97,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     description,
     address,
     image: file || null,
-    organizationId: authSession.organizationId,
+    organizationId,
   });
 
   sendNotification({
