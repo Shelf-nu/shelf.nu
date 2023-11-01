@@ -21,6 +21,7 @@ import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
+import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { revokeAccessToOrganization } from "~/modules/user";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -212,8 +213,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       await sendEmail({
         to: user.email,
-        subject: `Access revoked`,
-        text: `Your access to ${org.name}'s workspace has been revoked.`,
+        subject: `Access to ${org.name} has been revoked`,
+        text: revokeAccessEmailText({ orgName: org.name }),
       });
 
       sendNotification({

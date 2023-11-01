@@ -2,12 +2,12 @@ import type { Invite, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import { db } from "~/database";
-import { INVITE_TOKEN_SECRET, SERVER_URL } from "~/utils";
+import { INVITE_TOKEN_SECRET } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
-import { generateRandomCode } from "./helpers";
+import { generateRandomCode, inviteEmailText } from "./helpers";
 import { createTeamMember } from "../team-member";
 import { createUserOrAttachOrg } from "../user";
 
@@ -142,6 +142,12 @@ export async function createInvite({
     data,
     include: {
       organization: true,
+      inviter: {
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      },
     },
   });
 
@@ -151,7 +157,7 @@ export async function createInvite({
   await sendEmail({
     to: inviteeEmail,
     subject: `You have been invited to ${invite.organization.name}`,
-    text: `click to accept ${SERVER_URL}/accept-invite/${invite.id}?token=${token}`, //TODO change path if needed
+    text: inviteEmailText({ invite, token }),
   });
 
   //TODO: user template and embed token as part of button url
