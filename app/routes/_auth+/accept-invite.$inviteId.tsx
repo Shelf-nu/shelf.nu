@@ -50,7 +50,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (signInResult.status === "error") {
     //user could already be registered and hence loggin in with our password failed, redirect to home and let user login or go to home
-    //TODO better UX like redirecting to accept success page and then to home?
     return redirect("/login?acceptedInvite=yes");
   }
 

@@ -16,7 +16,6 @@ import { isFormProcessing } from "~/utils";
 import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
 
-// @TODO do we need the user here?
 export function TeamUsersActionsDropdown({
   userId,
   inviteStatus,

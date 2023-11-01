@@ -278,7 +278,6 @@ export default function WorkspacePage() {
           </p>
         </div>
       </div>
-      {/* @TODO this should be checked if user has proper package */}
       {!isPersonalOrg ? <UsersTable /> : null}
       <TeamMembersTable />
       <ContextualModal />

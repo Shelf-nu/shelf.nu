@@ -160,7 +160,6 @@ export async function createInvite({
     text: inviteEmailText({ invite, token }),
   });
 
-  //TODO: user template and embed token as part of button url
   return invite;
 }
 
