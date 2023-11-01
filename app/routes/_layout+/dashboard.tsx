@@ -1,6 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { Link } from "@remix-run/react";
-import AssetsLineChart from "~/components/dashboard/assets-line-chart";
+import AssetsAreaChart from "~/components/dashboard/assets-area-chart";
 import CustodiansList from "~/components/dashboard/custodians";
 import NewestAssets from "~/components/dashboard/newest-assets";
 import NewsBar from "~/components/dashboard/news-bar";
@@ -47,7 +47,7 @@ export default function DashboardPage() {
         url="."
       />
       <div className="w-full">
-        <AssetsLineChart />
+        <AssetsAreaChart />
       </div>
       <div className="flex gap-4">
         <div className="lg:w-1/2">
