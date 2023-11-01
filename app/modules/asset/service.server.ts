@@ -703,7 +703,6 @@ export async function getAllRelatedEntries({
 
 export const getPaginatedAndFilterableAssets = async ({
   request,
-  userId,
   organizationId,
 }: {
   request: LoaderFunctionArgs["request"];
@@ -723,7 +722,7 @@ export const getPaginatedAndFilterableAssets = async ({
   });
 
   const tags = await getAllTags({
-    userId,
+    organizationId,
   });
 
   const { assets, totalAssets } = await getAssets({
