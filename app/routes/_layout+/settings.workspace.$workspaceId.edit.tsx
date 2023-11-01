@@ -1,5 +1,6 @@
 import {
   json,
+  redirect,
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
@@ -96,20 +97,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
   });
 
   sendNotification({
-    title: "workspace updated",
+    title: "Workspace updated",
     message: "Your workspace  has been updated successfully",
     icon: { name: "success", variant: "success" },
     senderId: authSession.userId,
   });
 
-  return json(
-    { success: true },
-    {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, { authSession }),
-      },
-    }
-  );
+  return redirect("/settings/workspace", {
+    headers: {
+      "Set-Cookie": await commitAuthSession(request, { authSession }),
+    },
+  });
 }
 
 export default function WorkspaceEditPage() {

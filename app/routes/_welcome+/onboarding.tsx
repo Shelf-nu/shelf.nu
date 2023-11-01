@@ -4,7 +4,12 @@ import type {
   LoaderFunctionArgs,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { Form, useLoaderData, useSearchParams } from "@remix-run/react";
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useSearchParams,
+} from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -12,10 +17,7 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getAuthUserByAccessToken } from "~/modules/auth/service.server";
-import {
-  requireOrganisationId,
-  setSelectedOrganizationIdCookie,
-} from "~/modules/organization/context.server";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user";
 import type { UpdateUserPayload } from "~/modules/user/types";
 import { assertIsPost } from "~/utils";
@@ -87,7 +89,6 @@ export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
   const formData = await request.formData();
 
   const userSignedUpWithPassword =
@@ -124,22 +125,27 @@ export async function action({ request }: ActionFunctionArgs) {
   const organizationIdFromForm =
     (formData.get("organizationId") as string) || null;
 
+  const headers = [
+    setCookie(
+      await commitAuthSession(request, {
+        authSession,
+        flashErrorMessage: null,
+      })
+    ),
+  ];
+
+  if (organizationIdFromForm) {
+    headers.push(
+      setCookie(await setSelectedOrganizationIdCookie(organizationIdFromForm))
+    );
+  }
+
   return redirect(
-    `/welcome${organizationId ? `?organizationId=${organizationId}` : ""}`,
+    `/welcome${
+      organizationIdFromForm ? `?organizationId=${organizationIdFromForm}` : ""
+    }`,
     {
-      headers: [
-        setCookie(
-          await setSelectedOrganizationIdCookie(
-            organizationIdFromForm || organizationId
-          )
-        ),
-        setCookie(
-          await commitAuthSession(request, {
-            authSession,
-            flashErrorMessage: null,
-          })
-        ),
-      ],
+      headers,
     }
   );
 }
@@ -152,6 +158,7 @@ export default function Onboarding() {
   const OnboardingFormSchema = createOnboardingSchema(userSignedUpWithPassword);
 
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
+  const actionData = useActionData<typeof action>();
 
   return (
     <div className="p-6 sm:p-8">
@@ -194,7 +201,10 @@ export default function Onboarding() {
             addOn="shelf.nu/"
             type="text"
             name={zo.fields.username()}
-            error={zo.errors.username()?.message}
+            error={
+              // @ts-ignore
+              actionData?.errors?.username || zo.errors.username()?.message
+            }
             defaultValue={user?.username}
             className="w-full"
             inputClassName="flex-1"
