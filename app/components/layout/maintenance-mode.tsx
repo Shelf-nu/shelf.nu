@@ -1,7 +1,7 @@
 import { ToolIcon } from "../icons";
 import { Button } from "../shared/button";
 
-export default function MaintainanceMode() {
+export default function MaintenanceMode() {
   return (
     <div className="relative h-screen w-screen px-4 py-16 md:p-16">
       <img
