@@ -97,10 +97,11 @@ export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
   isRequired: false,
 });
 
-export const MAINTENANCE_MODE = getEnv("MAINTENANCE_MODE", {
-  isSecret: false,
-  isRequired: false,
-});
+export const MAINTENANCE_MODE =
+  getEnv("MAINTENANCE_MODE", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
 
 export const ENABLE_PREMIUM_FEATURES =
   getEnv("ENABLE_PREMIUM_FEATURES", {

@@ -60,6 +60,7 @@ export const meta: MetaFunction = () => [
 export const loader = async ({ request }: LoaderFunctionArgs) =>
   json({
     env: getBrowserEnv(),
+    maintenanceMode: MAINTENANCE_MODE,
     requestInfo: {
       hints: getHints(request),
     },
@@ -99,8 +100,9 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
 }
 
 export default function App() {
+  const { maintenanceMode } = useLoaderData<typeof loader>();
   return (
-    <Document>{MAINTENANCE_MODE ? <MaintenanceMode /> : <Outlet />}</Document>
+    <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
   );
 }
 
