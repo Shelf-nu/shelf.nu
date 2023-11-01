@@ -13,11 +13,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     });
   const image = await db.image.findUnique({
     where: { id: params.imageId },
-    select: { contentType: true, blob: true, userId: true },
+    select: { ownerOrgId: true, contentType: true, blob: true, userId: true },
   });
+  if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
 
-  /** If the image doesnt belong to the user who has the session. Throw an error. */
-  if (image?.userId !== session.userId) {
+  const userOrganizations = await db.userOrganization.findMany({
+    where: { userId: session.userId },
+    select: {
+      organization: {
+        select: { id: true },
+      },
+    },
+  });
+  const orgIds = userOrganizations.map((uo) => uo.organization.id);
+
+  if (!orgIds.includes(image.ownerOrgId)) {
     throw new ShelfStackError({
       message: "Unauthorized. This resource doesn't belong to you.",
       status: 403,

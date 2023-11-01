@@ -26,11 +26,12 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
-import ProfilePicture from "~/components/user/profile-picture";
+import { UserBadge } from "~/components/shared/user-badge";
 import { usePosition, useUserData } from "~/hooks";
 import { deleteAsset, getAsset } from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
@@ -46,13 +47,16 @@ import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
-import { deleteAssets } from "~/utils/storage.server";
+import { deleteAssetImage } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
+
   const id = getRequiredParam(params, "assetId");
 
-  const asset = await getAsset({ userId, id });
+  const asset = await getAsset({ organizationId, id });
   if (!asset) {
     throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
   }
@@ -102,11 +106,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
   assertIsDelete(request);
   const id = getRequiredParam(params, "assetId");
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const formData = await request.formData();
   const mainImageUrl = formData.get("mainImage") as string;
 
-  await deleteAsset({ userId: authSession.userId, id });
-  await deleteAssets({
+  await deleteAsset({ organizationId, id });
+  await deleteAssetImage({
     url: mainImageUrl,
     bucketName: "assets",
   });
@@ -251,7 +256,18 @@ export default function AssetDetailsPage() {
                     </Badge>
                   </div>
                 </li>
-              ) : null}
+              ) : (
+                <li className="mb-4 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Category
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Badge color={"#808080"} withDot={false}>
+                      Uncategorized
+                    </Badge>
+                  </div>
+                </li>
+              )}
               {location ? (
                 <li className="mb-2 flex justify-between">
                   <span className="text-[12px] font-medium text-gray-600">
@@ -294,14 +310,10 @@ export default function AssetDetailsPage() {
                 <span className="text-[12px] font-medium text-gray-600">
                   Owner
                 </span>
-                <div className="max-w-[250px]">
-                  <span className="mb-1 ml-1 inline-flex items-center rounded-2xl bg-gray-100 px-2 py-0.5">
-                    <ProfilePicture width="w-4" height="h-4" />
-                    <span className="ml-1.5 text-[12px] font-medium text-gray-700">
-                      {user?.firstName} {user?.lastName}
-                    </span>
-                  </span>
-                </div>
+                <UserBadge
+                  name={`${user?.firstName} ${user?.lastName}`}
+                  img={user?.profilePicture || "/images/default_pfp.jpg"}
+                />
               </li>
             </ul>
           </Card>

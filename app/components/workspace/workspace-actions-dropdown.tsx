@@ -1,16 +1,17 @@
+import type { Organization } from "@prisma/client";
 import { VerticalDotsIcon } from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.workspace";
-import { DeleteMember } from "./delete-member";
+import { Button } from "../shared/button";
 
-export function ActionsDropdown({
-  teamMember,
+export function WorkspaceActionsDropdown({
+  workspaceId,
 }: {
-  teamMember: TeamMemberWithCustodies;
+  workspaceId: Organization["id"];
 }) {
   return (
     <DropdownMenu modal={false}>
@@ -19,11 +20,23 @@ export function ActionsDropdown({
           <VerticalDotsIcon />
         </i>
       </DropdownMenuTrigger>
+
       <DropdownMenuContent
         align="end"
         className="order w-[180px] rounded-md bg-white p-0 text-right "
       >
-        <DeleteMember teamMember={teamMember} />
+        <DropdownMenuItem className="px-4 py-3">
+          <Button
+            to={`${workspaceId}/edit`}
+            icon="pen"
+            role="link"
+            variant="link"
+            className="justify-start text-gray-700 hover:text-gray-700"
+            width="full"
+          >
+            Edit
+          </Button>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

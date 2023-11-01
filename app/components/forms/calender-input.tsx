@@ -4,7 +4,7 @@ import { forwardRef } from "react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import { DayPicker } from "react-day-picker";
 
-import { tw as cn } from "~/utils";
+import { tw } from "~/utils";
 
 export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
@@ -18,21 +18,20 @@ const Calendar = forwardRef<
     showOutsideDays = true,
     selected,
     onSelect,
-    name,
     ...props
   },
-  ref
+  _ref
 ) {
   return (
     <>
       <DayPicker
-        onSelect={(range: unknown, d: Date) => {
+        onSelect={(_range: unknown, d: Date) => {
           onSelect(d);
         }}
         selected={selected}
         showOutsideDays={showOutsideDays}
-        className={cn(
-          "p-3 z-50 border-4 border-indigo bg-slate-200 z-100",
+        className={tw(
+          "border-indigo z-100 z-50 border-4 bg-slate-200 p-3",
           className
         )}
         classNames={{
@@ -42,7 +41,7 @@ const Calendar = forwardRef<
           caption: "flex justify-center pt-1 relative items-center",
           caption_label: "text-sm font-medium",
           nav: "space-x-1 flex items-center",
-          nav_button: cn(
+          nav_button: tw(
             "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100"
           ),
           nav_button_previous: "absolute left-1",
@@ -52,13 +51,13 @@ const Calendar = forwardRef<
           head_cell:
             "text-muted-foreground rounded-md w-8 font-normal text-[0.8rem]",
           row: "flex w-full mt-2",
-          cell: cn(
-            "relative p-0 text-center text-sm focus-within:relative focus-within:z-20 [&:has([aria-selected])]:bg-accent",
+          cell: tw(
+            "[&:has([aria-selected])]:bg-accent relative p-0 text-center text-sm focus-within:relative focus-within:z-20",
             props.mode === "range"
               ? "[&:has(>.day-range-end)]:rounded-r-md [&:has(>.day-range-start)]:rounded-l-md first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md"
               : "[&:has([aria-selected])]:rounded-md"
           ),
-          day: cn("h-8 w-8 p-0 font-normal aria-selected:opacity-100"),
+          day: tw("h-8 w-8 p-0 font-normal aria-selected:opacity-100"),
           day_range_start: "day-range-start",
           day_range_end: "day-range-end",
           day_selected:
@@ -72,8 +71,8 @@ const Calendar = forwardRef<
           ...classNames,
         }}
         components={{
-          IconLeft: ({ ...props }) => <ChevronLeftIcon className="h-4 w-4" />,
-          IconRight: ({ ...props }) => <ChevronRightIcon className="h-4 w-4" />,
+          IconLeft: () => <ChevronLeftIcon className="h-4 w-4" />,
+          IconRight: () => <ChevronRightIcon className="h-4 w-4" />,
         }}
         {...props}
       />

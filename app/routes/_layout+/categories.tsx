@@ -16,6 +16,7 @@ import { Th, Td } from "~/components/table";
 
 import { requireAuthSession } from "~/modules/auth";
 import { deleteCategory, getCategories } from "~/modules/category";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
   assertIsDelete,
   generatePageMeta,
@@ -27,7 +28,8 @@ import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -36,7 +38,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { prev, next } = generatePageMeta(request);
 
   const { categories, totalCategories } = await getCategories({
-    userId,
+    organizationId,
     page,
     perPage,
     search,
@@ -76,12 +78,15 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
+
   assertIsDelete(request);
   const formData = await request.formData();
   const id = formData.get("id") as string;
 
-  await deleteCategory({ id, userId });
+  await deleteCategory({ id, organizationId });
   sendNotification({
     title: "Category deleted",
     message: "Your category has been deleted successfully",

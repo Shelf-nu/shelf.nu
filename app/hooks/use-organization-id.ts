@@ -7,7 +7,7 @@ import { useMatchesData } from "./use-matches-data";
  * @returns {JSON|undefined} The router data or undefined if not found
  */
 export function useOrganizationId(): Organization["id"] | undefined {
-  return useMatchesData<{ organizationId: Organization["id"] }>(
-    "routes/_layout+/_layout"
-  )?.organizationId;
+  return useMatchesData<{
+    currentOrganizationId: Organization["id"];
+  }>("routes/_layout+/_layout")?.currentOrganizationId;
 }

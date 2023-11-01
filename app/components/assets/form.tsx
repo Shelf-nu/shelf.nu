@@ -146,7 +146,7 @@ export const AssetForm = ({
         className="border-b-0 pb-[10px]"
         required={zodFieldIsRequired(FormSchema.shape.category)}
       >
-        <CategorySelect defaultValue={category || undefined} />
+        <CategorySelect defaultValue={category || "uncategorized"} />
       </FormRow>
 
       <FormRow
