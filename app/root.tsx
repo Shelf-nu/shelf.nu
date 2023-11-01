@@ -21,15 +21,15 @@ import {
 import { ErrorBoundryComponent } from "./components/errors";
 
 import { HomeIcon } from "./components/icons/library";
+import MaintainanceMode from "./components/layout/maintainance-mode";
 import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import styles from "./tailwind.css";
 import { ClientHintCheck, getHints } from "./utils/client-hints";
-import { getBrowserEnv } from "./utils/env";
+import { getBrowserEnv, MAINTAINANCE_MODE } from "./utils/env";
 import { useNonce } from "./utils/nonce-provider";
 import { splashScreenLinks } from "./utils/splash-screen-links";
-import MaintainanceMode from "./components/layout/maintainance-mode";
 export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
@@ -99,9 +99,8 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
 }
 
 export default function App() {
-  const maintainance = true;
   return (
-    <Document>{maintainance ? <MaintainanceMode /> : <Outlet />}</Document>
+    <Document>{MAINTAINANCE_MODE ? <MaintainanceMode /> : <Outlet />}</Document>
   );
 }
 

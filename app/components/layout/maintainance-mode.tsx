@@ -22,7 +22,7 @@ export default function MaintainanceMode() {
             later.
           </p>
           <Button
-            to="https://www.shelf.nu/blog"
+            to="https://www.shelf.nu/blog-categories/updates-maintenance"
             target="_blank"
             rel="noopener noreferrer"
             variant="secondary"
