@@ -12,6 +12,7 @@ declare global {
       CRISP_WEBSITE_ID: string;
       ENABLE_PREMIUM_FEATURES: string;
       FORMBRICKS_ENV_ID: string;
+      MAINTENANCE_MODE: string;
     };
   }
 }
@@ -32,6 +33,7 @@ declare global {
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
       FORMBRICKS_ENV_ID: string;
+      MAINTENANCE_MODE: string;
     }
   }
 }
@@ -95,6 +97,12 @@ export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
   isRequired: false,
 });
 
+export const MAINTENANCE_MODE =
+  getEnv("MAINTENANCE_MODE", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
 export const ENABLE_PREMIUM_FEATURES =
   getEnv("ENABLE_PREMIUM_FEATURES", {
     isSecret: false,
@@ -111,5 +119,6 @@ export function getBrowserEnv() {
     MICROSOFT_CLARITY_ID,
     ENABLE_PREMIUM_FEATURES,
     FORMBRICKS_ENV_ID,
+    MAINTENANCE_MODE,
   };
 }
