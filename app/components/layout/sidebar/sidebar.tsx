@@ -15,10 +15,12 @@ import { toggleMobileNavAtom } from "./atoms";
 import SidebarBottom from "./bottom";
 import MenuButton from "./menu-button";
 import MenuItems from "./menu-items";
+import { OrganizationSelect } from "./organization-select";
 import Overlay from "./overlay";
 
 export default function Sidebar() {
-  const { user, minimizedSidebar } = useLoaderData<typeof loader>();
+  const { user, minimizedSidebar, currentOrganizationId } =
+    useLoaderData<typeof loader>();
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);
 
@@ -83,7 +85,7 @@ export default function Sidebar() {
           isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "left-[-100%]"
         )}
       >
-        <div className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-1 flex-col gap-6 overflow-y-auto overflow-x-hidden">
           <div className="navigation-header flex items-center justify-between">
             <Link
               to="."
@@ -100,19 +102,9 @@ export default function Sidebar() {
                 <ShelfTypography />
               </span>
             </Link>
-            {/* <button
-              className={tw(
-                " hide-show-sidebar bg-gray-100 px-3 py-[10px] transition-all duration-200 ease-linear hover:bg-gray-200 md:block",
-                maintainUncollapsedSidebar
-                  ? "rotate-180"
-                  : " fixed left-[93px] md:hidden"
-              )}
-              onClick={manageUncollapsedSidebar}
-            >
-              <i className="icon text-gray-500">
-                <ChevronRight />
-              </i>
-            </button> */}
+          </div>
+          <div className="">
+            <OrganizationSelect key={currentOrganizationId} />
           </div>
           <div className="flex-1">
             <MenuItems fetcher={sidebarFetcher} />

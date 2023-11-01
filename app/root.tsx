@@ -27,7 +27,7 @@ import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import styles from "./tailwind.css";
 import { ClientHintCheck, getHints } from "./utils/client-hints";
-import { getBrowserEnv, MAINTENANCE_MODE } from "./utils/env";
+import { getBrowserEnv } from "./utils/env";
 import { useNonce } from "./utils/nonce-provider";
 import { splashScreenLinks } from "./utils/splash-screen-links";
 export interface RootData {
@@ -60,7 +60,7 @@ export const meta: MetaFunction = () => [
 export const loader = async ({ request }: LoaderFunctionArgs) =>
   json({
     env: getBrowserEnv(),
-    maintenanceMode: true,
+    maintenanceMode: false,
     requestInfo: {
       hints: getHints(request),
     },

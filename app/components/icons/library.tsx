@@ -1172,6 +1172,61 @@ export const ScanQRIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+
+export const SendIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={22}
+    height={20}
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M9.5 10H4m-.084.291L1.58 17.267c-.184.548-.275.822-.21.99a.5.5 0 0 0 .332.3c.174.05.438-.07.965-.306l16.711-7.52c.515-.232.772-.348.851-.508a.5.5 0 0 0 0-.444c-.08-.16-.336-.276-.85-.508L2.661 1.748c-.525-.237-.788-.355-.962-.306a.5.5 0 0 0-.332.299c-.066.168.025.442.206.988l2.342 7.057c.032.093.047.14.053.188a.5.5 0 0 1 0 .129c-.006.048-.022.095-.053.188Z"
+    />
+  </svg>
+);
+
+export const AddUserIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={22}
+    height={20}
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M11 13.5H6.5c-1.396 0-2.093 0-2.661.172a4 4 0 0 0-2.667 2.667C1 16.907 1 17.604 1 19m17 0v-6m-3 3h6M13.5 5.5a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z"
+    />
+  </svg>
+);
+
+export const RemoveUserIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={22}
+    height={20}
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="m15.5 14 5 5m0-5-5 5M11 13.5H6.5c-1.396 0-2.093 0-2.661.172a4 4 0 0 0-2.667 2.667C1 16.907 1 17.604 1 19M13.5 5.5a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z"
+    />
+  </svg>
+);
+
 export const ToolIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="22"
@@ -1187,6 +1242,7 @@ export const ToolIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
+
     />
   </svg>
 );

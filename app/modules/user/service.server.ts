@@ -1,23 +1,26 @@
-import { Prisma, Roles } from "@prisma/client";
-import type { Category, User } from "@prisma/client";
+import type { PrismaClient, Organization, User } from "@prisma/client";
+import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 import sharp from "sharp";
 import { db } from "~/database";
 
-import type { AuthSession } from "~/modules/auth";
-
 import {
-  createEmailAuthAccount,
   deleteAuthAccount,
+  type AuthSession,
+  createEmailAuthAccount,
   signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth";
+
 import {
   dateTimeInUnix,
   generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
+  randomUsernameFromEmail,
 } from "~/utils";
 import { ShelfStackError } from "~/utils/error";
 import {
@@ -26,53 +29,7 @@ import {
   parseFileFormData,
 } from "~/utils/storage.server";
 import type { UpdateUserPayload, UpdateUserResponse } from "./types";
-
-export const defaultUserCategories: Pick<
-  Category,
-  "name" | "description" | "color"
->[] = [
-  {
-    name: "Office Equipment",
-    description:
-      "Items that are used for office work, such as computers, printers, scanners, phones, etc.",
-    color: "#ab339f",
-  },
-  {
-    name: "Cables",
-    description:
-      "Wires that connect devices or transmit signals, such as power cords, ethernet cables, HDMI cables, etc.",
-    color: "#0dec5d",
-  },
-  {
-    name: "Machinery",
-    description:
-      "Equipment that performs mechanical tasks, such as drills, saws, lathes, etc.",
-    color: "#efa578",
-  },
-  {
-    name: "Inventory",
-    description:
-      "Goods that are stored or sold by a business, such as raw materials, finished products, spare parts, etc.",
-    color: "#376dd8",
-  },
-  {
-    name: "Furniture",
-    description:
-      "Items that are used for sitting, working, or storing things, such as chairs, desks, shelves, cabinets, etc.",
-    color: "#88a59e",
-  },
-  {
-    name: "Supplies",
-    description:
-      "Items that are consumed or used up in a process, such as paper, ink, pens, tools, etc.",
-    color: "#acbf01",
-  },
-  {
-    name: "Other",
-    description: "Any other items that do not fit into the above categories.",
-    color: "#48ecfc",
-  },
-];
+import { defaultUserCategories } from "../category/default-categories";
 
 export async function getUserByEmail(email: User["email"]) {
   return db.user.findUnique({ where: { email: email.toLowerCase() } });
@@ -82,34 +39,163 @@ export async function getUserByID(id: User["id"]) {
   return db.user.findUnique({ where: { id } });
 }
 
+export async function getUserByIDWithOrg(id: User["id"]) {
+  return db.user.findUnique({
+    where: { id },
+    include: { organizations: true },
+  });
+}
+
+async function createUserOrgAssociation(
+  tx: Omit<PrismaClient, ITXClientDenyList>,
+  {
+    organizationIds,
+    userId,
+    roles,
+  }: {
+    roles: OrganizationRoles[];
+    organizationIds: Organization["id"][];
+    userId: User["id"];
+  }
+) {
+  return await Promise.all(
+    Array.from(new Set(organizationIds)).map((organizationId) =>
+      tx.userOrganization.upsert({
+        where: {
+          userId_organizationId: {
+            userId,
+            organizationId,
+          },
+        },
+        create: {
+          userId,
+          organizationId,
+          roles,
+        },
+        update: {
+          roles: {
+            push: roles,
+          },
+        },
+      })
+    )
+  );
+}
+
+export async function createUserOrAttachOrg({
+  email,
+  organizationId,
+  roles,
+  password,
+  firstName,
+}: Pick<User, "email" | "firstName"> & {
+  organizationId: Organization["id"];
+  roles: OrganizationRoles[];
+  password: string;
+}) {
+  const shelfUser = await db.user.findFirst({ where: { email } });
+  let authAccount: SupabaseUser | null = null;
+
+  /**
+   * If user does not exist, create a new user and attach the org to it
+   */
+  if (!shelfUser?.id) {
+    authAccount = await createEmailAuthAccount(email, password);
+    if (!authAccount) {
+      throw new ShelfStackError({
+        status: 500,
+        message: "failed to create auth account",
+      });
+    }
+
+    const user = await createUser({
+      email,
+      userId: authAccount.id,
+      username: randomUsernameFromEmail(email),
+      organizationId,
+      roles,
+      firstName,
+    });
+    return user;
+  }
+
+  await createUserOrgAssociation(db, {
+    userId: shelfUser.id,
+    organizationIds: [organizationId],
+    roles,
+  });
+  return shelfUser;
+}
+
 export async function createUser({
   email,
   userId,
   username,
-}: Pick<AuthSession & { username: string }, "userId" | "email" | "username">) {
-  return db.user
-    .create({
-      data: {
-        email,
-        id: userId,
-        username,
-        categories: {
-          create: defaultUserCategories,
-        },
-        organizations: {
-          create: [
-            {
-              name: "Personal",
+  organizationId,
+  roles,
+  firstName,
+}: Pick<AuthSession & { username: string }, "userId" | "email" | "username"> & {
+  organizationId?: Organization["id"];
+  roles?: OrganizationRoles[];
+  firstName?: User["firstName"];
+}) {
+  return db
+    .$transaction(
+      async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            email,
+            id: userId,
+            username,
+            firstName,
+            organizations: {
+              create: [
+                {
+                  name: "Personal",
+                  categories: {
+                    create: defaultUserCategories.map((c) => ({
+                      ...c,
+                      userId,
+                    })),
+                  },
+                },
+              ],
             },
-          ],
-        },
-        roles: {
-          connect: {
-            name: Roles["USER"],
+            roles: {
+              connect: {
+                name: Roles["USER"],
+              },
+            },
           },
-        },
+          include: {
+            organizations: true,
+          },
+        });
+        const organizationIds: Organization["id"][] = [
+          user.organizations[0].id,
+        ];
+        if (organizationId) {
+          organizationIds.push(organizationId);
+        }
+
+        await Promise.all([
+          createUserOrgAssociation(tx, {
+            userId: user.id,
+            organizationIds: [user.organizations[0].id],
+            roles: [OrganizationRoles.OWNER],
+          }),
+          organizationId &&
+            roles?.length &&
+            createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [organizationId],
+              roles,
+            }),
+        ]);
+        return user;
       },
-    })
+      { maxWait: 6000, timeout: 10000 }
+    )
     .then((user) => user)
     .catch(() => null);
 }
@@ -152,6 +238,18 @@ export async function updateUser(
       where: { id: updateUserPayload.id },
       data: {
         ...cleanClone,
+        teamMembers: {
+          updateMany: {
+            where: { userId: updateUserPayload.id },
+            data: {
+              name: `${
+                updateUserPayload.firstName ? updateUserPayload.firstName : ""
+              } ${
+                updateUserPayload.lastName ? updateUserPayload.lastName : ""
+              }`,
+            },
+          },
+        },
       },
     });
 
@@ -335,6 +433,7 @@ export async function deleteUser(id: User["id"]) {
 
   await deleteAuthAccount(id);
 }
+export { defaultUserCategories };
 
 /** THis function is used just for integration tests as it combines the creation of auth accound and user entry */
 export async function createUserAccountForTesting(
@@ -364,4 +463,43 @@ export async function createUserAccountForTesting(
   if (!user) return null;
 
   return authSession;
+}
+
+export async function revokeAccessToOrganization({
+  userId,
+  organizationId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  /**
+   * if I want to revoke access, i simply need to:
+   * 1. Remove relation between user and team member
+   * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
+   */
+  const teamMember = await db.teamMember.findFirst({
+    where: { userId, organizations: { some: { id: organizationId } } },
+  });
+
+  const user = await db.user.update({
+    where: { id: userId },
+    data: {
+      ...(teamMember?.id && {
+        teamMembers: {
+          disconnect: {
+            id: teamMember.id,
+          },
+        },
+      }),
+      userOrganizations: {
+        delete: {
+          userId_organizationId: {
+            userId,
+            organizationId,
+          },
+        },
+      },
+    },
+  });
+  return user;
 }

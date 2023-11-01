@@ -2,8 +2,6 @@ import { tw } from "~/utils";
 
 export interface ListItemData {
   id: string;
-  title: string;
-  mainImage: string;
 }
 export const ListItem = ({
   item,

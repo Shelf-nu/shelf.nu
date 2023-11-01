@@ -146,7 +146,7 @@ export async function deleteProfilePicture({
   }
 }
 
-export async function deleteAssets({
+export async function deleteAssetImage({
   url,
   bucketName,
 }: {

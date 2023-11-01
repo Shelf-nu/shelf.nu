@@ -1,15 +1,15 @@
-import type { Prisma, User, Location } from "@prisma/client";
+import type { Prisma, User, Location, Organization } from "@prisma/client";
 import { db } from "~/database";
-import type { CreateAssetFromContentImportPayload } from "../asset";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function getLocation({
-  userId,
+  organizationId,
   id,
   page = 1,
   perPage = 8,
   search,
 }: Pick<Location, "id"> & {
-  userId: User["id"];
+  organizationId: Organization["id"];
   /** Page number. Starts at 1 */
   page?: number;
 
@@ -33,7 +33,7 @@ export async function getLocation({
   const [location, totalAssetsWithinLocation] = await db.$transaction([
     /** Get the items */
     db.location.findFirst({
-      where: { id, userId },
+      where: { id, organizationId },
       include: {
         image: {
           select: {
@@ -63,17 +63,21 @@ export async function getLocation({
   return { location, totalAssetsWithinLocation };
 }
 
-export async function getAllLocations({ userId }: { userId: User["id"] }) {
-  return await db.location.findMany({ where: { userId } });
+export async function getAllLocations({
+  organizationId,
+}: {
+  organizationId: Organization["id"];
+}) {
+  return await db.location.findMany({ where: { organizationId } });
 }
 
 export async function getLocations({
-  userId,
+  organizationId,
   page = 1,
   perPage = 8,
   search,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
 
   /** Page number. Starts at 1 */
   page?: number;
@@ -87,7 +91,7 @@ export async function getLocations({
   const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
   /** Default value of where. Takes the items belonging to current user */
-  let where: Prisma.LocationWhereInput = { userId };
+  let where: Prisma.LocationWhereInput = { organizationId };
 
   /** If the search string exists, add it to the where object */
   if (search) {
@@ -126,9 +130,11 @@ export async function createLocation({
   description,
   address,
   userId,
+  organizationId,
   image,
 }: Pick<Location, "description" | "name" | "address"> & {
   userId: User["id"];
+  organizationId: Organization["id"];
   image: File | null;
 }) {
   const data = {
@@ -140,6 +146,11 @@ export async function createLocation({
         id: userId,
       },
     },
+    organization: {
+      connect: {
+        id: organizationId,
+      },
+    },
   };
 
   if (image?.size && image?.size > 0) {
@@ -148,6 +159,11 @@ export async function createLocation({
         create: {
           blob: Buffer.from(await image.arrayBuffer()),
           contentType: image.type,
+          ownerOrg: {
+            connect: {
+              id: organizationId,
+            },
+          },
           user: {
             connect: {
               id: userId,
@@ -182,8 +198,10 @@ export async function updateLocation(payload: {
   description?: Location["description"];
   image: File | null;
   userId: User["id"];
+  organizationId: Organization["id"];
 }) {
-  const { id, name, address, description, image, userId } = payload;
+  const { id, name, address, description, image, userId, organizationId } =
+    payload;
   const data = {
     name,
     description,
@@ -194,6 +212,11 @@ export async function updateLocation(payload: {
     const imageData = {
       blob: Buffer.from(await image.arrayBuffer()),
       contentType: image.type,
+      ownerOrg: {
+        connect: {
+          id: organizationId,
+        },
+      },
       user: {
         connect: {
           id: userId,
@@ -223,9 +246,11 @@ export async function updateLocation(payload: {
 export async function createLocationsIfNotExists({
   data,
   userId,
+  organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
   userId: User["id"];
+  organizationId: Organization["id"];
 }): Promise<Record<string, Location["id"]>> {
   // first we get all the locations from the assets and make then into an object where the category is the key and the value is an empty string
   const locations = new Map(
@@ -237,7 +262,7 @@ export async function createLocationsIfNotExists({
   // now we loop through the locations and check if they exist
   for (const [location, _] of locations) {
     const existingCategory = await db.location.findFirst({
-      where: { name: location, userId },
+      where: { name: location, organizationId },
     });
 
     if (!existingCategory) {
@@ -248,6 +273,11 @@ export async function createLocationsIfNotExists({
           user: {
             connect: {
               id: userId,
+            },
+          },
+          organization: {
+            connect: {
+              id: organizationId,
             },
           },
         },

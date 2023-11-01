@@ -1,14 +1,15 @@
-import type { Category, Prisma, User } from "@prisma/client";
+import type { Category, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database";
 import { getRandomColor } from "~/utils";
-import type { CreateAssetFromContentImportPayload } from "../asset";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function createCategory({
   name,
   description,
   color,
   userId,
-}: Pick<Category, "description" | "name" | "color"> & {
+  organizationId,
+}: Pick<Category, "description" | "name" | "color" | "organizationId"> & {
   userId: User["id"];
 }) {
   return db.category.create({
@@ -21,17 +22,22 @@ export async function createCategory({
           id: userId,
         },
       },
+      organization: {
+        connect: {
+          id: organizationId,
+        },
+      },
     },
   });
 }
 
 export async function getCategories({
-  userId,
+  organizationId,
   page = 1,
   perPage = 8,
   search,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
 
   /** Page number. Starts at 1 */
   page?: number;
@@ -45,7 +51,7 @@ export async function getCategories({
   const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
   /** Default value of where. Takes the items belonging to current user */
-  let where: Prisma.CategoryWhereInput = { userId };
+  let where: Prisma.CategoryWhereInput = { organizationId };
 
   /** If the search string exists, add it to the where object */
   if (search) {
@@ -73,23 +79,29 @@ export async function getCategories({
 
 export async function deleteCategory({
   id,
-  userId,
-}: Pick<Category, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Category, "id"> & { organizationId: Organization["id"] }) {
   return db.category.deleteMany({
-    where: { id, userId },
+    where: { id, organizationId },
   });
 }
 
-export async function getAllCategories({ userId }: { userId: User["id"] }) {
-  return await db.category.findMany({ where: { userId } });
+export async function getAllCategories({
+  organizationId,
+}: {
+  organizationId: Organization["id"];
+}) {
+  return await db.category.findMany({ where: { organizationId } });
 }
 
 export async function createCategoriesIfNotExists({
   data,
   userId,
+  organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
   userId: User["id"];
+  organizationId: Organization["id"];
 }): Promise<Record<string, Category["id"]>> {
   // first we get all the categories from the assets and make then into an object where the category is the key and the value is an empty string
   const categories = new Map(
@@ -113,6 +125,11 @@ export async function createCategoriesIfNotExists({
           user: {
             connect: {
               id: userId,
+            },
+          },
+          organization: {
+            connect: {
+              id: organizationId,
             },
           },
         },

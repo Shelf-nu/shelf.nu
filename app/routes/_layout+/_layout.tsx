@@ -1,5 +1,6 @@
-import { OrganizationType, Roles } from "@prisma/client";
+import { Roles } from "@prisma/client";
 import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
+
 import { json, redirect } from "@remix-run/node";
 import { Outlet } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
@@ -9,10 +10,15 @@ import { useCrisp } from "~/components/marketing/crisp";
 import { Toaster } from "~/components/shared/toast";
 import { db } from "~/database";
 import { useFormbricks } from "~/hooks/use-formbricks";
-import { requireAuthSession } from "~/modules/auth";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils";
-import { userPrefs } from "~/utils/cookies.server";
+import {
+  initializePerPageCookieOnLayout,
+  setCookie,
+  userPrefs,
+} from "~/utils/cookies.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
@@ -32,12 +38,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         include: {
           roles: true,
           organizations: {
-            where: {
-              // This is default for now. Will need to be adjusted when we have more org types and teams functionality is active
-              type: OrganizationType.PERSONAL,
-            },
             select: {
               id: true,
+              name: true,
+              type: true,
+              imageId: true,
+            },
+          },
+          userOrganizations: {
+            where: {
+              userId: authSession.userId,
+            },
+            select: {
+              organization: true,
             },
           },
         },
@@ -53,17 +66,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     subscription = getCustomerActiveSubscription({ customer });
   }
 
-  const cookieHeader = request.headers.get("Cookie");
-  const cookie = (await userPrefs.parse(cookieHeader)) || {};
-  cookie.perPage = 20;
+  const cookie = await initializePerPageCookieOnLayout(request);
+
   if (!user?.onboarded) {
     return redirect("onboarding");
   }
 
+  /** There could be a case when you get removed from an organization while browsing it.
+   * In this case what we do is we set the current organization to the first one in the list
+   */
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
+
   return json(
     {
       user,
-      organizationId: user?.organizations[0].id,
+      organizations,
+      currentOrganizationId: organizationId,
       subscription,
       enablePremium: ENABLE_PREMIUM_FEATURES,
       hideSupportBanner: cookie.hideSupportBanner,
@@ -71,9 +92,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
     },
     {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
+      headers: [
+        setCookie(await userPrefs.serialize(cookie)),
+        setCookie(
+          await commitAuthSession(request, {
+            authSession,
+          })
+        ),
+      ],
     }
   );
 };
@@ -81,6 +107,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function App() {
   useCrisp();
   useFormbricks();
+
   return (
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
       <div className="flex flex-col md:flex-row">

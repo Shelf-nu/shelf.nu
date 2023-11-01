@@ -31,9 +31,10 @@ export const shouldRevalidate = () => false;
 
 export default function SettingsPage() {
   const items = [
-    { to: "user", content: "My details" },
+    { to: "user", content: "User details" },
+    { to: "workspace", content: "Workspaces" },
     { to: "custom-fields", content: "Custom fields" },
-    { to: "workspace", content: "Workspace" },
+    { to: "team", content: "Team" },
   ];
 
   /**
@@ -41,7 +42,10 @@ export default function SettingsPage() {
    * the view /new should not inherit from the parent layouts
    * */
   const location = useLocation();
-  const isCustomFieldsNew = location.pathname === "/settings/custom-fields/new";
+  const shouldHideHeader =
+    location.pathname === "/settings/custom-fields/new" ||
+    /^\/settings\/workspace\/\w+$/.test(location.pathname);
+
   const enablePremium = useMatchesData<{ enablePremium: boolean }>(
     "routes/_layout+/_layout"
   )?.enablePremium;
@@ -52,9 +56,9 @@ export default function SettingsPage() {
 
   return (
     <>
-      {isCustomFieldsNew ? null : <Header />}
+      {shouldHideHeader ? null : <Header />}
       <div>
-        {isCustomFieldsNew ? null : <HorizontalTabs items={items} />}
+        {shouldHideHeader ? null : <HorizontalTabs items={items} />}
         <div>
           <Outlet />
         </div>

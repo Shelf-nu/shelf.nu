@@ -12,10 +12,6 @@ export const PriceCta = ({
 }) => {
   if (price.id === "free") return null;
 
-  if (price?.product?.metadata?.shelf_tier === "tier_2") {
-    return <Button disabled>Coming soon</Button>;
-  }
-
   if (activeSubscription) {
     return (
       <CustomerPortalForm

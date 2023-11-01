@@ -13,6 +13,12 @@ async function seed() {
       },
     })) as User;
 
+    const org = await prisma.organization.findFirst({
+      where: {
+        userId: user.id,
+      },
+    });
+
     const times = 100;
     const assets = [];
     for (let i = 0; i < times; i++) {
@@ -20,6 +26,7 @@ async function seed() {
         title: `Asset ${i}`,
         description: `Asset ${i} description`,
         userId: user.id,
+        organizationId: org!.id,
       });
     }
 
