@@ -54,8 +54,12 @@ export async function getTags({
   return { tags, totalTags };
 }
 
-export async function getAllTags({ userId }: { userId: User["id"] }) {
-  return await db.tag.findMany({ where: { userId } });
+export async function getAllTags({
+  organizationId,
+}: {
+  organizationId: Organization["id"];
+}) {
+  return await db.tag.findMany({ where: { organizationId } });
 }
 
 export async function createTag({
