@@ -13,7 +13,6 @@ export const authSession = {
   refreshToken: "valid",
   accessToken: "valid",
   userId: USER_ID,
-  organizationId: ORGANIZATION_ID,
   email: USER_EMAIL,
   expiresIn: -1,
   expiresAt: -1,
