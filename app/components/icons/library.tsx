@@ -1172,7 +1172,6 @@ export const ScanQRIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-
 export const SendIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -1242,7 +1241,6 @@ export const ToolIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-
     />
   </svg>
 );
