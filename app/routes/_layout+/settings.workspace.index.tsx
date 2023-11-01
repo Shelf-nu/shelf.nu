@@ -68,6 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
   const organizations = user.userOrganizations.map((r) => r.organization);
   return json({
+    userId,
     currentOrganizationId: organizationId,
     canCreateMoreOrganizations: canCreateMoreOrganizations({
       tierLimit: user?.tier?.tierLimit,
@@ -178,7 +179,7 @@ const OrganizationRow = ({
     };
   };
 }) => {
-  const { currentOrganizationId } = useLoaderData<typeof loader>();
+  const { currentOrganizationId, userId } = useLoaderData<typeof loader>();
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -218,7 +219,11 @@ const OrganizationRow = ({
       <Td>{item._count?.locations || 0}</Td>
       <Td>{item._count?.members || 0}</Td>
       <Td>
-        <WorkspaceActionsDropdown workspaceId={item.id} />
+        {userId === item.owner.id && item.type !== "PERSONAL" ? (
+          <WorkspaceActionsDropdown workspaceId={item.id} />
+        ) : (
+          " "
+        )}
       </Td>
     </>
   );
