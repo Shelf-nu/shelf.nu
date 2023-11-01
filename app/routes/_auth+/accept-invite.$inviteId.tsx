@@ -24,15 +24,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         "The invitation link doesn't have a token provided. Please try clicking the link in your email again or request a new invite. If the issue persists, feel free to contact support",
     });
   }
-  const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET);
-
-  // @TODO I am not sure why verify can return a string. It throws an Error if token is invalid which is being captured by the our error handler
-  // This is a temporary fix.
-  if (typeof decodedInvite === "string") {
-    throw new ShelfStackError({
-      message: "Something went wrong. Please try again",
-    });
-  }
+  const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET) as {
+    id: string;
+  };
 
   const password = generateRandomCode(10);
   const updatedInvite = await updateInviteStatus({
