@@ -60,6 +60,14 @@ export async function getAsset({
       category: true,
       notes: {
         orderBy: { createdAt: "desc" },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
       },
       qrCodes: true,
       tags: true,
