@@ -46,16 +46,4 @@ export const canCreateMoreOrganizations = ({
   return totalOrganizations < tierLimit?.maxOrganizations;
 };
 
-// export const canAddUsersToOrganization = ({
-//   tierLimit,
-//   totalUsers,
-// }: {
-//   tierLimit: { maxUsers: number } | null | undefined;
-//   totalUsers: number;
-// }) => {
-//   if (!premiumIsEnabled()) return true;
-//   if (!tierLimit?.maxUsers) return false;
-
-// }
-
 export const premiumIsEnabled = () => ENABLE_PREMIUM_FEATURES;

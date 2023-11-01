@@ -15,55 +15,19 @@ import {
   NewWorkspaceFormSchema,
   WorkspaceForm,
 } from "~/components/workspace/form";
-import { db } from "~/database";
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
+import { assertUserCanCreateMoreOrganizations } from "~/modules/tier";
 import { assertIsPost } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
-import { canCreateMoreOrganizations } from "~/utils/subscription";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    include: {
-      tier: {
-        include: { tierLimit: true },
-      },
-      userOrganizations: {
-        include: {
-          organization: {
-            select: {
-              userId: true,
-            },
-          },
-        },
-      },
-    },
-  });
-
-  const organizations = user?.userOrganizations
-    .map((o) => o.organization)
-    .filter((o) => o.userId === userId);
-
-  if (
-    !canCreateMoreOrganizations({
-      tierLimit: user?.tier?.tierLimit,
-      totalOrganizations: organizations?.length || 1,
-    })
-  ) {
-    throw new ShelfStackError({
-      message: "You cannot create workspaces with your current plan.",
-    });
-  }
-  // @TODO Here we need to check the subscription
+  assertUserCanCreateMoreOrganizations(userId);
 
   const header: HeaderData = {
     title: `New workspace`,
@@ -77,6 +41,7 @@ export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 export async function action({ request }: ActionFunctionArgs) {
   const authSession = await requireAuthSession(request);
   assertIsPost(request);
+  assertUserCanCreateMoreOrganizations(authSession.userId);
 
   /** Here we need to clone the request as we need 2 different streams:
    * 1. Access form data for creating asset

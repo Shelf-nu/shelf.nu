@@ -4,6 +4,7 @@ import { ShelfStackError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   canCreateMoreCustomFields,
+  canCreateMoreOrganizations,
   canExportAssets,
   canImportAssets,
 } from "~/utils/subscription";
@@ -116,3 +117,45 @@ export async function assertUserCanInviteUsersToWorkspace({
     });
   }
 }
+
+/**
+ * Fetches user and calls {@link canCreateMoreOrganizations};.
+ * Throws an error if the user cannot create more organizations.
+ */
+export const assertUserCanCreateMoreOrganizations = async (userId: string) => {
+  const user = await db.user.findUnique({
+    where: {
+      id: userId,
+    },
+    include: {
+      tier: {
+        include: { tierLimit: true },
+      },
+      userOrganizations: {
+        include: {
+          organization: {
+            select: {
+              userId: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const organizations = user?.userOrganizations
+    .map((o) => o.organization)
+    .filter((o) => o.userId === userId);
+
+  if (
+    !canCreateMoreOrganizations({
+      tierLimit: user?.tier?.tierLimit,
+      totalOrganizations: organizations?.length || 1,
+    })
+  ) {
+    throw new ShelfStackError({
+      message: "You cannot create workspaces with your current plan.",
+    });
+  }
+  return true;
+};
