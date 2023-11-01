@@ -125,7 +125,6 @@ export async function updateOrganization({
     name,
   };
 
-  // console.log(image);
   if (image?.size && image?.size > 0) {
     const imageData = {
       blob: Buffer.from(await image.arrayBuffer()),

@@ -7,6 +7,7 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
 import { Badge } from "~/components/shared";
+import { Image } from "~/components/shared/image";
 import { UserBadge } from "~/components/shared/user-badge";
 import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
 import { Table, Td, Th } from "~/components/table";
@@ -15,8 +16,10 @@ import { db } from "~/database";
 import { useUserData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
+import { tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfStackError } from "~/utils/error";
+import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -141,12 +144,11 @@ export default function WorkspacePage() {
                       image:
                         org.type === "PERSONAL"
                           ? user?.profilePicture || "/images/default_pfp.jpg"
-                          : org?.imageId
-                          ? `/api/image/${org.imageId}`
-                          : "/images/default_pfp.jpg",
+                          : org?.imageId || "/images/default_pfp.jpg",
                       _count: org._count,
                       type: org.type,
                       owner: org.owner,
+                      updatedAt: new Date(org.updatedAt),
                     }}
                   />
                 </ListItem>
@@ -164,7 +166,7 @@ export default function WorkspacePage() {
 const OrganizationRow = ({
   item,
 }: {
-  item: Pick<Organization, "id" | "name" | "type"> & {
+  item: Pick<Organization, "id" | "name" | "type" | "updatedAt"> & {
     image: string; // We dont pick that one as sometimes we send an id sometimes we send a placeholder
     _count: {
       assets: number | null;
@@ -186,11 +188,20 @@ const OrganizationRow = ({
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center">
-              <img
-                src={item?.image || "/images/default_pfp.jpg"}
-                alt={`${item.name}`}
-                className="h-12 w-12 rounded-[4px] object-cover"
-              />
+              {isPersonalOrg(item) ? (
+                <img
+                  src={item?.image || "/images/default_pfp.jpg"}
+                  alt={`${item.name}`}
+                  className="h-12 w-12 rounded-[4px] object-cover"
+                />
+              ) : (
+                <Image
+                  imageId={item?.image}
+                  alt={`${item.name}`}
+                  className={tw("h-12 w-12 rounded-[4px] object-cover")}
+                  updatedAt={item?.updatedAt}
+                />
+              )}
             </div>
             <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
               <div className="font-medium">
