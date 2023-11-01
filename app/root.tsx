@@ -60,7 +60,7 @@ export const meta: MetaFunction = () => [
 export const loader = async ({ request }: LoaderFunctionArgs) =>
   json({
     env: getBrowserEnv(),
-    maintenanceMode: MAINTENANCE_MODE,
+    maintenanceMode: true,
     requestInfo: {
       hints: getHints(request),
     },
