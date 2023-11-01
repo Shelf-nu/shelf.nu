@@ -12,6 +12,7 @@ export const PremiumFeatureButton = ({
   buttonContent = {
     title: "Use",
     message: "This feature is not available on the free tier of shelf.",
+    ctaText: "Upgrade to a paid plan",
   },
   buttonProps,
   skipCta = false,
@@ -20,6 +21,7 @@ export const PremiumFeatureButton = ({
   buttonContent: {
     title: string | JSX.Element | JSX.Element[];
     message: string;
+    ctaText?: string;
   };
   buttonProps: ButtonProps;
   skipCta?: boolean;
@@ -31,6 +33,7 @@ export const PremiumFeatureButton = ({
       buttonContent={{
         ...buttonContent,
         variant: buttonProps.variant || "primary",
+        ctaText: buttonContent?.ctaText || "Upgrade to a paid plan",
       }}
       skipCta={skipCta}
     />
@@ -44,6 +47,7 @@ const HoverMessage = ({
     title: string | JSX.Element | JSX.Element[];
     message: string;
     variant?: ButtonVariant;
+    ctaText: string;
   };
   skipCta: boolean;
 }) => (
@@ -60,7 +64,7 @@ const HoverMessage = ({
           <span>
             Please consider{" "}
             <Button to="/settings/subscription" variant={"link"}>
-              upgrading to a paid plan
+              {buttonContent.ctaText}
             </Button>
           </span>
         ) : null}

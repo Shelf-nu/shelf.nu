@@ -1,4 +1,4 @@
-import type { Organization } from "@prisma/client";
+import { TierId, type Organization } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -70,8 +70,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     plural: "Workspaces",
   };
   const organizations = user.userOrganizations.map((r) => r.organization);
+
   return json({
     userId,
+    tier: user?.tier,
     currentOrganizationId: organizationId,
     canCreateMoreOrganizations: canCreateMoreOrganizations({
       tierLimit: user?.tier?.tierLimit,
@@ -90,9 +92,18 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function WorkspacePage() {
-  const { items: organizations, canCreateMoreOrganizations } =
-    useLoaderData<typeof loader>();
+  const {
+    items: organizations,
+    canCreateMoreOrganizations,
+    tier,
+  } = useLoaderData<typeof loader>();
   const user = useUserData();
+
+  let upgradeMessage =
+    "You are currently able to create a max of 2 workspaces. If you want to create more than 1 Team workspace, please get in touch with sales";
+  if (tier.id === TierId.free || tier.id === TierId.tier_1) {
+    upgradeMessage = `You cannot create a workspace on a ${tier.name} subscription. `;
+  }
 
   return (
     <div>
@@ -103,10 +114,10 @@ export default function WorkspacePage() {
             canUseFeature={canCreateMoreOrganizations}
             buttonContent={{
               title: "New workspace",
-              message:
-                "You are currently able to create a max of 2 workspaces. If you want to create more than 1 Team workspace, please get in touch with sales",
+              message: upgradeMessage,
+              ctaText: "upgrading to team plan",
             }}
-            skipCta
+            skipCta={tier.id === TierId.tier_2}
             buttonProps={{
               to: "new",
               role: "link",

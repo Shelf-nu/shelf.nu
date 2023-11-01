@@ -779,15 +779,15 @@ export const createLocationChangeNote = async ({
 
   let message = "";
   if (currentLocation && newLocation) {
-    message = `**${firstName} ${lastName}** updated the location of **${assetName}** from **${currentLocation.name}** to **${newLocation.name}**`; // updating location
+    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **${currentLocation.name.trim()}** to **${newLocation.name.trim()}**`; // updating location
   }
 
   if (newLocation && !currentLocation) {
-    message = `**${firstName} ${lastName}** set the location of **${assetName}** to **${newLocation.name}**`; // setting to first location
+    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **${newLocation.name.trim()}**`; // setting to first location
   }
 
   if (isRemoving || !newLocation) {
-    message = `**${firstName} ${lastName}** removed  **${assetName}** from location **${currentLocation?.name}**`; // removing location
+    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **${currentLocation?.name.trim()}**`; // removing location
   }
   await createNote({
     content: message,
