@@ -29,6 +29,7 @@ import { ClientHintCheck, getHints } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
 import { useNonce } from "./utils/nonce-provider";
 import { splashScreenLinks } from "./utils/splash-screen-links";
+import MaintainanceMode from "./components/layout/maintainance-mode";
 export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
@@ -98,10 +99,9 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
 }
 
 export default function App() {
+  const maintainance = true;
   return (
-    <Document>
-      <Outlet />
-    </Document>
+    <Document>{maintainance ? <MaintainanceMode /> : <Outlet />}</Document>
   );
 }
 
