@@ -112,6 +112,50 @@ export async function createOrganization({
   }
   return org;
 }
+export async function updateOrganization({
+  id,
+  name,
+  image,
+  userId,
+}: Pick<Organization, "name" | "id"> & {
+  userId: User["id"];
+  image: File | null;
+}) {
+  const data = {
+    name,
+  };
+
+  if (image?.size && image?.size > 0) {
+    const imageData = {
+      blob: Buffer.from(await image.arrayBuffer()),
+      contentType: image.type,
+      ownerOrg: {
+        connect: {
+          id: id,
+        },
+      },
+      user: {
+        connect: {
+          id: userId,
+        },
+      },
+    };
+
+    Object.assign(data, {
+      image: {
+        upsert: {
+          create: imageData,
+          update: imageData,
+        },
+      },
+    });
+  }
+
+  return await db.organization.update({
+    where: { id },
+    data: data,
+  });
+}
 
 export const getUserOrganizations = async ({ userId }: { userId: string }) => {
   const userOrganizations = await db.userOrganization.findMany({
