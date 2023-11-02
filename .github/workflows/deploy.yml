@@ -18,6 +18,9 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SERVER_URL: ${{ secrets.SERVER_URL }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SMTP_PWD: ${{ secrets.SMTP_PWD }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
 
   build:
     name: 🐳 Build
