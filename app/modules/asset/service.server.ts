@@ -29,7 +29,12 @@ import {
 } from "~/utils/custom-fields";
 import { ShelfStackError } from "~/utils/error";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
-import type { ShelfAssetCustomFieldValueType } from "./types";
+import type {
+  CreateAssetFromBackupImportPayload,
+  CreateAssetFromContentImportPayload,
+  ShelfAssetCustomFieldValueType,
+  UpdateAssetPayload,
+} from "./types";
 import { createCategoriesIfNotExists, getAllCategories } from "../category";
 import {
   createCustomFieldsIfNotExists,
@@ -42,17 +47,27 @@ import { createTagsIfNotExists, getAllTags } from "../tag";
 import { createTeamMemberIfNotExists } from "../team-member";
 
 export async function getAsset({
+  organizationId,
   userId,
   id,
 }: Pick<Asset, "id"> & {
-  userId: User["id"];
+  organizationId?: Organization["id"];
+  userId?: User["id"];
 }) {
   const asset = await db.asset.findFirst({
-    where: { id, userId },
+    where: { id, organizationId, userId },
     include: {
       category: true,
       notes: {
         orderBy: { createdAt: "desc" },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
       },
       qrCodes: true,
       tags: true,
@@ -88,14 +103,14 @@ export async function getAsset({
 }
 
 export async function getAssets({
-  userId,
+  organizationId,
   page = 1,
   perPage = 8,
   search,
   categoriesIds,
   tagsIds,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
 
   /** Page number. Starts at 1 */
   page: number;
@@ -112,7 +127,7 @@ export async function getAssets({
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
   /** Default value of where. Takes the assetss belonging to current user */
-  let where: Prisma.AssetSearchViewWhereInput = { asset: { userId } };
+  let where: Prisma.AssetSearchViewWhereInput = { asset: { organizationId } };
 
   /** If the search string exists, add it to the where object */
   if (search) {
@@ -176,6 +191,11 @@ export async function getAssets({
                 custodian: {
                   select: {
                     name: true,
+                    user: {
+                      select: {
+                        profilePicture: true,
+                      },
+                    },
                   },
                 },
               },
@@ -203,17 +223,25 @@ export async function createAsset({
   tags,
   custodian,
   customFieldsValues,
+  organizationId,
 }: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
   custodian?: TeamMember["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  organizationId: Organization["id"];
 }) {
   /** User connction data */
   const user = {
     connect: {
       id: userId,
+    },
+  };
+
+  const organization = {
+    connect: {
+      id: organizationId as string,
     },
   };
 
@@ -235,6 +263,7 @@ export async function createAsset({
               version: 0,
               errorCorrection: ErrorCorrection["L"],
               user,
+              organization,
             },
           ],
         };
@@ -245,6 +274,7 @@ export async function createAsset({
     description,
     user,
     qrCodes,
+    organization,
   };
 
   /** If a categoryId is passed, link the category to the asset. */
@@ -322,21 +352,6 @@ export async function createAsset({
   });
 }
 
-interface UpdateAssetPayload {
-  id: Asset["id"];
-  title?: Asset["title"];
-  description?: Asset["description"];
-  /** Pass 'uncategorized' to clear the category */
-  categoryId?: Asset["categoryId"];
-  newLocationId?: Asset["locationId"];
-  currentLocationId?: Asset["locationId"];
-  mainImage?: Asset["mainImage"];
-  mainImageExpiration?: Asset["mainImageExpiration"];
-  tags?: { set: { id: string }[] };
-  userId?: User["id"];
-  customFieldsValues?: ShelfAssetCustomFieldValueType[];
-}
-
 export async function updateAsset(payload: UpdateAssetPayload) {
   const {
     title,
@@ -348,11 +363,10 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     id,
     newLocationId,
     currentLocationId,
-    userId,
     customFieldsValues: customFieldsValuesFromForm,
+    userId,
   } = payload;
-  const isChangingLocation =
-    newLocationId && currentLocationId && newLocationId !== currentLocationId;
+  const isChangingLocation = newLocationId !== currentLocationId;
 
   const data = {
     title,
@@ -446,47 +460,48 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     include: { location: true, tags: true },
   });
 
-  // /** If the location id was passed, we create a note for the move */
+  /** If the location id was passed, we create a note for the move */
   if (isChangingLocation) {
     /**
      * Create a note for the move
      * Here we actually need to query the locations so we can print their names
      * */
 
-    const [currentLocation, newLocation] = await db.$transaction([
-      /** Get the items */
-      db.location.findFirst({
-        where: {
-          id: currentLocationId,
-          userId,
-        },
-      }),
+    const user = await db.user.findFirst({
+      where: {
+        id: userId,
+      },
+      select: {
+        firstName: true,
+        lastName: true,
+      },
+    });
 
-      db.location.findFirst({
-        where: {
-          id: newLocationId,
-          userId,
-        },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-            },
+    const currentLocation = currentLocationId
+      ? await db.location.findFirst({
+          where: {
+            id: currentLocationId,
           },
-        },
-      }),
-    ]);
+        })
+      : null;
+
+    const newLocation = newLocationId
+      ? await db.location.findFirst({
+          where: {
+            id: newLocationId,
+          },
+        })
+      : null;
 
     await createLocationChangeNote({
       currentLocation,
-      newLocation: newLocation as Location,
-      firstName: newLocation?.user.firstName || "",
-      lastName: newLocation?.user.lastName || "",
+      newLocation,
+      firstName: user?.firstName || "",
+      lastName: user?.lastName || "",
       assetName: asset?.title,
       assetId: asset.id,
-      userId: newLocation?.userId as string,
-      isRemoving: false,
+      userId,
+      isRemoving: newLocationId === null,
     });
   }
 
@@ -495,10 +510,10 @@ export async function updateAsset(payload: UpdateAssetPayload) {
 
 export async function deleteAsset({
   id,
-  userId,
-}: Pick<Asset, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Asset, "id"> & { organizationId: Organization["id"] }) {
   return db.asset.deleteMany({
-    where: { id, userId },
+    where: { id, organizationId },
   });
 }
 
@@ -615,12 +630,14 @@ export async function duplicateAsset({
   asset,
   userId,
   amountOfDuplicates,
+  organizationId,
 }: {
   asset: Prisma.AssetGetPayload<{
     include: { custody: { include: { custodian: true } }; tags: true };
   }>;
   userId: string;
   amountOfDuplicates: number;
+  organizationId: string;
 }) {
   const duplicatedAssets = [];
 
@@ -629,6 +646,7 @@ export async function duplicateAsset({
       title: `${asset.title} (copy ${
         amountOfDuplicates > 1 ? i : ""
       } ${Date.now()})`,
+      organizationId,
       description: asset.description,
       userId,
       categoryId: asset.categoryId,
@@ -663,7 +681,6 @@ export async function duplicateAsset({
 
 /** Fetches all related entries required for creating a new asset */
 export async function getAllRelatedEntries({
-  userId,
   organizationId,
 }: {
   userId: User["id"];
@@ -676,13 +693,13 @@ export async function getAllRelatedEntries({
 }> {
   const [categories, tags, locations, customFields] = await db.$transaction([
     /** Get the categories */
-    db.category.findMany({ where: { userId } }),
+    db.category.findMany({ where: { organizationId } }),
 
     /** Get the tags */
-    db.tag.findMany({ where: { userId } }),
+    db.tag.findMany({ where: { organizationId } }),
 
     /** Get the locations */
-    db.location.findMany({ where: { userId } }),
+    db.location.findMany({ where: { organizationId } }),
 
     /** Get the custom fields */
     db.customField.findMany({
@@ -694,10 +711,11 @@ export async function getAllRelatedEntries({
 
 export const getPaginatedAndFilterableAssets = async ({
   request,
-  userId,
+  organizationId,
 }: {
   request: LoaderFunctionArgs["request"];
   userId: User["id"];
+  organizationId: Organization["id"];
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, categoriesIds, tagsIds } =
@@ -708,15 +726,15 @@ export const getPaginatedAndFilterableAssets = async ({
   const { perPage } = cookie;
 
   const categories = await getAllCategories({
-    userId,
+    organizationId,
   });
 
   const tags = await getAllTags({
-    userId,
+    organizationId,
   });
 
   const { assets, totalAssets } = await getAssets({
-    userId,
+    organizationId,
     page,
     perPage,
     search,
@@ -751,7 +769,7 @@ export const createLocationChangeNote = async ({
   isRemoving,
 }: {
   currentLocation: Location | null;
-  newLocation: Location;
+  newLocation: Location | null;
   firstName: string;
   lastName: string;
   assetName: Asset["title"];
@@ -766,12 +784,17 @@ export const createLocationChangeNote = async ({
    * 3. Removing the location
    */
 
-  let message = currentLocation
-    ? `**${firstName} ${lastName}** updated the location of **${assetName}** from **${currentLocation.name}** to **${newLocation.name}**` // updating location
-    : `**${firstName} ${lastName}** set the location of **${assetName}** to **${newLocation.name}**`; // setting to first location
+  let message = "";
+  if (currentLocation && newLocation) {
+    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **${currentLocation.name.trim()}** to **${newLocation.name.trim()}**`; // updating location
+  }
 
-  if (isRemoving) {
-    message = `**${firstName} ${lastName}** removed  **${assetName}** from location **${currentLocation?.name}**`; // removing location
+  if (newLocation && !currentLocation) {
+    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **${newLocation.name.trim()}**`; // setting to first location
+  }
+
+  if (isRemoving || !newLocation) {
+    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **${currentLocation?.name.trim()}**`; // removing location
   }
   await createNote({
     content: message,
@@ -783,13 +806,13 @@ export const createLocationChangeNote = async ({
 
 /** Fetches assets with the data needed for exporting to CSV */
 export const fetchAssetsForExport = async ({
-  userId,
+  organizationId,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
 }) =>
   await db.asset.findMany({
     where: {
-      userId,
+      organizationId,
     },
     include: {
       category: true,
@@ -821,11 +844,13 @@ export const createAssetsFromContentImport = async ({
   const categories = await createCategoriesIfNotExists({
     data,
     userId,
+    organizationId,
   });
 
   const locations = await createLocationsIfNotExists({
     data,
     userId,
+    organizationId,
   });
 
   const teamMembers = await createTeamMemberIfNotExists({
@@ -836,6 +861,7 @@ export const createAssetsFromContentImport = async ({
   const tags = await createTagsIfNotExists({
     data,
     userId,
+    organizationId,
   });
 
   const customFields = await createCustomFieldsIfNotExists({
@@ -864,6 +890,7 @@ export const createAssetsFromContentImport = async ({
     }, [] as ShelfAssetCustomFieldValueType[]);
 
     await createAsset({
+      organizationId,
       title: asset.title,
       description: asset.description || "",
       userId,
@@ -883,16 +910,6 @@ export const createAssetsFromContentImport = async ({
   }
 };
 
-export interface CreateAssetFromContentImportPayload
-  extends Record<string, any> {
-  title: string;
-  description?: string;
-  category?: string;
-  tags: string[];
-  location?: string;
-  custodian?: string;
-}
-
 export const createAssetsFromBackupImport = async ({
   data,
   userId,
@@ -902,9 +919,7 @@ export const createAssetsFromBackupImport = async ({
   userId: User["id"];
   organizationId: Organization["id"];
 }) => {
-  // console.log(data);
-
-  //TODO use concurrency control over it will overload the server
+  //TODO use concurrency control or it will overload the server
   data.map(async (asset) => {
     /** Base data from asset */
     const d = {
@@ -924,6 +939,7 @@ export const createAssetsFromBackupImport = async ({
               version: 0,
               errorCorrection: ErrorCorrection["L"],
               userId,
+              organizationId,
             },
           ],
         },
@@ -945,6 +961,7 @@ export const createAssetsFromBackupImport = async ({
       if (!existingCat) {
         const newCat = await db.category.create({
           data: {
+            organizationId,
             name: category.name,
             description: category.description || "",
             color: category.color,
@@ -971,7 +988,7 @@ export const createAssetsFromBackupImport = async ({
 
       const existingLoc = await db.location.findFirst({
         where: {
-          userId,
+          organizationId,
           name: location.name,
         },
       });
@@ -983,6 +1000,7 @@ export const createAssetsFromBackupImport = async ({
             name: location.name,
             description: location.description || "",
             address: location.address || "",
+            organizationId,
             userId,
             createdAt: new Date(location.createdAt),
             updatedAt: new Date(location.updatedAt),
@@ -1006,6 +1024,7 @@ export const createAssetsFromBackupImport = async ({
 
       const existingCustodian = await db.teamMember.findFirst({
         where: {
+          deletedAt: null,
           organizations: {
             some: {
               id: organizationId,
@@ -1070,6 +1089,11 @@ export const createAssetsFromBackupImport = async ({
                   id: userId,
                 },
               },
+              organization: {
+                connect: {
+                  id: organizationId,
+                },
+              },
             },
           });
           tags[tag] = newTag.id;
@@ -1093,6 +1117,7 @@ export const createAssetsFromBackupImport = async ({
     if (asset.customFields && asset.customFields.length > 0) {
       const customFieldDef = asset.customFields.reduce(
         (res, { value, customField }) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const { id, createdAt, updatedAt, ...rest } = customField;
           const options = value?.valueOption?.length
             ? [value?.valueOption]
@@ -1133,39 +1158,3 @@ export const createAssetsFromBackupImport = async ({
     }
   });
 };
-
-export interface CreateAssetFromBackupImportPayload
-  extends Record<string, any> {
-  id: string;
-  title: string;
-  description?: string;
-  category:
-    | {
-        id: string;
-        name: string;
-        description: string;
-        color: string;
-        createdAt: string;
-        updatedAt: string;
-        userId: string;
-      }
-    | {};
-  tags: {
-    name: string;
-  }[];
-  location:
-    | {
-        name: string;
-        description?: string;
-        address?: string;
-        createdAt: string;
-        updatedAt: string;
-      }
-    | {};
-  customFields: AssetCustomFieldsValuesWithFields[];
-}
-
-export type AssetCustomFieldsValuesWithFields =
-  ShelfAssetCustomFieldValueType & {
-    customField: CustomField;
-  };

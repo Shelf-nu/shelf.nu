@@ -1,14 +1,20 @@
-import type { Prisma, Tag, TeamMember, User } from "@prisma/client";
+import type {
+  Organization,
+  Prisma,
+  Tag,
+  TeamMember,
+  User,
+} from "@prisma/client";
 import { db } from "~/database";
-import type { CreateAssetFromContentImportPayload } from "../asset";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function getTags({
-  userId,
+  organizationId,
   page = 1,
   perPage = 8,
   search,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
 
   /** Page number. Starts at 1 */
   page?: number;
@@ -22,7 +28,7 @@ export async function getTags({
   const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
   /** Default value of where. Takes the items belonging to current user */
-  let where: Prisma.TagWhereInput = { userId };
+  let where: Prisma.TagWhereInput = { organizationId };
 
   /** If the search string exists, add it to the where object */
   if (search) {
@@ -48,15 +54,20 @@ export async function getTags({
   return { tags, totalTags };
 }
 
-export async function getAllTags({ userId }: { userId: User["id"] }) {
-  return await db.tag.findMany({ where: { userId } });
+export async function getAllTags({
+  organizationId,
+}: {
+  organizationId: Organization["id"];
+}) {
+  return await db.tag.findMany({ where: { organizationId } });
 }
 
 export async function createTag({
   name,
   description,
   userId,
-}: Pick<Tag, "description" | "name"> & {
+  organizationId,
+}: Pick<Tag, "description" | "name" | "organizationId"> & {
   userId: User["id"];
 }) {
   return db.tag.create({
@@ -68,16 +79,21 @@ export async function createTag({
           id: userId,
         },
       },
+      organization: {
+        connect: {
+          id: organizationId,
+        },
+      },
     },
   });
 }
 
 export async function deleteTag({
   id,
-  userId,
-}: Pick<Tag, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Tag, "id"> & { organizationId: Organization["id"] }) {
   return db.tag.deleteMany({
-    where: { id, userId },
+    where: { id, organizationId },
   });
 }
 
@@ -92,9 +108,11 @@ export const buildTagsSet = (tags: string | undefined) =>
 export async function createTagsIfNotExists({
   data,
   userId,
+  organizationId,
 }: {
   data: CreateAssetFromContentImportPayload[];
   userId: User["id"];
+  organizationId: Organization["id"];
 }): Promise<Record<string, TeamMember["id"]>> {
   const tags = data
     .filter(({ tags }) => tags.length > 0)
@@ -108,7 +126,7 @@ export async function createTagsIfNotExists({
     const existingTag = await db.tag.findFirst({
       where: {
         name: tag,
-        userId,
+        organizationId,
       },
     });
 
@@ -120,6 +138,11 @@ export async function createTagsIfNotExists({
           user: {
             connect: {
               id: userId,
+            },
+          },
+          organization: {
+            connect: {
+              id: organizationId,
             },
           },
         },

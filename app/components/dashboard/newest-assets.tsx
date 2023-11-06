@@ -1,6 +1,6 @@
 import type { Asset, Category } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import type { loader } from "~/root";
+import type { loader } from "~/routes/_layout+/dashboard";
 import { userFriendlyAssetStatus } from "~/utils";
 import { AssetImage } from "../assets/asset-image";
 import { Badge } from "../shared";
@@ -29,8 +29,10 @@ export default function NewestAssets() {
         </tr>
       </thead>
       <tbody>
-        {newAssets.assets.map((asset: Asset) => (
+        {newAssets.assets.map((asset) => (
           <Tr key={asset.id}>
+            {/* @TODO resolve this issue
+            @ts-ignore */}
             <Row item={asset} />
           </Tr>
         ))}

@@ -20,20 +20,28 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 
 import {
-  createAuthSession,
   getAuthSession,
   signInWithEmail,
   ContinueWithEmailForm,
+  commitAuthSession,
 } from "~/modules/auth";
-import { assertIsPost, isFormProcessing, validEmail } from "~/utils";
+import { getOrganizationByUserId } from "~/modules/organization";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import {
+  assertIsPost,
+  isFormProcessing,
+  safeRedirect,
+  validEmail,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
 
-  if (authSession) return redirect("/");
+  if (authSession) return redirect(`/`);
   return json({ title, subHeading });
 }
 
@@ -104,10 +112,24 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // Ensure that user property exists before proceeding
   if (signInResult.status === "success" && signInResult.authSession) {
-    return createAuthSession({
-      request,
-      authSession: signInResult.authSession,
-      redirectTo: redirectTo || "/",
+    const { authSession } = signInResult;
+    const personalOrganization = await getOrganizationByUserId({
+      userId: authSession.userId,
+      orgType: "PERSONAL",
+    });
+
+    return redirect(safeRedirect(redirectTo || "/"), {
+      headers: [
+        setCookie(
+          await setSelectedOrganizationIdCookie(personalOrganization.id)
+        ),
+        setCookie(
+          await commitAuthSession(request, {
+            authSession,
+            flashErrorMessage: null,
+          })
+        ),
+      ],
     });
   }
 
@@ -131,6 +153,7 @@ export default function IndexLoginForm() {
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
+  const acceptedInvite = searchParams.get("acceptedInvite");
   const data = useActionData<{
     errors: { email: string; password: string };
   }>();
@@ -140,6 +163,12 @@ export default function IndexLoginForm() {
 
   return (
     <div className="w-full max-w-md">
+      {acceptedInvite ? (
+        <div className="mb-8 text-center text-success-600">
+          Successfully accepted workspace invite. Please login to see your new
+          workspace.
+        </div>
+      ) : null}
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
         <div>
           <Input

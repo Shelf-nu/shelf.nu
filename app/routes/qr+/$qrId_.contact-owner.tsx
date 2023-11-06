@@ -6,12 +6,13 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
+import { db } from "~/database";
 import { usePosition } from "~/hooks";
 import { getAsset } from "~/modules/asset";
-import { getQr } from "~/modules/qr";
 import { createReport, sendReportEmails } from "~/modules/report-found";
 import { getUserByID } from "~/modules/user";
-import { assertIsPost, isFormProcessing, tw } from "~/utils";
+import { assertIsPost, getRequiredParam, isFormProcessing, tw } from "~/utils";
+import { ShelfStackError } from "~/utils/error";
 
 export const NewReportSchema = z.object({
   email: z
@@ -23,16 +24,27 @@ export const NewReportSchema = z.object({
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   assertIsPost(request);
-  const qrId = params.qrId as string;
-  const qr = await getQr(qrId);
 
-  if (!qr || !qr.assetId) {
+  /** Get the QR id from the url */
+  const qrId = getRequiredParam(params, "qrId");
+  /** Query the QR and include the asset and userId for later use */
+  const qr = await db.qr.findFirst({
+    where: {
+      id: qrId,
+    },
+    select: {
+      asset: true,
+      userId: true,
+    },
+  });
+
+  if (!qr || !qr.asset || !qr.asset.id) {
     return new Response("QR code doesnt exist.", { status: 400 });
   }
 
   const owner = await getUserByID(qr.userId);
   if (!owner) return new Response("Something went wrong", { status: 500 });
-  const asset = await getAsset({ userId: owner.id, id: qr.assetId });
+  const asset = await getAsset({ id: qr.asset.id });
 
   const formData = await request.formData();
   const result = await NewReportSchema.safeParseAsync(parseFormAny(formData));
@@ -47,16 +59,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const report = await createReport({
     email,
     content,
-    assetId: qr.assetId,
+    assetId: qr.asset.id,
   });
-  if (!report) return new Response("Something went wrong", { status: 500 });
+  if (!report) return new ShelfStackError({ message: "Something went wrong" });
 
   /**
    * Here we send 2 emails.
    * 1. To the owner of the asset
    * 2. To the person who reported the asset as found
    */
-  sendReportEmails({
+
+  await sendReportEmails({
     owner,
     asset: asset as Asset,
     message: report.content,
@@ -109,7 +122,7 @@ export default function ContactOwner() {
               the asset can contact you.
             </p>
           </div>
-          <Button width="full" disabled={disabled}>
+          <Button type="submit" width="full" disabled={disabled}>
             Send
           </Button>
         </Form>

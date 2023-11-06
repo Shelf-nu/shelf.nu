@@ -1,13 +1,12 @@
 import { useLoaderData } from "@remix-run/react";
-import type {
-  TeamMemberWithCustodies,
-  loader,
-} from "~/routes/_layout+/settings.workspace";
+import type { loader } from "~/routes/_layout+/dashboard";
+import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.team";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Table, Td, Th, Tr } from "../table";
 
 export default function CustodiansList() {
   const { custodians } = useLoaderData<typeof loader>();
+
   return (
     <Table className="rounded border border-gray-200">
       <thead>
@@ -29,7 +28,9 @@ export default function CustodiansList() {
       </thead>
       <tbody>
         {custodians.map((custodian) => (
-          <Tr key={custodian.id}>
+          <Tr key={custodian.teamMemberId}>
+            {/* @TODO this is related to dodo in dashboard route.
+              @ts-ignore */}
             <Row item={custodian} />
           </Tr>
         ))}

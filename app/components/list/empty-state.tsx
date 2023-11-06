@@ -10,10 +10,16 @@ export interface CustomEmptyState {
     newButtonRoute: string;
     newButtonContent: string;
   };
+  modelName?: {
+    singular: string;
+    plural: string;
+  };
 }
-export const EmptyState = ({ customContent }: CustomEmptyState) => {
-  const { search, modelName } = useLoaderData<SearchableIndexResponse>();
-  const { singular, plural } = modelName;
+export const EmptyState = ({ customContent, modelName }: CustomEmptyState) => {
+  const { search, modelName: modelNameData } =
+    useLoaderData<SearchableIndexResponse>();
+  const singular = modelName?.singular || modelNameData.singular;
+  const plural = modelName?.plural || modelNameData.plural;
 
   const texts = {
     title: search ? `No ${plural} found` : `No ${plural} on database`,

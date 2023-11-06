@@ -6,7 +6,7 @@ import { createSignedUrl } from "~/utils/storage.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   assertIsPost(request);
-  await requireAuthSession(request);
+  const { userId } = await requireAuthSession(request);
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
   const mainImage = formData.get("mainImage") as string;
@@ -32,6 +32,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     id: assetId,
     mainImage: signedUrl,
     mainImageExpiration: oneDayFromNow(),
+    userId,
   });
   return json({ asset, error: "" });
 };

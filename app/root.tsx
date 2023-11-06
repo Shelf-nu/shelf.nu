@@ -21,6 +21,7 @@ import {
 import { ErrorBoundryComponent } from "./components/errors";
 
 import { HomeIcon } from "./components/icons/library";
+import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
@@ -59,6 +60,7 @@ export const meta: MetaFunction = () => [
 export const loader = async ({ request }: LoaderFunctionArgs) =>
   json({
     env: getBrowserEnv(),
+    maintenanceMode: false,
     requestInfo: {
       hints: getHints(request),
     },
@@ -98,10 +100,9 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
 }
 
 export default function App() {
+  const { maintenanceMode } = useLoaderData<typeof loader>();
   return (
-    <Document>
-      <Outlet />
-    </Document>
+    <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
   );
 }
 

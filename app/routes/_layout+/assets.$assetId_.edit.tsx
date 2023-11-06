@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -24,7 +23,7 @@ import {
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -36,25 +35,19 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
-  const organization = await getOrganizationByUserId({
-    userId,
-    orgType: OrganizationType.PERSONAL,
-  });
-
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
   const { categories, tags, locations, customFields } =
     await getAllRelatedEntries({
       userId,
-      organizationId: organization.id,
+      organizationId,
     });
 
   const id = getRequiredParam(params, "assetId");
 
-  const asset = await getAsset({ userId, id });
+  const asset = await getAsset({ organizationId, id });
   if (!asset) {
     throw new ShelfStackError({ message: "Not Found", status: 404 });
   }
@@ -85,13 +78,14 @@ export const handle = {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
 
   const id = getRequiredParam(params, "assetId");
   const clonedRequest = request.clone();
   const formData = await clonedRequest.formData();
 
   const customFields = await getActiveCustomFields({
-    userId: authSession.userId,
+    organizationId,
   });
 
   const FormSchema = mergedSchema({

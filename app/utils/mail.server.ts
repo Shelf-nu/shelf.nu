@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
 
 export const sendEmail = async ({
   to,
@@ -22,12 +23,18 @@ export const sendEmail = async ({
 
   // create reusable transporter object using the default SMTP transport
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
+    host: SMTP_HOST,
     port: 465,
     secure: true, // true for 465, false for other ports
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PWD,
+      user: SMTP_USER,
+      pass: SMTP_PWD,
+    },
+    logger: NODE_ENV === "development",
+    debug: NODE_ENV === "development",
+    tls: {
+      // do not fail on invalid certs
+      rejectUnauthorized: true,
     },
   });
 
@@ -40,7 +47,6 @@ export const sendEmail = async ({
     html: html || "", // html body
   });
 
-  // console.log("Message sent: %s", info.messageId);
   // Message sent: <b658f8ca-6296-ccf4-8306-87d57a0b4321@example.com>
 
   // Preview only available when sending through an Ethereal account

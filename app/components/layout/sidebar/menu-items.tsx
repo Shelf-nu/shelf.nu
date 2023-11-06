@@ -60,7 +60,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-full flex-col justify-between">
-        <ul className="menu mt-6">
+        <ul className="menu">
           {isAdmin ? (
             <li>
               <NavLink

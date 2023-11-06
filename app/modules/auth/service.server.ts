@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { SERVER_URL } from "~/utils/env";
 
-import { mapAuthSession } from "./mappers";
+import { mapAuthSession } from "./mappers.server";
 import type { AuthSession } from "./types";
 
 export async function createEmailAuthAccount(email: string, password: string) {
@@ -67,7 +67,7 @@ export async function signInWithEmail(email: string, password: string) {
     return { status: "error", message: "something went wrong try login again" };
   }
 
-  const mappedSession = mapAuthSession(data.session);
+  const mappedSession = await mapAuthSession(data.session);
 
   if (!mappedSession) {
     return { status: "error", message: "something went wrong try login again" };
@@ -132,7 +132,7 @@ export async function refreshAccessToken(
 
   if (!data.session || error) return null;
 
-  return mapAuthSession(data.session);
+  return await mapAuthSession(data.session);
 }
 
 export async function verifyAuthSession(authSession: AuthSession) {

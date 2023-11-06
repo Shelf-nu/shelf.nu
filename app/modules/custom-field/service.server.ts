@@ -8,7 +8,7 @@ import { db } from "~/database";
 import { badRequest } from "~/utils";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { CustomFieldDraftPayload } from "./types";
-import type { CreateAssetFromContentImportPayload } from "../asset";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function createCustomField({
   name,
@@ -211,10 +211,14 @@ export async function createCustomFieldsIfNotExists({
   return upsertCustomField(Object.values(fieldToDefDraftMap));
 }
 
-export async function getActiveCustomFields({ userId }: { userId: string }) {
+export async function getActiveCustomFields({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
   return await db.customField.findMany({
     where: {
-      userId,
+      organizationId,
       active: true,
     },
   });

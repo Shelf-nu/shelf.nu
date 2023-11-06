@@ -7,6 +7,7 @@ import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { generateOrphanedCodes } from "~/modules/qr";
 import { deleteUser } from "~/modules/user";
 import { isDelete } from "~/utils";
@@ -51,6 +52,7 @@ export const handle = {
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   await requireAdmin(request);
   const formData = await request.formData();
   /** ID of the target user we are generating codes for */
@@ -68,6 +70,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect("/admin-dashboard");
   } else {
     await generateOrphanedCodes({
+      organizationId,
       userId,
       amount: Number(formData.get("amount")),
     });

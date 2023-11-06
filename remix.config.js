@@ -20,6 +20,8 @@ module.exports = {
       path: true,
       child_process: true,
       events: true,
+      buffer: true,
+      crypto: true,
     },
   },
 };
