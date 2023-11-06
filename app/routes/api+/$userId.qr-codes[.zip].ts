@@ -23,7 +23,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
   const zip = new JSZip();
 
-  codes.forEach((c, index) => {
+  codes.forEach((c) => {
     const code = QRCode(0, ErrorCorrection["L"]);
     code.addData(`${process.env.SERVER_URL}/qr/${c.id}`);
     code.make();

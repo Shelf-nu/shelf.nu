@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/assets.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
@@ -162,13 +162,12 @@ export async function action({ request }: LoaderFunctionArgs) {
 }
 
 export default function NewAssetPage() {
-  const title = useAtomValue(titleAtom);
+  const title = useAtomValue(dynamicTitleAtom);
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
-
   return (
     <>
-      <Header title={title} />
+      <Header title={title ? title : "Untitled Asset"} />
       <div>
         <AssetForm qrId={qrId} />
       </div>
