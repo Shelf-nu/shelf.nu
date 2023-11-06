@@ -4,7 +4,7 @@ import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { updateTitleAtom } from "~/atoms/assets.new";
+import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { isFormProcessing } from "~/utils";
@@ -77,7 +77,7 @@ export const AssetForm = ({
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
-  const [, updateTitle] = useAtom(updateTitleAtom);
+  const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
   return (
     <Form
@@ -101,7 +101,7 @@ export const AssetForm = ({
           disabled={disabled}
           error={zo.errors.title()?.message}
           autoFocus
-          onChange={updateTitle}
+          onChange={updateDynamicTitle}
           className="w-full"
           defaultValue={title || ""}
           required={zodFieldIsRequired(FormSchema.shape.title)}
