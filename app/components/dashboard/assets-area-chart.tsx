@@ -1,8 +1,10 @@
+import { useLoaderData } from "@remix-run/react";
 import { AreaChart, Card, Title } from "@tremor/react";
+import type { loader } from "~/routes/_layout+/dashboard";
 import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function AssetsAreaChart() {
-  const chartData = [
+  const chartDataStatic = [
     { month: "January", "Assets Created": 23 },
     { month: "February", "Assets Created": 27 },
     { month: "March", "Assets Created": 17 },
@@ -16,6 +18,8 @@ export default function AssetsAreaChart() {
     { month: "November", "Assets Created": 43 },
     { month: "December", "Assets Created": 38 },
   ];
+  const { chartData } = useLoaderData<typeof loader>;
+  console.log(chartData);
   return (
     <>
       <Card className="mb-10">
@@ -44,7 +48,7 @@ export default function AssetsAreaChart() {
         </Title>
         <AreaChart
           className="mt-4 h-72"
-          data={chartData}
+          data={chartDataStatic}
           index="month"
           categories={["Assets Created"]}
           colors={["orange"]}
