@@ -4,22 +4,7 @@ import type { loader } from "~/routes/_layout+/dashboard";
 import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function AssetsAreaChart() {
-  const chartDataStatic = [
-    { month: "January", "Assets Created": 23 },
-    { month: "February", "Assets Created": 27 },
-    { month: "March", "Assets Created": 17 },
-    { month: "April", "Assets Created": 30 },
-    { month: "May", "Assets Created": 36 },
-    { month: "June", "Assets Created": 22 },
-    { month: "July", "Assets Created": 29 },
-    { month: "August", "Assets Created": 33 },
-    { month: "September", "Assets Created": 49 },
-    { month: "October", "Assets Created": 31 },
-    { month: "November", "Assets Created": 43 },
-    { month: "December", "Assets Created": 38 },
-  ];
-  const { chartData } = useLoaderData<typeof loader>;
-  console.log(chartData);
+  const { assetsCreatedInEachMonth } = useLoaderData<typeof loader>();
   return (
     <>
       <Card className="mb-10">
@@ -48,7 +33,7 @@ export default function AssetsAreaChart() {
         </Title>
         <AreaChart
           className="mt-4 h-72"
-          data={chartDataStatic}
+          data={assetsCreatedInEachMonth}
           index="month"
           categories={["Assets Created"]}
           colors={["orange"]}

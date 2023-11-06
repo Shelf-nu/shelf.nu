@@ -9,6 +9,7 @@ import { db } from "~/database";
 import { getAssets } from "~/modules/asset";
 
 import { requireAuthSession } from "~/modules/auth";
+import { getAssetsCreatedInEachMonth } from "~/utils/get-assets-created-in-each-month";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
@@ -28,56 +29,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     },
   });
-  const months = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
 
-  const currentYear = new Date().getFullYear();
-  const lastYear = currentYear - 1;
+  const assetsCreatedInEachMonth = getAssetsCreatedInEachMonth();
 
-  const oneYearAgo = new Date();
-  oneYearAgo.setFullYear(lastYear);
-
-  const dailyData = await db.asset.groupBy({
-    by: ["createdAt"],
-    where: {
-      createdAt: {
-        gte: oneYearAgo,
-      },
-    },
-    _count: {
-      id: true,
-    },
-    orderBy: {
-      createdAt: "asc",
-    },
-  });
-
-  const chartData = months.map((month) => {
-    const date = new Date(lastYear, months.indexOf(month), 1);
-    const data = dailyData.find(
-      (data) => new Date(data.createdAt).getMonth() === date.getMonth()
-    );
-    return {
-      month,
-      "Assets Created": data ? data._count.id : 0,
-    };
-  });
   return json({
     newAssets,
     custodians,
-    chartData,
+    assetsCreatedInEachMonth,
   });
 }
 
