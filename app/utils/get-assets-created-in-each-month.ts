@@ -1,9 +1,9 @@
-import { db } from "~/database";
+import type { Asset } from "@prisma/client";
 
 export async function getAssetsCreatedInEachMonth({
-  organizationId,
+  assets,
 }: {
-  organizationId: string;
+  assets: Asset[];
 }) {
   const months = [
     "January",
@@ -26,30 +26,21 @@ export async function getAssetsCreatedInEachMonth({
   const oneYearAgo = new Date();
   oneYearAgo.setFullYear(lastYear);
 
-  const dailyData = await db.asset.groupBy({
-    by: ["createdAt"],
-    where: {
-      organizationId,
-      createdAt: {
-        gte: oneYearAgo,
-      },
-    },
-    _count: {
-      id: true,
-    },
-    orderBy: {
-      createdAt: "asc",
-    },
-  });
-
-  const assetsCreated = months.map((month) => {
-    const date = new Date(lastYear, months.indexOf(month), 1);
-    const data = dailyData.find(
-      (data) => new Date(data.createdAt).getMonth() === date.getMonth()
-    );
+  const assetsCreated = months.map((month, index) => {
+    const date = new Date(lastYear, index, 1);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + 1);
+    date.setMilliseconds(date.getMilliseconds() - 1);
+    const assetsCreatedBeforeMonth = assets.reduce((count, asset) => {
+      const assetDate = new Date(asset.createdAt);
+      if (assetDate.getTime() <= date.getTime()) {
+        return count + 1;
+      }
+      return count;
+    }, 0);
     return {
       month,
-      "Assets Created": data ? data._count.id : 0,
+      "Assets Created": assetsCreatedBeforeMonth,
     };
   });
   return assetsCreated;

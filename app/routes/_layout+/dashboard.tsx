@@ -6,7 +6,6 @@ import NewestAssets from "~/components/dashboard/newest-assets";
 import NewsBar from "~/components/dashboard/news-bar";
 import { ErrorBoundryComponent } from "~/components/errors";
 import { db } from "~/database";
-import { getAssets } from "~/modules/asset";
 
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
@@ -16,16 +15,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
-  const page = 1;
-  const perPage = 5;
-  const newAssets = await getAssets({ organizationId, page, perPage });
+  const assets = await db.asset.findMany({
+    where: {
+      organizationId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    include: {
+      category: true,
+      custody: {
+        include: {
+          custodian: true,
+        },
+      },
+    },
+  });
 
   /**
    * @TODO
-   * Here I think we might have to change this and need a second query. Because we cannot use select using groupBy
-   * and we actually need the custodian name and if there is a user attached to it we also need to know that user's first and last name as well as profile picture
-   *
-   * So we might need to make a new query using the Ids and merge the data together
+   * We need to drop this. So the idea is that we just have 1 query that gives us all the data(see above) and then we create the different data sets from that.
    */
   const custodians = await db.custody.groupBy({
     by: ["teamMemberId", "id"],
@@ -39,17 +48,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
   const assetsCreatedInEachMonth = await getAssetsCreatedInEachMonth({
-    organizationId,
+    assets,
   });
 
+  console.log(assetsCreatedInEachMonth);
+
   return json({
-    newAssets,
+    newAssets: assets.slice(0, 5),
     custodians,
-    totalAssets: await db.asset.count({
-      where: {
-        organizationId,
-      },
-    }),
+    totalAssets: assets.length,
     assetsCreatedInEachMonth,
   });
 }

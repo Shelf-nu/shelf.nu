@@ -29,7 +29,7 @@ export default function NewestAssets() {
         </tr>
       </thead>
       <tbody>
-        {newAssets.assets.map((asset) => (
+        {newAssets.map((asset) => (
           <Tr key={asset.id}>
             {/* @TODO resolve this issue
             @ts-ignore */}
