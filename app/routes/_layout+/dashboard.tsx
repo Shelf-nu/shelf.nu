@@ -38,12 +38,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     },
   });
-
-  const assetsCreatedInEachMonth = await getAssetsCreatedInEachMonth();
+  const assetsCreatedInEachMonth = await getAssetsCreatedInEachMonth({
+    organizationId,
+  });
 
   return json({
     newAssets,
     custodians,
+    totalAssets: await db.asset.count({
+      where: {
+        organizationId,
+      },
+    }),
     assetsCreatedInEachMonth,
   });
 }

@@ -4,7 +4,8 @@ import type { loader } from "~/routes/_layout+/dashboard";
 import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function AssetsAreaChart() {
-  const { assetsCreatedInEachMonth } = useLoaderData<typeof loader>();
+  const { assetsCreatedInEachMonth, totalAssets } =
+    useLoaderData<typeof loader>();
   return (
     <>
       <Card className="mb-10">
@@ -15,7 +16,7 @@ export default function AssetsAreaChart() {
                 Total inventory
               </span>
               <span className="block text-[30px] font-semibold text-gray-900">
-                80 assets
+                {totalAssets} assets
               </span>
             </div>
             <InfoTooltip

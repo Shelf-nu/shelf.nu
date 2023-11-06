@@ -1,6 +1,10 @@
 import { db } from "~/database";
 
-export async function getAssetsCreatedInEachMonth() {
+export async function getAssetsCreatedInEachMonth({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
   const months = [
     "January",
     "February",
@@ -25,6 +29,7 @@ export async function getAssetsCreatedInEachMonth() {
   const dailyData = await db.asset.groupBy({
     by: ["createdAt"],
     where: {
+      organizationId,
       createdAt: {
         gte: oneYearAgo,
       },
