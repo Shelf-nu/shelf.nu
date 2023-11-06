@@ -7,7 +7,7 @@ import type {
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/custom-fields.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   CustomFieldForm,
   NewCustomFieldFormSchema,
@@ -103,8 +103,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function CustomFieldEditPage() {
-  const name = useAtomValue(titleAtom);
-  const hasName = name !== "Untitled custom field";
+  const name = useAtomValue(dynamicTitleAtom);
+  const hasName = name !== "";
   const { customField } = useLoaderData<typeof loader>();
 
   return (

@@ -2,8 +2,8 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/custom-fields.new";
 
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   CustomFieldForm,
   NewCustomFieldFormSchema,
@@ -97,11 +97,11 @@ export async function action({ request }: LoaderFunctionArgs) {
 }
 
 export default function NewCustomFieldPage() {
-  const title = useAtomValue(titleAtom);
+  const title = useAtomValue(dynamicTitleAtom);
 
   return (
     <>
-      <Header title={title} />
+      <Header title={title ? title : "Untitled custom field"} />
       <div>
         <CustomFieldForm />
       </div>

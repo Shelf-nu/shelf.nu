@@ -4,7 +4,7 @@ import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { updateTitleAtom } from "~/atoms/custom-fields.new";
+import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useOrganizationId } from "~/hooks/use-organization-id";
 import { isFormProcessing } from "~/utils";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
@@ -80,7 +80,7 @@ export const CustomFieldForm = ({
     type || "TEXT"
   );
 
-  const [, updateTitle] = useAtom(updateTitleAtom);
+  const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
   // keeping text field type by default selected
   const organizationId = useOrganizationId();
