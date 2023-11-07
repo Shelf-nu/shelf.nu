@@ -1,30 +1,26 @@
-import {
-  Links,
-  LiveReload,
-  Meta,
-  Scripts,
-  ScrollRestoration,
-} from "@remix-run/react";
-import { ErrorContent } from "./content";
+import { useRouteError } from "@remix-run/react";
+import { isShelfStackError } from "~/utils/error";
 
-export interface ErrorContentProps {
-  title?: string;
-  message?: string | JSX.Element;
-}
+export const ErrorContent = () => {
+  const response = useRouteError();
+  let title = "Oops, something went wrong";
+  let message =
+    "An error has occured. Please refresh the page and try again. If the issue persists, please contact support.";
 
-export const ErrorBoundryComponent = () => (
-  <html lang="en" className="h-full">
-    <head>
-      <meta charSet="utf-8" />
-      <meta name="viewport" content="width=device-width,initial-scale=1" />
-      <Meta />
-      <Links />
-    </head>
-    <body className="h-full">
-      <ErrorContent />
-      <ScrollRestoration />
-      <Scripts />
-      <LiveReload />
-    </body>
-  </html>
-);
+  if (isShelfStackError(response)) {
+    title = response?.title || title;
+    message = response.message;
+  }
+
+  return (
+    <div className="flex h-full w-full items-center justify-center">
+      <div className="flex flex-col items-center text-center">
+        <img src="/images/error-icon.svg" alt={title} className="mb-5" />
+        <h2 className="mb-2">{title}</h2>
+        <p className="max-w-[550px]">{message}</p>
+
+        <div className=" mt-8 flex gap-3"></div>
+      </div>
+    </div>
+  );
+};

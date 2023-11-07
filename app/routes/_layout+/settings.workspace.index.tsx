@@ -2,7 +2,7 @@ import { TierId, type Organization } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+// import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
@@ -89,7 +89,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+// export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function WorkspacePage() {
   const {

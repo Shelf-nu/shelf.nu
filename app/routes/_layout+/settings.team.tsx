@@ -13,7 +13,7 @@ import type {
   ActionFunctionArgs,
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+// import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { TeamMembersTable } from "~/components/workspace/team-members-table";
@@ -256,7 +256,7 @@ export const handle = {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.organization.name) : "" },
 ];
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+// export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function WorkspacePage() {
   const { organization } = useLoaderData<typeof loader>();

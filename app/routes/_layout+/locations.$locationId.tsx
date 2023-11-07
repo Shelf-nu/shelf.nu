@@ -9,7 +9,7 @@ import type {
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { AssetImage } from "~/components/assets/asset-image";
-import { ErrorBoundryComponent } from "~/components/errors";
+// import { ErrorBoundryComponent } from "~/components/errors";
 import { ChevronRight } from "~/components/icons";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
@@ -336,4 +336,4 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   ) : null;
 };
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+// export const ErrorBoundary = () => <ErrorBoundryComponent />;

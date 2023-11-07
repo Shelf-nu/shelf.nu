@@ -13,7 +13,7 @@ import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { Notes } from "~/components/assets/notes";
-import { ErrorBoundryComponent } from "~/components/errors";
+// import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
@@ -58,7 +58,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const asset = await getAsset({ organizationId, id });
   if (!asset) {
-    throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
+    throw new ShelfStackError({
+      title: "Asset Not Found",
+      message: "We couldn't find the assset you were looking for.",
+      status: 404,
+    });
   }
   /** We get the first QR code(for now we can only have 1)
    * And using the ID of tha qr code, we find the latest scan
@@ -351,4 +355,4 @@ export default function AssetDetailsPage() {
   );
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+// export const ErrorBoundary = () => <ErrorBoundryComponent />;

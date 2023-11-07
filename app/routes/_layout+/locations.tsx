@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+// import { ErrorBoundryComponent } from "~/components/errors";
 import { requireAuthSession } from "~/modules/auth";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -17,4 +17,4 @@ export default function LocationsPage() {
   return <Outlet />;
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+// export const ErrorBoundary = () => <ErrorBoundryComponent />;

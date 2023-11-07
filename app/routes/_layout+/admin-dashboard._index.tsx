@@ -1,7 +1,7 @@
 import type { User } from "@prisma/client";
 import { redirect, type LoaderFunctionArgs, json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+// import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Pagination } from "~/components/list/pagination";
@@ -71,4 +71,4 @@ const ListUserContent = ({ item }: { item: User }) => (
   </>
 );
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+// export const ErrorBoundary = () => <ErrorBoundryComponent />;
