@@ -1,8 +1,4 @@
-import {
-  isRouteErrorResponse,
-  useLocation,
-  useRouteError,
-} from "@remix-run/react";
+import { useLocation, useRouteError } from "@remix-run/react";
 import { NODE_ENV } from "~/utils/env";
 import { isShelfStackError } from "~/utils/error";
 import { Button } from "../shared";
@@ -13,11 +9,6 @@ export const ErrorContent = () => {
   let title = "Oops, something went wrong";
   let message =
     "An error has occured. Please refresh the page and try again. If the issue persists, please contact support.";
-
-  if (isRouteErrorResponse(response)) {
-    title = response.data.errors.title;
-    message = response.data.errors.title;
-  }
 
   if (isShelfStackError(response)) {
     title = response?.title || title;

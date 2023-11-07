@@ -1,6 +1,5 @@
 import { redirect, json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { ErrorBoundryComponent } from "~/components/errors";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
 import { belongsToCurrentUsersOrg } from "~/modules/qr/utils.server";
