@@ -183,7 +183,7 @@ describe(createUserAccountForTesting.name, () => {
       `${SUPABASE_AUTH_ADMIN_USER_API}/${USER_ID}`
     );
   });
-  it.only("should create an account", async () => {
+  it("should create an account", async () => {
     expect.assertions(5);
     const fetchAuthAdminUserAPI = new Map();
     const fetchAuthTokenAPI = new Map();

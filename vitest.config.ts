@@ -19,5 +19,10 @@ export default defineConfig({
       include: ["app/**/*.{js,ts}"],
       all: true,
     },
+    env: {
+      SMTP_PWD: "123",
+      SMTP_HOST: "123",
+      SMTP_USER: "123",
+    },
   },
 } as UserConfig);

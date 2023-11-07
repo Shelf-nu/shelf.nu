@@ -16,12 +16,6 @@ on:
         required: true
       DATABASE_URL:
         required: true
-      SMTP_PWD:
-        required: true
-      SMTP_HOST:
-        required: true
-      SMTP_USER:
-        required: true
 
 jobs:
   authorize:
