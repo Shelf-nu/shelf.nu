@@ -1,7 +1,13 @@
 import { OrganizationRoles, OrganizationType } from "@prisma/client";
-import type { Organization, User } from "@prisma/client";
+import type { Organization, Prisma, User } from "@prisma/client";
 
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
+import {
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+} from "~/utils";
 import { defaultUserCategories } from "../category/default-categories";
 
 export const getOrganization = async ({ id }: { id: Organization["id"] }) =>
@@ -168,4 +174,58 @@ export const getUserOrganizations = async ({ userId }: { userId: string }) => {
   });
 
   return userOrganizations.map((uo) => uo.organization);
+};
+
+export const getPaginatedAndFilterableOrganizations = async ({
+  request,
+}: {
+  request: LoaderFunctionArgs["request"];
+}) => {
+  const searchParams = getCurrentSearchParams(request);
+  const { page, search } = getParamsValues(searchParams);
+  const { prev, next } = generatePageMeta(request);
+  const perPage = 25;
+
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+
+  /** Default value of where. Takes the assetss belonging to current user */
+  let where: Prisma.UserWhereInput = {};
+
+  /** If the search string exists, add it to the where object */
+  // if (search) {
+  //   where.email = {
+  //     contains: search,
+  //     mode: "insensitive",
+  //   };
+  // }
+
+  const [organizations, totalOrganizations] = await db.$transaction([
+    /** Get the users */
+    db.organization.findMany({
+      skip,
+      take,
+      // where,
+      orderBy: { createdAt: "desc" },
+      include: {
+        owner: true,
+      },
+    }),
+
+    /** Count them */
+    db.user.count({ where }),
+  ]);
+
+  const totalPages = Math.ceil(totalOrganizations / 25);
+
+  return {
+    page,
+    perPage: 25,
+    search,
+    totalOrganizations,
+    prev,
+    next,
+    organizations,
+    totalPages,
+  };
 };

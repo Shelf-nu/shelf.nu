@@ -1,20 +1,30 @@
-import type { User } from "@prisma/client";
+import { useMemo } from "react";
+import type { Organization, User } from "@prisma/client";
 import { redirect, type LoaderFunctionArgs, json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Pagination } from "~/components/list/pagination";
-import { Td } from "~/components/table";
-import { getPaginatedAndFilterableUsers } from "~/modules/user";
+import { Td, Th } from "~/components/table";
+import { getPaginatedAndFilterableOrganizations } from "~/modules/organization";
+import { isPersonalOrg } from "~/utils/organization";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await requireAdmin(request);
-  const { search, totalUsers, perPage, page, prev, next, users, totalPages } =
-    await getPaginatedAndFilterableUsers({
-      request,
-    });
+  const {
+    search,
+    totalOrganizations,
+    perPage,
+    page,
+    prev,
+    next,
+    organizations,
+    totalPages,
+  } = await getPaginatedAndFilterableOrganizations({
+    request,
+  });
 
   if (page > totalPages) {
     return redirect("/admin-dashboard");
@@ -31,10 +41,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return json({
     header,
-    items: users,
+    items: organizations,
     search,
     page,
-    totalItems: totalUsers,
+    totalItems: totalOrganizations,
     perPage,
     totalPages,
     next,
@@ -53,6 +63,13 @@ export default function Area51() {
           <Pagination />
         </Filters>
         <List
+          headerChildren={
+            <>
+              <Th>Name</Th>
+              <Th>Owner Email</Th>
+              <Th>Type</Th>
+            </>
+          }
           ItemComponent={ListUserContent}
           navigate={(itemId) => navigate(itemId)}
         />
@@ -61,14 +78,37 @@ export default function Area51() {
   );
 }
 
-const ListUserContent = ({ item }: { item: User }) => (
-  <>
-    <Td className="w-full p-0 md:p-0">
-      <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-        {item.email}
-      </div>
-    </Td>
-  </>
-);
+const ListUserContent = ({
+  item,
+}: {
+  item: Organization & {
+    owner: User;
+  };
+}) => {
+  const isPersonal = useMemo(() => isPersonalOrg(item), [item]);
+
+  return (
+    <>
+      <Td> </Td>
+      <Td className="w-full p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+          {isPersonal
+            ? `${item.owner.firstName} ${item.owner.lastName}`
+            : item.name}
+        </div>
+      </Td>
+      <Td className="w-full p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+          {item.owner.email}
+        </div>
+      </Td>
+      <Td className="w-full p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+          {item.type}
+        </div>
+      </Td>
+    </>
+  );
+};
 
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
