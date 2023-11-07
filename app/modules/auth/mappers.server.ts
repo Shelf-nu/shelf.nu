@@ -3,9 +3,9 @@ import type { SupabaseAuthSession } from "~/integrations/supabase";
 import { ShelfStackError } from "~/utils/error";
 import type { AuthSession } from "./types";
 
-export function mapAuthSession(
+export async function mapAuthSession(
   supabaseAuthSession: SupabaseAuthSession | null
-): AuthSession | null {
+): Promise<AuthSession | null> {
   if (!supabaseAuthSession) return null;
 
   if (!supabaseAuthSession.refresh_token)

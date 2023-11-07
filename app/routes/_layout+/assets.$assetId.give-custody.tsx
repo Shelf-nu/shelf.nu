@@ -1,4 +1,4 @@
-import { AssetStatus, OrganizationType } from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
@@ -8,12 +8,17 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import { createNote } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
+import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({
     where: { id: assetId },
@@ -30,12 +35,18 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   /** We get all the team members that are part of the user's personal organization */
   const teamMembers = await db.teamMember.findMany({
     where: {
+      deletedAt: null,
       organizations: {
         some: {
-          type: OrganizationType.PERSONAL,
-          owner: { id: userId },
+          id: organizationId,
         },
       },
+    },
+    include: {
+      user: true,
+    },
+    orderBy: {
+      userId: "asc",
     },
   });
 
@@ -50,6 +61,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const assetId = params.assetId as string;
   const custodian = formData.get("custodian");
+  const user = await getUserByID(userId);
+
+  if (!user)
+    throw new ShelfStackError({
+      message:
+        "User not found. Please refresh and if the issue persists contact support.",
+    });
 
   if (!custodian)
     return json({ error: "Please select a custodian" }, { status: 400 });
@@ -89,7 +107,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   /** Once the asset is updated, we create the note */
   await createNote({
-    content: `**${asset.user.firstName} ${asset.user.lastName}** has given **${custodianName}** custody over **${asset.title}**`,
+    content: `**${user.firstName} ${user.lastName}** has given **${custodianName}** custody over **${asset.title}**`,
     type: "UPDATE",
     userId: userId,
     assetId: asset.id,

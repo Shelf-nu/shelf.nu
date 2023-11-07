@@ -3,8 +3,8 @@ import { Form, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
-import { updateTitleAtom } from "~/atoms/locations.new";
 import { isFormProcessing } from "~/utils";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
@@ -32,7 +32,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
 
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
-  const [, updateName] = useAtom(updateTitleAtom);
+  const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   return (
     <Form

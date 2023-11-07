@@ -12,12 +12,13 @@ import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import invariant from "tiny-invariant";
-import { titleAtom } from "~/atoms/locations.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getLocation, updateLocation } from "~/modules/location";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -25,11 +26,11 @@ import { ShelfStackError } from "~/utils/error";
 import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
-
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const id = getRequiredParam(params, "locationId");
 
-  const { location } = await getLocation({ userId, id });
+  const { location } = await getLocation({ organizationId, id });
   if (!location) {
     throw new ShelfStackError({ message: "Location Not Found", status: 404 });
   }
@@ -55,6 +56,7 @@ export const handle = {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const clonedRequest = request.clone();
 
   const id = getRequiredParam(params, "locationId");
@@ -95,6 +97,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     description,
     address,
     image: file || null,
+    organizationId,
   });
 
   sendNotification({
@@ -114,16 +117,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
   );
 }
 
-export default function AssetEditPage() {
-  const name = useAtomValue(titleAtom);
+export default function LocationEditPage() {
+  const name = useAtomValue(dynamicTitleAtom);
+  const hasName = name !== "";
   const { location } = useLoaderData<typeof loader>();
 
   return (
     <>
-      <Header title={location.name} />
+      <Header title={hasName ? name : location.name} />
       <div className=" items-top flex justify-between">
         <LocationForm
-          name={location.name || name}
+          name={location.name}
           description={location.description}
           address={location.address}
         />

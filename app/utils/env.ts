@@ -12,6 +12,7 @@ declare global {
       CRISP_WEBSITE_ID: string;
       ENABLE_PREMIUM_FEATURES: string;
       FORMBRICKS_ENV_ID: string;
+      MAINTENANCE_MODE: string;
     };
   }
 }
@@ -31,7 +32,12 @@ declare global {
       STRIPE_SECRET_KEY: string;
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
+      INVITE_TOKEN_SECRET: string;
       FORMBRICKS_ENV_ID: string;
+      SMTP_PWD: string;
+      SMTP_HOST: string;
+      SMTP_USER: string;
+      MAINTENANCE_MODE: string;
     }
   }
 }
@@ -62,11 +68,17 @@ function getEnv(
  */
 export const SERVER_URL = getEnv("SERVER_URL");
 export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
+export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
+  isSecret: true,
+});
 export const SESSION_SECRET = getEnv("SESSION_SECRET");
 export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
   isSecret: true,
   isRequired: false,
 });
+export const SMTP_PWD = getEnv("SMTP_PWD");
+export const SMTP_HOST = getEnv("SMTP_HOST");
+export const SMTP_USER = getEnv("SMTP_USER");
 
 /**
  * Shared envs
@@ -95,6 +107,12 @@ export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
   isRequired: false,
 });
 
+export const MAINTENANCE_MODE =
+  getEnv("MAINTENANCE_MODE", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
 export const ENABLE_PREMIUM_FEATURES =
   getEnv("ENABLE_PREMIUM_FEATURES", {
     isSecret: false,
@@ -111,5 +129,6 @@ export function getBrowserEnv() {
     MICROSOFT_CLARITY_ID,
     ENABLE_PREMIUM_FEATURES,
     FORMBRICKS_ENV_ID,
+    MAINTENANCE_MODE,
   };
 }

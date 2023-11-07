@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -9,7 +8,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/assets.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import { ErrorBoundryComponent } from "~/components/errors";
 
@@ -24,7 +23,7 @@ import {
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -36,32 +35,34 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
-  const organization = await getOrganizationByUserId({
-    userId,
-    orgType: OrganizationType.PERSONAL,
-  });
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
 
-  const {
-    categories,
-    totalCategories,
-    tags,
-    locations,
-    totalLocations,
-    customFields,
-  } = await getAllEntriesForCreateAndEdit({
-    userId,
-    organizationId: organization.id,
-    request,
-  });
+  //const {
+  //  categories,
+  //    totalCategories,
+  //    tags,
+  //    locations,
+  //    totalLocations,
+  //    customFields,
+  //  } = await getAllEntriesForCreateAndEdit({
+  //    userId,
+  //    organizationId: organization.id,
+  //    request,
+  //  });
+
+  const { categories, tags, locations, customFields } =
+    await getAllRelatedEntries({
+      userId,
+      organizationId,
+    });
+
 
   const id = getRequiredParam(params, "assetId");
 
-  const asset = await getAsset({ userId, id });
+  const asset = await getAsset({ organizationId, id });
   if (!asset) {
     throw new ShelfStackError({ message: "Not Found", status: 404 });
   }
@@ -95,13 +96,14 @@ export const handle = {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
 
   const id = getRequiredParam(params, "assetId");
   const clonedRequest = request.clone();
   const formData = await clonedRequest.formData();
 
   const customFields = await getActiveCustomFields({
-    userId: authSession.userId,
+    organizationId,
   });
 
   const FormSchema = mergedSchema({
@@ -175,8 +177,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function AssetEditPage() {
-  const title = useAtomValue(titleAtom);
-  const hasTitle = title !== "Untitled asset";
+  const title = useAtomValue(dynamicTitleAtom);
+  const hasTitle = title !== "";
   const { asset } = useLoaderData<typeof loader>();
   const tags = useMemo(
     () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],

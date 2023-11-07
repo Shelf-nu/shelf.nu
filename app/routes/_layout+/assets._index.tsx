@@ -1,4 +1,10 @@
-import type { Category, Asset, Tag, Custody } from "@prisma/client";
+import type {
+  Category,
+  Asset,
+  Tag,
+  Custody,
+  Organization,
+} from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
@@ -25,11 +31,13 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
+import { isPersonalOrg } from "~/utils/organization";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -67,7 +75,10 @@ export interface IndexResponse {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+
+  const { userId } = authSession;
 
   const user = await db.user.findUnique({
     where: {
@@ -78,8 +89,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
       tier: {
         include: { tierLimit: true },
       },
+      userOrganizations: {
+        where: {
+          userId,
+        },
+        select: {
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+            },
+          },
+        },
+      },
     },
   });
+
+  const organizations = user?.userOrganizations.map(
+    (userOrganization) => userOrganization.organization
+  ) as Organization[];
+  const currentOrganization = organizations.find(
+    (org) => org.id === organizationId
+  );
 
   const {
     search,
@@ -98,6 +130,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   } = await getPaginatedAndFilterableAssets({
     request,
     userId,
+    organizationId,
   });
 
   if (totalPages !== 0 && page > totalPages) {
@@ -106,14 +139,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   if (!assets) {
     throw new ShelfStackError({
-      title: "heyy!",
+      title: "Hey!",
       message: `No assets found`,
       status: 404,
     });
   }
 
   const header: HeaderData = {
-    title: user?.firstName ? `${user.firstName}'s inventory` : `Your inventory`,
+    title: isPersonalOrg(currentOrganization)
+      ? user?.firstName
+        ? `${user.firstName}'s inventory`
+        : `Your inventory`
+      : currentOrganization?.name
+      ? `${currentOrganization?.name}'s inventory`
+      : "Your inventory",
   };
 
   const modelName = {
@@ -146,9 +185,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalTags,
     },
     {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
+      headers: [
+        ["Set-Cookie", await userPrefs.serialize(cookie)],
+        [
+          "Set-Cookie",
+          await commitAuthSession(request, {
+            authSession,
+          }),
+        ],
+      ],
     }
   );
 }
@@ -173,8 +218,6 @@ export default function AssetIndexPage() {
     clearCategoryFilters();
     clearTagFilters();
   };
-
-  // const [sendNotification] = useClientNotification();
 
   return (
     <>
@@ -261,6 +304,9 @@ const ListAssetContent = ({
     custody: Custody & {
       custodian: {
         name: string;
+        user?: {
+          profilePicture: string | null;
+        };
       };
     };
     location: {
@@ -326,7 +372,23 @@ const ListAssetContent = ({
 
       {/* Custodian */}
       <Td className="hidden md:table-cell">
-        {custody ? <GrayBadge>{custody.custodian.name}</GrayBadge> : null}
+        {custody ? (
+          <GrayBadge>
+            <>
+              {custody.custodian?.user ? (
+                <img
+                  src={
+                    custody.custodian?.user?.profilePicture ||
+                    "/images/default_pfp.jpg"
+                  }
+                  className="mr-1 h-4 w-4 rounded-full"
+                  alt=""
+                />
+              ) : null}
+              <span className="mt-[1px]">{custody.custodian.name}</span>
+            </>
+          </GrayBadge>
+        ) : null}
       </Td>
 
       {/* Location */}
@@ -360,8 +422,12 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   ) : null;
 };
 
-const GrayBadge = ({ children }: { children: string | JSX.Element }) => (
-  <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
+const GrayBadge = ({
+  children,
+}: {
+  children: string | JSX.Element | JSX.Element[];
+}) => (
+  <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
     {children}
   </span>
 );

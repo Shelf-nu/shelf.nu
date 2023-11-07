@@ -8,7 +8,12 @@ import {
   SUPABASE_AUTH_ADMIN_USER_API,
   authSession,
 } from "mocks/handlers";
-import { USER_EMAIL, USER_ID, USER_PASSWORD } from "mocks/user";
+import {
+  ORGANIZATION_ID,
+  USER_EMAIL,
+  USER_ID,
+  USER_PASSWORD,
+} from "mocks/user";
 import { db } from "~/database";
 
 import { randomUsernameFromEmail } from "~/utils";
@@ -25,6 +30,11 @@ vitest.mock("~/database", () => ({
   db: {
     user: {
       create: vitest.fn().mockResolvedValue({}),
+    },
+    organization: {
+      findFirst: vitest.fn().mockResolvedValue({
+        id: ORGANIZATION_ID,
+      }),
     },
   },
 }));

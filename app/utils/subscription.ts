@@ -33,4 +33,17 @@ export const canCreateMoreCustomFields = ({
   return totalCustomFields < tierLimit?.maxCustomFields;
 };
 
+export const canCreateMoreOrganizations = ({
+  tierLimit,
+  totalOrganizations,
+}: {
+  tierLimit: { maxOrganizations: number } | null | undefined;
+  totalOrganizations: number;
+}) => {
+  if (!premiumIsEnabled()) return true;
+  if (!tierLimit?.maxOrganizations) return false;
+
+  return totalOrganizations < tierLimit?.maxOrganizations;
+};
+
 export const premiumIsEnabled = () => ENABLE_PREMIUM_FEATURES;

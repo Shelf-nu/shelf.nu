@@ -2,8 +2,8 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/custom-fields.new";
 
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   CustomFieldForm,
   NewCustomFieldFormSchema,
@@ -12,6 +12,7 @@ import Header from "~/components/layout/header";
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { createCustomField } from "~/modules/custom-field";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 
 import { assertIsPost } from "~/utils";
@@ -45,6 +46,7 @@ export const handle = {
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   assertIsPost(request);
   await assertUserCanCreateMoreCustomFields({ userId: authSession.userId });
 
@@ -67,8 +69,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     );
   }
 
-  const { name, helpText, required, type, active, organizationId, options } =
-    result.data;
+  const { name, helpText, required, type, active, options } = result.data;
 
   await createCustomField({
     name,
@@ -96,11 +97,11 @@ export async function action({ request }: LoaderFunctionArgs) {
 }
 
 export default function NewCustomFieldPage() {
-  const title = useAtomValue(titleAtom);
+  const title = useAtomValue(dynamicTitleAtom);
 
   return (
     <>
-      <Header title={title} />
+      <Header title={title ? title : "Untitled custom field"} />
       <div>
         <CustomFieldForm />
       </div>

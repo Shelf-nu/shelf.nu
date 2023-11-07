@@ -195,9 +195,7 @@ export default function AssetCustomFields({
               required={field.required}
             >
               {typeof fieldTypeToCompMap[field.type] === "function" ? (
-                // @ts-ignore
-                // @TODO we have to find a solution for this
-                fieldTypeToCompMap[field.type]!(field)
+                fieldTypeToCompMap[field.type]!(field as unknown as CustomField)
               ) : (
                 <Input
                   hideLabel

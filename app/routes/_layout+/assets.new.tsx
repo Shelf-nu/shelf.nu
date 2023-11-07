@@ -1,10 +1,9 @@
-import { OrganizationType } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/assets.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
@@ -17,7 +16,7 @@ import {
 } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -30,11 +29,10 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 const title = "New Asset";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
-  const organization = await getOrganizationByUserId({
-    userId,
-    orgType: OrganizationType.PERSONAL,
-  });
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
+
 
   if (!organization) {
     throw new Error("Organization not found");
@@ -51,6 +49,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     organizationId: organization.id,
     request,
   });
+
+  //const { categories, tags, locations, customFields } =
+  //    await getAllRelatedEntries({
+  //      userId,
+  //      organizationId,
+  //    });
+
 
   const header = {
     title,
@@ -78,6 +83,7 @@ export const handle = {
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   assertIsPost(request);
 
   /** Here we need to clone the request as we need 2 different streams:
@@ -91,7 +97,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   const formData = await clonedRequest.formData();
 
   const customFields = await getActiveCustomFields({
-    userId: authSession.userId,
+    organizationId,
   });
 
   const FormSchema = mergedSchema({
@@ -132,6 +138,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   const tags = buildTagsSet(result.data.tags);
 
   const asset = await createAsset({
+    organizationId,
     title,
     description,
     userId: authSession.userId,
@@ -173,13 +180,12 @@ export async function action({ request }: LoaderFunctionArgs) {
 }
 
 export default function NewAssetPage() {
-  const title = useAtomValue(titleAtom);
+  const title = useAtomValue(dynamicTitleAtom);
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
-
   return (
     <>
-      <Header title={title} />
+      <Header title={title ? title : "Untitled Asset"} />
       <div>
         <AssetForm qrId={qrId} />
       </div>

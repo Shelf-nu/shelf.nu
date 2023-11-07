@@ -1,4 +1,3 @@
-import { OrganizationType } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -8,7 +7,7 @@ import type {
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/custom-fields.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   CustomFieldForm,
   NewCustomFieldFormSchema,
@@ -17,26 +16,15 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getCustomField, updateCustomField } from "~/modules/custom-field";
-import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
-
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const id = getRequiredParam(params, "fieldId");
-
-  const organization = await getOrganizationByUserId({
-    userId,
-    orgType: OrganizationType.PERSONAL,
-  });
-
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
-
-  const organizationId = organization.id;
 
   const { customField } = await getCustomField({ organizationId, id });
   if (!customField) {
@@ -115,8 +103,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function CustomFieldEditPage() {
-  const name = useAtomValue(titleAtom);
-  const hasName = name !== "Untitled custom field";
+  const name = useAtomValue(dynamicTitleAtom);
+  const hasName = name !== "";
   const { customField } = useLoaderData<typeof loader>();
 
   return (

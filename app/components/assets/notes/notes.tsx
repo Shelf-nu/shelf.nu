@@ -31,6 +31,7 @@ export const Notes = () => {
               <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
                 <div>
                   <span className="commentator font-medium text-gray-900">
+                    {/* Here we just take the current user because this is just handling optimistic UI */}
                     {user?.firstName} {user?.lastName}
                   </span>{" "}
                   <span className="text-gray-600">Just Now</span>
