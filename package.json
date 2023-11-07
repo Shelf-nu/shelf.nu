@@ -18,7 +18,7 @@
     "reset:db": "prisma migrate reset",
     "start": "remix-serve build/index.js",
     "start:ci": "dotenv -- remix-serve build",
-    "test": "echo test",
+    "test": "vitest",
     "test:cov": "vitest --coverage",
     "test:e2e:dev": "start-server-and-test dev http://localhost:3000 'npx playwright test --ui'",
     "test:e2e:run": "start-server-and-test dev http://localhost:3000 'npx playwright test'",

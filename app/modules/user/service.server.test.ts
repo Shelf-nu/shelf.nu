@@ -26,15 +26,28 @@ import {
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
 // mock db
+var EMAIL_NULL = "email@null.com";
 vitest.mock("~/database", () => ({
   db: {
+    $transaction: async function (callback: Function) {
+      return await callback(this);
+    },
     user: {
-      create: vitest.fn().mockResolvedValue({}),
+      create: vitest
+        .fn()
+        .mockImplementation((data) =>
+          data.data.email === EMAIL_NULL
+            ? null
+            : { id: USER_ID, organizations: [{ id: ORGANIZATION_ID }] }
+        ),
     },
     organization: {
       findFirst: vitest.fn().mockResolvedValue({
         id: ORGANIZATION_ID,
       }),
+    },
+    userOrganization: {
+      upsert: vitest.fn(),
     },
   },
 }));
@@ -154,9 +167,9 @@ describe(createUserAccountForTesting.name, () => {
       if (matchesMethod && matchesUrl) fetchAuthAdminUserAPI.set(req.id, req);
     });
     //@ts-expect-error missing vitest type
-    db.user.create.mockResolvedValue(null);
+    db.user.create.mockResolvedValueOnce(null);
     const result = await createUserAccountForTesting(
-      USER_EMAIL,
+      EMAIL_NULL,
       USER_PASSWORD,
       ""
     );
@@ -170,8 +183,8 @@ describe(createUserAccountForTesting.name, () => {
       `${SUPABASE_AUTH_ADMIN_USER_API}/${USER_ID}`
     );
   });
-  it("should create an account", async () => {
-    expect.assertions(4);
+  it.only("should create an account", async () => {
+    expect.assertions(5);
     const fetchAuthAdminUserAPI = new Map();
     const fetchAuthTokenAPI = new Map();
     server.events.on("request:start", (req) => {
@@ -192,8 +205,6 @@ describe(createUserAccountForTesting.name, () => {
       ).matches;
       if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
     });
-    //@ts-expect-error missing vitest type
-    db.user.create.mockResolvedValue({ id: USER_ID, email: USER_EMAIL });
     const username = randomUsernameFromEmail(USER_EMAIL);
     const result = await createUserAccountForTesting(
       USER_EMAIL,
@@ -208,12 +219,45 @@ describe(createUserAccountForTesting.name, () => {
         email: USER_EMAIL,
         id: USER_ID,
         username: username,
-        categories: { create: defaultUserCategories },
-        organizations: { create: [{ name: "Personal" }] },
+        firstName: undefined,
+        organizations: {
+          create: [
+            {
+              name: "Personal",
+              categories: {
+                create: defaultUserCategories.map((c) => ({
+                  ...c,
+                  userId: USER_ID,
+                })),
+              },
+            },
+          ],
+        },
         roles: {
           connect: {
             name: Roles["USER"],
           },
+        },
+      },
+      include: {
+        organizations: true,
+      },
+    });
+    expect(db.userOrganization.upsert).toHaveBeenCalledWith({
+      where: {
+        userId_organizationId: {
+          userId: USER_ID,
+          organizationId: ORGANIZATION_ID,
+        },
+      },
+      create: {
+        userId: USER_ID,
+        organizationId: ORGANIZATION_ID,
+        roles: ["OWNER"],
+      },
+      update: {
+        roles: {
+          push: ["OWNER"],
         },
       },
     });
