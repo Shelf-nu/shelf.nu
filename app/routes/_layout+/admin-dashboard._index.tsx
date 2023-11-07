@@ -89,7 +89,7 @@ const ListUserContent = ({
 
   return (
     <>
-      <Td> </Td>
+      <Td>---------------------------</Td>
       <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           {isPersonal
