@@ -10,7 +10,6 @@ import { ErrorContent } from "./content";
 export interface ErrorContentProps {
   title?: string;
   message?: string | JSX.Element;
-  showReload?: boolean;
 }
 
 export const ErrorBoundryComponent = () => (

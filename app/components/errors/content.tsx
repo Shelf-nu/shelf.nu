@@ -1,15 +1,23 @@
-import { useLocation, useRouteError } from "@remix-run/react";
+import {
+  isRouteErrorResponse,
+  useLocation,
+  useRouteError,
+} from "@remix-run/react";
 import { NODE_ENV } from "~/utils/env";
 import { isShelfStackError } from "~/utils/error";
-import type { ErrorContentProps } from ".";
 import { Button } from "../shared";
 
-export const ErrorContent = ({ showReload }: ErrorContentProps) => {
+export const ErrorContent = () => {
   const location = useLocation();
   const response = useRouteError();
   let title = "Oops, something went wrong";
   let message =
     "An error has occured. Please refresh the page and try again. If the issue persists, please contact support.";
+
+  if (isRouteErrorResponse(response)) {
+    title = response.data.errors.title;
+    message = response.data.errors.title;
+  }
 
   if (isShelfStackError(response)) {
     title = response?.title || title;
@@ -31,11 +39,9 @@ export const ErrorContent = ({ showReload }: ErrorContentProps) => {
           <Button to="/" variant="secondary" icon="home">
             Back to home
           </Button>
-          {showReload ? (
-            <Button to={location.pathname} reloadDocument>
-              Reload page
-            </Button>
-          ) : null}
+          <Button to={location.pathname} reloadDocument>
+            Reload page
+          </Button>
         </div>
       </div>
     </div>
