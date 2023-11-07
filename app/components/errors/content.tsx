@@ -1,39 +1,21 @@
-import {
-  Links,
-  LiveReload,
-  Meta,
-  Scripts,
-  ScrollRestoration,
-  useLocation,
-} from "@remix-run/react";
+import { useLocation, useRouteError } from "@remix-run/react";
 import { NODE_ENV } from "~/utils/env";
+import { isShelfStackError } from "~/utils/error";
 import type { ErrorContentProps } from ".";
 import { Button } from "../shared";
 
-export const ErrorContent = ({
-  title,
-  message,
-  showReload = true,
-}: ErrorContentProps) => (
-  <html lang="en" className="h-full">
-    <head>
-      <meta charSet="utf-8" />
-      <meta name="viewport" content="width=device-width,initial-scale=1" />
-      <Meta />
-      {title ? <title>{title}</title> : null}
-      <Links />
-    </head>
-    <body className="h-full">
-      <InnerContent title={title} message={message} showReload={showReload} />
-      <ScrollRestoration />
-      <Scripts />
-      <LiveReload />
-    </body>
-  </html>
-);
-
-const InnerContent = ({ title, message, showReload }: ErrorContentProps) => {
+export const ErrorContent = ({ showReload }: ErrorContentProps) => {
   const location = useLocation();
+  const response = useRouteError();
+  let title = "Oops, something went wrong";
+  let message =
+    "An error has occured. Please refresh the page and try again. If the issue persists, please contact support.";
+
+  if (isShelfStackError(response)) {
+    title = response?.title || title;
+    message = response.message;
+  }
+
   return (
     <div className="flex h-full w-full items-center justify-center">
       <div className="flex flex-col items-center text-center">

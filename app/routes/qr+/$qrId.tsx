@@ -1,7 +1,6 @@
 import { redirect, json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
-import { QrNotFound } from "~/components/qr/not-found";
+import { ErrorBoundryComponent } from "~/components/errors";
 import { requireAuthSession } from "~/modules/auth";
 import { getQr } from "~/modules/qr";
 import { belongsToCurrentUsersOrg } from "~/modules/qr/utils.server";
@@ -36,7 +35,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
    * that is still there. Will we allow someone to claim it?
    */
   if (!qr) {
-    throw new ShelfStackError({ message: "Not found" });
+    throw new ShelfStackError({
+      title: "QR code not found",
+      message: "This QR code is not available on shelf",
+      status: 404,
+    });
   }
 
   /**
@@ -98,15 +101,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   return json({ ok: true });
 };
-
-export function ErrorBoundary() {
-  const error = useRouteError();
-
-  /** 404 error */
-  if (isRouteErrorResponse(error)) {
-    return <QrNotFound />;
-  }
-}
 
 export default function Qr() {
   return null;

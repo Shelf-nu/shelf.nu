@@ -124,6 +124,4 @@ export default function App() {
   );
 }
 
-export const ErrorBoundary = () => (
-  <ErrorBoundryComponent title="Sorry, page you are looking for doesn't exist" />
-);
+export const ErrorBoundary = () => <ErrorBoundryComponent />;

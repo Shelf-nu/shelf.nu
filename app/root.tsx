@@ -68,8 +68,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) =>
 
 export const shouldRevalidate = () => false;
 
-function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
-  const { env } = useLoaderData<typeof loader>();
+export default function App({ title }: PropsWithChildren<{ title?: string }>) {
+  const { env, maintenanceMode } = useLoaderData<typeof loader>();
+
   const nonce = useNonce();
   return (
     <html lang="en" className="h-full">
@@ -85,7 +86,8 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
         <Clarity />
       </head>
       <body className="h-full">
-        {children}
+        {maintenanceMode ? <MaintenanceMode /> : <Outlet />}
+
         <ScrollRestoration />
         <script
           dangerouslySetInnerHTML={{
@@ -96,13 +98,6 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
         <LiveReload />
       </body>
     </html>
-  );
-}
-
-export default function App() {
-  const { maintenanceMode } = useLoaderData<typeof loader>();
-  return (
-    <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
   );
 }
 

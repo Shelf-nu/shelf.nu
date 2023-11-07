@@ -1,3 +1,6 @@
+import type { ErrorResponse } from "@remix-run/node";
+import { isRouteErrorResponse } from "@remix-run/react";
+import { isErrorResponse } from "@remix-run/react/dist/data";
 import type { HTTPStatusCode } from "./http-status";
 
 /**
@@ -57,4 +60,10 @@ export class ShelfStackError extends Error {
 
 export function isShelfStackError(cause: unknown): cause is ShelfStackError {
   return cause instanceof ShelfStackError;
+}
+
+export function isRouteError(
+  response: unknown
+): response is { data: ErrorResponse } {
+  return isRouteErrorResponse(response) && isErrorResponse(response.data);
 }

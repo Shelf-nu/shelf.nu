@@ -351,6 +351,4 @@ export default function AssetDetailsPage() {
   );
 }
 
-export const ErrorBoundary = () => (
-  <ErrorBoundryComponent title="Sorry, asset you are looking for doesn't exist" />
-);
+export const ErrorBoundary = () => <ErrorBoundryComponent />;

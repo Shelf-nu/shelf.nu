@@ -336,6 +336,4 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   ) : null;
 };
 
-export const ErrorBoundary = () => (
-  <ErrorBoundryComponent title="Sorry, location you are looking for doesn't exist" />
-);
+export const ErrorBoundary = () => <ErrorBoundryComponent />;
