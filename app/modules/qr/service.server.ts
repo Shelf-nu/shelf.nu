@@ -1,7 +1,8 @@
 import type { Organization, Qr, User } from "@prisma/client";
 import QRCode from "qrcode-generator";
 import { db } from "~/database";
-import { gifToPng } from "~/utils";
+import { getCurrentSearchParams, gifToPng } from "~/utils";
+import { ShelfStackError } from "~/utils/error";
 
 export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
   return db.qr.findFirst({
@@ -93,6 +94,33 @@ export async function generateOrphanedCodes({
 
   return await db.qr.createMany({
     data: data,
-    skipDuplicates: true, // Skip 'Bobo'
+    skipDuplicates: true,
   });
+}
+
+export async function assertWhetherQrBelongsToCurrentOrganization({
+  request,
+  organizationId,
+}: {
+  request: Request;
+  organizationId: Organization["id"];
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const qrId = searchParams.get("qrId");
+  /** We have the case when someone could be linking a QR that doesnt belong to the current org */
+  if (qrId) {
+    const qr = await db.qr.findUnique({
+      where: {
+        id: qrId,
+        organizationId,
+      },
+    });
+    if (!qr)
+      throw new ShelfStackError({
+        message:
+          "This QR code doesn't belong to your current organization. A new asset cannot be linked to it.",
+        title: "Not allowed",
+        status: 403,
+      });
+  }
 }
