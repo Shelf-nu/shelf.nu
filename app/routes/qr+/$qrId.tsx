@@ -84,29 +84,34 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     return redirect(`contact-owner?scanId=${scan.id}`);
   }
 
+  const headers = [
+    setCookie(
+      await setSelectedOrganizationIdCookie(
+        userOrganizationIds.find((orgId) => orgId === qr.organizationId) ||
+          personalOrganization.id
+      )
+    ),
+    setCookie(
+      await commitAuthSession(request, {
+        authSession,
+        flashErrorMessage: null,
+      })
+    ),
+  ];
+
   /**
    * When there is no assetId that means that the asset was deleted so the QR code is orphaned.
    * Here we redirect to a page where the user has the option to link to existing asset or create a new one.
    */
-  if (!qr.assetId) return redirect(`link?scanId=${scan.id}`);
+  if (!qr.assetId)
+    return redirect(`link?scanId=${scan.id}`, {
+      headers,
+    });
 
   return redirect(
     `/assets/${qr.assetId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
     {
-      headers: [
-        setCookie(
-          await setSelectedOrganizationIdCookie(
-            userOrganizationIds.find((orgId) => orgId === qr.organizationId) ||
-              personalOrganization.id
-          )
-        ),
-        setCookie(
-          await commitAuthSession(request, {
-            authSession,
-            flashErrorMessage: null,
-          })
-        ),
-      ],
+      headers,
     }
   );
 };
