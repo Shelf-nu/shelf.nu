@@ -7,13 +7,13 @@ import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   requireAdmin(request);
-  const { userId } = params;
+  const { organizationId } = params;
   const url = new URL(request.url);
   const onlyOrphaned = url.searchParams.get("orphaned");
 
   const codes = await db.qr.findMany({
     where: {
-      userId,
+      organizationId,
       assetId: onlyOrphaned
         ? null
         : {
