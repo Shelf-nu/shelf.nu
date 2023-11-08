@@ -31,7 +31,7 @@ export function useModelFilters({
   initialDataKey,
   selectionMode = "append",
 }: ModelFilterProps) {
-  const initialData = useLoaderData();
+  const initialData = useLoaderData<any>();
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedItems = searchParams.getAll(model.name);

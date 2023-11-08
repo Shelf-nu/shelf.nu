@@ -32,13 +32,7 @@ const title = "New Asset";
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
 
-
-
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
   const {
     categories,
     totalCategories,
@@ -47,17 +41,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalLocations,
     customFields,
   } = await getAllEntriesForCreateAndEdit({
-    userId,
-    organizationId: organization.id,
+    organizationId,
     request,
   });
-
-  //const { categories, tags, locations, customFields } =
-  //    await getAllRelatedEntries({
-  //      userId,
-  //      organizationId,
-  //    });
-
 
   /**
    * We need to check if the QR code passed in the URL belongs to the current org
@@ -67,7 +53,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     request,
     organizationId,
   });
-
 
   const header = {
     title,

@@ -129,7 +129,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalTags,
   } = await getPaginatedAndFilterableAssets({
     request,
-    userId,
     organizationId,
   });
 

@@ -681,65 +681,10 @@ export async function duplicateAsset({
   return duplicatedAssets;
 }
 
-/** Fetches all related entries required for creating a new asset */
-export async function getAllRelatedEntries({
-  organizationId,
-}: {
-  userId: User["id"];
-  organizationId: Organization["id"];
-}): Promise<{
-  categories: Category[];
-  totalCategories: number;
-  tags: Tag[];
-  totalTags: number;
-  locations: Location[];
-  totalLocations: number;
-  customFields: CustomField[];
-}> {
-  const [
-    categories,
-    totalCategories,
-    tags,
-    totalTags,
-    locations,
-    totalLocations,
-    customFields,
-  ] = await db.$transaction([
-    /** Get the categories */
-    db.category.findMany({ where: { userId }, take: 4 }),
-    db.category.count({ where: { userId } }),
-
-    /** Get the tags */
-    db.tag.findMany({ where: { userId }, take: 4 }),
-    db.tag.count({ where: { userId } }),
-
-    /** Get the locations */
-    db.location.findMany({ where: { userId }, take: 4 }),
-    db.location.count({ where: { userId } }),
-
-    /** Get the custom fields */
-    db.customField.findMany({
-      where: { organizationId, active: { equals: true } },
-      take: 4,
-    }),
-  ]);
-  return {
-    categories,
-    totalCategories,
-    tags,
-    totalTags,
-    locations,
-    totalLocations,
-    customFields,
-  };
-}
-
 export async function getAllEntriesForCreateAndEdit({
-  userId,
   organizationId,
   request,
 }: {
-  userId: User["id"];
   organizationId: Organization["id"];
   request: LoaderFunctionArgs["request"];
 }) {
@@ -759,24 +704,22 @@ export async function getAllEntriesForCreateAndEdit({
   ] = await db.$transaction([
     /** Get the categories */
     db.category.findMany({
-      where: { userId, id: { not: categorySelected } },
+      where: { organizationId, id: { not: categorySelected } },
       take: 4,
     }),
-    db.category.findMany({ where: { userId, id: categorySelected } }),
-    db.category.count({ where: { userId } }),
-    db.category.findMany({ where: { organizationId } }),
+    db.category.findMany({ where: { organizationId, id: categorySelected } }),
+    db.category.count({ where: { organizationId } }),
 
     /** Get the tags */
     db.tag.findMany({ where: { organizationId } }),
 
     /** Get the locations */
     db.location.findMany({
-      where: { userId, id: { not: locationSelected } },
+      where: { organizationId, id: { not: locationSelected } },
       take: 4,
     }),
-    db.location.findMany({ where: { userId, id: locationSelected } }),
-    db.location.count({ where: { userId } }),
-    db.location.findMany({ where: { organizationId } }),
+    db.location.findMany({ where: { organizationId, id: locationSelected } }),
+    db.location.count({ where: { organizationId } }),
 
     /** Get the custom fields */
     db.customField.findMany({
@@ -799,7 +742,6 @@ export const getPaginatedAndFilterableAssets = async ({
   organizationId,
 }: {
   request: LoaderFunctionArgs["request"];
-  userId: User["id"];
   organizationId: Organization["id"];
 }) => {
   const searchParams = getCurrentSearchParams(request);
@@ -819,16 +761,23 @@ export const getPaginatedAndFilterableAssets = async ({
     totalTags,
   ] = await db.$transaction([
     db.category.findMany({
-      where: { userId, id: { notIn: categoriesIds } },
+      where: { organizationId, id: { notIn: categoriesIds } },
       take: 4,
     }),
-    db.category.findMany({ where: { userId, id: { in: categoriesIds } } }),
-    db.category.count({ where: { userId } }),
-    db.tag.findMany({ where: { userId, id: { notIn: tagsIds } }, take: 4 }),
-    db.tag.findMany({ where: { userId, id: { in: tagsIds } }, take: 4 }),
-    db.tag.count({ where: { userId } }),
+    db.category.findMany({
+      where: { organizationId, id: { in: categoriesIds } },
+    }),
+    db.category.count({ where: { organizationId } }),
+    db.tag.findMany({
+      where: { organizationId, id: { notIn: tagsIds } },
+      take: 4,
+    }),
+    db.tag.findMany({
+      where: { organizationId, id: { in: tagsIds } },
+      take: 4,
+    }),
+    db.tag.count({ where: { organizationId } }),
   ]);
-
 
   const { assets, totalAssets } = await getAssets({
     organizationId,

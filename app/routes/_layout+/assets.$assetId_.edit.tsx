@@ -37,28 +37,18 @@ import { ShelfStackError } from "~/utils/error";
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
 
-
-  //const {
-  //  categories,
-  //    totalCategories,
-  //    tags,
-  //    locations,
-  //    totalLocations,
-  //    customFields,
-  //  } = await getAllEntriesForCreateAndEdit({
-  //    userId,
-  //    organizationId: organization.id,
-  //    request,
-  //  });
-
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
-      organizationId,
-    });
-
+  const {
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  } = await getAllEntriesForCreateAndEdit({
+    request,
+    organizationId,
+  });
 
   const id = getRequiredParam(params, "assetId");
 
