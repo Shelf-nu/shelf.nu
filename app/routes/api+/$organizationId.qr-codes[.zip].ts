@@ -7,13 +7,13 @@ import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   requireAdmin(request);
-  const { userId } = params;
+  const { organizationId } = params;
   const url = new URL(request.url);
   const onlyOrphaned = url.searchParams.get("orphaned");
 
   const codes = await db.qr.findMany({
     where: {
-      userId,
+      organizationId,
       assetId: onlyOrphaned
         ? null
         : {
@@ -23,7 +23,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
   const zip = new JSZip();
 
-  codes.forEach((c, index) => {
+  codes.forEach((c) => {
     const code = QRCode(0, ErrorCorrection["L"]);
     code.addData(`${process.env.SERVER_URL}/qr/${c.id}`);
     code.make();

@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/assets.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
@@ -17,6 +17,7 @@ import {
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
 import { requireOrganisationId } from "~/modules/organization/context.server";
+import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -32,6 +33,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
+
+  /**
+   * We need to check if the QR code passed in the URL belongs to the current org
+   * This is relevant whenever the user is trying to link a new asset with an existing QR code
+   * */
+  await assertWhetherQrBelongsToCurrentOrganization({
+    request,
+    organizationId,
+  });
 
   const { categories, tags, locations, customFields } =
     await getAllRelatedEntries({
@@ -153,13 +163,12 @@ export async function action({ request }: LoaderFunctionArgs) {
 }
 
 export default function NewAssetPage() {
-  const title = useAtomValue(titleAtom);
+  const title = useAtomValue(dynamicTitleAtom);
   const [searchParams] = useSearchParams();
   const qrId = searchParams.get("qrId");
-
   return (
     <>
-      <Header title={title} />
+      <Header title={title ? title : "Untitled Asset"} />
       <div>
         <AssetForm qrId={qrId} />
       </div>

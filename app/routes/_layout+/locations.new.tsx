@@ -12,7 +12,7 @@ import {
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/locations.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
 import Header from "~/components/layout/header";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
@@ -113,11 +113,11 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function NewLocationPage() {
-  const title = useAtomValue(titleAtom);
+  const title = useAtomValue(dynamicTitleAtom);
 
   return (
     <>
-      <Header title={title} />
+      <Header title={title ? title : "Untitled location"} />
       <div>
         <LocationForm />
       </div>

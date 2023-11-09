@@ -1,4 +1,3 @@
-import type { Organization } from "@prisma/client";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import {
   Select,
