@@ -16,6 +16,7 @@ import {
   getCustodiansOrderedByTotalCustodies,
   getMostScannedAssets,
   getMostScannedAssetsCategories,
+  groupAssetsByStatus,
   totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
 
@@ -56,18 +57,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
-  const assetsByStatus = await db.asset.groupBy({
-    by: ["status"],
-    _count: {
-      status: true,
-    },
-    where: {
-      status: {
-        in: ["AVAILABLE", "IN_CUSTODY"],
-      },
-    },
-  });
-
   return json({
     newAssets: assets.slice(0, 5),
     totalAssets: assets.length,
@@ -80,7 +69,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalAssetsAtEndOfEachMonth: await totalAssetsAtEndOfEachMonth({
       assets,
     }),
-    assetsByStatus,
+    assetsByStatus: await groupAssetsByStatus({ assets }),
   });
 }
 
