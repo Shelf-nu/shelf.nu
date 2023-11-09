@@ -12,12 +12,16 @@ import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
   getAssetsCreatedInEachMonth,
   getCustodiansOrderedByTotalCustodies,
+  getMostScannedAssets,
+  getMostScannedAssetsCategories,
 } from "~/utils/dashboard.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
+
+  /** This should be updated to use select to only get the data we need */
   const assets = await db.asset.findMany({
     where: {
       organizationId,
@@ -50,19 +54,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
-  const assetsCreatedInEachMonth = await getAssetsCreatedInEachMonth({
-    assets,
-  });
-
-  const custodiansData = await getCustodiansOrderedByTotalCustodies({
-    assets,
-  });
-
   return json({
     newAssets: assets.slice(0, 5),
-    custodiansData,
     totalAssets: assets.length,
-    assetsCreatedInEachMonth,
+
+    custodiansData: await getCustodiansOrderedByTotalCustodies({
+      assets,
+    }),
+    mostScannedAssets: await getMostScannedAssets({ assets }),
+    mostScannedCategories: await getMostScannedAssetsCategories({ assets }),
+    assetsCreatedInEachMonth: await getAssetsCreatedInEachMonth({
+      assets,
+    }),
   });
 }
 
