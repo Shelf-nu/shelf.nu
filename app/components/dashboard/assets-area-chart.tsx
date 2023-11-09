@@ -38,6 +38,8 @@ export default function AssetsAreaChart() {
           index="month"
           categories={["Assets Created"]}
           colors={["orange"]}
+          showAnimation={true}
+          animationDuration={400}
         />
       </Card>
     </>

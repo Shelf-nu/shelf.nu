@@ -1,6 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { Link } from "@remix-run/react";
 import AssetsAreaChart from "~/components/dashboard/assets-area-chart";
+import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";
 import CustodiansList from "~/components/dashboard/custodians";
 import NewestAssets from "~/components/dashboard/newest-assets";
 import NewsBar from "~/components/dashboard/news-bar";
@@ -51,13 +52,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     assets,
   });
 
-  console.log(assetsCreatedInEachMonth);
+  const assetsByStatus = await db.asset.groupBy({
+    by: ["status"],
+    _count: {
+      status: true,
+    },
+    where: {
+      status: {
+        in: ["AVAILABLE", "IN_CUSTODY"],
+      },
+    },
+  });
 
   return json({
     newAssets: assets.slice(0, 5),
     custodians,
     totalAssets: assets.length,
     assetsCreatedInEachMonth,
+    assetsByStatus,
   });
 }
 
@@ -75,6 +87,10 @@ export default function DashboardPage() {
       />
       <div className="w-full">
         <AssetsAreaChart />
+      </div>
+      <div className="flex gap-4">
+        <AssetsByStatusChart />
+        <AssetsByStatusChart />
       </div>
       <div className="flex gap-4">
         <div className="lg:w-1/2">
