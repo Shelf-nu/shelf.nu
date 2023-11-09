@@ -1,11 +1,11 @@
 import { useLoaderData } from "@remix-run/react";
+import type { TeamMemberWithUser } from "~/modules/team-member/types";
 import type { loader } from "~/routes/_layout+/dashboard";
-import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.team";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Table, Td, Th, Tr } from "../table";
 
 export default function CustodiansList() {
-  const { custodians } = useLoaderData<typeof loader>();
+  const { custodiansData } = useLoaderData<typeof loader>();
 
   return (
     <Table className="rounded border border-gray-200">
@@ -27,11 +27,13 @@ export default function CustodiansList() {
         </tr>
       </thead>
       <tbody>
-        {custodians.map((custodian) => (
-          <Tr key={custodian.teamMemberId}>
-            {/* @TODO this is related to dodo in dashboard route.
-              @ts-ignore */}
-            <Row item={custodian} />
+        {custodiansData.map((cd) => (
+          <Tr key={cd.id}>
+            {/**
+             * @TODO this needs to be resolved. Its because of the createdAt & updatedAt fields.
+             * We need a global solution for this as it happens everywhere
+             *  @ts-ignore */}
+            <Row custodian={cd.custodian} count={cd.count} />
           </Tr>
         ))}
       </tbody>
@@ -39,15 +41,30 @@ export default function CustodiansList() {
   );
 }
 
-function Row({ item }: { item: TeamMemberWithCustodies }) {
+function Row({
+  custodian,
+  count,
+}: {
+  custodian: TeamMemberWithUser;
+  count: number;
+}) {
   return (
     <>
       <Td className="w-full">
         <div className="flex items-center justify-between">
           <span className="text-text-sm font-medium text-gray-900">
-            {item.name}
+            {custodian?.user ? (
+              <img
+                src={
+                  custodian?.user?.profilePicture || "/images/default_pfp.jpg"
+                }
+                className="mr-1 h-4 w-4 rounded-full"
+                alt=""
+              />
+            ) : null}
+            <span className="mt-[1px]">{custodian.name}</span>
           </span>
-          <span className="block text-gray-600">23 Assets</span>
+          <span className="block text-gray-600">{count}</span>
         </div>
       </Td>
     </>

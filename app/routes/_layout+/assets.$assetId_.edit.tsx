@@ -8,7 +8,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/assets.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import { ErrorBoundryComponent } from "~/components/errors";
 
@@ -159,8 +159,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function AssetEditPage() {
-  const title = useAtomValue(titleAtom);
-  const hasTitle = title !== "Untitled asset";
+  const title = useAtomValue(dynamicTitleAtom);
+  const hasTitle = title !== "";
   const { asset } = useLoaderData<typeof loader>();
   const tags = useMemo(
     () => asset.tags?.map((tag) => ({ label: tag.name, value: tag.id })) || [],

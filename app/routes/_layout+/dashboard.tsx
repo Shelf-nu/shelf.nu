@@ -1,7 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { Link } from "@remix-run/react";
-import AssetsAreaChart from "~/components/dashboard/assets-area-chart";
 import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";
+import AssetsForEachMonth from "~/components/dashboard/assets-for-each-month";
 import CustodiansList from "~/components/dashboard/custodians";
 import NewestAssets from "~/components/dashboard/newest-assets";
 import NewsBar from "~/components/dashboard/news-bar";
@@ -10,12 +10,18 @@ import { db } from "~/database";
 
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
-import { getAssetsCreatedInEachMonth } from "~/utils/get-assets-created-in-each-month";
+import {
+  getCustodiansOrderedByTotalCustodies,
+  getMostScannedAssets,
+  getMostScannedAssetsCategories,
+  totalAssetsAtEndOfEachMonth,
+} from "~/utils/dashboard.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
+  /** This should be updated to use select to only get the data we need */
   const assets = await db.asset.findMany({
     where: {
       organizationId,
@@ -27,29 +33,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       category: true,
       custody: {
         include: {
-          custodian: true,
+          custodian: {
+            include: {
+              user: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                  profilePicture: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      qrCodes: {
+        include: {
+          scans: true,
         },
       },
     },
-  });
-
-  /**
-   * @TODO
-   * We need to drop this. So the idea is that we just have 1 query that gives us all the data(see above) and then we create the different data sets from that.
-   */
-  const custodians = await db.custody.groupBy({
-    by: ["teamMemberId", "id"],
-    _count: {
-      teamMemberId: true,
-    },
-    orderBy: {
-      _count: {
-        teamMemberId: "desc",
-      },
-    },
-  });
-  const assetsCreatedInEachMonth = await getAssetsCreatedInEachMonth({
-    assets,
   });
 
   const assetsByStatus = await db.asset.groupBy({
@@ -66,9 +68,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return json({
     newAssets: assets.slice(0, 5),
-    custodians,
     totalAssets: assets.length,
-    assetsCreatedInEachMonth,
+
+    custodiansData: await getCustodiansOrderedByTotalCustodies({
+      assets,
+    }),
+    mostScannedAssets: await getMostScannedAssets({ assets }),
+    mostScannedCategories: await getMostScannedAssetsCategories({ assets }),
+    totalAssetsAtEndOfEachMonth: await totalAssetsAtEndOfEachMonth({
+      assets,
+    }),
     assetsByStatus,
   });
 }
@@ -86,7 +95,7 @@ export default function DashboardPage() {
         url="."
       />
       <div className="w-full">
-        <AssetsAreaChart />
+        <AssetsForEachMonth />
       </div>
       <div className="flex gap-4">
         <AssetsByStatusChart />

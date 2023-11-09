@@ -12,7 +12,7 @@ import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import invariant from "tiny-invariant";
-import { titleAtom } from "~/atoms/locations.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
@@ -117,16 +117,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
   );
 }
 
-export default function AssetEditPage() {
-  const name = useAtomValue(titleAtom);
+export default function LocationEditPage() {
+  const name = useAtomValue(dynamicTitleAtom);
+  const hasName = name !== "";
   const { location } = useLoaderData<typeof loader>();
 
   return (
     <>
-      <Header title={location.name} />
+      <Header title={hasName ? name : location.name} />
       <div className=" items-top flex justify-between">
         <LocationForm
-          name={location.name || name}
+          name={location.name}
           description={location.description}
           address={location.address}
         />
