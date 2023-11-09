@@ -40,6 +40,7 @@ export default function AssetsForEachMonth() {
           colors={["orange"]}
           showAnimation={true}
           animationDuration={400}
+          curveType="monotone"
         />
       </Card>
     </>

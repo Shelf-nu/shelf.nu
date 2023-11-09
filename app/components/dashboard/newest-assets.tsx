@@ -36,6 +36,14 @@ export default function NewestAssets() {
             <Row item={asset} />
           </Tr>
         ))}
+        {newAssets.length < 5 &&
+          Array(5 - newAssets.length)
+            .fill(null)
+            .map((i) => (
+              <Tr key={i} className="h-[72px]">
+                {""}
+              </Tr>
+            ))}
       </tbody>
     </Table>
   );

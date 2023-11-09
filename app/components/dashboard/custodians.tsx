@@ -19,7 +19,7 @@ export default function CustodiansList() {
               content={
                 <>
                   <h6>Custodians</h6>
-                  <p>Below listed assets were created recently</p>
+                  <p>Below listed custodians hold the most assets</p>
                 </>
               }
             />
@@ -28,7 +28,7 @@ export default function CustodiansList() {
       </thead>
       <tbody>
         {custodiansData.map((cd) => (
-          <Tr key={cd.id}>
+          <Tr key={cd.id} className="h-[72px]">
             {/**
              * @TODO this needs to be resolved. Its because of the createdAt & updatedAt fields.
              * We need a global solution for this as it happens everywhere
@@ -36,6 +36,14 @@ export default function CustodiansList() {
             <Row custodian={cd.custodian} count={cd.count} />
           </Tr>
         ))}
+        {custodiansData.length < 5 &&
+          Array(5 - custodiansData.length)
+            .fill(null)
+            .map((i) => (
+              <Tr key={i} className="h-[72px]">
+                {""}
+              </Tr>
+            ))}
       </tbody>
     </Table>
   );
@@ -63,10 +71,11 @@ function Row({
               />
             ) : null}
             <span className="mt-[1px]">{custodian.name}</span>
+            <span className="block text-gray-600">{count} Assets</span>
           </span>
-          <span className="block text-gray-600">{count}</span>
         </div>
       </Td>
+      <Td>{""}</Td>
     </>
   );
 }
