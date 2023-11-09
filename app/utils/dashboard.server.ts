@@ -126,6 +126,76 @@ export async function getCustodiansOrderedByTotalCustodies({
  * Most scanned assets
  */
 
+export async function getMostScannedAssets({ assets }: { assets: Asset[] }) {
+  const assetsWithScans = assets.filter((asset) => asset.qrCodes.length > 0);
+
+  const assetsWithScanCount = assetsWithScans.map((asset) => ({
+    ...asset,
+    scanCount: asset.qrCodes.reduce(
+      (count, qrCode) => count + qrCode.scans.length,
+      0
+    ),
+  }));
+
+  assetsWithScanCount.sort((a, b) => b.scanCount - a.scanCount);
+
+  const top5Assets = assetsWithScanCount.slice(0, 5);
+
+  return top5Assets;
+}
+
 /**
- * Most scanned categories
+ * Most scanned assets' categories
+ * Gives a list of the categories from all assets
  */
+export async function getMostScannedAssetsCategories({
+  assets,
+}: {
+  assets: Asset[];
+}) {
+  const assetsWithScans = assets.filter((asset) => asset.qrCodes.length > 0);
+
+  const assetsWithScanCount = assetsWithScans.map((asset) => ({
+    ...asset,
+    scanCount: asset.qrCodes.reduce(
+      (count, qrCode) => count + qrCode.scans.length,
+      0
+    ),
+  }));
+
+  // group the assets by their category. assets without category should be grouped as "Ucatagorized"
+  const assetsByCategory: {
+    [key: string]: {
+      category: string;
+      assets: Asset[];
+      scanCount: number;
+    };
+  } = {};
+
+  for (let asset of assetsWithScanCount) {
+    let category = asset.category?.name || "Uncategorized";
+    if (!assetsByCategory[category]) {
+      assetsByCategory[category] = {
+        category,
+        assets: [],
+        scanCount: 0,
+      };
+    }
+    assetsByCategory[category].assets.push(asset);
+    assetsByCategory[category].scanCount += asset.scanCount;
+  }
+
+  const assetsByCategoryArray = Object.values(assetsByCategory);
+
+  // Calculate the total count of scans for each category
+  assetsByCategoryArray.sort((a, b) => b.scanCount - a.scanCount);
+
+  // Get the top 5 categories
+  const top5Categories = assetsByCategoryArray.slice(0, 5);
+
+  return top5Categories.map((cd) => ({
+    name: cd.category,
+    scanCount: cd.scanCount,
+    assetCount: cd.assets.length,
+  }));
+}
