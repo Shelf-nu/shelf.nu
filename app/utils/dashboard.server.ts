@@ -23,11 +23,15 @@ type Asset = Prisma.AssetGetPayload<{
  * Asset created in each month in the last year.
  * */
 
-export async function getAssetsCreatedInEachMonth({
+export async function totalAssetsAtEndOfEachMonth({
   assets,
 }: {
   assets: Asset[];
 }) {
+  const currentDate = new Date();
+  const twelveMonthsAgo = new Date();
+  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
+
   const months = [
     "January",
     "February",
@@ -43,30 +47,98 @@ export async function getAssetsCreatedInEachMonth({
     "December",
   ];
 
-  const currentYear = new Date().getFullYear();
-  const lastYear = currentYear - 1;
+  const monthsArray = [];
 
-  const oneYearAgo = new Date();
-  oneYearAgo.setFullYear(lastYear);
+  // Add the current month to the array
+  const currentMonthName = months[currentDate.getMonth()];
+  const currentYear = currentDate.getFullYear();
 
-  const assetsCreated = months.map((month, index) => {
-    const date = new Date(lastYear, index, 1);
-    date.setHours(0, 0, 0, 0);
-    date.setDate(date.getDate() + 1);
-    date.setMilliseconds(date.getMilliseconds() - 1);
-    const assetsCreatedBeforeMonth = assets.reduce((count, asset) => {
-      const assetDate = new Date(asset.createdAt);
-      if (assetDate.getTime() <= date.getTime()) {
-        return count + 1;
-      }
-      return count;
-    }, 0);
-    return {
-      month,
-      "Assets Created": assetsCreatedBeforeMonth,
-    };
+  // Add the previous 12 months to the array
+  for (let i = 0; i < 12; i++) {
+    const monthDate = new Date();
+    monthDate.setFullYear(
+      twelveMonthsAgo.getFullYear(),
+      twelveMonthsAgo.getMonth() + i,
+      1
+    );
+    const monthName = months[monthDate.getMonth()];
+    const year = monthDate.getFullYear();
+
+    // Prevent adding the current month in this loop
+    if (monthName === currentMonthName && year === currentYear) {
+      continue;
+    }
+
+    monthsArray.push({
+      month: monthName,
+      year,
+      assetsCreated: 0,
+      "Total assets": 0,
+    });
+  }
+
+  // Add the current month to the array
+  monthsArray.push({
+    month: currentMonthName,
+    year: currentYear,
+    assetsCreated: 0,
+    "Total assets": 0,
   });
-  return assetsCreated;
+  // Sort the array by year and month
+  monthsArray.sort((a, b) => {
+    const yearA = a.year;
+    const yearB = b.year;
+    const monthA = months.indexOf(a.month);
+    const monthB = months.indexOf(b.month);
+    return yearA - yearB || monthA - monthB;
+  });
+
+  // Get the total of assets created in each month
+  let totalAssets = 0;
+  for (let asset of assets) {
+    const assetCreatedDate = new Date(asset.createdAt);
+    const assetCreatedMonth = assetCreatedDate.getMonth();
+    const assetCreatedYear = assetCreatedDate.getFullYear();
+
+    // If the asset was created in the last year
+    if (
+      assetCreatedDate >= twelveMonthsAgo &&
+      assetCreatedDate <= currentDate
+    ) {
+      // Find the month object in the months array that matches the asset creation date
+      const month = monthsArray.find(
+        (m) =>
+          m.month === months[assetCreatedMonth] && m.year === assetCreatedYear
+      );
+      if (month) {
+        month.assetsCreated += 1;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      totalAssets += 1;
+    }
+  }
+
+  // Calculate the total number of assets that existed at the end of each month
+  let assetsExisting = 0;
+  for (let i = 0; i < monthsArray.length; i++) {
+    const currentMonth = monthsArray[i];
+    const previousMonth = monthsArray[i - 1];
+
+    // If the current month is not the first month and it's the same as the previous month, skip it
+    if (
+      previousMonth &&
+      currentMonth.month === previousMonth.month &&
+      currentMonth.year === previousMonth.year + 1
+    ) {
+      continue;
+    }
+
+    assetsExisting += currentMonth.assetsCreated;
+    currentMonth["Total assets"] = assetsExisting;
+  }
+
+  // Return the array of months with the total number of assets that existed at the end of each month
+  return monthsArray;
 }
 
 /**
