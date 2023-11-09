@@ -271,3 +271,40 @@ export async function getMostScannedAssetsCategories({
     assetCount: cd.assets.length,
   }));
 }
+
+/**
+ * Assets grouped per status
+ */
+
+export async function groupAssetsByStatus({ assets }: { assets: Asset[] }) {
+  const assetsByStatus: Record<string, { status: string; assets: Asset[] }> =
+    {};
+
+  for (let asset of assets) {
+    let status = asset.status;
+    if (!assetsByStatus[status]) {
+      assetsByStatus[status] = {
+        status,
+        assets: [],
+      };
+    }
+    assetsByStatus[status].assets.push(asset);
+  }
+
+  const assetsByStatusArray = Object.values(assetsByStatus);
+  const FORMAT_STATUS: { [key: string]: string } = {
+    AVAILABLE: "Available",
+    IN_CUSTODY: "In Custody",
+  };
+
+  const chartData = assetsByStatusArray.map((cd) => ({
+    status: FORMAT_STATUS[cd.status],
+    assets: cd.assets.length,
+  }));
+  return {
+    chartData,
+    availableAssets: chartData.find((obj) => obj.status == "Available")?.assets,
+    inCustodyAssets: chartData.find((obj) => obj.status == "In Custody")
+      ?.assets,
+  };
+}

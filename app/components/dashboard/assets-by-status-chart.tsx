@@ -6,23 +6,9 @@ import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function AssetsByStatusChart() {
   const { assetsByStatus } = useLoaderData<typeof loader>();
-  const FORMAT_STATUS = {
-    AVAILABLE: "Available",
-    IN_CUSTODY: "In Custody",
-  };
-  const chartData: { status: string; assets: number }[] = [];
-  assetsByStatus.map((status) => {
-    const formattedData = {
-      status: FORMAT_STATUS[status.status],
-      assets: status._count.status,
-    };
-    return chartData.push(formattedData);
-  });
-  const availableAssets: number | undefined = chartData.find(
-    (obj) => obj.status == "Available"
-  )?.assets;
-  const inCustodyAssets = chartData.find((obj) => obj.status == "In Custody")
-    ?.assets;
+
+  const { chartData, availableAssets, inCustodyAssets } = assetsByStatus;
+
   return (
     <div className="mb-4 w-full rounded border border-gray-200 lg:w-1/2">
       <div className="flex items-center justify-between">
