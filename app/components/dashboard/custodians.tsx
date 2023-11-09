@@ -61,17 +61,21 @@ function Row({
       <Td className="w-full">
         <div className="flex items-center justify-between">
           <span className="text-text-sm font-medium text-gray-900">
-            {custodian?.user ? (
+            <div className="flex items-center gap-3">
               <img
                 src={
-                  custodian?.user?.profilePicture || "/images/default_pfp.jpg"
+                  custodian?.user?.profilePicture
+                    ? custodian?.user?.profilePicture
+                    : "/images/default_pfp.jpg"
                 }
-                className="mr-1 h-4 w-4 rounded-full"
-                alt=""
+                className={"h-10 w-10 rounded-[4px]"}
+                alt={`${name}'s profile`}
               />
-            ) : null}
-            <span className="mt-[1px]">{custodian.name}</span>
-            <span className="block text-gray-600">{count} Assets</span>
+              <div>
+                <span className="mt-[1px]">{custodian.name}</span>
+                <span className="block text-gray-600">{count} Assets</span>
+              </div>
+            </div>
           </span>
         </div>
       </Td>
