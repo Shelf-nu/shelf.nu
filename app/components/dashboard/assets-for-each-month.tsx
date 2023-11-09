@@ -3,8 +3,8 @@ import { AreaChart, Card, Title } from "@tremor/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { InfoTooltip } from "../shared/info-tooltip";
 
-export default function AssetsAreaChart() {
-  const { assetsCreatedInEachMonth, totalAssets } =
+export default function AssetsForEachMonth() {
+  const { totalAssetsAtEndOfEachMonth, totalAssets } =
     useLoaderData<typeof loader>();
   return (
     <>
@@ -34,9 +34,9 @@ export default function AssetsAreaChart() {
         </Title>
         <AreaChart
           className="mt-4 h-72"
-          data={assetsCreatedInEachMonth}
+          data={totalAssetsAtEndOfEachMonth}
           index="month"
-          categories={["Assets Created"]}
+          categories={["Total assets"]}
           colors={["orange"]}
         />
       </Card>

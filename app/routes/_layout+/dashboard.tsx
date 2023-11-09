@@ -1,6 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { Link } from "@remix-run/react";
-import AssetsAreaChart from "~/components/dashboard/assets-area-chart";
+import AssetsAreaChart from "~/components/dashboard/assets-for-each-month";
 import CustodiansList from "~/components/dashboard/custodians";
 import NewestAssets from "~/components/dashboard/newest-assets";
 import NewsBar from "~/components/dashboard/news-bar";
@@ -10,10 +10,10 @@ import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
-  getAssetsCreatedInEachMonth,
   getCustodiansOrderedByTotalCustodies,
   getMostScannedAssets,
   getMostScannedAssetsCategories,
+  totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -63,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }),
     mostScannedAssets: await getMostScannedAssets({ assets }),
     mostScannedCategories: await getMostScannedAssetsCategories({ assets }),
-    assetsCreatedInEachMonth: await getAssetsCreatedInEachMonth({
+    totalAssetsAtEndOfEachMonth: await totalAssetsAtEndOfEachMonth({
       assets,
     }),
   });
