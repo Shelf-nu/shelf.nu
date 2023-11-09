@@ -68,6 +68,11 @@ export async function getCategories({
       take,
       where,
       orderBy: { updatedAt: "desc" },
+      include: {
+        _count: {
+          select: { assets: true },
+        },
+      },
     }),
 
     /** Count them */

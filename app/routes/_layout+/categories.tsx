@@ -52,6 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     singular: "category",
     plural: "categories",
   };
+
   return json(
     {
       header,
@@ -123,6 +124,7 @@ export default function CategoriesPage() {
           headerChildren={
             <>
               <Th>Description</Th>
+              <Th>Assets</Th>
               <Th>Actions</Th>
             </>
           }
@@ -135,7 +137,11 @@ export default function CategoriesPage() {
 const CategoryItem = ({
   item,
 }: {
-  item: Pick<Category, "id" | "description" | "name" | "color">;
+  item: Pick<Category, "id" | "description" | "name" | "color"> & {
+    _count: {
+      assets: number;
+    };
+  };
 }) => (
   <>
     <Td title={`Category: ${item.name}`} className="w-1/4 ">
@@ -146,6 +152,7 @@ const CategoryItem = ({
     <Td className="w-3/4 text-gray-500" title="Description">
       {item.description}
     </Td>
+    <Td>{item._count.assets}</Td>
     <Td>
       <Button
         to={`${item.id}/edit`}
