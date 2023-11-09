@@ -22,7 +22,6 @@ type Asset = Prisma.AssetGetPayload<{
 /**
  * Asset created in each month in the last year.
  * */
-
 export async function totalAssetsAtEndOfEachMonth({
   assets,
 }: {
@@ -137,14 +136,13 @@ export async function totalAssetsAtEndOfEachMonth({
     currentMonth["Total assets"] = assetsExisting;
   }
 
-  // Return the array of months with the total number of assets that existed at the end of each month
+  //Return the array of months with the total number of assets that existed at the end of each month
   return monthsArray;
 }
 
 /**
  * Custodians ordered by total custodies
  */
-
 function hasCustody(asset: Asset): asset is Asset & { custody: Custody } {
   return asset.custody !== null;
 }
@@ -197,7 +195,6 @@ export async function getCustodiansOrderedByTotalCustodies({
 /**
  * Most scanned assets
  */
-
 export async function getMostScannedAssets({ assets }: { assets: Asset[] }) {
   const assetsWithScans = assets.filter((asset) => asset.qrCodes.length > 0);
 
@@ -275,7 +272,6 @@ export async function getMostScannedAssetsCategories({
 /**
  * Assets grouped per status
  */
-
 export async function groupAssetsByStatus({ assets }: { assets: Asset[] }) {
   const assetsByStatus: Record<string, { status: string; assets: Asset[] }> =
     {};
@@ -307,4 +303,43 @@ export async function groupAssetsByStatus({ assets }: { assets: Asset[] }) {
     inCustodyAssets: chartData.find((obj) => obj.status == "In Custody")
       ?.assets,
   };
+}
+
+/**
+ * Assets grouped per category
+ */
+export async function groupAssetsByCategory({ assets }: { assets: Asset[] }) {
+  const assetsByCategory: Record<
+    string,
+    { category: string; assets: Asset[]; id: string }
+  > = {};
+
+  for (let asset of assets) {
+    let category = asset.category?.name || "Uncategorized";
+    let id = asset?.category?.id || "Uncategorized";
+    if (!assetsByCategory[category]) {
+      assetsByCategory[category] = {
+        category,
+        id,
+        assets: [],
+      };
+    }
+    assetsByCategory[category].assets.push(asset);
+  }
+
+  const assetsByCategoryArray = Object.values(assetsByCategory);
+
+  const chartData = assetsByCategoryArray.map((cd) => ({
+    category: cd.category,
+    id: cd.id,
+    assets: cd.assets.length,
+  }));
+
+  // Order chart data based on item count
+  chartData.sort((a, b) => b.assets - a.assets);
+
+  // Get the top 6 categories
+  const top6Categories = chartData.slice(0, 6);
+
+  return top6Categories;
 }

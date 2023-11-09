@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { Link } from "@remix-run/react";
+import AssetsByCategoryChart from "~/components/dashboard/assets-by-category-chart";
 import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";
 import AssetsForEachMonth from "~/components/dashboard/assets-for-each-month";
 import CustodiansList from "~/components/dashboard/custodians";
@@ -16,6 +17,7 @@ import {
   getCustodiansOrderedByTotalCustodies,
   getMostScannedAssets,
   getMostScannedAssetsCategories,
+  groupAssetsByCategory,
   groupAssetsByStatus,
   totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
@@ -70,6 +72,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       assets,
     }),
     assetsByStatus: await groupAssetsByStatus({ assets }),
+    assetsByCategory: await groupAssetsByCategory({ assets }),
   });
 }
 
@@ -90,7 +93,7 @@ export default function DashboardPage() {
       </div>
       <div className="flex gap-4">
         <AssetsByStatusChart />
-        <AssetsByStatusChart />
+        <AssetsByCategoryChart />
       </div>
       <div className="mb-4 flex gap-4">
         <div className="lg:w-1/2">
