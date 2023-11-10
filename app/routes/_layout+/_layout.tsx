@@ -123,5 +123,3 @@ export default function App() {
     </div>
   );
 }
-
-// export const ErrorBoundary = () => <ErrorBoundryComponent />;

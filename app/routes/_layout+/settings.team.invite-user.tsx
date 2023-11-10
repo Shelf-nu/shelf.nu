@@ -9,6 +9,7 @@ import {
 } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import z from "zod";
+import { ErrorContent } from "~/components/errors";
 import {
   Select,
   SelectGroup,
@@ -239,3 +240,5 @@ export default function InviteUser() {
     </>
   ) : null;
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

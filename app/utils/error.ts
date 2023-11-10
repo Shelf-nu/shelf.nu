@@ -53,7 +53,7 @@ export class ShelfStackError extends Error {
     this.tag = tag;
     this.traceId = traceId;
     this.title = title;
-    this.isShelfError = true;
+    this.isShelfError = isLikeShelfError(cause);
   }
 }
 
@@ -72,6 +72,7 @@ export function isLikeShelfError(cause: unknown): cause is ShelfStackError {
 }
 
 export function makeShelfError(cause: unknown) {
+  // console.log(cause);
   if (isLikeShelfError(cause)) {
     // copy the original error and fill in the maybe missing fields like status or traceId
     return new ShelfStackError({

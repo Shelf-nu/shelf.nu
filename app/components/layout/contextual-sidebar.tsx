@@ -12,7 +12,7 @@ export default function ContextualSidebar() {
   const data = currentRoute?.data as {
     showSidebar?: boolean;
   };
-  const showSidebar = data.showSidebar || false;
+  const showSidebar = data?.showSidebar || false;
 
   return (
     <AnimatePresence>

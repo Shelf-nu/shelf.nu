@@ -16,7 +16,7 @@ export function useCurrentOrganization(): Organization | undefined {
   if (!layoutData) {
     throw new ShelfStackError({
       message:
-        "Something went wrong with fetching your organization defails. If the issue persists, please contact support",
+        "Something went wrong with fetching your organization details. If the issue persists, please contact support",
     });
   }
 

@@ -616,7 +616,8 @@ async function uploadDuplicateAssetMainImage(
 
   if (!data?.path || error) {
     throw new ShelfStackError({
-      message: "Could not upload image fot the asset!",
+      title: "Oops, duplicating failed",
+      message: "Something went wrong while uploading the image",
       status: 500,
     });
   }

@@ -9,6 +9,7 @@ import {
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
+import { ErrorContent } from "~/components/errors";
 import Input from "~/components/forms/input";
 import { Badge, Button } from "~/components/shared";
 import { Spinner } from "~/components/shared/spinner";
@@ -19,12 +20,13 @@ import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/custom-modal.css";
 import {
   assertIsPost,
+  error,
   isFormProcessing,
   userFriendlyAssetStatus,
 } from "~/utils";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfStackError, makeShelfError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await requireAuthSession(request);
@@ -50,49 +52,57 @@ const DuplicateAssetSchema = z.object({
 });
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  assertIsPost(request);
+  try {
+    assertIsPost(request);
 
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
+    const authSession = await requireAuthSession(request);
+    const { organizationId } = await requireOrganisationId(
+      authSession,
+      request
+    );
+    const { userId } = authSession;
 
-  const assetId = params.assetId as string;
-  const asset = await db.asset.findUnique({
-    where: { id: assetId },
-    include: { custody: { include: { custodian: true } }, tags: true },
-  });
-  if (!asset) {
-    throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
+    const assetId = params.assetId as string;
+    const asset = await db.asset.findUnique({
+      where: { id: assetId },
+      include: { custody: { include: { custodian: true } }, tags: true },
+    });
+    if (!asset) {
+      throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
+    }
+
+    const formData = await request.formData();
+    const result = await DuplicateAssetSchema.safeParseAsync(
+      parseFormAny(formData)
+    );
+
+    if (!result.success) {
+      return json({ errors: result.error }, { status: 400 });
+    }
+
+    const amountOfDuplicates = Number(result.data.amountOfDuplicates);
+
+    const duplicatedAssets = await duplicateAsset({
+      asset,
+      userId,
+      amountOfDuplicates,
+      organizationId,
+    });
+
+    sendNotification({
+      title: "Asset successfully duplicated",
+      message: `${asset.title} has been duplicated.`,
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+
+    return redirect(
+      `/assets/${amountOfDuplicates > 1 ? "" : duplicatedAssets[0].id}`
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
   }
-
-  const formData = await request.formData();
-  const result = await DuplicateAssetSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
-
-  if (!result.success) {
-    return json({ errors: result.error }, { status: 400 });
-  }
-
-  const amountOfDuplicates = Number(result.data.amountOfDuplicates);
-
-  const duplicatedAssets = await duplicateAsset({
-    asset,
-    userId,
-    amountOfDuplicates,
-    organizationId,
-  });
-
-  sendNotification({
-    title: "Asset successfully duplicated",
-    message: `${asset.title} has been duplicated.`,
-    icon: { name: "success", variant: "success" },
-    senderId: userId,
-  });
-
-  return redirect(
-    `/assets/${amountOfDuplicates > 1 ? "" : duplicatedAssets[0].id}`
-  );
 };
 
 export function links() {
@@ -104,9 +114,7 @@ export default function DuplicateAsset() {
   const { asset } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isProcessing = isFormProcessing(navigation.state);
-  const data = useActionData<{
-    errors: { amountOfDuplicates: string };
-  }>();
+  const data = useActionData<typeof action>();
 
   return (
     <Form ref={zo.ref} method="post">
@@ -152,6 +160,7 @@ export default function DuplicateAsset() {
           required
           error={
             zo.errors.amountOfDuplicates()?.message ||
+            // @ts-ignore
             data?.errors?.amountOfDuplicates
           }
         />
@@ -178,3 +187,5 @@ export default function DuplicateAsset() {
     </Form>
   );
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

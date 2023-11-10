@@ -13,6 +13,7 @@ import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { Notes } from "~/components/assets/notes";
+import { ErrorContent } from "~/components/errors";
 // import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -354,5 +355,3 @@ export default function AssetDetailsPage() {
     </>
   );
 }
-
-// export const ErrorBoundary = () => <ErrorBoundryComponent />;
