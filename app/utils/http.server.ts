@@ -91,3 +91,24 @@ export function safeRedirect(
 
   return to;
 }
+
+/**
+ * Create an error response payload.
+ *
+ * Normalize the error to return to help type inference.
+ *
+ * @param cause - The error that has been catch
+ * @returns The normalized error with `error` key set to the error
+ */
+export function error(cause: ShelfStackError) {
+  return {
+    error: {
+      message: cause.message,
+      title: cause.title,
+      status: cause.status,
+      isShelfError: cause.isShelfError,
+    },
+  };
+}
+
+export type ErrorResponse = ReturnType<typeof error>;

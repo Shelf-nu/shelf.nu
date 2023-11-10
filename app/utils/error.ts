@@ -1,6 +1,3 @@
-import type { ErrorResponse } from "@remix-run/node";
-import { isRouteErrorResponse } from "@remix-run/react";
-import { isErrorResponse } from "@remix-run/react/dist/data";
 import type { HTTPStatusCode } from "./http-status";
 
 /**
@@ -35,6 +32,7 @@ export class ShelfStackError extends Error {
   readonly tag: FailureReason["tag"];
   readonly status: FailureReason["status"];
   readonly title: FailureReason["title"];
+  readonly isShelfError: boolean;
   traceId: FailureReason["traceId"];
 
   constructor({
@@ -47,23 +45,43 @@ export class ShelfStackError extends Error {
     title,
   }: FailureReason) {
     super();
-    this.name = "ShelfStackError 👀";
+    this.name = "ShelfStackError";
     this.message = message;
-    this.status = isShelfStackError(cause) ? cause.status : status;
+    this.status = isLikeShelfError(cause) ? cause.status : status;
     this.cause = cause;
     this.metadata = metadata;
     this.tag = tag;
     this.traceId = traceId;
     this.title = title;
+    this.isShelfError = true;
   }
 }
 
-export function isShelfStackError(cause: unknown): cause is ShelfStackError {
-  return cause instanceof ShelfStackError;
+/**
+ * This helper function is used to check if an error is an instance of `AppError` or an object that looks like an `AppError`.
+ */
+export function isLikeShelfError(cause: unknown): cause is ShelfStackError {
+  return (
+    cause instanceof ShelfStackError ||
+    (typeof cause === "object" &&
+      cause !== null &&
+      "name" in cause &&
+      cause.name !== "ShelfStackError" &&
+      "message" in cause)
+  );
 }
 
-export function isRouteError(
-  response: unknown
-): response is { data: ErrorResponse } {
-  return isRouteErrorResponse(response) && isErrorResponse(response.data);
+export function makeShelfError(cause: unknown) {
+  if (isLikeShelfError(cause)) {
+    // copy the original error and fill in the maybe missing fields like status or traceId
+    return new ShelfStackError({
+      ...cause,
+    });
+  }
+
+  // 🤷‍♂️ We don't know what this error is, so we create a new default one.
+  return new ShelfStackError({
+    cause,
+    message: "Sorry, something went wrong.",
+  });
 }
