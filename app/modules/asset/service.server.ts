@@ -278,7 +278,7 @@ export async function createAsset({
   };
 
   /** If a categoryId is passed, link the category to the asset. */
-  if (categoryId !== "uncategorized") {
+  if (categoryId && categoryId !== "uncategorized") {
     Object.assign(data, {
       category: {
         connect: {
