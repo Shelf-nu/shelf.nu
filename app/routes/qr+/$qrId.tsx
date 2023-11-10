@@ -1,11 +1,15 @@
+import type { Organization } from "@prisma/client";
 import { redirect, json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { requireAuthSession } from "~/modules/auth";
+import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
+import { QrNotFound } from "~/components/qr/not-found";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { getUserOrganizations } from "~/modules/organization";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getQr } from "~/modules/qr";
-import { belongsToCurrentUsersOrg } from "~/modules/qr/utils.server";
 import { createScan, updateScan } from "~/modules/scan";
-import { getUserByIDWithOrg } from "~/modules/user";
 import { assertIsPost } from "~/utils";
+import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -69,19 +73,50 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
    * Does the QR code belong to LOGGED IN user's any of organizations?
    * Redirect to page to report if found.
    */
-  const user = await getUserByIDWithOrg(authSession.userId);
-  if (!belongsToCurrentUsersOrg(qr, user?.organizations)) {
+
+  /** There could be a case when you get removed from an organization while browsing it.
+   * In this case what we do is we set the current organization to the first one in the list
+   */
+  const userOrganizations = await getUserOrganizations({
+    userId: authSession.userId,
+  });
+  const userOrganizationIds = userOrganizations.map((org) => org.id);
+  const personalOrganization = userOrganizations.find(
+    (org) => org.type === "PERSONAL"
+  ) as Organization;
+  if (!userOrganizationIds.includes(qr.organizationId)) {
     return redirect(`contact-owner?scanId=${scan.id}`);
   }
+
+  const headers = [
+    setCookie(
+      await setSelectedOrganizationIdCookie(
+        userOrganizationIds.find((orgId) => orgId === qr.organizationId) ||
+          personalOrganization.id
+      )
+    ),
+    setCookie(
+      await commitAuthSession(request, {
+        authSession,
+        flashErrorMessage: null,
+      })
+    ),
+  ];
 
   /**
    * When there is no assetId that means that the asset was deleted so the QR code is orphaned.
    * Here we redirect to a page where the user has the option to link to existing asset or create a new one.
    */
-  if (!qr.assetId) return redirect(`link?scanId=${scan.id}`);
+  if (!qr.assetId)
+    return redirect(`link?scanId=${scan.id}`, {
+      headers,
+    });
 
   return redirect(
-    `/assets/${qr.assetId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`
+    `/assets/${qr.assetId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
+    {
+      headers,
+    }
   );
 };
 
