@@ -180,7 +180,6 @@ dialog {
   display: none;
 }
 
-
 /*removing arrows from valuation input field (type = "number")*/
 .valuation-input::-webkit-outer-spin-button,
 .valuation-input::-webkit-inner-spin-button {
