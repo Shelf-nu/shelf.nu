@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, useMatches } from "@remix-run/react";
 import { Outlet, redirect } from "react-router";
-// import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 import SubHeading from "~/components/shared/sub-heading";
 import { getAuthSession } from "~/modules/auth";
 import { getUserByEmail } from "~/modules/user";
@@ -69,4 +69,4 @@ export default function App() {
   );
 }
 
-// export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;
