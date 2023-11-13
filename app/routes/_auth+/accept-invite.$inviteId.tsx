@@ -81,7 +81,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({ title: "Accept team invite" });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json({ ...error(reason) }, { status: reason.status });
+    throw json(
+      { title: "Accept team invite", ...error(reason) },
+      { status: reason.status }
+    );
   }
 };
 
