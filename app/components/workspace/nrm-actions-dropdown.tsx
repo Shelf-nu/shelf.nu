@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { SendIcon, VerticalDotsIcon } from "~/components/icons";
 import {
@@ -8,11 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
-import type { WithDateFields } from "~/modules/types";
-import type {
-  TeamMemberWithCustodies,
-  loader,
-} from "~/routes/_layout+/settings.team";
+import type { loader } from "~/routes/_layout+/settings.team";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { DeleteMember } from "./delete-member";
 import { PremiumFeatureButton } from "../subscription/premium-feature-button";
@@ -20,7 +17,15 @@ import { PremiumFeatureButton } from "../subscription/premium-feature-button";
 export function TeamMembersActionsDropdown({
   teamMember,
 }: {
-  teamMember: WithDateFields<TeamMemberWithCustodies, string>;
+  teamMember: Prisma.TeamMemberGetPayload<{
+    include: {
+      _count: {
+        select: {
+          custodies: true;
+        };
+      };
+    };
+  }>;
 }) {
   const { organization } = useLoaderData<typeof loader>();
   const [open, setOpen] = useState(false);
@@ -44,7 +49,6 @@ export function TeamMembersActionsDropdown({
         align="end"
         className="order w-[180px] rounded-md bg-white p-[6px] text-right "
       >
-        {/* {!isPersonalOrg && ( */}
         <DropdownMenuItem className="text-gray-700hover:text-gray-700 p-4 hover:bg-slate-100">
           <PremiumFeatureButton
             canUseFeature={!isPersonalOrg}
