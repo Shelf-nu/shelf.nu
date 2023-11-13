@@ -118,6 +118,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
             },
           },
         },
+        include: {
+          _count: {
+            select: {
+              custodies: true,
+            },
+          },
+        },
       }),
     ]);
   if (!organization) {

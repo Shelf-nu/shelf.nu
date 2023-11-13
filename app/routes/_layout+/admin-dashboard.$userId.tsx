@@ -1,14 +1,11 @@
 import type { Asset, Qr, User } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData, Link } from "@remix-run/react";
-import { Button } from "~/components/shared";
+import { useLoaderData, Link } from "@remix-run/react";
 import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { generateOrphanedCodes } from "~/modules/qr";
 import { deleteUser } from "~/modules/user";
 import { isDelete } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -43,7 +40,15 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     },
   })) as UserWithQrCodes;
 
-  return json({ user });
+  const organizations = await db.organization.findMany({
+    where: {
+      owner: {
+        id: userId,
+      },
+    },
+  });
+
+  return json({ user, organizations });
 };
 
 export const handle = {
@@ -52,9 +57,7 @@ export const handle = {
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
   await requireAdmin(request);
-  const formData = await request.formData();
   /** ID of the target user we are generating codes for */
   const userId = params.userId as string;
 
@@ -68,18 +71,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       senderId: authSession.userId,
     });
     return redirect("/admin-dashboard");
-  } else {
-    await generateOrphanedCodes({
-      organizationId,
-      userId,
-      amount: Number(formData.get("amount")),
-    });
-    return json({ message: "Generated Orphaned QR codes" });
   }
+  return null;
 };
 
 export default function Area51UserPage() {
-  const { user } = useLoaderData<typeof loader>();
+  const { user, organizations } = useLoaderData<typeof loader>();
   return user ? (
     <div>
       <div>
@@ -102,83 +99,33 @@ export default function Area51UserPage() {
         </ul>
       </div>
       <div className="mt-10">
-        <div className="flex justify-between">
-          <div className="flex items-end gap-3">
-            <h2>QR Codes</h2>
-            <span>{user?.qrCodes.length} total codes</span>
-          </div>
-          <div className="flex flex-col justify-end gap-3">
-            <Form method="post">
-              <input
-                type="number"
-                max={1000}
-                min={1}
-                name="amount"
-                required
-                defaultValue={10}
-              />
-              <Button type="submit" to={""} variant="secondary">
-                Generate Orphaned QR codes
-              </Button>
-            </Form>
-            <div className="flex justify-end gap-3">
-              <Button
-                to={`/api/${user?.id}/qr-codes.zip?${new URLSearchParams({
-                  orphaned: "true",
-                })}`}
-                reloadDocument
-                className="whitespace-nowrap"
-                variant="secondary"
-              >
-                Print orphaned codes
-              </Button>
-              <Button
-                to={`/api/${user?.id}/qr-codes.zip`}
-                reloadDocument
-                className="whitespace-nowrap"
-                variant="secondary"
-              >
-                Print non-orphaned codes
-              </Button>
-            </div>
-          </div>
-        </div>
-        <Table className="mt-5">
-          <thead className="bg-gray-100">
-            <tr className="font-semibold">
-              <th className="border-b p-4 text-left text-gray-600 md:px-6" />
+        <Table>
+          <thead>
+            <tr>
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
-                QR code id
+                Name
               </th>
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
-                Asset id
+                Type
               </th>
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
-                Asset name
-              </th>
-              <th className="border-b p-4 text-left text-gray-600 md:px-6">
-                Created At
+                Created at
               </th>
             </tr>
           </thead>
-
           <tbody>
-            {user?.qrCodes.map((qrCode) => (
-              <Tr key={qrCode.id}>
-                <Td className="w-1">
-                  <input type="checkbox" name="qrId" value={qrCode.id} />
-                </Td>
+            {organizations.map((org) => (
+              <Tr key={org.id}>
                 <Td>
                   <Link
-                    to={`/qr/${qrCode.id}`}
+                    to={`/admin-dashboard/org/${org.id}`}
                     className="underline hover:text-gray-500"
                   >
-                    {qrCode.id}
+                    {org.name}
                   </Link>
                 </Td>
-                <Td>{qrCode?.assetId || "Orphaned"}</Td>
-                <Td>{qrCode?.asset?.title || "Orphaned"}</Td>
-                <Td>{qrCode.createdAt}</Td>
+                <Td>{org.type}</Td>
+                <Td>{org.createdAt}</Td>
               </Tr>
             ))}
           </tbody>
