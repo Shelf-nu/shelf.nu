@@ -128,7 +128,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     locationId: newLocationId,
     qrId,
     tags,
-    valuation: valuation,
+    valuation,
     customFieldsValues,
   });
 

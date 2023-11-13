@@ -1,4 +1,4 @@
-import type { $Enums, Organization } from "@prisma/client";
+import type { Organization, $Enums } from "@prisma/client";
 import { Currency } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
@@ -22,7 +22,7 @@ import { Spinner } from "../shared/spinner";
 
 export const NewWorkspaceFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
-  currency: z.string(),
+  currency: z.custom<Currency>(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
