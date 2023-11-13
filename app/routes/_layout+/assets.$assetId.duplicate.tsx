@@ -29,17 +29,26 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError, makeShelfError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
-  const assetId = params.assetId as string;
-  const asset = await db.asset.findUnique({ where: { id: assetId } });
-  if (!asset) {
-    throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
-  }
+  try {
+    await requireAuthSession(request);
 
-  return json({
-    showModal: true,
-    asset,
-  });
+    const assetId = params.assetId as string;
+    const asset = await db.asset.findUnique({ where: { id: assetId } });
+    if (!asset) {
+      throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
+    }
+
+    return json({
+      showModal: true,
+      asset,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(
+      { asset: null, showModal: true, ...error(reason) },
+      { status: reason.status }
+    );
+  }
 };
 
 const DuplicateAssetSchema = z.object({
@@ -77,7 +86,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     );
 
     if (!result.success) {
-      return json({ errors: result.error }, { status: 400 });
+      return json({ error: { ...result.error } }, { status: 400 });
     }
 
     const amountOfDuplicates = Number(result.data.amountOfDuplicates);
@@ -101,7 +110,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     );
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(error(reason), { status: reason.status });
+    return json(
+      { showModal: true, ...error(reason) },
+      { status: reason.status }
+    );
   }
 };
 
@@ -114,7 +126,7 @@ export default function DuplicateAsset() {
   const { asset } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isProcessing = isFormProcessing(navigation.state);
-  const data = useActionData<typeof action>();
+  const actionData = useActionData<typeof action>();
 
   return (
     <Form ref={zo.ref} method="post">
@@ -123,31 +135,33 @@ export default function DuplicateAsset() {
           Duplicate asset
         </div>
 
-        <div className="flex items-center gap-3 rounded-md border p-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center">
-            <AssetImage
-              asset={{
-                assetId: asset.id,
-                mainImage: asset.mainImage,
-                mainImageExpiration: asset.mainImageExpiration,
-                alt: asset.title,
-              }}
-              className="h-full w-full rounded-[4px] border object-cover"
-            />
-          </div>
-          <div className="min-w-[130px]">
-            <span className="word-break mb-1 block font-medium">
-              {asset.title}
-            </span>
-            <div>
-              <Badge
-                color={asset.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-              >
-                {userFriendlyAssetStatus(asset.status)}
-              </Badge>
+        {asset ? (
+          <div className="flex items-center gap-3 rounded-md border p-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center">
+              <AssetImage
+                asset={{
+                  assetId: asset.id,
+                  mainImage: asset.mainImage,
+                  mainImageExpiration: asset.mainImageExpiration,
+                  alt: asset.title,
+                }}
+                className="h-full w-full rounded-[4px] border object-cover"
+              />
+            </div>
+            <div className="min-w-[130px]">
+              <span className="word-break mb-1 block font-medium">
+                {asset.title}
+              </span>
+              <div>
+                <Badge
+                  color={asset.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
+                >
+                  {userFriendlyAssetStatus(asset.status)}
+                </Badge>
+              </div>
             </div>
           </div>
-        </div>
+        ) : null}
 
         <Input
           type="number"
@@ -158,10 +172,11 @@ export default function DuplicateAsset() {
           className="w-full"
           disabled={isProcessing}
           required
+          /* We have to find a way to normalize the error object when it comes from zod */
           error={
             zo.errors.amountOfDuplicates()?.message ||
             // @ts-ignore
-            data?.errors?.amountOfDuplicates
+            actionData?.error?.amountOfDuplicates
           }
         />
 
@@ -183,6 +198,14 @@ export default function DuplicateAsset() {
             {isProcessing ? <Spinner /> : "Duplicate"}
           </Button>
         </div>
+        {actionData?.error ? (
+          <div className="text-error-500">
+            {/*@ts-ignore */}
+            <p className="font-medium">{actionData.error?.title || ""}</p>
+            {/* @ts-ignore */}
+            <p>{actionData?.error?.message}</p>
+          </div>
+        ) : null}
       </div>
     </Form>
   );
