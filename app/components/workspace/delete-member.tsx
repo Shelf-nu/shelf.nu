@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { TeamMember } from "@prisma/client";
+import type { Prisma, TeamMember } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
@@ -14,18 +14,24 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 
-import type { WithDateFields } from "~/modules/types";
-import type { TeamMemberWithCustodies } from "~/routes/_layout+/settings.team";
 import { isFormProcessing, tw } from "~/utils";
 import { TrashIcon, XIcon } from "../icons";
 
 export const DeleteMember = ({
   teamMember,
 }: {
-  teamMember: WithDateFields<TeamMemberWithCustodies, string>;
+  teamMember: Prisma.TeamMemberGetPayload<{
+    include: {
+      _count: {
+        select: {
+          custodies: true;
+        };
+      };
+    };
+  }>;
 }) => {
   const hasCustodies = useMemo(
-    () => teamMember?.custodies?.length > 0,
+    () => teamMember?._count.custodies > 0,
     [teamMember]
   );
   return (
@@ -40,14 +46,14 @@ export const DeleteMember = ({
           >
             <span className="flex items-center gap-2">
               <TrashIcon />
-              Delete
+              Delete jjjj
             </span>
           </Button>
         </AlertDialogTrigger>
 
         {hasCustodies ? (
           <UnableToDeleteMemberContent
-            custodiesCount={teamMember.custodies.length}
+            custodiesCount={teamMember?._count.custodies}
           />
         ) : (
           <DeleteMemberContent id={teamMember.id} />
