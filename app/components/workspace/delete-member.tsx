@@ -46,7 +46,7 @@ export const DeleteMember = ({
           >
             <span className="flex items-center gap-2">
               <TrashIcon />
-              Delete jjjj
+              Delete
             </span>
           </Button>
         </AlertDialogTrigger>
