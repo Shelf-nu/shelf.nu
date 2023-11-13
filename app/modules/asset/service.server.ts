@@ -252,12 +252,12 @@ export async function createAsset({
    * Otherwise, create a new one
    * Here we also need to double check:
    * 1. If the qr code exists
-   * 2. If the qr code belongs to the current user
+   * 2. If the qr code belongs to the current organization
    * 3. If the qr code is not linked to an asset
    */
   const qr = qrId ? await getQr(qrId) : null;
   const qrCodes =
-    qr && qr.userId === userId && qr.assetId === null
+    qr && qr.organizationId === organizationId && qr.assetId === null
       ? { connect: { id: qrId } }
       : {
           create: [
@@ -280,7 +280,7 @@ export async function createAsset({
   };
 
   /** If a categoryId is passed, link the category to the asset. */
-  if (categoryId !== "uncategorized") {
+  if (categoryId && categoryId !== "uncategorized") {
     Object.assign(data, {
       category: {
         connect: {
