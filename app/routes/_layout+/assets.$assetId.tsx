@@ -1,4 +1,4 @@
-import type { Location } from "@prisma/client";
+import { type Location } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -291,6 +291,18 @@ export default function AssetDetailsPage() {
                         {tag.name}
                       </Tag>
                     ))}
+                  </div>
+                </li>
+              ) : null}
+              {asset.organization && asset.valuation ? (
+                <li className="mb-2 flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Value
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Tag key={asset.valuation} className="mb-2 ml-2">
+                      {asset.organization.currency + " " + asset.valuation}
+                    </Tag>
                   </div>
                 </li>
               ) : null}

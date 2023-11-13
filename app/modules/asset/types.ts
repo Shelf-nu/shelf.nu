@@ -32,6 +32,7 @@ export interface UpdateAssetPayload {
   tags?: { set: { id: string }[] };
   userId: User["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
+  valuation?: Asset["valuation"];
 }
 
 export interface CreateAssetFromContentImportPayload

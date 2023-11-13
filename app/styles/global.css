@@ -180,6 +180,18 @@ dialog {
   display: none;
 }
 
+
+/*removing arrows from valuation input field (type = "number")*/
+.valuation-input::-webkit-outer-spin-button,
+.valuation-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+.valuation-input {
+  -moz-appearance: textfield;
+}
 .react-tags {
   @apply bg-white;
 }

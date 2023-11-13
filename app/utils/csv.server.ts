@@ -89,6 +89,7 @@ export const buildCsvDataFromAssets = ({
         case "tags":
         case "custody":
         case "organization":
+        case "valuation":
         case "customFields":
           toExport.push(
             JSON.stringify(value, (_key, value) => {
