@@ -11,7 +11,7 @@ export default function CustodiansList() {
     <Table className="rounded border border-gray-200">
       <thead>
         <tr>
-          <Th className="hidden text-[14px] font-semibold text-gray-900 md:table-cell">
+          <Th className="text-[14px] font-semibold text-gray-900 ">
             Custodians
           </Th>
           <Th className="text-right">
@@ -69,7 +69,7 @@ function Row({
                     : "/images/default_pfp.jpg"
                 }
                 className={"h-10 w-10 rounded-[4px]"}
-                alt={`${name}'s profile`}
+                alt={`${custodian.name}'s profile`}
               />
               <div>
                 <span className="mt-[1px]">{custodian.name}</span>

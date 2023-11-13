@@ -91,23 +91,27 @@ export default function DashboardPage() {
       <div className="w-full">
         <AssetsForEachMonth />
       </div>
-      <div className="flex gap-4">
-        <AssetsByStatusChart />
-        <AssetsByCategoryChart />
+      <div className="xl:flex xl:gap-4">
+        <div className="xl:lg-1/2 w-full">
+          <AssetsByStatusChart />
+        </div>
+        <div className="xl:lg-1/2 w-full">
+          <AssetsByCategoryChart />
+        </div>
       </div>
-      <div className="mb-4 flex gap-4">
-        <div className="lg:w-1/2">
+      <div className="mb-4 xl:flex xl:gap-4">
+        <div className="mb-4 xl:mb-0 xl:w-1/2">
           <NewestAssets />
         </div>
-        <div className="lg:w-1/2">
+        <div className="xl:w-1/2">
           <CustodiansList />
         </div>
       </div>
-      <div className="flex gap-4">
-        <div className="lg:w-1/2">
+      <div className="xl:flex xl:gap-4">
+        <div className="mb-4 xl:mb-0 xl:w-1/2">
           <MostScannedAssets />
         </div>
-        <div className="lg:w-1/2">
+        <div className="xl:w-1/2">
           <MostScannedCategories />
         </div>
       </div>

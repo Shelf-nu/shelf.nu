@@ -10,7 +10,7 @@ export default function AssetsForEachMonth() {
   return (
     <ClientOnly fallback={null}>
       {() => (
-        <Card className="mb-10">
+        <Card className="mb-10 py-4 lg:p-6">
           <Title>
             <div className="flex justify-between">
               <div>

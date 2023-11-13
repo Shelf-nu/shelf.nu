@@ -10,7 +10,7 @@ export default function MostScannedCategories() {
     <Table className="h-[420px] rounded border border-gray-200">
       <thead>
         <tr>
-          <Th className="hidden text-[14px] font-semibold text-gray-900 md:table-cell">
+          <Th className="text-[14px] font-semibold text-gray-900">
             Most scanned categories
           </Th>
           <Th className="text-right">
