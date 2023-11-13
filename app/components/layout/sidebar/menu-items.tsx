@@ -70,7 +70,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     isActive ? "active bg-primary-50 text-primary-600" : ""
                   )
                 }
-                to={"/admin-dashboard"}
+                to={"/admin-dashboard/users"}
                 onClick={toggleMobileNav}
                 title={"Admin dashboard"}
               >
