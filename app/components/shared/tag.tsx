@@ -5,7 +5,7 @@ export const Tag = ({
   className,
   title,
 }: {
-  children: string;
+  children: string | JSX.Element;
   className?: string;
   title?: string;
 }) => (
