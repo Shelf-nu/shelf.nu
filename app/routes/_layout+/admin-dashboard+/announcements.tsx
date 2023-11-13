@@ -20,9 +20,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({});
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  return null;
-};
+export const action = async ({ request }: ActionFunctionArgs) => null;
 
 export default function Announcements() {
   return (
