@@ -16,6 +16,7 @@ import {
 } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
+import { getOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
@@ -32,7 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
-
+  const organization = await getOrganization({ id: organizationId });
   const { categories, tags, locations, customFields } =
     await getAllRelatedEntries({
       userId,
@@ -48,7 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     categories,
     tags,
     locations,
-    currency: organization.currency,
+    currency: organization?.currency,
     customFields,
   });
 }

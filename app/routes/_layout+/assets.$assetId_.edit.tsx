@@ -23,6 +23,7 @@ import {
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
+import { getOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
@@ -37,6 +38,7 @@ import { ShelfStackError } from "~/utils/error";
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
+  const organization = await getOrganization({ id: organizationId });
   const { userId } = authSession;
 
   const { categories, tags, locations, customFields } =
@@ -63,7 +65,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     categories,
     tags,
     locations,
-    currency: organization.currency,
+    currency: organization?.currency,
     customFields,
   });
 }

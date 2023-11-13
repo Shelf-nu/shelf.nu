@@ -229,7 +229,11 @@ export async function createAsset({
   custodian,
   customFieldsValues,
   organizationId,
-}: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
+  valuation,
+}: Pick<
+  Asset,
+  "description" | "title" | "categoryId" | "userId" | "valuation"
+> & {
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
@@ -358,7 +362,6 @@ export async function createAsset({
   });
 }
 
-
 export async function updateAsset(payload: UpdateAssetPayload) {
   const {
     title,
@@ -373,7 +376,6 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     userId,
     valuation,
     customFieldsValues: customFieldsValuesFromForm,
-    userId,
   } = payload;
   const isChangingLocation = newLocationId !== currentLocationId;
 
@@ -921,7 +923,6 @@ export const createAssetsFromContentImport = async ({
     });
   }
 };
-
 
 export const createAssetsFromBackupImport = async ({
   data,
