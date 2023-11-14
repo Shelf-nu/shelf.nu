@@ -71,7 +71,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  const { name } = result.data;
+  const { name, currency } = result.data;
   /** This checks if tags are passed and build the  */
 
   const formDataFile = await unstable_parseMultipartFormData(
@@ -86,6 +86,7 @@ export async function action({ request }: ActionFunctionArgs) {
     name,
     userId: authSession.userId,
     image: file || null,
+    currency,
   });
 
   sendNotification({

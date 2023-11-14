@@ -78,6 +78,11 @@ export async function getAsset({
           custodian: true,
         },
       },
+      organization: {
+        select: {
+          currency: true,
+        },
+      },
       customFields: {
         where: {
           customField: {
@@ -224,7 +229,11 @@ export async function createAsset({
   custodian,
   customFieldsValues,
   organizationId,
-}: Pick<Asset, "description" | "title" | "categoryId" | "userId"> & {
+  valuation,
+}: Pick<
+  Asset,
+  "description" | "title" | "categoryId" | "userId" | "valuation"
+> & {
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
@@ -274,6 +283,7 @@ export async function createAsset({
     description,
     user,
     qrCodes,
+    valuation,
     organization,
   };
 
@@ -363,14 +373,16 @@ export async function updateAsset(payload: UpdateAssetPayload) {
     id,
     newLocationId,
     currentLocationId,
-    customFieldsValues: customFieldsValuesFromForm,
     userId,
+    valuation,
+    customFieldsValues: customFieldsValuesFromForm,
   } = payload;
   const isChangingLocation = newLocationId !== currentLocationId;
 
   const data = {
     title,
     description,
+    valuation,
     mainImage,
     mainImageExpiration,
   };
@@ -653,6 +665,7 @@ export async function duplicateAsset({
       locationId: asset.locationId ?? undefined,
       custodian: asset?.custody?.custodian.id ?? undefined,
       tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
+      valuation: asset.valuation,
     });
 
     if (asset.mainImage) {
@@ -905,6 +918,7 @@ export const createAssetsFromContentImport = async ({
                 .map((t) => ({ id: tags[t] })),
             }
           : undefined,
+      valuation: asset.valuation ? +asset.valuation : null,
       customFieldsValues,
     });
   }
@@ -943,6 +957,7 @@ export const createAssetsFromBackupImport = async ({
             },
           ],
         },
+        valuation: asset.valuation ? +asset.valuation : null,
       },
     };
 

@@ -16,6 +16,7 @@ import {
 } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
+import { getOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr";
 import { buildTagsSet } from "~/modules/tag";
@@ -33,7 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
-
+  const organization = await getOrganization({ id: organizationId });
   /**
    * We need to check if the QR code passed in the URL belongs to the current org
    * This is relevant whenever the user is trying to link a new asset with an existing QR code
@@ -53,7 +54,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     title,
   };
 
-  return json({ header, categories, tags, locations, customFields });
+  return json({
+    header,
+    categories,
+    tags,
+    locations,
+    currency: organization?.currency,
+    customFields,
+  });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -110,7 +118,8 @@ export async function action({ request }: LoaderFunctionArgs) {
     );
   }
 
-  const { title, description, category, qrId, newLocationId } = result.data;
+  const { title, description, category, qrId, newLocationId, valuation } =
+    result.data;
 
   const customFieldsValues = extractCustomFieldValuesFromResults({
     result,
@@ -129,6 +138,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     locationId: newLocationId,
     qrId,
     tags,
+    valuation,
     customFieldsValues,
   });
 

@@ -1,4 +1,5 @@
-import { type CustomField } from "@prisma/client";
+import type { Organization, $Enums } from "@prisma/client";
+import { Currency } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
@@ -9,19 +10,28 @@ import { isFormProcessing } from "~/utils";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../forms/select";
 import { Button } from "../shared";
 import { Spinner } from "../shared/spinner";
 
 export const NewWorkspaceFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
+  currency: z.custom<Currency>(),
 });
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
-  name?: CustomField["name"];
+  name?: Organization["name"];
+  currency?: Organization["currency"];
 }
 
-export const WorkspaceForm = ({ name }: Props) => {
+export const WorkspaceForm = ({ name, currency }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewWorkspaceFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -56,7 +66,7 @@ export const WorkspaceForm = ({ name }: Props) => {
         />
       </FormRow>
 
-      <FormRow rowLabel={"Main image"}>
+      <FormRow rowLabel={"Main image"} className="border-b-0">
         <div>
           <p className="hidden lg:block">Accepts PNG, JPG or JPEG (max.4 MB)</p>
           <Input
@@ -74,6 +84,39 @@ export const WorkspaceForm = ({ name }: Props) => {
           <p className="mt-2 lg:hidden">Accepts PNG, JPG or JPEG (max.4 MB)</p>
         </div>
       </FormRow>
+
+      <div>
+        <label className="lg:hidden">Currency</label>
+        <FormRow rowLabel={"Currency"}>
+          <Select
+            defaultValue={currency || "USD"}
+            disabled={disabled}
+            name={zo.fields.currency()}
+          >
+            <SelectTrigger
+              className="px-3.5 py-3"
+              placeholder="Choose a field type"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent
+              position="popper"
+              className="w-full min-w-[300px]"
+              align="start"
+            >
+              <div className=" max-h-[320px] overflow-auto">
+                {Object.keys(Currency).map((value) => (
+                  <SelectItem value={value} key={value}>
+                    <span className="mr-4 text-[14px] text-gray-700">
+                      {Currency[value as $Enums.Currency]}
+                    </span>
+                  </SelectItem>
+                ))}
+              </div>
+            </SelectContent>
+          </Select>
+        </FormRow>
+      </div>
 
       <div className="text-right">
         <Button type="submit" disabled={disabled}>

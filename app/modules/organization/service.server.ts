@@ -29,6 +29,7 @@ export const getOrganizationByUserId = async ({
       id: true,
       name: true,
       type: true,
+      currency: true,
     },
   });
 
@@ -63,12 +64,14 @@ export async function createOrganization({
   name,
   userId,
   image,
-}: Pick<Organization, "name"> & {
+  currency,
+}: Pick<Organization, "name" | "currency"> & {
   userId: User["id"];
   image: File | null;
 }) {
   const data = {
     name,
+    currency,
     type: OrganizationType.TEAM,
     categories: {
       create: defaultUserCategories.map((c) => ({ ...c, userId })),
@@ -117,12 +120,14 @@ export async function updateOrganization({
   name,
   image,
   userId,
-}: Pick<Organization, "name" | "id"> & {
+  currency,
+}: Pick<Organization, "name" | "id" | "currency"> & {
   userId: User["id"];
   image: File | null;
 }) {
   const data = {
     name,
+    currency,
   };
 
   if (image?.size && image?.size > 0) {
