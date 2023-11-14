@@ -507,6 +507,7 @@ model Announcement {
 
   link String?
   linkText String?
+  published Boolean @default(false)
 
   // Datetime
   createdAt DateTime @default(now())

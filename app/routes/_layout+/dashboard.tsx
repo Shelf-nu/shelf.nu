@@ -1,5 +1,7 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
+import AnnouncementBar from "~/components/dashboard/announcement-bar";
 import AssetsByCategoryChart from "~/components/dashboard/assets-by-category-chart";
 import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";
 import AssetsForEachMonth from "~/components/dashboard/assets-for-each-month";
@@ -7,12 +9,12 @@ import CustodiansList from "~/components/dashboard/custodians";
 import MostScannedAssets from "~/components/dashboard/most-scanned-assets";
 import MostScannedCategories from "~/components/dashboard/most-scanned-categories";
 import NewestAssets from "~/components/dashboard/newest-assets";
-import NewsBar from "~/components/dashboard/news-bar";
 import { ErrorBoundryComponent } from "~/components/errors";
 import { db } from "~/database";
 
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   getCustodiansOrderedByTotalCustodies,
   getMostScannedAssets,
@@ -21,6 +23,7 @@ import {
   groupAssetsByStatus,
   totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
+import { parseMarkdownToReact } from "~/utils/md.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
@@ -59,7 +62,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
+  const announcement = await db.announcement.findFirst({
+    where: {
+      published: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
   return json({
+    header: {
+      title: "Dashboard",
+    },
     newAssets: assets.slice(0, 5),
     totalAssets: assets.length,
 
@@ -73,8 +88,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }),
     assetsByStatus: await groupAssetsByStatus({ assets }),
     assetsByCategory: await groupAssetsByCategory({ assets }),
+    announcement: announcement
+      ? {
+          ...announcement,
+          content: parseMarkdownToReact(announcement.content),
+        }
+      : null,
   });
 }
+
+export const meta: MetaFunction<typeof loader> = () => [
+  { title: appendToMetaTitle("Dashboard") },
+];
 
 export const handle = {
   breadcrumb: () => <Link to="/dashboard">Dashboard</Link>,
@@ -83,11 +108,7 @@ export const handle = {
 export default function DashboardPage() {
   return (
     <div>
-      <NewsBar
-        heading="We’ve just announced our Series A!"
-        description="Read about it from our CEO."
-        url="."
-      />
+      <AnnouncementBar />
       <div className="w-full">
         <AssetsForEachMonth />
       </div>

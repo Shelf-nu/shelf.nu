@@ -1,7 +1,8 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Form } from "@remix-run/react";
 import Input from "~/components/forms/input";
+import { Switch } from "~/components/forms/switch";
 import { MarkdownEditor } from "~/components/markdown";
 import { Button } from "~/components/shared";
 import { db } from "~/database";
@@ -20,21 +21,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   await requireAdmin(request);
 
   const formData = await request.formData();
-  const name = formData.get("name");
-  const content = formData.get("content");
-  const link = formData.get("link");
-  const linkText = formData.get("linkText");
+  const name = formData.get("name") as string;
+  const content = formData.get("content") as string;
+  const link = formData.get("link") as string;
+  const linkText = formData.get("linkText") as string;
+  const published = formData.get("published") === "on";
 
-  console.log({ name, content, link, linkText });
+  await db.announcement.create({
+    data: {
+      name,
+      content,
+      link,
+      linkText,
+      published,
+    },
+  });
 
-  return null;
+  return redirect("/admin-dashboard/announcements");
 };
 
 export default function NewAnnouncement() {
   return (
     <div>
       <Form method="post" className="flex flex-col gap-4">
-        <Input label={"name"} name="name" />
+        <Input label={"name"} name="name" required />
         <div>
           <label className="mb-[6px] text-text-sm font-medium text-gray-700">
             Announcement Content
@@ -49,11 +59,25 @@ export default function NewAnnouncement() {
             className="rounded-b-none"
             // onBlur={handelBlur}
             // onKeyDown={handleKeyDown}
+            required
           />
         </div>
-        <Input label={"Link"} name="link" />
-        <Input label={"Link text"} name="linkText" />
-        <Button type="submit">Save</Button>
+        <Input label={"Link"} name="link" required />
+        <Input label={"Link text"} name="linkText" required />
+        <div className="">
+          <label className="font-medium text-gray-700">
+            <span>Published</span>
+          </label>
+          <div>
+            <Switch name={`published`} defaultChecked={false} required />
+          </div>
+        </div>
+        <div className="flex gap-1">
+          <Button type="submit">Save</Button>
+          <Button to=".." variant="secondary">
+            Cancel
+          </Button>
+        </div>
       </Form>
     </div>
   );
