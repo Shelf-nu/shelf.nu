@@ -5,6 +5,7 @@ import {
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
 import { parse } from "csv-parse";
+import { fetchAssetsForExport } from "~/modules/asset";
 
 export type CSVData = [string[], ...string[][]] | [];
 
@@ -113,3 +114,44 @@ export const buildCsvDataFromAssets = ({
 
     return toExport;
   });
+
+/* There are some keys that need to be skipped and require special handling */
+const keysToSkip = [
+  "userId",
+  "organizationId",
+  "categoryId",
+  "locationId",
+  "customFieldId",
+  "mainImage",
+  "mainImageExpiration",
+];
+
+export async function exportAssetsToCsv({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  const assets = await fetchAssetsForExport({ organizationId });
+
+  const csvData = buildCsvDataFromAssets({
+    assets,
+    keysToSkip,
+  });
+
+  if (!csvData) return null;
+  /** Get the headers from the first row and filter out the keys to skip */
+  const headers = Object.keys(assets[0]).filter(
+    (header) => !keysToSkip.includes(header)
+  );
+
+  /** Add the header column */
+  csvData.unshift(headers);
+
+  /** Convert the data to a string */
+  const csvRows = csvData.map((row) => row.join(";"));
+
+  /** Join the rows with a new line */
+  const csvString = csvRows.join("\n");
+
+  return csvString;
+}
