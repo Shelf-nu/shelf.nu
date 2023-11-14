@@ -26,8 +26,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
-import { UserBadge } from "~/components/shared/user-badge";
-import { usePosition, useUserData } from "~/hooks";
+import { usePosition } from "~/hooks";
 import { deleteAsset, getAsset } from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
@@ -155,7 +154,6 @@ export default function AssetDetailsPage() {
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
   const location = asset?.location as SerializeFrom<Location>;
-  const user = useUserData();
   usePosition();
 
   return (
@@ -296,7 +294,7 @@ export default function AssetDetailsPage() {
                 </li>
               ) : null}
               {asset.organization && asset.valuation ? (
-                <li className="mb-2 flex justify-between">
+                <li className="flex justify-between">
                   <span className="text-[12px] font-medium text-gray-600">
                     Value
                   </span>
@@ -313,15 +311,6 @@ export default function AssetDetailsPage() {
                   </div>
                 </li>
               ) : null}
-              <li className="flex justify-between">
-                <span className="text-[12px] font-medium text-gray-600">
-                  Owner
-                </span>
-                <UserBadge
-                  name={`${user?.firstName} ${user?.lastName}`}
-                  img={user?.profilePicture || "/images/default_pfp.jpg"}
-                />
-              </li>
             </ul>
           </Card>
 
