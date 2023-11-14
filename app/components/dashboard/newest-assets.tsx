@@ -2,21 +2,22 @@ import type { Asset, Category } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { userFriendlyAssetStatus } from "~/utils";
+import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image";
 import { Badge } from "../shared";
 import { InfoTooltip } from "../shared/info-tooltip";
-import { Th, Td, Table, Tr } from "../table";
+import { Td, Table, Tr } from "../table";
 
 export default function NewestAssets() {
   const { newAssets } = useLoaderData<typeof loader>();
   return (
-    <Table className="rounded border border-gray-200">
-      <thead>
-        <tr>
-          <Th className="text-[14px] font-semibold text-gray-900">
+    <>
+      <div className="border border-b-0 border-gray-200">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
             Newest Assets
-          </Th>
-          <Th className="text-right">
+          </div>
+          <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
             <InfoTooltip
               content={
                 <>
@@ -25,27 +26,35 @@ export default function NewestAssets() {
                 </>
               }
             />
-          </Th>
-        </tr>
-      </thead>
-      <tbody>
-        {newAssets.map((asset) => (
-          <Tr key={asset.id}>
-            {/* @TODO resolve this issue
+          </div>
+        </div>
+      </div>
+      {newAssets.length > 0 ? (
+        <Table className="border  border-gray-200">
+          <tbody>
+            {newAssets.map((asset) => (
+              <Tr key={asset.id}>
+                {/* @TODO resolve this issue
             @ts-ignore */}
-            <Row item={asset} />
-          </Tr>
-        ))}
-        {newAssets.length < 5 &&
-          Array(5 - newAssets.length)
-            .fill(null)
-            .map((i) => (
-              <Tr key={i} className="h-[72px]">
-                {""}
+                <Row item={asset} />
               </Tr>
             ))}
-      </tbody>
-    </Table>
+            {newAssets.length < 5 &&
+              Array(5 - newAssets.length)
+                .fill(null)
+                .map((_d, i) => (
+                  <Tr key={i} className="h-[72px]">
+                    {""}
+                  </Tr>
+                ))}
+          </tbody>
+        </Table>
+      ) : (
+        <div className="h-full flex-1 rounded-b border border-gray-200">
+          <EmptyState text="No assets in database" />
+        </div>
+      )}
+    </>
   );
 }
 

@@ -2,21 +2,22 @@ import type { Asset } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { userFriendlyAssetStatus } from "~/utils";
+import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image";
 import { Badge } from "../shared";
 import { InfoTooltip } from "../shared/info-tooltip";
-import { Th, Td, Table, Tr } from "../table";
+import { Td, Table, Tr } from "../table";
 
 export default function MostScannedAssets() {
   const { mostScannedAssets } = useLoaderData<typeof loader>();
   return (
-    <Table className="h-[420px] rounded border border-gray-200">
-      <thead>
-        <tr>
-          <Th className="text-[14px] font-semibold text-gray-900">
+    <>
+      <div className="rounded-t border border-b-0 border-gray-200">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
             Most scanned assets
-          </Th>
-          <Th className="text-right">
+          </div>
+          <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
             <InfoTooltip
               content={
                 <>
@@ -28,27 +29,35 @@ export default function MostScannedAssets() {
                 </>
               }
             />
-          </Th>
-        </tr>
-      </thead>
-      <tbody>
-        {mostScannedAssets.map((asset) => (
-          <Tr key={asset.id}>
-            {/* @TODO resolve this issue
+          </div>
+        </div>
+      </div>
+      {mostScannedAssets.length > 0 ? (
+        <Table className="rounded border border-gray-200">
+          <tbody>
+            {mostScannedAssets.map((asset) => (
+              <Tr key={asset.id}>
+                {/* @TODO resolve this issue
             @ts-ignore */}
-            <Row item={asset} />
-          </Tr>
-        ))}
-        {mostScannedAssets.length < 5 &&
-          Array(5 - mostScannedAssets.length)
-            .fill(null)
-            .map((i) => (
-              <Tr key={i} className="h-[72px]">
-                {""}
+                <Row item={asset} />
               </Tr>
             ))}
-      </tbody>
-    </Table>
+            {mostScannedAssets.length < 5 &&
+              Array(5 - mostScannedAssets.length)
+                .fill(null)
+                .map((_d, i) => (
+                  <Tr key={i} className="h-[72px]">
+                    {""}
+                  </Tr>
+                ))}
+          </tbody>
+        </Table>
+      ) : (
+        <div className="flex-1 rounded-b border border-gray-200 p-8">
+          <EmptyState text="No assets scans available" />
+        </div>
+      )}
+    </>
   );
 }
 

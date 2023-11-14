@@ -1,19 +1,20 @@
 import type { Category } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
+import { EmptyState } from "./empty-state";
 import { InfoTooltip } from "../shared/info-tooltip";
-import { Th, Td, Table, Tr } from "../table";
+import { Td, Table, Tr } from "../table";
 
 export default function MostScannedCategories() {
   const { mostScannedCategories } = useLoaderData<typeof loader>();
   return (
-    <Table className="h-[420px] rounded border border-gray-200">
-      <thead>
-        <tr>
-          <Th className="text-[14px] font-semibold text-gray-900">
+    <>
+      <div className="rounded-t border border-b-0 border-gray-200">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
             Most scanned categories
-          </Th>
-          <Th className="text-right">
+          </div>
+          <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
             <InfoTooltip
               content={
                 <>
@@ -25,27 +26,35 @@ export default function MostScannedCategories() {
                 </>
               }
             />
-          </Th>
-        </tr>
-      </thead>
-      <tbody>
-        {mostScannedCategories.map((category) => (
-          <Tr key={category.name}>
-            {/* @TODO resolve this issue
+          </div>
+        </div>
+      </div>
+      {mostScannedCategories.length > 0 ? (
+        <Table className=" border border-gray-200">
+          <tbody>
+            {mostScannedCategories.map((category, i) => (
+              <Tr key={category.name + i}>
+                {/* @TODO resolve this issue
             @ts-ignore */}
-            <Row item={category} />
-          </Tr>
-        ))}
-        {mostScannedCategories.length < 5 &&
-          Array(5 - mostScannedCategories.length)
-            .fill(null)
-            .map((i) => (
-              <Tr key={i} className="h-[72px]">
-                {""}
+                <Row item={category} />
               </Tr>
             ))}
-      </tbody>
-    </Table>
+            {mostScannedCategories.length < 5 &&
+              Array(5 - mostScannedCategories.length)
+                .fill(null)
+                .map((_d, i) => (
+                  <Tr key={i} className="h-[72px]">
+                    {""}
+                  </Tr>
+                ))}
+          </tbody>
+        </Table>
+      ) : (
+        <div className="flex-1 rounded-b border border-gray-200 p-8">
+          <EmptyState text="No assets scans available" />
+        </div>
+      )}
+    </>
   );
 }
 

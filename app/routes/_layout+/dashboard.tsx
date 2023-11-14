@@ -107,12 +107,12 @@ export const handle = {
 
 export default function DashboardPage() {
   return (
-    <div>
+    <div className="pb-8">
       <AnnouncementBar />
       <div className="w-full">
         <AssetsForEachMonth />
       </div>
-      <div className="xl:flex xl:gap-4">
+      <div className="pb-4 xl:flex xl:gap-4">
         <div className="xl:lg-1/2 w-full">
           <AssetsByStatusChart />
         </div>
@@ -120,19 +120,19 @@ export default function DashboardPage() {
           <AssetsByCategoryChart />
         </div>
       </div>
-      <div className="mb-4 xl:flex xl:gap-4">
-        <div className="mb-4 xl:mb-0 xl:w-1/2">
+      <div className="pb-4 xl:flex xl:gap-4">
+        <div className="flex flex-col xl:mb-0 xl:w-1/2">
           <NewestAssets />
         </div>
-        <div className="xl:w-1/2">
+        <div className="flex flex-col xl:mb-0 xl:w-1/2">
           <CustodiansList />
         </div>
       </div>
-      <div className="xl:flex xl:gap-4">
-        <div className="mb-4 xl:mb-0 xl:w-1/2">
+      <div className="pb-4 xl:flex xl:gap-4">
+        <div className="flex flex-col xl:mb-0 xl:w-1/2">
           <MostScannedAssets />
         </div>
-        <div className="xl:w-1/2">
+        <div className="flex flex-col xl:mb-0 xl:w-1/2">
           <MostScannedCategories />
         </div>
       </div>
