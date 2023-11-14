@@ -194,3 +194,7 @@ dialog {
 .react-tags {
   @apply bg-white;
 }
+
+.fill-tremor-content-emphasis {
+  @apply text-[24px] font-medium text-gray-900;
+}

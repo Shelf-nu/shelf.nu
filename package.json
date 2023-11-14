@@ -55,6 +55,7 @@
     "@stripe/react-stripe-js": "^2.1.1",
     "@stripe/stripe-js": "^1.54.2",
     "@supabase/supabase-js": "^2.26.0",
+    "@tremor/react": "^3.10.0",
     "@zxing/library": "^0.20.0",
     "changedpi": "^1.0.4",
     "cookie": "^0.5.0",

@@ -497,3 +497,19 @@ model Invite {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+
+model Announcement {
+  id String @id @default(cuid())
+  
+  name   String
+  content String
+
+  link String?
+  linkText String?
+  published Boolean @default(false)
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
