@@ -55,10 +55,7 @@ export default function NewAnnouncement() {
             placeholder={"Announcement content"}
             // @ts-ignore
             rows={4}
-            // ref={editorRef}
             className="rounded-b-none"
-            // onBlur={handelBlur}
-            // onKeyDown={handleKeyDown}
             required
           />
         </div>
