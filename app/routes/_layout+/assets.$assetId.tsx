@@ -1,4 +1,4 @@
-import type { Location } from "@prisma/client";
+import { type Location } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -26,8 +26,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
-import { UserBadge } from "~/components/shared/user-badge";
-import { usePosition, useUserData } from "~/hooks";
+import { usePosition } from "~/hooks";
 import { deleteAsset, getAsset } from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
@@ -42,7 +41,7 @@ import {
   userFriendlyAssetStatus,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getDateTimeFormat } from "~/utils/client-hints";
+import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
@@ -53,7 +52,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
-
+  const locale = getLocale(request);
   const id = getRequiredParam(params, "assetId");
 
   const asset = await getAsset({ organizationId, id });
@@ -104,6 +103,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     },
     lastScan,
     header,
+    locale,
   });
 }
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -148,7 +148,7 @@ export const links: LinksFunction = () => [
 ];
 
 export default function AssetDetailsPage() {
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, locale } = useLoaderData<typeof loader>();
   const customFieldsValues =
     asset?.customFields?.length > 0
       ? asset.customFields.filter((f) => f?.value)
@@ -158,7 +158,6 @@ export default function AssetDetailsPage() {
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
   const location = asset?.location as SerializeFrom<Location>;
-  const user = useUserData();
   usePosition();
 
   return (
@@ -298,15 +297,24 @@ export default function AssetDetailsPage() {
                   </div>
                 </li>
               ) : null}
-              <li className="flex justify-between">
-                <span className="text-[12px] font-medium text-gray-600">
-                  Owner
-                </span>
-                <UserBadge
-                  name={`${user?.firstName} ${user?.lastName}`}
-                  img={user?.profilePicture || "/images/default_pfp.jpg"}
-                />
-              </li>
+              {asset.organization && asset.valuation ? (
+                <li className="flex justify-between">
+                  <span className="text-[12px] font-medium text-gray-600">
+                    Value
+                  </span>
+                  <div className="max-w-[250px]">
+                    <Tag key={asset.valuation} className="mb-2 ml-2">
+                      <>
+                        {asset.organization.currency}{" "}
+                        {asset.valuation.toLocaleString(locale, {
+                          style: "currency",
+                          currency: asset.organization.currency,
+                        })}
+                      </>
+                    </Tag>
+                  </div>
+                </li>
+              ) : null}
             </ul>
           </Card>
 

@@ -5,6 +5,7 @@ import { useAtom } from "jotai";
 import {
   AssetsIcon,
   CategoriesIcon,
+  GraphIcon,
   LocationMarkerIcon,
   QuestionsIcon,
   SettingsIcon,
@@ -18,6 +19,11 @@ import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
 
 const menuItemsTop = [
+  {
+    icon: <GraphIcon />,
+    to: "dashboard",
+    label: "Dashboard",
+  },
   {
     icon: <AssetsIcon />,
     to: "assets",
@@ -64,7 +70,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     isActive ? "active bg-primary-50 text-primary-600" : ""
                   )
                 }
-                to={"/admin-dashboard"}
+                to={"/admin-dashboard/users"}
                 onClick={toggleMobileNav}
                 title={"Admin dashboard"}
               >

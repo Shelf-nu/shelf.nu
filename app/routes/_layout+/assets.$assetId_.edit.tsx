@@ -23,6 +23,7 @@ import {
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
+import { getOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
@@ -37,6 +38,7 @@ import { ShelfStackError } from "~/utils/error";
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
+  const organization = await getOrganization({ id: organizationId });
   const { userId } = authSession;
 
   const { categories, tags, locations, customFields } =
@@ -63,6 +65,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     categories,
     tags,
     locations,
+    currency: organization?.currency,
     customFields,
   });
 }
@@ -126,8 +129,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
     userId: authSession.userId,
   });
 
-  const { title, description, category, newLocationId, currentLocationId } =
-    result.data;
+  const {
+    title,
+    description,
+    category,
+    newLocationId,
+    currentLocationId,
+    valuation,
+  } = result.data;
 
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
@@ -142,6 +151,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     currentLocationId,
     userId: authSession.userId,
     customFieldsValues,
+    valuation,
   });
 
   sendNotification({
@@ -176,6 +186,7 @@ export default function AssetEditPage() {
           category={asset.categoryId}
           location={asset.locationId}
           description={asset.description}
+          valuation={asset.valuation}
           tags={tags}
         />
       </div>

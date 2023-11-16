@@ -54,7 +54,7 @@ export default function Area51() {
         </Filters>
         <List
           ItemComponent={ListUserContent}
-          navigate={(itemId) => navigate(itemId)}
+          navigate={(itemId) => navigate(`../${itemId}`)}
         />
       </div>
     </div>

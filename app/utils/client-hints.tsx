@@ -128,10 +128,7 @@ export function getDateTimeFormat(
   request: Request,
   options?: Intl.DateTimeFormatOptions
 ) {
-  const locales = parseAcceptLanguage(request.headers.get("accept-language"), {
-    validate: Intl.DateTimeFormat.supportedLocalesOf,
-  });
-  const locale = locales[0] ?? "en-US";
+  const locale = getLocale(request);
 
   // change your default options here
   const defaultOptions: Intl.DateTimeFormatOptions = {
@@ -146,4 +143,17 @@ export function getDateTimeFormat(
     timeZone: options?.timeZone ?? getHints(request).timeZone,
   };
   return new Intl.DateTimeFormat(locale, options);
+}
+
+/**
+ *
+ * @param request
+ * @returns current locale. Defaults to en-US
+ */
+export function getLocale(request: Request) {
+  const locales = parseAcceptLanguage(request.headers.get("accept-language"), {
+    validate: Intl.DateTimeFormat.supportedLocalesOf,
+  });
+
+  return locales[0] ?? "en-US";
 }
