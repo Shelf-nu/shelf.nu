@@ -1,6 +1,9 @@
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { useNavigate } from "@remix-run/react";
+import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Button } from "~/components/shared";
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
@@ -62,3 +65,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
+
+export default function BookingsIndexPage() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <Header>
+        <Button
+          to="new"
+          role="link"
+          aria-label={`new booking`}
+          data-test-id="createNewBooking"
+        >
+          New booking
+        </Button>
+      </Header>
+      <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
+        List bookings
+        {/* <List
+          ItemComponent={ListItemContent}
+          navigate={(itemId) => navigate(itemId)}
+          headerChildren={
+            <>
+              <Th>Assets</Th>
+            </>
+          }
+        /> */}
+      </div>
+    </>
+  );
+}
