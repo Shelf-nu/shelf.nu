@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useAtom } from "jotai";
 import {
   AssetsIcon,
+  CalendarIcon,
   CategoriesIcon,
   GraphIcon,
   LocationMarkerIcon,
@@ -43,6 +44,11 @@ const menuItemsTop = [
     icon: <LocationMarkerIcon />,
     to: "locations",
     label: "Locations",
+  },
+  {
+    icon: <CalendarIcon />,
+    to: "bookings",
+    label: "Bookings",
   },
 ];
 const menuItemsBottom = [
