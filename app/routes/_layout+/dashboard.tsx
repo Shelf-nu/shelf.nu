@@ -1,10 +1,12 @@
+import { useState } from "react";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { Link, useLoaderData, useMatches } from "@remix-run/react";
 import AnnouncementBar from "~/components/dashboard/announcement-bar";
 import AssetsByCategoryChart from "~/components/dashboard/assets-by-category-chart";
 import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";
 import AssetsForEachMonth from "~/components/dashboard/assets-for-each-month";
+import OnboardingChecklist from "~/components/dashboard/checklist";
 import CustodiansList from "~/components/dashboard/custodians";
 import MostScannedAssets from "~/components/dashboard/most-scanned-assets";
 import MostScannedCategories from "~/components/dashboard/most-scanned-categories";
@@ -14,6 +16,7 @@ import { db } from "~/database";
 
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
+import type { loader as cookiesLoader } from "~/routes/_layout+/_layout";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   getCustodiansOrderedByTotalCustodies,
@@ -106,36 +109,48 @@ export const handle = {
 };
 
 export default function DashboardPage() {
+  const [completedAllChecks] = useState(false);
+  const matches = useMatches();
+  const parentRoutesData = matches.find(
+    (match) => match.id === "routes/_layout+/_layout"
+  )?.data;
+  const { skipOnboardingChecklist } = parentRoutesData;
   return (
-    <div className="pb-8">
-      <AnnouncementBar />
-      <div className="w-full">
-        <AssetsForEachMonth />
-      </div>
-      <div className="pb-4 xl:flex xl:gap-4">
-        <div className="xl:lg-1/2 w-full">
-          <AssetsByStatusChart />
+    <div>
+      {completedAllChecks && skipOnboardingChecklist ? (
+        <div className="pb-8">
+          <AnnouncementBar />
+          <div className="w-full">
+            <AssetsForEachMonth />
+          </div>
+          <div className="pb-4 xl:flex xl:gap-4">
+            <div className="xl:lg-1/2 w-full">
+              <AssetsByStatusChart />
+            </div>
+            <div className="xl:lg-1/2 w-full">
+              <AssetsByCategoryChart />
+            </div>
+          </div>
+          <div className="pb-4 xl:flex xl:gap-4">
+            <div className="flex flex-col xl:mb-0 xl:w-1/2">
+              <NewestAssets />
+            </div>
+            <div className="flex flex-col xl:mb-0 xl:w-1/2">
+              <CustodiansList />
+            </div>
+          </div>
+          <div className="pb-4 xl:flex xl:gap-4">
+            <div className="flex flex-col xl:mb-0 xl:w-1/2">
+              <MostScannedAssets />
+            </div>
+            <div className="flex flex-col xl:mb-0 xl:w-1/2">
+              <MostScannedCategories />
+            </div>
+          </div>
         </div>
-        <div className="xl:lg-1/2 w-full">
-          <AssetsByCategoryChart />
-        </div>
-      </div>
-      <div className="pb-4 xl:flex xl:gap-4">
-        <div className="flex flex-col xl:mb-0 xl:w-1/2">
-          <NewestAssets />
-        </div>
-        <div className="flex flex-col xl:mb-0 xl:w-1/2">
-          <CustodiansList />
-        </div>
-      </div>
-      <div className="pb-4 xl:flex xl:gap-4">
-        <div className="flex flex-col xl:mb-0 xl:w-1/2">
-          <MostScannedAssets />
-        </div>
-        <div className="flex flex-col xl:mb-0 xl:w-1/2">
-          <MostScannedCategories />
-        </div>
-      </div>
+      ) : (
+        <OnboardingChecklist />
+      )}
     </div>
   );
 }
