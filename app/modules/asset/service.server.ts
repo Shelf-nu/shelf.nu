@@ -10,8 +10,9 @@ import type {
   Organization,
   TeamMember,
   CustomField,
+  Booking,
 } from "@prisma/client";
-import { AssetStatus, ErrorCorrection } from "@prisma/client";
+import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import { type LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import { getSupabaseAdmin } from "~/integrations/supabase";
@@ -114,6 +115,9 @@ export async function getAssets({
   search,
   categoriesIds,
   tagsIds,
+  bookingFrom,
+  bookingTo,
+  hideUnavailable,
 }: {
   organizationId: Organization["id"];
 
@@ -127,6 +131,9 @@ export async function getAssets({
 
   categoriesIds?: Category["id"][] | null;
   tagsIds?: Tag["id"][] | null;
+  hideUnavailable?: Asset["availableToBook"];
+  bookingFrom?: Booking["from"];
+  bookingTo?: Booking["to"];
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
@@ -163,6 +170,38 @@ export async function getAssets({
         in: categoriesIds,
       };
     }
+  }
+  const unavailableBookingStatuses = [
+    BookingStatus.DRAFT,
+    BookingStatus.RESERVED,
+    BookingStatus.ONGOING,
+  ];
+  if (hideUnavailable && where.asset) {
+    //not disabled for booking
+    where.asset.availableToBook = true;
+    //not assigned to team meber
+    where.asset.custody = null;
+    if (bookingFrom && bookingTo) {
+      //reserved during that time
+      where.asset.bookings = {
+        none: {
+          status: { in: unavailableBookingStatuses },
+          OR: [
+            {
+              to: { gt: bookingFrom },
+            },
+            {
+              from: { lt: bookingTo },
+            },
+          ],
+        },
+      };
+    }
+  }
+  if (hideUnavailable === false && (!bookingFrom || !bookingTo)) {
+    throw new ShelfStackError({
+      message: "booking dates are needed to hide unavailable assets",
+    });
   }
 
   if (tagsIds && tagsIds.length > 0 && where.asset) {
@@ -205,6 +244,32 @@ export async function getAssets({
                 },
               },
             },
+            ...(hideUnavailable === false
+              ? {
+                  bookings: {
+                    where: {
+                      status: { in: unavailableBookingStatuses },
+                      ...(bookingTo &&
+                        bookingFrom && {
+                          OR: [
+                            {
+                              to: { gt: bookingFrom },
+                            },
+                            {
+                              from: { lt: bookingTo },
+                            },
+                          ],
+                        }),
+                    },
+                    take: 1, //just to show in UI if its booked, so take only 1
+                    select: {
+                      from: true,
+                      to: true,
+                      status: true,
+                    }, //@TODO more needed?
+                  },
+                }
+              : {}),
           },
         },
       },
