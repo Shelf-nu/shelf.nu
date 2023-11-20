@@ -4,12 +4,6 @@ We have decided to give RemixJS a try.
 
 For the purpose of shipping asap, we have opted into using a template: https://github.com/rphlmr/supa-fly-stack
 
-> This Readme will be re-written soon
-
-```
-npx create-remix --template rphlmr/supa-fly-stack
-```
-
 ## What's in the stack
 
 - [Fly app deployment](https://fly.io) with [Docker](https://www.docker.com/products/docker-desktop/)
