@@ -7,6 +7,7 @@ import { Button } from "~/components/shared";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
+import { parseMarkdownToReact } from "~/utils/md.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -19,7 +20,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
-  return json({ announcements });
+  return json({
+    announcements: announcements.map((a) => ({
+      ...a,
+      content: parseMarkdownToReact(a.content),
+    })),
+  });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {

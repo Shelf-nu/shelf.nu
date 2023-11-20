@@ -23,8 +23,8 @@ import {
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanImportAssets } from "~/modules/tier";
-import { csvDataFromRequest } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { csvDataFromRequest } from "~/utils/csv.server";
 import {
   extractCSVDataFromBackupImport,
   extractCSVDataFromContentImport,

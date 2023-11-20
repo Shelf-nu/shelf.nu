@@ -109,7 +109,7 @@ export const ImportContent = () => (
   </>
 );
 
-const FileForm = ({ intent }: { intent: string }) => {
+export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const [agreed, setAgreed] = useState<"I AGREE" | "">("");
   const formRef = useRef<HTMLFormElement>(null);
   const fetcher = useFetcher<typeof action>();
@@ -136,6 +136,7 @@ const FileForm = ({ intent }: { intent: string }) => {
       method="post"
       ref={formRef}
       encType="multipart/form-data"
+      action={url ? url : undefined}
     >
       <Input
         type="file"

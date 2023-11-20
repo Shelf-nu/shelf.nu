@@ -23,10 +23,18 @@ export default function CustodianSelect() {
             className="w-[352px]"
             position="popper"
             align="start"
-            ref={(ref) => {
-              if (!ref) return;
-              ref.ontouchstart = (e) => e.preventDefault();
-            }}
+            // This piece of code was present to prevent an error where selecting an item
+            // will click through the item and click the element in the back
+            // However this causes another error, namely that you are not able to scroll the entries inside the select
+            // if there are too many entries.
+            // After the new issue came up, we did some testing and couldnt anymore recreate the original issue
+            // so for now I am comming out this code.
+            // Original issue when this was added: https://github.com/Shelf-nu/shelf.nu/issues/415
+            // New issue with scrolling problem: https://github.com/Shelf-nu/shelf.nu/issues/553
+            // ref={(ref) => {
+            //   if (!ref) return;
+            //   ref.ontouchstart = (e) => e.preventDefault();
+            // }}
           >
             {teamMembers.length > 0 ? (
               <div className=" max-h-[320px] overflow-auto">
