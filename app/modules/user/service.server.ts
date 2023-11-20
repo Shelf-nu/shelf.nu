@@ -102,6 +102,7 @@ export async function createUserOrAttachOrg({
   if (!shelfUser?.id) {
     authAccount = await createEmailAuthAccount(email, password);
     if (!authAccount) {
+      // @TODO Solve error handling
       throw new ShelfStackError({
         status: 500,
         message: "failed to create auth account",
@@ -400,6 +401,8 @@ export async function updateProfilePicture({
 
 export async function deleteUser(id: User["id"]) {
   if (!id) {
+    // @TODO Solve error handling
+
     throw new ShelfStackError({ message: "User ID is required" });
   }
 

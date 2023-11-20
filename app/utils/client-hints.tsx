@@ -19,6 +19,7 @@ type ClientHintNames = keyof typeof clientHints;
 function getCookieValue(cookieString: string, name: ClientHintNames) {
   const hint = clientHints[name];
   if (!hint) {
+    // @TODO Solve error handling
     throw new ShelfStackError({ message: `Unknown client hint: ${name}` });
   }
   const value = cookieString

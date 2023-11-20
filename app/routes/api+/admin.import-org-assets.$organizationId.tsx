@@ -21,11 +21,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     });
 
     if (!organization) {
+      // @TODO Solve error handling
       throw new ShelfStackError({ message: "Organization not found" });
     }
 
     const csvData = await csvDataFromRequest({ request });
     if (csvData.length < 2) {
+      // @TODO Solve error handling
       throw new ShelfStackError({ message: "CSV file is empty" });
     }
 

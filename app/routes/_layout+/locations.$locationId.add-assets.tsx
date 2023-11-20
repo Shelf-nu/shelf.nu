@@ -95,6 +95,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   });
 
   if (!location) {
+    // @TODO Solve error handling
     throw new ShelfStackError({ message: "Something went wrong", status: 500 });
   }
 

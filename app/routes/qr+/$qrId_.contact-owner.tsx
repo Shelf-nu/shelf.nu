@@ -61,6 +61,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     content,
     assetId: qr.asset.id,
   });
+  // @TODO Solve error handling
   if (!report) return new ShelfStackError({ message: "Something went wrong" });
 
   /**

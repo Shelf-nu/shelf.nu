@@ -51,6 +51,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const asset = await getAsset({ organizationId, id });
   if (!asset) {
+    // @TODO Solve error handling
     throw new ShelfStackError({ message: "Not Found", status: 404 });
   }
 

@@ -47,6 +47,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const user = await getUserByID(userId);
 
   if (!user)
+    // @TODO Solve error handling
     throw new ShelfStackError({
       message:
         "User not found. Please refresh and if the issue persists contact support.",

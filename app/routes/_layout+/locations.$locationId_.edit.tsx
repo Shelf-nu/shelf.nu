@@ -32,6 +32,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const { location } = await getLocation({ organizationId, id });
   if (!location) {
+    // @TODO Solve error handling
     throw new ShelfStackError({ message: "Location Not Found", status: 404 });
   }
 

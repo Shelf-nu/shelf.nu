@@ -137,6 +137,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   if (!assets) {
+    // @TODO Solve error handling
     throw new ShelfStackError({
       title: "Hey!",
       message: `No assets found`,

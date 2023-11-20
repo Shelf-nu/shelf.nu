@@ -28,6 +28,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     },
   });
   if (!organization) {
+    // @TODO Solve error handling
     throw new ShelfStackError({ message: "Organization not found" });
   }
 

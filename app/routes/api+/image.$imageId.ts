@@ -7,6 +7,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const session = await getAuthSession(request);
 
   if (!session)
+    // @TODO Solve error handling
     throw new ShelfStackError({
       message: "Unauthorized. You are not allowed to view this resource",
       status: 403,
@@ -15,6 +16,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     where: { id: params.imageId },
     select: { ownerOrgId: true, contentType: true, blob: true, userId: true },
   });
+  // @TODO Solve error handling
   if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
 
   const userOrganizations = await db.userOrganization.findMany({
@@ -28,12 +30,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const orgIds = userOrganizations.map((uo) => uo.organization.id);
 
   if (!orgIds.includes(image.ownerOrgId)) {
+    // @TODO Solve error handling
     throw new ShelfStackError({
       message: "Unauthorized. This resource doesn't belong to you.",
       status: 403,
     });
   }
-
+  // @TODO Solve error handling
   if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
 
   return new Response(image.blob, {

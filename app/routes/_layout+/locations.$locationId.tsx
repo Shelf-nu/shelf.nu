@@ -61,6 +61,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 
   if (!location) {
+    // @TODO Solve error handling
     throw new ShelfStackError({ message: "Not Found", status: 404 });
   }
 

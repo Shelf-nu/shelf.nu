@@ -37,6 +37,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
      * that is still there. Will we allow someone to claim it?
      */
     if (!qr) {
+      // @TODO Solve error handling
       throw new ShelfStackError({
         title: "QR code not found",
         message: "This QR code is not available on shelf.",

@@ -63,6 +63,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!user || user.userOrganizations?.length < 1)
+    // @TODO Solve error handling
     throw new ShelfStackError({ message: "Organization not found" });
 
   const modelName = {

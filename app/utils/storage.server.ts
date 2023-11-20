@@ -45,6 +45,7 @@ export async function createSignedUrl({
 
     return data.signedUrl;
   } catch (error) {
+    // @TODO Solve error handling
     return new ShelfStackError({
       message:
         "Something went wrong with updating your image. Please refresh the page. If the issue persists contact support.",
@@ -131,6 +132,7 @@ export async function deleteProfilePicture({
       ) ||
       url === ""
     ) {
+      // @TODO Solve error handling
       throw new ShelfStackError({ message: "Wrong url" });
     }
 
@@ -157,6 +159,7 @@ export async function deleteAssetImage({
     const path = extractImageNameFromSupabaseUrl({ url, bucketName });
 
     if (!path) {
+      // @TODO Solve error handling
       throw new ShelfStackError({ message: "Cannot find image" });
     }
 

@@ -35,6 +35,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     const assetId = params.assetId as string;
     const asset = await db.asset.findUnique({ where: { id: assetId } });
     if (!asset) {
+      // @TODO Solve error handling
       throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
     }
 
@@ -77,6 +78,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       include: { custody: { include: { custodian: true } }, tags: true },
     });
     if (!asset) {
+      // @TODO Solve error handling
       throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
     }
 

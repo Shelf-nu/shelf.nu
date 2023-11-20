@@ -110,10 +110,12 @@ export async function assertUserCanInviteUsersToWorkspace({
     });
 
     if (!org) {
+      // @TODO Solve error
       throw new ShelfStackError({ message: "Organization not found" });
     }
 
     if (isPersonalOrg(org)) {
+      // @TODO Solve error
       throw new ShelfStackError({
         title: "Cannot invite users",
         message:

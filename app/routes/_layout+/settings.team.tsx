@@ -223,6 +223,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
 
       if (!org) {
+        // @TODO Solve error handling
         throw new ShelfStackError({
           message: "Organization not found",
         });
@@ -262,6 +263,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
       return null;
     default:
+      // @TODO Solve error handling
       throw new ShelfStackError({ message: "Invalid action" });
   }
 };

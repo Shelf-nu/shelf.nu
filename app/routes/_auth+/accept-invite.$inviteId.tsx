@@ -21,6 +21,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const token = searchParams.get("token") as string;
 
     if (!token) {
+      // @TODO Solve error handling
+
       throw new ShelfStackError({
         title: "No invite token provided",
         message:
@@ -39,6 +41,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
 
     if (updatedInvite?.status !== InviteStatuses.ACCEPTED) {
+      // @TODO Solve error handling
       throw new ShelfStackError({
         message:
           "Something went wrong with updating your invite. Please try again",

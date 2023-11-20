@@ -9,6 +9,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const organizationId = formData.get("organizationId");
   if (!organizationId)
+    // @TODO Solve error handling
     throw new ShelfStackError({ message: "Organization ID is required" });
 
   return redirect("/", {
