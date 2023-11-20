@@ -26,6 +26,7 @@ import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/skeleton-loading.css";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
+  checklistOptions,
   getCustodiansOrderedByTotalCustodies,
   getMostScannedAssets,
   getMostScannedAssetsCategories,
@@ -115,6 +116,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           content: parseMarkdownToReact(announcement.content),
         }
       : null,
+    checklistOptions: await checklistOptions({ assets, organizationId }),
   });
 }
 
@@ -133,7 +135,9 @@ export default function DashboardPage() {
   const matches = useMatches();
   const parentRoutesData = matches.find(
     (match) => match.id === "routes/_layout+/_layout"
-  )?.data as { skipOnboardingChecklist: boolean };
+  )?.data;
+  // @TODO fix this
+  // @ts-ignore
   const { skipOnboardingChecklist } = parentRoutesData;
   return (
     <div>
