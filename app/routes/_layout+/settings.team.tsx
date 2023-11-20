@@ -14,6 +14,7 @@ import type {
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 // import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { TeamMembersTable } from "~/components/workspace/team-members-table";
@@ -24,9 +25,10 @@ import { createInvite } from "~/modules/invite";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { revokeAccessToOrganization } from "~/modules/user";
+import { error } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfStackError, makeShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 
@@ -50,124 +52,132 @@ type InviteWithTeamMember = Pick<
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const [organization, userMembers, invites, teamMembers] =
-    await db.$transaction([
-      /** Get the org */
-      db.organization.findFirst({
-        where: {
-          id: organizationId,
-        },
-        include: {
-          owner: true,
-        },
-      }),
-      /** Get Users */
-      db.userOrganization.findMany({
-        where: {
-          organizationId,
-        },
-        select: {
-          user: true,
-        },
-      }),
-      /** Get the invites */
-      db.invite.findMany({
-        where: {
-          organizationId,
-          status: {
-            in: [InviteStatuses.PENDING],
+  try {
+    const authSession = await requireAuthSession(request);
+    const { organizationId } = await requireOrganisationId(
+      authSession,
+      request
+    );
+    const [organization, userMembers, invites, teamMembers] =
+      await db.$transaction([
+        /** Get the org */
+        db.organization.findFirst({
+          where: {
+            id: organizationId,
           },
-          inviteeEmail: {
-            not: "",
+          include: {
+            owner: true,
           },
-        },
-        distinct: ["inviteeEmail"],
-        select: {
-          id: true,
-          teamMemberId: true,
-          inviteeEmail: true,
-          status: true,
-          inviteeTeamMember: {
-            select: {
-              name: true,
+        }),
+        /** Get Users */
+        db.userOrganization.findMany({
+          where: {
+            organizationId,
+          },
+          select: {
+            user: true,
+          },
+        }),
+        /** Get the invites */
+        db.invite.findMany({
+          where: {
+            organizationId,
+            status: {
+              in: [InviteStatuses.PENDING],
+            },
+            inviteeEmail: {
+              not: "",
             },
           },
-        },
-      }),
-      /** Get the teamMembers */
-      /**
-       * 1. Don't have any invites(userId:null)
-       * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
-       */
-      db.teamMember.findMany({
-        where: {
-          deletedAt: null,
-          organizations: {
-            some: {
-              id: organizationId,
-            },
-          },
-          userId: null,
-          receivedInvites: {
-            none: {
-              status: {
-                in: [InviteStatuses.PENDING],
+          distinct: ["inviteeEmail"],
+          select: {
+            id: true,
+            teamMemberId: true,
+            inviteeEmail: true,
+            status: true,
+            inviteeTeamMember: {
+              select: {
+                name: true,
               },
             },
           },
-        },
-        include: {
-          _count: {
-            select: {
-              custodies: true,
+        }),
+        /** Get the teamMembers */
+        /**
+         * 1. Don't have any invites(userId:null)
+         * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
+         */
+        db.teamMember.findMany({
+          where: {
+            deletedAt: null,
+            organizations: {
+              some: {
+                id: organizationId,
+              },
+            },
+            userId: null,
+            receivedInvites: {
+              none: {
+                status: {
+                  in: [InviteStatuses.PENDING],
+                },
+              },
             },
           },
-        },
-      }),
-    ]);
-  if (!organization) {
-    throw new Error("Organization not found");
-  }
+          include: {
+            _count: {
+              select: {
+                custodies: true,
+              },
+            },
+          },
+        }),
+      ]);
+    if (!organization) {
+      throw new ShelfStackError({ message: "Organization not found" });
+    }
 
-  const header: HeaderData = {
-    title: `Settings - ${organization.name}`,
-  };
+    const header: HeaderData = {
+      title: `Settings - ${organization.name}`,
+    };
 
-  /** Create a structure for the users org members and merge it with invites */
-  const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
-    userMembers.map((um) => ({
-      name: `${um.user.firstName ? um.user.firstName : ""} ${
-        um.user.lastName ? um.user.lastName : ""
-      }`,
-      img: um.user.profilePicture || "/images/default_pfp.jpg",
-      email: um.user.email,
-      status: "ACCEPTED",
-      role: um.user.id === organization.userId ? "Owner" : "Administrator",
-      userId: um.user.id,
-    }));
+    /** Create a structure for the users org members and merge it with invites */
+    const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
+      userMembers.map((um) => ({
+        name: `${um.user.firstName ? um.user.firstName : ""} ${
+          um.user.lastName ? um.user.lastName : ""
+        }`,
+        img: um.user.profilePicture || "/images/default_pfp.jpg",
+        email: um.user.email,
+        status: "ACCEPTED",
+        role: um.user.id === organization.userId ? "Owner" : "Administrator",
+        userId: um.user.id,
+      }));
 
-  /** Create the same structure for invites */
-  for (const invite of invites as InviteWithTeamMember[]) {
-    teamMembersWithUserOrInvite.push({
-      name: invite.inviteeTeamMember.name,
-      img: "/images/default_pfp.jpg",
-      email: invite.inviteeEmail,
-      status: invite.status,
-      role: "Administrator",
-      userId: null,
+    /** Create the same structure for invites */
+    for (const invite of invites as InviteWithTeamMember[]) {
+      teamMembersWithUserOrInvite.push({
+        name: invite.inviteeTeamMember.name,
+        img: "/images/default_pfp.jpg",
+        email: invite.inviteeEmail,
+        status: invite.status,
+        role: "Administrator",
+        userId: null,
+      });
+    }
+
+    return json({
+      currentOrganizationId: organizationId,
+      organization,
+      header,
+      owner: organization.owner,
+      teamMembers,
+      teamMembersWithUserOrInvite,
     });
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
   }
-
-  return json({
-    currentOrganizationId: organizationId,
-    organization,
-    header,
-    owner: organization.owner,
-    teamMembers,
-    teamMembersWithUserOrInvite,
-  });
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -295,3 +305,5 @@ export default function WorkspacePage() {
 export interface TeamMemberWithCustodies extends TeamMember {
   custodies: Custody[];
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

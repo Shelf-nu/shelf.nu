@@ -9,7 +9,7 @@ export default function ContextualModal() {
   const data = currentRoute?.data as {
     showModal?: boolean;
   };
-  const showModal = data.showModal || false;
+  const showModal = data?.showModal || false;
 
   return (
     <AnimatePresence>

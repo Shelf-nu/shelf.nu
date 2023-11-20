@@ -1,6 +1,8 @@
 import type { Organization, User } from "@prisma/client";
+import { json } from "@remix-run/node";
 import { db } from "~/database";
-import { ShelfStackError } from "~/utils/error";
+import { error } from "~/utils";
+import { ShelfStackError, makeShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   canCreateMoreCustomFields,
@@ -97,24 +99,32 @@ export async function assertUserCanInviteUsersToWorkspace({
 }: {
   organizationId: Organization["id"];
 }) {
-  /** Get the tier limit and check if they can export */
-  // const tierLimit = await getUserTierLimit(userId);
-  const org = await db.organization.findUnique({
-    where: { id: organizationId },
-    select: {
-      type: true,
-    },
-  });
-
-  if (!org) {
-    throw new ShelfStackError({ message: "Organization not found" });
-  }
-
-  if (isPersonalOrg(org)) {
-    throw new ShelfStackError({
-      message:
-        "You cannot invite other users to a personal workspace. Please create a Team workspace.",
+  try {
+    /** Get the tier limit and check if they can export */
+    // const tierLimit = await getUserTierLimit(userId);
+    const org = await db.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        type: true,
+      },
     });
+
+    if (!org) {
+      throw new ShelfStackError({ message: "Organization not found" });
+    }
+
+    if (isPersonalOrg(org)) {
+      throw new ShelfStackError({
+        title: "Cannot invite users",
+        message:
+          "You cannot invite other users to a personal workspace. Please create a Team workspace.",
+        status: 403,
+      });
+    }
+    return true;
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
   }
 }
 

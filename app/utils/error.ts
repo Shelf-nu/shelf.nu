@@ -47,13 +47,16 @@ export class ShelfStackError extends Error {
     super();
     this.name = "ShelfStackError";
     this.message = message;
-    this.status = isLikeShelfError(cause) ? cause.status : status;
+    this.status = isLikeShelfError(cause)
+      ? cause.status || status || 500
+      : status || 500;
     this.cause = cause;
     this.metadata = metadata;
     this.tag = tag;
     this.traceId = traceId;
     this.title = title;
     this.isShelfError = isLikeShelfError(cause);
+    // this.isShelfError = true;
   }
 }
 
@@ -66,7 +69,7 @@ export function isLikeShelfError(cause: unknown): cause is ShelfStackError {
     (typeof cause === "object" &&
       cause !== null &&
       "name" in cause &&
-      cause.name !== "ShelfStackError" &&
+      cause.name !== "Error" &&
       "message" in cause)
   );
 }

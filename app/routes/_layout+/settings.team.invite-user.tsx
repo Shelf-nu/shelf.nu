@@ -29,8 +29,9 @@ import { createInvite } from "~/modules/invite";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier";
 import styles from "~/styles/layout/custom-modal.css";
-import { isFormProcessing, tw, validEmail } from "~/utils";
+import { error, isFormProcessing, tw, validEmail } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
 
 const InviteUserFormSchema = z.object({
   email: z
@@ -43,12 +44,24 @@ const InviteUserFormSchema = z.object({
 });
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  await assertUserCanInviteUsersToWorkspace({ organizationId });
-  return json({
-    showModal: true,
-  });
+  try {
+    const authSession = await requireAuthSession(request);
+    const { organizationId } = await requireOrganisationId(
+      authSession,
+      request
+    );
+    await assertUserCanInviteUsersToWorkspace({ organizationId });
+
+    return json({
+      showModal: true,
+    });
+  } catch (cause) {
+    // @TODO this is totally broken and doesnt work at all on this route. No idea why
+    // To test it navigate to /settings/team/invite-user within a personal org
+    // IMPORTANT: it only doesnt work with assertUserCanInviteUsersToWorkspace. If you test it with requireOrganisationId it works fine
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {

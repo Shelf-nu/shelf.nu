@@ -36,6 +36,7 @@ import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
 import {
   assertIsDelete,
+  error,
   getRequiredParam,
   tw,
   userFriendlyAssetStatus,
@@ -44,67 +45,75 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfStackError, makeShelfError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
-  const locale = getLocale(request);
-  const id = getRequiredParam(params, "assetId");
+  try {
+    const authSession = await requireAuthSession(request);
+    const { organizationId } = await requireOrganisationId(
+      authSession,
+      request
+    );
+    const { userId } = authSession;
+    const locale = getLocale(request);
+    const id = getRequiredParam(params, "assetId");
 
-  const asset = await getAsset({ organizationId, id });
-  if (!asset) {
-    throw new ShelfStackError({
-      title: "Asset Not Found",
-      message: "We couldn't find the assset you were looking for.",
-      status: 404,
-    });
-  }
-  /** We get the first QR code(for now we can only have 1)
-   * And using the ID of tha qr code, we find the latest scan
-   */
-  const lastScan = asset.qrCodes[0]?.id
-    ? parseScanData({
-        scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
-        userId,
-        request,
-      })
-    : null;
+    const asset = await getAsset({ organizationId, id });
+    if (!asset) {
+      throw new ShelfStackError({
+        title: "Asset Not Found",
+        message: "We couldn't find the assset you were looking for.",
+        status: 404,
+      });
+    }
+    /** We get the first QR code(for now we can only have 1)
+     * And using the ID of tha qr code, we find the latest scan
+     */
+    const lastScan = asset.qrCodes[0]?.id
+      ? parseScanData({
+          scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
+          userId,
+          request,
+        })
+      : null;
 
-  const notes = asset.notes.map((note) => ({
-    ...note,
-    dateDisplay: getDateTimeFormat(request).format(note.createdAt),
-    content: parseMarkdownToReact(note.content),
-  }));
+    const notes = asset.notes.map((note) => ({
+      ...note,
+      dateDisplay: getDateTimeFormat(request).format(note.createdAt),
+      content: parseMarkdownToReact(note.content),
+    }));
 
-  let custody = null;
-  if (asset.custody) {
-    const date = new Date(asset.custody.createdAt);
-    const dateDisplay = getDateTimeFormat(request).format(date);
+    let custody = null;
+    if (asset.custody) {
+      const date = new Date(asset.custody.createdAt);
+      const dateDisplay = getDateTimeFormat(request).format(date);
 
-    custody = {
-      ...asset.custody,
-      dateDisplay,
+      custody = {
+        ...asset.custody,
+        dateDisplay,
+      };
+    }
+
+    const header: HeaderData = {
+      title: asset.title,
     };
+
+    return json({
+      asset: {
+        ...asset,
+        custody,
+        notes,
+      },
+      lastScan,
+      header,
+      locale,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason));
   }
-
-  const header: HeaderData = {
-    title: asset.title,
-  };
-
-  return json({
-    asset: {
-      ...asset,
-      custody,
-      notes,
-    },
-    lastScan,
-    header,
-    locale,
-  });
 }
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsDelete(request);

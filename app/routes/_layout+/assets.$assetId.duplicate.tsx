@@ -44,7 +44,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
-    return json(
+    throw json(
       { asset: null, showModal: true, ...error(reason) },
       { status: reason.status }
     );

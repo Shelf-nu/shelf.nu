@@ -1,26 +1,34 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet, useLocation } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useMatchesData } from "~/hooks";
 import { requireAuthSession } from "~/modules/auth";
+import { error } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { makeShelfError } from "~/utils/error";
 
 export const handle = {
   breadcrumb: () => <Link to="/settings">Settings</Link>,
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
-  const title = "Settings";
-  const subHeading = "Manage your preferences here.";
-  const header = {
-    title,
-    subHeading,
-  };
-  return json({ header });
+  try {
+    await requireAuthSession(request);
+    const title = "Settings";
+    const subHeading = "Manage your preferences here.";
+    const header = {
+      title,
+      subHeading,
+    };
+    return json({ header });
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason));
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -66,3 +74,5 @@ export default function SettingsPage() {
     </>
   );
 }
+
+export const ErrorBoundary = () => <ErrorContent />;
