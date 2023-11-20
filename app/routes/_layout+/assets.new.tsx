@@ -20,48 +20,56 @@ import { getOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr";
 import { buildTagsSet } from "~/modules/tag";
-import { assertIsPost, slugify } from "~/utils";
+import { assertIsPost, error, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
 
 const title = "New Asset";
 
+const header = {
+  title,
+};
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
-  const organization = await getOrganization({ id: organizationId });
-  /**
-   * We need to check if the QR code passed in the URL belongs to the current org
-   * This is relevant whenever the user is trying to link a new asset with an existing QR code
-   * */
-  await assertWhetherQrBelongsToCurrentOrganization({
-    request,
-    organizationId,
-  });
-
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
+  try {
+    const authSession = await requireAuthSession(request);
+    const { organizationId } = await requireOrganisationId(
+      authSession,
+      request
+    );
+    const { userId } = authSession;
+    const organization = await getOrganization({ id: organizationId });
+    /**
+     * We need to check if the QR code passed in the URL belongs to the current org
+     * This is relevant whenever the user is trying to link a new asset with an existing QR code
+     * */
+    await assertWhetherQrBelongsToCurrentOrganization({
+      request,
       organizationId,
     });
 
-  const header = {
-    title,
-  };
+    const { categories, tags, locations, customFields } =
+      await getAllRelatedEntries({
+        userId,
+        organizationId,
+      });
 
-  return json({
-    header,
-    categories,
-    tags,
-    locations,
-    currency: organization?.currency,
-    customFields,
-  });
+    return json({
+      header,
+      categories,
+      tags,
+      locations,
+      currency: organization?.currency,
+      customFields,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json({ ...error(reason), header });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

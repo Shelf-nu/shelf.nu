@@ -1,12 +1,18 @@
-import { createCookie, redirect } from "@remix-run/node";
-import { NODE_ENV, SESSION_SECRET, getCurrentPath, isGet } from "~/utils";
+import { createCookie, json, redirect } from "@remix-run/node";
+import {
+  NODE_ENV,
+  SESSION_SECRET,
+  error,
+  getCurrentPath,
+  isGet,
+} from "~/utils";
 import {
   destroyCookie,
   parseCookie,
   serializeCookie,
   setCookie,
 } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfStackError, makeShelfError } from "~/utils/error";
 
 import { getUserOrganizations } from "./service.server";
 import type { AuthSession } from "../auth/types";
@@ -43,45 +49,50 @@ export async function requireOrganisationId(
   { userId }: AuthSession,
   request: Request
 ) {
-  const organizationId = await getSelectedOrganizationIdCookie(request);
+  try {
+    const organizationId = await getSelectedOrganizationIdCookie(request);
 
-  /** There could be a case when you get removed from an organization while browsing it.
-   * In this case what we do is we set the current organization to the first one in the list
-   */
-  const userOrganizations = await getUserOrganizations({ userId });
-  const userOrganizationIds = userOrganizations.map((org) => org.id);
-  const personalOrganization = userOrganizations.find(
-    (org) => org.type === "PERSONAL"
-  );
+    /** There could be a case when you get removed from an organization while browsing it.
+     * In this case what we do is we set the current organization to the first one in the list
+     */
+    const userOrganizations = await getUserOrganizations({ userId });
+    const userOrganizationIds = userOrganizations.map((org) => org.id);
+    const personalOrganization = userOrganizations.find(
+      (org) => org.type === "PERSONAL"
+    );
 
-  if (!personalOrganization) {
-    throw new ShelfStackError({
-      cause: null,
-      message:
-        "You do not have a personal organization. This should not happen. Please contact support.",
-      status: 500,
-    });
-  }
-
-  // If the user is not part of the organization or the organizationId is not set (should not happen but just in case)
-  if (!organizationId || !userOrganizationIds.includes(organizationId)) {
-    if (isGet(request)) {
-      throw redirect(getCurrentPath(request), {
-        headers: [
-          setCookie(
-            await setSelectedOrganizationIdCookie(personalOrganization.id)
-          ),
-        ],
+    if (!personalOrganization) {
+      throw new ShelfStackError({
+        title: "No organization found",
+        message:
+          "You do not have a personal organization. This should not happen. Please contact support.",
+        status: 500,
       });
     }
 
-    // Other methods should throw an error (mostly for actions)
-    throw new ShelfStackError({
-      cause: null,
-      message: "You do not have access to this organization",
-      status: 401,
-    });
-  }
+    // If the user is not part of the organization or the organizationId is not set (should not happen but just in case)
+    if (!organizationId || !userOrganizationIds.includes(organizationId)) {
+      if (isGet(request)) {
+        throw redirect(getCurrentPath(request), {
+          headers: [
+            setCookie(
+              await setSelectedOrganizationIdCookie(personalOrganization.id)
+            ),
+          ],
+        });
+      }
 
-  return { organizationId, organizations: userOrganizations };
+      // Other methods should throw an error (mostly for actions)
+      throw new ShelfStackError({
+        cause: null,
+        message: "You do not have access to this organization",
+        status: 401,
+      });
+    }
+
+    return { organizationId, organizations: userOrganizations };
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
+  }
 }

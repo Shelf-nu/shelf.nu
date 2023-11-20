@@ -115,12 +115,13 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
         organizationId,
       },
     });
-    if (!qr)
+    if (!qr) {
       throw new ShelfStackError({
         message:
-          "This QR code doesn't belong to your current organization. A new asset cannot be linked to it.",
-        title: "Not allowed",
+          "This QR code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
+        title: "QR code not found",
         status: 403,
       });
+    }
   }
 }

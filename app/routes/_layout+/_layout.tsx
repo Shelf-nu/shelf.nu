@@ -3,6 +3,7 @@ import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
 
 import { json, redirect } from "@remix-run/node";
 import { Outlet } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
 // import { ErrorBoundryComponent } from "~/components/errors";
 import { Breadcrumbs } from "~/components/layout/breadcrumbs";
 import Sidebar from "~/components/layout/sidebar/sidebar";
@@ -123,3 +124,5 @@ export default function App() {
     </div>
   );
 }
+
+export const ErrorBoundary = () => <ErrorContent />;
