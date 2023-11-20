@@ -1,11 +1,10 @@
-import { useState } from "react";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   LinksFunction,
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useMatches } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import AnnouncementBar from "~/components/dashboard/announcement-bar";
 import AssetsByCategoryChart from "~/components/dashboard/assets-by-category-chart";
 import AssetsByStatusChart from "~/components/dashboard/assets-by-status-chart";
@@ -25,6 +24,8 @@ import { getOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/skeleton-loading.css";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getLocale } from "~/utils/client-hints";
+import { userPrefs } from "~/utils/cookies.server";
 import {
   checklistOptions,
   getCustodiansOrderedByTotalCustodies,
@@ -75,12 +76,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const organization = await getOrganization({ id: organizationId });
 
-  const totalValuation = await db.asset.aggregate({
-    _sum: {
-      valuation: true,
-    },
-  });
-
   const announcement = await db.announcement.findFirst({
     where: {
       published: true,
@@ -90,15 +85,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
+  /** Calculate the total value of the assets that have value added */
+  const totalValuation = assets.reduce((acc, asset) => {
+    if (asset.valuation) {
+      return acc + asset.valuation;
+    }
+    return acc;
+  }, 0);
+  const cookieHeader = request.headers.get("Cookie");
+  const cookie = (await userPrefs.parse(cookieHeader)) || {};
+
   return json({
     header: {
       title: "Dashboard",
     },
     assets,
+    locale: getLocale(request),
     currency: organization?.currency,
-    totalValuation: totalValuation._sum.valuation,
+    totalValuation,
     newAssets: assets.slice(0, 5),
     totalAssets: assets.length,
+    skipOnboardingChecklist: cookie.skipOnboardingChecklist,
 
     custodiansData: await getCustodiansOrderedByTotalCustodies({
       assets,
@@ -131,17 +138,13 @@ export const handle = {
 };
 
 export default function DashboardPage() {
-  const [completedAllChecks] = useState(true);
-  const matches = useMatches();
-  const parentRoutesData = matches.find(
-    (match) => match.id === "routes/_layout+/_layout"
-  )?.data;
-  // @TODO fix this
-  // @ts-ignore
-  const { skipOnboardingChecklist } = parentRoutesData;
+  const { skipOnboardingChecklist, checklistOptions } =
+    useLoaderData<typeof loader>();
+  const completedAllChecks = Object.values(checklistOptions).every(Boolean);
+
   return (
     <div>
-      {completedAllChecks && skipOnboardingChecklist ? (
+      {completedAllChecks || skipOnboardingChecklist ? (
         <div className="pb-8">
           <AnnouncementBar />
           <div className="w-full">

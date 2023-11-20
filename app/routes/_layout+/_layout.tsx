@@ -89,7 +89,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       enablePremium: ENABLE_PREMIUM_FEATURES,
       hideSupportBanner: cookie.hideSupportBanner,
       minimizedSidebar: cookie.minimizedSidebar,
-      skipOnboardingChecklist: cookie.skipOnboardingChecklist,
       isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
     },
     {

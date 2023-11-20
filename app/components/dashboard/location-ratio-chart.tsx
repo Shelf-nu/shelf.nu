@@ -8,9 +8,7 @@ import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function LocationRatioChart() {
   const { assets, totalAssets } = useLoaderData<typeof loader>();
-  const assetsWithLocation = assets.filter(
-    (asset) => asset.locationId !== null
-  ).length;
+  const assetsWithLocation = assets.filter((asset) => asset.locationId).length;
 
   return (
     <ClientOnly fallback={<FallbackLoading />}>

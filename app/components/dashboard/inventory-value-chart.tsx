@@ -7,7 +7,7 @@ import FallbackLoading from "./fallback-loading";
 import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function InventoryValueChart() {
-  const { assets, currency, totalAssets, totalValuation } =
+  const { assets, currency, totalAssets, totalValuation, locale } =
     useLoaderData<typeof loader>();
   const valueKnownAssets = assets.filter(
     (asset) => asset.valuation !== null
@@ -60,7 +60,11 @@ export default function InventoryValueChart() {
                       Inventory value
                     </Text>
                     <Text className="mb-3 !text-[30px] font-semibold text-gray-900">
-                      {currency + " " + totalValuation?.toFixed(2)}
+                      {currency}{" "}
+                      {(totalValuation || 0).toLocaleString(locale, {
+                        style: "currency",
+                        currency: currency,
+                      })}
                     </Text>
                   </div>
                 </Flex>

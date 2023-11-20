@@ -1,4 +1,6 @@
-import { Link, useFetcher } from "@remix-run/react";
+import { Link, useFetcher, useLoaderData } from "@remix-run/react";
+import type { loader } from "~/routes/_layout+/dashboard";
+import { tw } from "~/utils";
 import {
   AddUserIcon,
   AssetsIcon,
@@ -14,6 +16,7 @@ import SubHeading from "../shared/sub-heading";
 
 export default function OnboardingChecklist() {
   const fetcher = useFetcher();
+  const { checklistOptions } = useLoaderData<typeof loader>();
   return (
     <div className="rounded border bg-white px-4 py-5 lg:px-20 lg:py-16">
       <div className="mb-8">
@@ -34,8 +37,13 @@ export default function OnboardingChecklist() {
           </p>
         </div>
         <ul className="onboarding-checklist -mx-1 xl:flex xl:flex-wrap">
-          <li className="completed mx-1 mb-2 xl:w-[49%]">
-            <div className="flex items-start justify-between gap-1 rounded border p-4">
+          <li
+            className={tw(
+              " mx-1 mb-2 xl:w-[49%]",
+              checklistOptions.hasAssets && "completed"
+            )}
+          >
+            <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
               <div className="flex items-start">
                 <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
                   <AssetsIcon />
@@ -64,8 +72,13 @@ export default function OnboardingChecklist() {
               </i>
             </div>
           </li>
-          <li className="mx-1 mb-2 xl:w-[49%] ">
-            <div className="flex items-start justify-between gap-1 rounded border p-4">
+          <li
+            className={tw(
+              " mx-1 mb-2 xl:w-[49%]",
+              checklistOptions.hasCategories && "completed"
+            )}
+          >
+            <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
               <div className="flex items-start">
                 <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
                   <CategoriesIcon />
@@ -95,8 +108,13 @@ export default function OnboardingChecklist() {
               </i>
             </div>
           </li>
-          <li className="mx-1 mb-2 xl:w-[49%] ">
-            <div className="flex items-start justify-between gap-1 rounded border p-4">
+          <li
+            className={tw(
+              " mx-1 mb-2 xl:w-[49%]",
+              checklistOptions.hasTags && "completed"
+            )}
+          >
+            <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
               <div className="flex items-start">
                 <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
                   <TagsIcon />
@@ -135,8 +153,13 @@ export default function OnboardingChecklist() {
           </p>
         </div>
         <ul className="onboarding-checklist -mx-1 xl:flex xl:flex-wrap">
-          <li className="mx-1 mb-2 xl:w-[49%]">
-            <div className="flex items-start justify-between gap-1 rounded border p-4">
+          <li
+            className={tw(
+              " mx-1 mb-2 xl:w-[49%]",
+              checklistOptions.hasTeamMembers && "completed"
+            )}
+          >
+            <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
               <div className="flex items-start">
                 <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
                   <UserIcon />
@@ -166,8 +189,13 @@ export default function OnboardingChecklist() {
               </i>
             </div>
           </li>
-          <li className="mx-1 mb-2 xl:w-[49%] ">
-            <div className="flex items-start justify-between gap-1 rounded border p-4">
+          <li
+            className={tw(
+              " mx-1 mb-2 xl:w-[49%]",
+              checklistOptions.hasCustodies && "completed"
+            )}
+          >
+            <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
               <div className="flex items-start">
                 <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
                   <AddUserIcon />
@@ -205,8 +233,13 @@ export default function OnboardingChecklist() {
           </p>
         </div>
         <ul className="onboarding-checklist -mx-1 xl:flex xl:flex-wrap">
-          <li className="mx-1 mb-2 xl:w-[49%]">
-            <div className="flex items-start justify-between gap-1 rounded border p-4">
+          <li
+            className={tw(
+              " mx-1 mb-2 xl:w-[49%]",
+              checklistOptions.hasCustomFields && "completed"
+            )}
+          >
+            <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
               <div className="flex items-start">
                 <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
                   <CustomFiedIcon />
