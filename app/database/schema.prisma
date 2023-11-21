@@ -60,6 +60,8 @@ model User {
   receivedInvites   Invite[]           @relation("invitee")
   teamMembers       TeamMember[]
   userOrganizations UserOrganization[]
+  bookings          Booking[]          @relation("creator")
+  custodies         Booking[]          @relation("custodian")
 
   @@unique([email, username])
 }
@@ -72,6 +74,7 @@ model Asset {
   mainImageExpiration DateTime?
   status              AssetStatus @default(AVAILABLE)
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
+  availableToBook     Boolean     @default(true)
 
   // Datetime
   createdAt DateTime @default(now())
@@ -94,6 +97,7 @@ model Asset {
   tags            Tag[]
   customFields    AssetCustomFieldValue[]
   assetSearchView AssetSearchView?
+  bookings        Booking[]
 }
 
 view AssetSearchView {
@@ -111,6 +115,7 @@ view AssetSearchView {
 enum AssetStatus {
   AVAILABLE
   IN_CUSTODY
+  BOOKED
 }
 
 model Category {
@@ -292,6 +297,7 @@ model TeamMember {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
+  bookings   Booking[]
 }
 
 model Custody {
@@ -336,6 +342,7 @@ model Organization {
   updatedAt    DateTime      @updatedAt
   customFields CustomField[]
   images       Image[]       @relation("owner")
+  bookings     Booking[]
 }
 
 model UserOrganization {
@@ -498,18 +505,55 @@ model Invite {
   updatedAt DateTime @updatedAt
 }
 
-
 model Announcement {
   id String @id @default(cuid())
-  
-  name   String
+
+  name    String
   content String
 
-  link String?
-  linkText String?
+  link      String?
+  linkText  String?
   published Boolean @default(false)
 
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+enum BookingStatus {
+  DRAFT
+  RESERVED
+  ONGOING
+  OVERDUE
+  COMPLETE
+  ARCHIVED
+  CANCELLED
+}
+
+model Booking {
+  id String @id @default(cuid())
+
+  name   String?
+  status BookingStatus @default(DRAFT)
+
+  // Relationships
+  creator   User   @relation("creator", fields: [creatorId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  creatorId String
+
+  custodianUser   User?  @relation("custodian", fields: [custodianUserId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  custodianUserId String?
+
+  custodianTeamMember   TeamMember? @relation(fields: [custodianTeamMemberId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  custodianTeamMemberId String?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
+
+  assets Asset[]
+
+  // Datetime
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(3)
+  from      DateTime? @db.Timestamptz(3)
+  to        DateTime? @db.Timestamptz(3)
 }
