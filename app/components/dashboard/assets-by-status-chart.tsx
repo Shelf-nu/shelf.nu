@@ -3,7 +3,6 @@ import { DonutChart } from "@tremor/react";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
-import FallbackLoading from "./fallback-loading";
 import { Badge } from "../shared";
 import { InfoTooltip } from "../shared/info-tooltip";
 
@@ -13,7 +12,7 @@ export default function AssetsByStatusChart() {
   const { chartData, availableAssets, inCustodyAssets } = assetsByStatus;
 
   return (
-    <ClientOnly fallback={<FallbackLoading />}>
+    <ClientOnly fallback={null}>
       {() => (
         <div className="w-full border border-gray-200 ">
           <div className="flex items-center justify-between">

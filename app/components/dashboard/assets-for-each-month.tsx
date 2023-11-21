@@ -2,14 +2,13 @@ import { useLoaderData } from "@remix-run/react";
 import { AreaChart, Card, Title } from "@tremor/react";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
-import FallbackLoading from "./fallback-loading";
 import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function AssetsForEachMonth() {
   const { totalAssetsAtEndOfEachMonth, totalAssets } =
     useLoaderData<typeof loader>();
   return (
-    <ClientOnly fallback={<FallbackLoading />}>
+    <ClientOnly fallback={null}>
       {() => (
         <Card className="mb-10 py-4 lg:p-6">
           <Title>

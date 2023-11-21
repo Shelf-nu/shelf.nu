@@ -17,6 +17,7 @@ import SubHeading from "../shared/sub-heading";
 export default function OnboardingChecklist() {
   const fetcher = useFetcher();
   const { checklistOptions } = useLoaderData<typeof loader>();
+
   return (
     <div className="rounded border bg-white px-4 py-5 lg:px-20 lg:py-16">
       <div className="mb-8">
@@ -58,10 +59,14 @@ export default function OnboardingChecklist() {
                     </p>
                   </div>
                   <div className="flex gap-3">
-                    <Link to="#" className=" font-semibold text-gray-600">
+                    <Link
+                      to="https://www.shelf.nu/knowledge-base/adding-new-assets"
+                      target="_blank"
+                      className=" font-semibold text-gray-600"
+                    >
                       Learn more
                     </Link>
-                    <Button variant="link" to="/categories">
+                    <Button variant="link" to="/assets/new">
                       New asset
                     </Button>
                   </div>
@@ -94,10 +99,14 @@ export default function OnboardingChecklist() {
                     </p>
                   </div>
                   <div className="flex gap-3">
-                    <Link to="#" className=" font-semibold text-gray-600">
+                    <Link
+                      to="https://www.shelf.nu/knowledge-base/using-categories-to-organize-your-asset-inventory"
+                      target="_blank"
+                      className=" font-semibold text-gray-600"
+                    >
                       Learn more
                     </Link>
-                    <Button variant="link" to="/categories">
+                    <Button variant="link" to="/categories/new">
                       New category
                     </Button>
                   </div>
@@ -128,10 +137,7 @@ export default function OnboardingChecklist() {
                     </p>
                   </div>
                   <div className="flex gap-3">
-                    <Link to="#" className=" font-semibold text-gray-600">
-                      Learn more
-                    </Link>
-                    <Button variant="link" to="/tags">
+                    <Button variant="link" to="/tags/new">
                       New tag
                     </Button>
                   </div>
@@ -175,7 +181,11 @@ export default function OnboardingChecklist() {
                     </p>
                   </div>
                   <div className="flex gap-3">
-                    <Link to="#" className=" font-semibold text-gray-600">
+                    <Link
+                      to="https://www.shelf.nu/knowledge-base/onboarding-your-team-members"
+                      target="_blank"
+                      className=" font-semibold text-gray-600"
+                    >
                       Learn more
                     </Link>
                     <Button variant="link" to="/settings/team">
@@ -211,7 +221,11 @@ export default function OnboardingChecklist() {
                     </p>
                   </div>
                   <div className="flex gap-3">
-                    <Link to="#" className=" font-semibold text-gray-600">
+                    <Link
+                      to="https://www.shelf.nu/knowledge-base/custody-feature-for-long-term-equipment-lend-outs"
+                      target="_blank"
+                      className=" font-semibold text-gray-600"
+                    >
                       Learn more
                     </Link>
                   </div>
@@ -254,10 +268,14 @@ export default function OnboardingChecklist() {
                     </p>
                   </div>
                   <div className="flex gap-3">
-                    <Link to="#" className=" font-semibold text-gray-600">
+                    <Link
+                      to="https://www.shelf.nu/knowledge-base/adding-additional-fields-to-assets"
+                      target="_blank"
+                      className=" font-semibold text-gray-600"
+                    >
                       Learn more
                     </Link>
-                    <Button variant="link" to="/settings/custom-fields">
+                    <Button variant="link" to="/settings/custom-fields/new">
                       New custom field
                     </Button>
                   </div>
