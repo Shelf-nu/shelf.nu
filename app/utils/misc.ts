@@ -6,3 +6,6 @@
  *  */
 export const validEmail = (val: string) =>
   /^([A-Z0-9_+-]+\.?)*[A-Z0-9_+-]@([A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,}$/i.test(val);
+
+export const isLink = (val: string) =>
+  /\b(?:https?):\/\/[-\w+&@#/%?=~|$!:,.;]*[\w+&@#/%=~|$]/.test(val);
