@@ -144,9 +144,11 @@ export async function getAssets({
   /** If the search string exists, add it to the where object */
   if (search) {
     const words = search
+      .trim()
+      .replace(/ +/g, " ") //replace multiple spaces into 1
       .split(" ")
-      .map((w) => w.replace(/[^a-zA-Z0-9\-_]/g, "") + ":*")
-      .filter(Boolean) //remove uncommon special character
+      .map((w) => w.replace(/[^a-zA-Z0-9\-_]/g, "") + ":*") //remove uncommon special character
+      .filter(Boolean)
       .join(" & ");
     where.searchVector = {
       search: words,

@@ -198,3 +198,17 @@ dialog {
 .fill-tremor-content-emphasis {
   @apply text-[24px] font-medium text-gray-900;
 }
+
+.onboarding-checklist .completed {
+  @apply border-2 border-primary-600 bg-primary-50 rounded;
+}
+.onboarding-checklist .completed p {
+  @apply text-primary-700;
+}
+.onboarding-checklist .completed h6 {
+  @apply text-primary-800;
+}
+
+.onboarding-checklist .completed i {
+  @apply block;
+}
