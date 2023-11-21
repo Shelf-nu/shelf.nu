@@ -345,6 +345,7 @@ export default function AssetDetailsPage() {
                               role="link"
                               variant="link"
                               className="text-gray text-end font-normal underline hover:text-gray-600"
+                              target="_blank"
                               to={`${customFieldDisplayValue}?ref=shelf-webapp`}
                             >
                               {customFieldDisplayValue}
