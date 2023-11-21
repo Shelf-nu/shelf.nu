@@ -115,7 +115,7 @@ enum AssetStatus {
 
 model Category {
   id          String  @id @default(cuid())
-  name        String
+  name        String  
   description String?
   color       String
 
@@ -130,6 +130,8 @@ model Category {
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String
+
+  @@unique([name, organizationId])
 }
 
 model Tag {
