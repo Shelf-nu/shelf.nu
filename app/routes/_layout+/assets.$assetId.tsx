@@ -344,7 +344,7 @@ export default function AssetDetailsPage() {
                             <Button
                               role="link"
                               variant="link"
-                              className="text-gray text-end font-normal hover:text-gray-600"
+                              className="text-gray text-end font-normal underline hover:text-gray-600"
                               to={`${customFieldDisplayValue}?ref=shelf-webapp`}
                             >
                               {customFieldDisplayValue}
