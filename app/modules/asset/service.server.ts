@@ -1042,11 +1042,7 @@ export const createAssetsFromBackupImport = async ({
       const existingCustodian = await db.teamMember.findFirst({
         where: {
           deletedAt: null,
-          organizations: {
-            some: {
-              id: organizationId,
-            },
-          },
+          organizationId,
           name: custodian.name,
         },
       });
@@ -1055,11 +1051,7 @@ export const createAssetsFromBackupImport = async ({
         const newCustodian = await db.teamMember.create({
           data: {
             name: custodian.name,
-            organizations: {
-              connect: {
-                id: organizationId,
-              },
-            },
+            organizationId,
             createdAt: new Date(custodian.createdAt),
             updatedAt: new Date(custodian.updatedAt),
           },
