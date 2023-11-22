@@ -28,11 +28,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const teamMember = await db.teamMember.create({
     data: {
       name: formData.get("name") as string,
-      organizations: {
-        connect: {
-          id: organizationId,
-        },
-      },
+      organizationId,
     },
   });
 
