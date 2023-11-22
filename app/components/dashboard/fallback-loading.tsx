@@ -1,16 +1,8 @@
-export default function FallbackLoading() {
+import { tw } from "~/utils";
+export default function FallbackLoading({ className }: { className?: string }) {
   return (
-    <div className="m-4 rounded border p-5">
-      <div className="post">
-        <div className="avatar"></div>
-        <div className="line !w-[80%]"></div>
-        <div className="line !w-[80%]"></div>
-        <div className="line"></div>
-        <div className="line"></div>
-        <div className="line"></div>
-        <div className="line"></div>
-        <div className="line"></div>
-      </div>
+    <div className={tw("animate-pulse", className)}>
+      <div className=" h-full rounded-md bg-gray-200"></div>
     </div>
   );
 }
