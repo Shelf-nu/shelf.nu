@@ -70,22 +70,28 @@ export async function createTag({
 }: Pick<Tag, "description" | "name" | "organizationId"> & {
   userId: User["id"];
 }) {
-  return db.tag.create({
-    data: {
-      name,
-      description,
-      user: {
-        connect: {
-          id: userId,
+  try {
+    const tag = await db.tag.create({
+      data: {
+        name,
+        description,
+        user: {
+          connect: {
+            id: userId,
+          },
+        },
+        organization: {
+          connect: {
+            id: organizationId,
+          },
         },
       },
-      organization: {
-        connect: {
-          id: organizationId,
-        },
-      },
-    },
-  });
+    });
+    return { tag, error: null };
+  } catch (cause) {
+    // if (cause)
+    console.log(cause);
+  }
 }
 
 export async function deleteTag({

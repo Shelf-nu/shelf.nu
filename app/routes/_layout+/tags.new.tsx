@@ -52,11 +52,17 @@ export async function action({ request }: LoaderFunctionArgs) {
     );
   }
 
-  await createTag({
+  const rsp = await createTag({
     ...result.data,
     userId: authSession.userId,
     organizationId,
   });
+
+  if (rsp?.error) {
+    return json({
+      error: rsp.error,
+    });
+  }
 
   sendNotification({
     title: "Tag created",
