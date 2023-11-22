@@ -4,9 +4,9 @@ import { DonutChart } from "@tremor/react";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
+import FallbackLoading from "./fallback-loading";
 import { Badge, Button } from "../shared";
 import { InfoTooltip } from "../shared/info-tooltip";
-import FallbackLoading from "./fallback-loading";
 
 export default function AssetsByCategoryChart() {
   const { assetsByCategory } = useLoaderData<typeof loader>();

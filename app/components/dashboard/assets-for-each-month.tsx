@@ -2,8 +2,8 @@ import { useLoaderData } from "@remix-run/react";
 import { AreaChart, Card, Title } from "@tremor/react";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { InfoTooltip } from "../shared/info-tooltip";
 import FallbackLoading from "./fallback-loading";
+import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function AssetsForEachMonth() {
   const { totalAssetsAtEndOfEachMonth, totalAssets } =

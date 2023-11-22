@@ -3,8 +3,8 @@ import { Text, Flex, ProgressCircle } from "@tremor/react";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
-import { InfoTooltip } from "../shared/info-tooltip";
 import FallbackLoading from "./fallback-loading";
+import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function InventoryValueChart() {
   const { assets, currency, totalAssets, totalValuation, locale } =
