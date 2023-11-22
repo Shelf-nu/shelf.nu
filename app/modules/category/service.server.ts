@@ -118,7 +118,7 @@ export async function createCategoriesIfNotExists({
   // now we loop through the categories and check if they exist
   for (const [category, _] of categories) {
     const existingCategory = await db.category.findFirst({
-      where: { name: category, userId },
+      where: { name: category, organizationId },
     });
 
     if (!existingCategory) {

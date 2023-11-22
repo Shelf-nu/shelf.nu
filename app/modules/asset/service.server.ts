@@ -969,7 +969,7 @@ export const createAssetsFromBackupImport = async ({
 
       const existingCat = await db.category.findFirst({
         where: {
-          userId,
+          organizationId,
           name: category.name,
         },
       });
@@ -1092,7 +1092,7 @@ export const createAssetsFromBackupImport = async ({
         const existingTag = await db.tag.findFirst({
           where: {
             name: tag,
-            userId,
+            organizationId,
           },
         });
 
