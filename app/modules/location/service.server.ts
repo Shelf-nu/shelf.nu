@@ -1,5 +1,6 @@
 import type { Prisma, User, Location, Organization } from "@prisma/client";
 import { db } from "~/database";
+import { handleUniqueConstraintError } from "~/utils/error";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function getLocation({
@@ -137,44 +138,49 @@ export async function createLocation({
   organizationId: Organization["id"];
   image: File | null;
 }) {
-  const data = {
-    name,
-    description,
-    address,
-    user: {
-      connect: {
-        id: userId,
+  try {
+    const data = {
+      name,
+      description,
+      address,
+      user: {
+        connect: {
+          id: userId,
+        },
       },
-    },
-    organization: {
-      connect: {
-        id: organizationId,
+      organization: {
+        connect: {
+          id: organizationId,
+        },
       },
-    },
-  };
+    };
 
-  if (image?.size && image?.size > 0) {
-    Object.assign(data, {
-      image: {
-        create: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
-          ownerOrg: {
-            connect: {
-              id: organizationId,
+    if (image?.size && image?.size > 0) {
+      Object.assign(data, {
+        image: {
+          create: {
+            blob: Buffer.from(await image.arrayBuffer()),
+            contentType: image.type,
+            ownerOrg: {
+              connect: {
+                id: organizationId,
+              },
             },
-          },
-          user: {
-            connect: {
-              id: userId,
+            user: {
+              connect: {
+                id: userId,
+              },
             },
           },
         },
-      },
-    });
-  }
+      });
+    }
 
-  return db.location.create({ data });
+    const location = await db.location.create({ data });
+    return { location, error: null };
+  } catch (cause) {
+    return handleUniqueConstraintError(cause, "Location");
+  }
 }
 
 export async function deleteLocation({ id }: Pick<Location, "id">) {
@@ -200,47 +206,52 @@ export async function updateLocation(payload: {
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
-  const { id, name, address, description, image, userId, organizationId } =
-    payload;
-  const data = {
-    name,
-    description,
-    address,
-  };
-
-  if (image?.size && image?.size > 0) {
-    const imageData = {
-      blob: Buffer.from(await image.arrayBuffer()),
-      contentType: image.type,
-      ownerOrg: {
-        connect: {
-          id: organizationId,
-        },
-      },
-      user: {
-        connect: {
-          id: userId,
-        },
-      },
+  try {
+    const { id, name, address, description, image, userId, organizationId } =
+      payload;
+    const data = {
+      name,
+      description,
+      address,
     };
 
-    /** We do an upsert, because if a user creates a location wihtout an image,
-     * we need to create an Image when the location is updated,
-     * else we need to update the Image */
-    Object.assign(data, {
-      image: {
-        upsert: {
-          create: imageData,
-          update: imageData,
+    if (image?.size && image?.size > 0) {
+      const imageData = {
+        blob: Buffer.from(await image.arrayBuffer()),
+        contentType: image.type,
+        ownerOrg: {
+          connect: {
+            id: organizationId,
+          },
         },
-      },
-    });
-  }
+        user: {
+          connect: {
+            id: userId,
+          },
+        },
+      };
 
-  return await db.location.update({
-    where: { id },
-    data: data,
-  });
+      /** We do an upsert, because if a user creates a location wihtout an image,
+       * we need to create an Image when the location is updated,
+       * else we need to update the Image */
+      Object.assign(data, {
+        image: {
+          upsert: {
+            create: imageData,
+            update: imageData,
+          },
+        },
+      });
+    }
+
+    const location = await db.location.update({
+      where: { id },
+      data: data,
+    });
+    return { location, error: null };
+  } catch (cause) {
+    return handleUniqueConstraintError(cause, "Location");
+  }
 }
 
 export async function createLocationsIfNotExists({

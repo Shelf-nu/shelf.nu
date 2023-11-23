@@ -1,5 +1,5 @@
 import type { Location } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -33,6 +33,13 @@ export const LocationForm = ({ name, address, description }: Props) => {
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   const [, updateName] = useAtom(updateDynamicTitleAtom);
+  const actionData = useActionData<{
+    errors?: {
+      name?: {
+        message: string;
+      };
+    };
+  }>();
 
   return (
     <Form
@@ -51,7 +58,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
           hideLabel
           name={zo.fields.name()}
           disabled={disabled}
-          error={zo.errors.name()?.message}
+          error={actionData?.errors?.name?.message || zo.errors.name()?.message}
           autoFocus
           onChange={updateName}
           className="w-full"
