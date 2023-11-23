@@ -12,23 +12,42 @@ export async function createCategory({
 }: Pick<Category, "description" | "name" | "color" | "organizationId"> & {
   userId: User["id"];
 }) {
-  return db.category.create({
-    data: {
-      name,
-      description,
-      color,
-      user: {
-        connect: {
-          id: userId,
+  try {
+    const category = await db.category.create({
+      data: {
+        name,
+        description,
+        color,
+        user: {
+          connect: {
+            id: userId,
+          },
+        },
+        organization: {
+          connect: {
+            id: organizationId,
+          },
         },
       },
-      organization: {
-        connect: {
-          id: organizationId,
+    });
+    return { category, error: null };
+  } catch (cause: any) {
+    if (cause?.code && cause.code === "P2002") {
+      return {
+        category: null,
+        error: {
+          message: `Category name is already taken. Please choose a different name.`,
         },
-      },
-    },
-  });
+      };
+    } else {
+      return {
+        category: null,
+        error: {
+          message: "Something went wrong. Please try again later.",
+        },
+      };
+    }
+  }
 }
 
 export async function getCategories({
@@ -162,14 +181,33 @@ export async function updateCategory({
   description,
   color,
 }: Pick<Category, "id" | "description" | "name" | "color">) {
-  return db.category.update({
-    where: {
-      id,
-    },
-    data: {
-      name,
-      description,
-      color,
-    },
-  });
+  try {
+    const category = await db.category.update({
+      where: {
+        id,
+      },
+      data: {
+        name,
+        description,
+        color,
+      },
+    });
+    return { category, error: null };
+  } catch (cause: any) {
+    if (cause?.code && cause.code === "P2002") {
+      return {
+        category: null,
+        error: {
+          message: `Category name is already taken. Please choose a different name.`,
+        },
+      };
+    } else {
+      return {
+        category: null,
+        error: {
+          message: "Something went wrong. Please try again later.",
+        },
+      };
+    }
+  }
 }

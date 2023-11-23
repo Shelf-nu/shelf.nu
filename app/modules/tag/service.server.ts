@@ -88,9 +88,22 @@ export async function createTag({
       },
     });
     return { tag, error: null };
-  } catch (cause) {
-    // if (cause)
-    console.log(cause);
+  } catch (cause: any) {
+    if (cause?.code && cause.code === "P2002") {
+      return {
+        tag: null,
+        error: {
+          message: `Tag name is already taken. Please choose a different name.`,
+        },
+      };
+    } else {
+      return {
+        tag: null,
+        error: {
+          message: "Something went wrong. Please try again later.",
+        },
+      };
+    }
   }
 }
 
@@ -174,13 +187,32 @@ export async function updateTag({
   name,
   description,
 }: Pick<Tag, "id" | "name" | "description">) {
-  return db.tag.update({
-    where: {
-      id,
-    },
-    data: {
-      name,
-      description,
-    },
-  });
+  try {
+    const tag = await db.tag.update({
+      where: {
+        id,
+      },
+      data: {
+        name,
+        description,
+      },
+    });
+    return { tag, error: null };
+  } catch (cause: any) {
+    if (cause?.code && cause.code === "P2002") {
+      return {
+        tag: null,
+        error: {
+          message: `Tag name is already taken. Please choose a different name.`,
+        },
+      };
+    } else {
+      return {
+        tag: null,
+        error: {
+          message: "Something went wrong. Please try again later.",
+        },
+      };
+    }
+  }
 }
