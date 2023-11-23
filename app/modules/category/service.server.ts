@@ -1,6 +1,7 @@
 import type { Category, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database";
 import { getRandomColor } from "~/utils";
+import { handleUniqueConstraintError } from "~/utils/error";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function createCategory({
@@ -32,21 +33,7 @@ export async function createCategory({
     });
     return { category, error: null };
   } catch (cause: any) {
-    if (cause?.code && cause.code === "P2002") {
-      return {
-        category: null,
-        error: {
-          message: `Category name is already taken. Please choose a different name.`,
-        },
-      };
-    } else {
-      return {
-        category: null,
-        error: {
-          message: "Something went wrong. Please try again later.",
-        },
-      };
-    }
+    return handleUniqueConstraintError(cause, "Category");
   }
 }
 
@@ -194,20 +181,6 @@ export async function updateCategory({
     });
     return { category, error: null };
   } catch (cause: any) {
-    if (cause?.code && cause.code === "P2002") {
-      return {
-        category: null,
-        error: {
-          message: `Category name is already taken. Please choose a different name.`,
-        },
-      };
-    } else {
-      return {
-        category: null,
-        error: {
-          message: "Something went wrong. Please try again later.",
-        },
-      };
-    }
+    return handleUniqueConstraintError(cause, "Category");
   }
 }

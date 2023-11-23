@@ -6,6 +6,7 @@ import type {
   User,
 } from "@prisma/client";
 import { db } from "~/database";
+import { handleUniqueConstraintError } from "~/utils/error";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function getTags({
@@ -89,21 +90,7 @@ export async function createTag({
     });
     return { tag, error: null };
   } catch (cause: any) {
-    if (cause?.code && cause.code === "P2002") {
-      return {
-        tag: null,
-        error: {
-          message: `Tag name is already taken. Please choose a different name.`,
-        },
-      };
-    } else {
-      return {
-        tag: null,
-        error: {
-          message: "Something went wrong. Please try again later.",
-        },
-      };
-    }
+    return handleUniqueConstraintError(cause, "Tag");
   }
 }
 
@@ -199,20 +186,6 @@ export async function updateTag({
     });
     return { tag, error: null };
   } catch (cause: any) {
-    if (cause?.code && cause.code === "P2002") {
-      return {
-        tag: null,
-        error: {
-          message: `Tag name is already taken. Please choose a different name.`,
-        },
-      };
-    } else {
-      return {
-        tag: null,
-        error: {
-          message: "Something went wrong. Please try again later.",
-        },
-      };
-    }
+    return handleUniqueConstraintError(cause, "Tag");
   }
 }

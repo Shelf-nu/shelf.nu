@@ -16,6 +16,7 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getTag, updateTag } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
@@ -58,7 +59,10 @@ export async function action({ request, params }: LoaderFunctionArgs) {
       {
         errors: result.error,
       },
-      { status: 400 }
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
     );
   }
 
@@ -72,7 +76,10 @@ export async function action({ request, params }: LoaderFunctionArgs) {
       {
         errors: rsp.error,
       },
-      { status: 400 }
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
     );
   }
 
@@ -84,9 +91,7 @@ export async function action({ request, params }: LoaderFunctionArgs) {
   });
 
   return redirect(`/tags`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+    headers: [setCookie(await commitAuthSession(request, { authSession }))],
   });
 }
 
