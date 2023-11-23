@@ -680,6 +680,8 @@ export async function duplicateAsset({
       tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
       valuation: asset.valuation,
     });
+    // @ts-ignore
+    // @TODO fix this. MIght need to modify how handling the error works
     const duplicatedAsset = rsp.asset as Asset;
 
     if (asset.mainImage) {

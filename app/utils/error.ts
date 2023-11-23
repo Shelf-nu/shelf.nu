@@ -62,14 +62,14 @@ export function isShelfStackError(cause: unknown): cause is ShelfStackError {
 export function handleUniqueConstraintError(cause: any, modelName: string) {
   if (cause?.code && cause.code === "P2002") {
     return {
-      asset: null,
+      item: null,
       error: {
         message: `${modelName} name is already taken. Please choose a different name.`,
       },
     };
   } else {
     return {
-      asset: null,
+      item: null,
       error: {
         message: "Something went wrong. Please try again later.",
       },

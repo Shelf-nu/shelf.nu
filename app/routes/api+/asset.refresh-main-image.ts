@@ -34,6 +34,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     mainImageExpiration: oneDayFromNow(),
     userId,
   });
+  // @ts-ignore
+  // @TODO fix this. MIght need to modify how handling the error works
   const { asset } = rsp;
   return json({ asset, error: "" });
 };
