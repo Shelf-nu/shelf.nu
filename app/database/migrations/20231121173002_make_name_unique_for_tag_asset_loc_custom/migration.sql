@@ -1,16 +1,3 @@
--- deduplicate asset title
-WITH Duplicates AS (
-  SELECT "id", "title", "organizationId", 
-         ROW_NUMBER() OVER (PARTITION BY LOWER("title"), "organizationId" ORDER BY "createdAt") AS duplicate_count
-  FROM "Asset"
-  WHERE "title" IS NOT NULL
-)
-
-UPDATE "Asset" e
-SET "title" = e."title" || '-' || subquery."duplicate_count"
-FROM Duplicates subquery
-WHERE e."id" = subquery."id" AND subquery."duplicate_count" > 1;
-
 -- deduplicate CustomField title
 WITH Duplicates AS (
   SELECT "id", "name", "organizationId", 
@@ -50,10 +37,6 @@ UPDATE "Tag" e
 SET "name" = e."name" || '-' || subquery."duplicate_count"
 FROM Duplicates subquery
 WHERE e."id" = subquery."id" AND subquery."duplicate_count" > 1;
-
-
--- CreateIndex
-CREATE UNIQUE INDEX "Asset_title_organizationId_key" ON "Asset"(LOWER("title"), "organizationId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "CustomField_name_organizationId_key" ON "CustomField"(LOWER("name"), "organizationId");

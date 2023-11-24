@@ -20,16 +20,3 @@ ALTER TABLE "_OrganizationToTeamMember" DROP CONSTRAINT "_OrganizationToTeamMemb
 
 -- DropTable
 DROP TABLE "_OrganizationToTeamMember";
-
--- deduplicate names title
-WITH Duplicates AS (
-  SELECT "id", "name", "organizationId", 
-         ROW_NUMBER() OVER (PARTITION BY LOWER("name"), "organizationId" ORDER BY "createdAt") AS duplicate_count
-  FROM "TeamMember"
-  WHERE "name" IS NOT NULL
-)
-
-UPDATE "TeamMember" e
-SET "name" = e."name" || '-' || subquery."duplicate_count"
-FROM Duplicates subquery
-WHERE e."id" = subquery."id" AND subquery."duplicate_count" > 1;
