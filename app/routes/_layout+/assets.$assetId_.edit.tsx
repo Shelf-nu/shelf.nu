@@ -28,6 +28,7 @@ import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
@@ -116,9 +117,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -141,7 +140,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
 
-  await updateAsset({
+  const rsp = await updateAsset({
     id,
     title,
     description,
@@ -154,6 +153,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
     valuation,
   });
 
+  if (rsp.error) {
+    return json(
+      {
+        errors: {
+          title: rsp.error,
+        },
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
+
   sendNotification({
     title: "Asset updated",
     message: "Your asset has been updated successfully",
@@ -162,9 +175,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   });
 
   return redirect(`/assets/${id}`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+    headers: [setCookie(await commitAuthSession(request, { authSession }))],
   });
 }
 

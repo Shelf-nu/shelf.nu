@@ -76,7 +76,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const { name, helpText, active, required, options } = result.data;
 
-  await updateCustomField({
+  const rsp = await updateCustomField({
     id,
     name,
     helpText,
@@ -84,6 +84,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
     required,
     options,
   });
+
+  if (rsp.error) {
+    return json(
+      {
+        errors: { name: rsp.error },
+        success: false,
+      },
+      {
+        status: 400,
+        headers: {
+          "Set-Cookie": await commitAuthSession(request, { authSession }),
+        },
+      }
+    );
+  }
 
   sendNotification({
     title: "Custom field updated",
@@ -93,7 +108,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   });
 
   return json(
-    { success: true },
+    { success: true, errors: null },
     {
       headers: {
         "Set-Cookie": await commitAuthSession(request, { authSession }),

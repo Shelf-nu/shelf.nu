@@ -27,7 +27,7 @@ import {
   buildCustomFieldValue,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfStackError, handleUniqueConstraintError } from "~/utils/error";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type {
   CreateAssetFromBackupImportPayload,
@@ -243,283 +243,294 @@ export async function createAsset({
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
   organizationId: Organization["id"];
 }) {
-  /** User connction data */
-  const user = {
-    connect: {
-      id: userId,
-    },
-  };
+  try {
+    /** User connction data */
+    const user = {
+      connect: {
+        id: userId,
+      },
+    };
 
-  const organization = {
-    connect: {
-      id: organizationId as string,
-    },
-  };
+    const organization = {
+      connect: {
+        id: organizationId as string,
+      },
+    };
 
-  /**
-   * If a qr code is passsed, link to that QR
-   * Otherwise, create a new one
-   * Here we also need to double check:
-   * 1. If the qr code exists
-   * 2. If the qr code belongs to the current organization
-   * 3. If the qr code is not linked to an asset
-   */
-  const qr = qrId ? await getQr(qrId) : null;
-  const qrCodes =
-    qr && qr.organizationId === organizationId && qr.assetId === null
-      ? { connect: { id: qrId } }
-      : {
-          create: [
-            {
-              version: 0,
-              errorCorrection: ErrorCorrection["L"],
-              user,
-              organization,
-            },
-          ],
-        };
+    /**
+     * If a qr code is passsed, link to that QR
+     * Otherwise, create a new one
+     * Here we also need to double check:
+     * 1. If the qr code exists
+     * 2. If the qr code belongs to the current organization
+     * 3. If the qr code is not linked to an asset
+     */
+    const qr = qrId ? await getQr(qrId) : null;
+    const qrCodes =
+      qr && qr.organizationId === organizationId && qr.assetId === null
+        ? { connect: { id: qrId } }
+        : {
+            create: [
+              {
+                version: 0,
+                errorCorrection: ErrorCorrection["L"],
+                user,
+                organization,
+              },
+            ],
+          };
 
-  /** Data object we send via prisma to create Asset */
-  const data = {
-    title,
-    description,
-    user,
-    qrCodes,
-    valuation,
-    organization,
-  };
+    /** Data object we send via prisma to create Asset */
+    const data = {
+      title,
+      description,
+      user,
+      qrCodes,
+      valuation,
+      organization,
+    };
 
-  /** If a categoryId is passed, link the category to the asset. */
-  if (categoryId && categoryId !== "uncategorized") {
-    Object.assign(data, {
-      category: {
-        connect: {
-          id: categoryId,
+    /** If a categoryId is passed, link the category to the asset. */
+    if (categoryId && categoryId !== "uncategorized") {
+      Object.assign(data, {
+        category: {
+          connect: {
+            id: categoryId,
+          },
         },
-      },
-    });
-  }
+      });
+    }
 
-  /** If a locationId is passed, link the location to the asset. */
-  if (locationId) {
-    Object.assign(data, {
-      location: {
-        connect: {
-          id: locationId,
+    /** If a locationId is passed, link the location to the asset. */
+    if (locationId) {
+      Object.assign(data, {
+        location: {
+          connect: {
+            id: locationId,
+          },
         },
-      },
-    });
-  }
+      });
+    }
 
-  /** If a tags is passed, link the category to the asset. */
-  if (tags && tags?.set?.length > 0) {
-    Object.assign(data, {
-      tags: {
-        connect: tags?.set,
-      },
-    });
-  }
+    /** If a tags is passed, link the category to the asset. */
+    if (tags && tags?.set?.length > 0) {
+      Object.assign(data, {
+        tags: {
+          connect: tags?.set,
+        },
+      });
+    }
 
-  /** If a custodian is passed, create a Custody relation with that asset
-   * `custodian` represents the id of a {@link TeamMember}. */
-  if (custodian) {
-    Object.assign(data, {
-      custody: {
-        create: {
-          custodian: {
-            connect: {
-              id: custodian,
+    /** If a custodian is passed, create a Custody relation with that asset
+     * `custodian` represents the id of a {@link TeamMember}. */
+    if (custodian) {
+      Object.assign(data, {
+        custody: {
+          create: {
+            custodian: {
+              connect: {
+                id: custodian,
+              },
             },
           },
         },
-      },
-      status: AssetStatus.IN_CUSTODY,
-    });
-  }
+        status: AssetStatus.IN_CUSTODY,
+      });
+    }
 
-  /** If custom fields are passed, create them */
-  if (customFieldsValues && customFieldsValues.length > 0) {
-    Object.assign(data, {
-      /** Custom fields here refers to the values, check the Schema for more info */
-      customFields: {
-        create: customFieldsValues?.map(
-          ({ id, value }) =>
-            id &&
-            value && {
-              value,
-              customFieldId: id,
-            }
-        ),
+    /** If custom fields are passed, create them */
+    if (customFieldsValues && customFieldsValues.length > 0) {
+      Object.assign(data, {
+        /** Custom fields here refers to the values, check the Schema for more info */
+        customFields: {
+          create: customFieldsValues?.map(
+            ({ id, value }) =>
+              id &&
+              value && {
+                value,
+                customFieldId: id,
+              }
+          ),
+        },
+      });
+    }
+
+    const asset = await db.asset.create({
+      data,
+      include: {
+        location: true,
+        user: true,
+        custody: true,
       },
     });
+    return { asset, error: null };
+  } catch (cause: any) {
+    return handleUniqueConstraintError(cause, "Asset");
   }
-
-  return db.asset.create({
-    data,
-    include: {
-      location: true,
-      user: true,
-      custody: true,
-    },
-  });
 }
 
 export async function updateAsset(payload: UpdateAssetPayload) {
-  const {
-    title,
-    description,
-    mainImage,
-    mainImageExpiration,
-    categoryId,
-    tags,
-    id,
-    newLocationId,
-    currentLocationId,
-    userId,
-    valuation,
-    customFieldsValues: customFieldsValuesFromForm,
-  } = payload;
-  const isChangingLocation = newLocationId !== currentLocationId;
-
-  const data = {
-    title,
-    description,
-    valuation,
-    mainImage,
-    mainImageExpiration,
-  };
-
-  /** If uncategorized is passed, disconnect the category */
-  if (categoryId === "uncategorized") {
-    Object.assign(data, {
-      category: {
-        disconnect: true,
-      },
-    });
-  }
-
-  // If category id is passed and is differenent than uncategorized, connect the category
-  if (categoryId && categoryId !== "uncategorized") {
-    Object.assign(data, {
-      category: {
-        connect: {
-          id: categoryId,
-        },
-      },
-    });
-  }
-
-  /** Connect the new location id */
-  if (newLocationId) {
-    Object.assign(data, {
-      location: {
-        connect: {
-          id: newLocationId,
-        },
-      },
-    });
-  }
-
-  /** disconnecting location relation if a user clears locations */
-  if (currentLocationId && !newLocationId) {
-    Object.assign(data, {
-      location: {
-        disconnect: true,
-      },
-    });
-  }
-
-  /** If a tags is passed, link the category to the asset. */
-  if (tags && tags?.set) {
-    Object.assign(data, {
+  try {
+    const {
+      title,
+      description,
+      mainImage,
+      mainImageExpiration,
+      categoryId,
       tags,
-    });
-  }
+      id,
+      newLocationId,
+      currentLocationId,
+      userId,
+      valuation,
+      customFieldsValues: customFieldsValuesFromForm,
+    } = payload;
+    const isChangingLocation = newLocationId !== currentLocationId;
 
-  /** If custom fields are passed, create/update them */
-  if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
-    /** We get the current values. We need this in order to co-relate the correct fields to update as we dont have the id's of the values */
-    const currentCustomFieldsValues = await db.assetCustomFieldValue.findMany({
-      where: {
-        assetId: id,
-      },
-      select: {
-        id: true,
-        customFieldId: true,
-      },
-    });
+    const data = {
+      title,
+      description,
+      valuation,
+      mainImage,
+      mainImageExpiration,
+    };
 
-    Object.assign(data, {
-      customFields: {
-        upsert: customFieldsValuesFromForm?.map(({ id, value }) => ({
-          where: {
-            id:
-              currentCustomFieldsValues.find(
-                (ccfv) => ccfv.customFieldId === id
-              )?.id || "",
+    /** If uncategorized is passed, disconnect the category */
+    if (categoryId === "uncategorized") {
+      Object.assign(data, {
+        category: {
+          disconnect: true,
+        },
+      });
+    }
+
+    // If category id is passed and is differenent than uncategorized, connect the category
+    if (categoryId && categoryId !== "uncategorized") {
+      Object.assign(data, {
+        category: {
+          connect: {
+            id: categoryId,
           },
-          update: { value },
-          create: {
-            value,
-            customFieldId: id,
-          },
-        })),
-      },
-    });
-  }
+        },
+      });
+    }
 
-  const asset = await db.asset.update({
-    where: { id },
-    data,
-    include: { location: true, tags: true },
-  });
-
-  /** If the location id was passed, we create a note for the move */
-  if (isChangingLocation) {
-    /**
-     * Create a note for the move
-     * Here we actually need to query the locations so we can print their names
-     * */
-
-    const user = await db.user.findFirst({
-      where: {
-        id: userId,
-      },
-      select: {
-        firstName: true,
-        lastName: true,
-      },
-    });
-
-    const currentLocation = currentLocationId
-      ? await db.location.findFirst({
-          where: {
-            id: currentLocationId,
-          },
-        })
-      : null;
-
-    const newLocation = newLocationId
-      ? await db.location.findFirst({
-          where: {
+    /** Connect the new location id */
+    if (newLocationId) {
+      Object.assign(data, {
+        location: {
+          connect: {
             id: newLocationId,
           },
-        })
-      : null;
+        },
+      });
+    }
 
-    await createLocationChangeNote({
-      currentLocation,
-      newLocation,
-      firstName: user?.firstName || "",
-      lastName: user?.lastName || "",
-      assetName: asset?.title,
-      assetId: asset.id,
-      userId,
-      isRemoving: newLocationId === null,
+    /** disconnecting location relation if a user clears locations */
+    if (currentLocationId && !newLocationId) {
+      Object.assign(data, {
+        location: {
+          disconnect: true,
+        },
+      });
+    }
+
+    /** If a tags is passed, link the category to the asset. */
+    if (tags && tags?.set) {
+      Object.assign(data, {
+        tags,
+      });
+    }
+
+    /** If custom fields are passed, create/update them */
+    if (customFieldsValuesFromForm && customFieldsValuesFromForm.length > 0) {
+      /** We get the current values. We need this in order to co-relate the correct fields to update as we dont have the id's of the values */
+      const currentCustomFieldsValues = await db.assetCustomFieldValue.findMany(
+        {
+          where: {
+            assetId: id,
+          },
+          select: {
+            id: true,
+            customFieldId: true,
+          },
+        }
+      );
+
+      Object.assign(data, {
+        customFields: {
+          upsert: customFieldsValuesFromForm?.map(({ id, value }) => ({
+            where: {
+              id:
+                currentCustomFieldsValues.find(
+                  (ccfv) => ccfv.customFieldId === id
+                )?.id || "",
+            },
+            update: { value },
+            create: {
+              value,
+              customFieldId: id,
+            },
+          })),
+        },
+      });
+    }
+
+    const asset = await db.asset.update({
+      where: { id },
+      data,
+      include: { location: true, tags: true },
     });
-  }
 
-  return asset;
+    /** If the location id was passed, we create a note for the move */
+    if (isChangingLocation) {
+      /**
+       * Create a note for the move
+       * Here we actually need to query the locations so we can print their names
+       * */
+
+      const user = await db.user.findFirst({
+        where: {
+          id: userId,
+        },
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      });
+
+      const currentLocation = currentLocationId
+        ? await db.location.findFirst({
+            where: {
+              id: currentLocationId,
+            },
+          })
+        : null;
+
+      const newLocation = newLocationId
+        ? await db.location.findFirst({
+            where: {
+              id: newLocationId,
+            },
+          })
+        : null;
+
+      await createLocationChangeNote({
+        currentLocation,
+        newLocation,
+        firstName: user?.firstName || "",
+        lastName: user?.lastName || "",
+        assetName: asset?.title,
+        assetId: asset.id,
+        userId,
+        isRemoving: newLocationId === null,
+      });
+    }
+
+    return { asset, error: null };
+  } catch (cause: any) {
+    return handleUniqueConstraintError(cause, "Asset");
+  }
 }
 
 export async function deleteAsset({
@@ -656,7 +667,7 @@ export async function duplicateAsset({
   const duplicatedAssets = [];
 
   for (const i of [...Array(amountOfDuplicates)].keys()) {
-    const duplicatedAsset = await createAsset({
+    const rsp = await createAsset({
       title: `${asset.title} (copy ${
         amountOfDuplicates > 1 ? i : ""
       } ${Date.now()})`,
@@ -669,6 +680,9 @@ export async function duplicateAsset({
       tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
       valuation: asset.valuation,
     });
+    // @ts-ignore
+    // @TODO fix this. MIght need to modify how handling the error works
+    const duplicatedAsset = rsp.asset as Asset;
 
     if (asset.mainImage) {
       const imagePath = await uploadDuplicateAssetMainImage(
@@ -1042,11 +1056,7 @@ export const createAssetsFromBackupImport = async ({
       const existingCustodian = await db.teamMember.findFirst({
         where: {
           deletedAt: null,
-          organizations: {
-            some: {
-              id: organizationId,
-            },
-          },
+          organizationId,
           name: custodian.name,
         },
       });
@@ -1055,11 +1065,7 @@ export const createAssetsFromBackupImport = async ({
         const newCustodian = await db.teamMember.create({
           data: {
             name: custodian.name,
-            organizations: {
-              connect: {
-                id: organizationId,
-              },
-            },
+            organizationId,
             createdAt: new Date(custodian.createdAt),
             updatedAt: new Date(custodian.updatedAt),
           },
