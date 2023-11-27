@@ -8,7 +8,7 @@ import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { BookingForm, BookingFormSchema } from "~/components/booking";
+import { BookingForm, NewBookingFormSchema } from "~/components/booking";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
@@ -51,7 +51,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const id = getRequiredParam(params, "bookingId");
   const formData = await request.formData();
-  const result = await BookingFormSchema.safeParseAsync(parseFormAny(formData));
+  const result = await NewBookingFormSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
 
   if (!result.success) {
     return json(

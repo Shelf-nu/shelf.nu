@@ -5,7 +5,6 @@ import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
-import { Filters } from "~/components/list/filters";
 import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";

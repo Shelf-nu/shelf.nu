@@ -87,6 +87,8 @@ export const AssetForm = ({
 
   const { currency } = useLoaderData<typeof loader>();
 
+  console.log(FormSchema);
+
   return (
     <Form
       ref={zo.ref}

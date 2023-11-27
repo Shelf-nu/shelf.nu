@@ -7,25 +7,83 @@ import { json } from "@remix-run/node";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { BookingForm, BookingFormSchema } from "~/components/booking";
+import { BookingForm, NewBookingFormSchema } from "~/components/booking";
+import ContextualModal from "~/components/layout/contextual-modal";
 
 import Header from "~/components/layout/header";
+import { db } from "~/database";
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost } from "~/utils";
+import {
+  assertIsPost,
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 const title = "New Booking";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
 
   const header = {
     title,
   };
 
-  return json({ header });
+  const teamMembers = await db.teamMember.findMany({
+    where: {
+      deletedAt: null,
+      organizations: {
+        some: {
+          id: organizationId,
+        },
+      },
+    },
+    include: {
+      user: true,
+    },
+    orderBy: {
+      userId: "asc",
+    },
+  });
+  const booking = { status: "DRAFT", assets: [] };
+
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPageParam } = getParamsValues(searchParams);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+  const modelName = {
+    singular: "asset",
+    plural: "assets",
+  };
+  const totalItems = 0;
+  const totalPages = 1 / perPage;
+  const { prev, next } = generatePageMeta(request);
+
+  return json(
+    {
+      header,
+      booking,
+      modelName,
+      items: booking.assets,
+      page,
+      totalItems,
+      perPage,
+      totalPages,
+      next,
+      prev,
+      teamMembers,
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -42,7 +100,9 @@ export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const formData = await request.formData();
-  const result = await BookingFormSchema.safeParseAsync(parseFormAny(formData));
+  const result = await NewBookingFormSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
 
   if (!result.success) {
     return json(
@@ -93,6 +153,7 @@ export default function NewBookingPage() {
       <Header title={title ? title : "Untitled booking"} />
       <div>
         <BookingForm />
+        <ContextualModal />
       </div>
     </>
   );
