@@ -10,6 +10,7 @@ import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { handleUniqueConstraintError } from "~/utils/error";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await requireAuthSession(request);
@@ -25,28 +26,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { userId } = authSession;
   const formData = await request.formData();
 
-  const teamMember = await db.teamMember.create({
-    data: {
-      name: formData.get("name") as string,
-      organizations: {
-        connect: {
-          id: organizationId,
-        },
+  try {
+    const teamMember = await db.teamMember.create({
+      data: {
+        name: formData.get("name") as string,
+        organizationId,
       },
-    },
-  });
+    });
 
-  if (!teamMember)
-    return json({ error: "Something went wrong. Please try again." });
+    if (!teamMember)
+      return json({
+        error: {
+          general: "Something went wrong. Please try again.",
+        },
+      });
 
-  sendNotification({
-    title: "Successfully added a new team member",
-    message: "You are now able to give this team member custody over assets.",
-    icon: { name: "success", variant: "success" },
-    senderId: userId,
-  });
+    sendNotification({
+      title: "Successfully added a new team member",
+      message: "You are now able to give this team member custody over assets.",
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
 
-  return redirect(`/settings/team`);
+    return redirect(`/settings/team`);
+  } catch (cause) {
+    const rsp = handleUniqueConstraintError(cause, "Team Member");
+
+    return json(
+      { error: { name: rsp.error.message } },
+      {
+        status: 400,
+      }
+    );
+  }
 };
 
 export function links() {
@@ -54,7 +66,9 @@ export function links() {
 }
 
 export default function AddMember() {
-  const actionData = useActionData<typeof action>();
+  const actionData = useActionData<{
+    error?: { [key: string]: string };
+  }>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   return (
@@ -77,6 +91,7 @@ export default function AddMember() {
             label="Name"
             className="mb-8"
             placeholder="Enter team member’s name"
+            error={actionData?.error?.name}
             required
             autoFocus
           />
@@ -89,8 +104,10 @@ export default function AddMember() {
             Add team member
           </Button>
         </Form>
-        {actionData?.error && (
-          <div className="text-sm text-error-500">{actionData.error}</div>
+        {actionData?.error?.general && (
+          <div className="text-sm text-error-500">
+            {actionData.error.general}
+          </div>
         )}
       </div>
     </>

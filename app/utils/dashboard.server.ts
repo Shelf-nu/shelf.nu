@@ -378,21 +378,13 @@ export async function checklistOptions({
 
     db.teamMember.count({
       where: {
-        organizations: {
-          some: {
-            id: organizationId,
-          },
-        },
+        organizationId,
       },
     }),
 
     db.teamMember.count({
       where: {
-        organizations: {
-          some: {
-            id: organizationId,
-          },
-        },
+        organizationId,
         custodies: {
           some: {},
         },

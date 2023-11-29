@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CustomFieldType, type CustomField } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -84,7 +84,13 @@ export const CustomFieldForm = ({
 
   // keeping text field type by default selected
   const organizationId = useOrganizationId();
-
+  const actionData = useActionData<{
+    errors?: {
+      name?: {
+        message: string;
+      };
+    };
+  }>();
   return (
     <Form
       ref={zo.ref}
@@ -102,7 +108,7 @@ export const CustomFieldForm = ({
           hideLabel
           name={zo.fields.name()}
           disabled={disabled}
-          error={zo.errors.name()?.message}
+          error={actionData?.errors?.name?.message || zo.errors.name()?.message}
           autoFocus
           onChange={updateTitle}
           className="w-full"

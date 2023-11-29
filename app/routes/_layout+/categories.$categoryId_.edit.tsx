@@ -1,6 +1,11 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import { ColorInput } from "~/components/forms/color-input";
@@ -12,6 +17,7 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getCategory, updateCategory } from "~/modules/category";
 import { assertIsPost, isFormProcessing, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
@@ -56,14 +62,29 @@ export async function action({ request, params }: LoaderFunctionArgs) {
       {
         errors: result.error,
       },
-      { status: 400 }
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
     );
   }
 
-  await updateCategory({
+  const rsp = await updateCategory({
     ...result.data,
     id,
   });
+  // Handle response error when creating. Mostly due to duplicate name
+  if (rsp?.error) {
+    return json(
+      {
+        errors: rsp.error,
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
 
   sendNotification({
     title: "Category Updated",
@@ -73,9 +94,7 @@ export async function action({ request, params }: LoaderFunctionArgs) {
   });
 
   return redirect(`/categories`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+    headers: [setCookie(await commitAuthSession(request, { authSession }))],
   });
 }
 
@@ -84,61 +103,69 @@ export default function EditCategory() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const { colorFromServer, category } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
 
   return category && colorFromServer ? (
     <>
       <Form
         method="post"
-        className="block rounded-[12px] border border-gray-200 bg-white px-6 py-5 lg:flex lg:items-end lg:justify-between lg:gap-3"
+        className="block rounded-[12px] border border-gray-200 bg-white px-6 py-5"
         ref={zo.ref}
       >
-        <div className="gap-3 lg:flex lg:items-end">
-          <Input
-            label="Name"
-            placeholder="Category name"
-            className="mb-4 lg:mb-0 lg:max-w-[180px]"
-            name={zo.fields.name()}
-            disabled={disabled}
-            error={zo.errors.name()?.message}
-            hideErrorText
-            autoFocus
-            required={zodFieldIsRequired(UpdateCategoryFormSchema.shape.name)}
-            defaultValue={category.name}
-          />
-          <Input
-            label="Description"
-            placeholder="Description (optional)"
-            name={zo.fields.description()}
-            disabled={disabled}
-            data-test-id="categoryDescription"
-            className="mb-4 lg:mb-0"
-            required={zodFieldIsRequired(
-              UpdateCategoryFormSchema.shape.description
-            )}
-            defaultValue={category.description || undefined}
-          />
-          <div className="mb-6 lg:mb-0">
-            <ColorInput
-              name={zo.fields.color()}
+        <div className=" lg:flex lg:items-end lg:justify-between lg:gap-3">
+          <div className="gap-3 lg:flex lg:items-end">
+            <Input
+              label="Name"
+              placeholder="Category name"
+              className="mb-4 lg:mb-0 lg:max-w-[180px]"
+              name={zo.fields.name()}
               disabled={disabled}
-              error={zo.errors.color()?.message}
+              error={zo.errors.name()?.message}
               hideErrorText
-              colorFromServer={colorFromServer}
-              required={zodFieldIsRequired(
-                UpdateCategoryFormSchema.shape.color
-              )}
+              autoFocus
+              required={zodFieldIsRequired(UpdateCategoryFormSchema.shape.name)}
+              defaultValue={category.name}
             />
+            <Input
+              label="Description"
+              placeholder="Description (optional)"
+              name={zo.fields.description()}
+              disabled={disabled}
+              data-test-id="categoryDescription"
+              className="mb-4 lg:mb-0"
+              required={zodFieldIsRequired(
+                UpdateCategoryFormSchema.shape.description
+              )}
+              defaultValue={category.description || undefined}
+            />
+            <div className="mb-6 lg:mb-0">
+              <ColorInput
+                name={zo.fields.color()}
+                disabled={disabled}
+                error={zo.errors.color()?.message}
+                hideErrorText
+                colorFromServer={colorFromServer}
+                required={zodFieldIsRequired(
+                  UpdateCategoryFormSchema.shape.color
+                )}
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-1">
+            <Button variant="secondary" to="/categories" size="sm">
+              Cancel
+            </Button>
+            <Button type="submit" size="sm">
+              Update
+            </Button>
           </div>
         </div>
-
-        <div className="flex gap-1">
-          <Button variant="secondary" to="/categories" size="sm">
-            Cancel
-          </Button>
-          <Button type="submit" size="sm">
-            Update
-          </Button>
-        </div>
+        {actionData?.errors ? (
+          <div className="mt-3 text-sm text-error-500">
+            {actionData?.errors?.message}
+          </div>
+        ) : null}
       </Form>
     </>
   ) : null;

@@ -21,6 +21,7 @@ import { getLocation, updateLocation } from "~/modules/location";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { MAX_SIZE } from "./locations.new";
@@ -90,7 +91,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const file = formDataFile.get("image") as File | null;
   invariant(file instanceof File, "file not the right type");
 
-  await updateLocation({
+  const rsp = await updateLocation({
     id,
     userId: authSession.userId,
     name,
@@ -99,6 +100,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
     image: file || null,
     organizationId,
   });
+  // Handle unique constraint error for name
+  if (rsp.error) {
+    return json(
+      {
+        errors: {
+          name: rsp.error,
+        },
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
 
   sendNotification({
     title: "Location updated",

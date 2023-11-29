@@ -1,6 +1,11 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
@@ -11,6 +16,7 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getTag, updateTag } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
@@ -53,14 +59,29 @@ export async function action({ request, params }: LoaderFunctionArgs) {
       {
         errors: result.error,
       },
-      { status: 400 }
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
     );
   }
 
-  await updateTag({
+  const rsp = await updateTag({
     ...result.data,
     id,
   });
+
+  if (rsp?.error) {
+    return json(
+      {
+        errors: rsp.error,
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
 
   sendNotification({
     title: "Tag Updated",
@@ -70,9 +91,7 @@ export async function action({ request, params }: LoaderFunctionArgs) {
   });
 
   return redirect(`/tags`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+    headers: [setCookie(await commitAuthSession(request, { authSession }))],
   });
 }
 
@@ -81,46 +100,58 @@ export default function EditTag() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const { tag } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+
   return tag ? (
     <>
       <Form
         method="post"
-        className="block rounded-[12px] border border-gray-200 bg-white px-6 py-5 lg:flex lg:items-end lg:justify-between lg:gap-3"
+        className="block rounded-[12px] border border-gray-200 bg-white px-6 py-5 "
         ref={zo.ref}
       >
-        <div className="gap-3 lg:flex lg:items-end">
-          <Input
-            label="Name"
-            placeholder="Tag name"
-            className="mb-4 lg:mb-0 lg:max-w-[180px]"
-            name={zo.fields.name()}
-            disabled={disabled}
-            error={zo.errors.name()?.message}
-            hideErrorText
-            autoFocus
-            required={zodFieldIsRequired(UpdateTagFormSchema.shape.name)}
-            defaultValue={tag.name}
-          />
-          <Input
-            label="Description"
-            placeholder="Description (optional)"
-            name={zo.fields.description()}
-            disabled={disabled}
-            data-test-id="tagDescription"
-            className="mb-4 lg:mb-0"
-            required={zodFieldIsRequired(UpdateTagFormSchema.shape.description)}
-            defaultValue={tag.description || undefined}
-          />
+        <div className="lg:flex lg:items-end lg:justify-between lg:gap-3">
+          <div className="gap-3 lg:flex lg:items-end">
+            <Input
+              label="Name"
+              placeholder="Tag name"
+              className="mb-4 lg:mb-0 lg:max-w-[180px]"
+              name={zo.fields.name()}
+              disabled={disabled}
+              error={zo.errors.name()?.message}
+              hideErrorText
+              autoFocus
+              required={zodFieldIsRequired(UpdateTagFormSchema.shape.name)}
+              defaultValue={tag.name}
+            />
+            <Input
+              label="Description"
+              placeholder="Description (optional)"
+              name={zo.fields.description()}
+              disabled={disabled}
+              data-test-id="tagDescription"
+              className="mb-4 lg:mb-0"
+              required={zodFieldIsRequired(
+                UpdateTagFormSchema.shape.description
+              )}
+              defaultValue={tag.description || undefined}
+            />
+          </div>
+
+          <div className="flex gap-1">
+            <Button variant="secondary" to="/tags" size="sm">
+              Cancel
+            </Button>
+            <Button type="submit" size="sm">
+              Update
+            </Button>
+          </div>
         </div>
 
-        <div className="flex gap-1">
-          <Button variant="secondary" to="/tags" size="sm">
-            Cancel
-          </Button>
-          <Button type="submit" size="sm">
-            Update
-          </Button>
-        </div>
+        {actionData?.errors ? (
+          <div className="mt-3 text-sm text-error-500">
+            {actionData?.errors?.message}
+          </div>
+        ) : null}
       </Form>
     </>
   ) : null;
