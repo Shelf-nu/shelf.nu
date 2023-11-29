@@ -10,6 +10,7 @@ import { requireAuthSession } from "~/modules/auth";
 import { cropImage, extractImageNameFromSupabaseUrl } from ".";
 import { SUPABASE_URL } from "./env";
 import { ShelfStackError } from "./error";
+import { getFileArrayBuffer } from "./getFileArrayBuffer";
 
 export function getPublicFileURL({
   filename,
@@ -54,18 +55,25 @@ export async function createSignedUrl({
 
 async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
-  { filename, contentType, bucketName, resizeOptions }: UploadOptions
+  { filename, contentType, bucketName, resizeOptions, updateExisting }: UploadOptions
 ) {
   try {
-    const file = await cropImage(fileData, resizeOptions);
-
-    const { data, error } = await getSupabaseAdmin()
+    let file = await getFileArrayBuffer(fileData) 
+    resizeOptions && cropImage(file, resizeOptions);
+    console.log(updateExisting)
+    const {data, error} = updateExisting ? await getSupabaseAdmin()
+    .storage.from(bucketName)
+    .update(filename, file, { contentType, upsert: true }) : 
+    await getSupabaseAdmin()
       .storage.from(bucketName)
       .upload(filename, file, { contentType, upsert: true });
 
+      console.log('upload data: ', data, 'error: ', error);
     if (error) {
       throw error;
     }
+
+
     return data.path;
   } catch (error) {
     /** We have to return null as thats what composeUploadHandlers expects
@@ -80,6 +88,7 @@ export interface UploadOptions {
   filename: string;
   contentType: string;
   resizeOptions?: ResizeOptions;
+  updateExisting?: boolean;
 }
 
 export async function parseFileFormData({
@@ -87,23 +96,28 @@ export async function parseFileFormData({
   newFileName,
   bucketName = "profile-pictures",
   resizeOptions,
+  updateExisting = false
 }: {
   request: Request;
   newFileName: string;
   bucketName?: string;
   resizeOptions?: ResizeOptions;
+  updateExisting?: boolean;
 }) {
   await requireAuthSession(request);
 
   const uploadHandler = unstable_composeUploadHandlers(
     async ({ contentType, data, filename }) => {
-      if (!contentType?.includes("image")) return undefined;
-      const fileExtension = filename?.split(".").pop();
+      if (!contentType) return undefined;
+      if (contentType?.includes("image") && contentType.includes("pdf")) return undefined;
+      const fileExtension = contentType.includes('pdf') ? 'pdf' : filename?.split(".").pop();
+      console.log('data: ', data)
       const uploadedFilePath = await uploadFile(data, {
         filename: `${newFileName}.${fileExtension}`,
         contentType,
         bucketName,
         resizeOptions,
+        updateExisting
       });
       return uploadedFilePath;
     }

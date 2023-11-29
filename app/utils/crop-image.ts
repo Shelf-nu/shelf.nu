@@ -1,18 +1,14 @@
 import type { ResizeOptions } from "sharp";
 
 export const cropImage = async (
-  data: AsyncIterable<Uint8Array>,
+  data: ArrayBuffer,
   options?: ResizeOptions
 ) => {
-  const chunks = [];
-  for await (const chunk of data) {
-    chunks.push(chunk);
-  }
 
   // @ts-ignore
   const sharp = (await import("sharp")).default;
 
-  return sharp(Buffer.concat(chunks))
+  return sharp(data)
     .rotate()
     .resize(
       options || {

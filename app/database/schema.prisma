@@ -46,6 +46,7 @@ model User {
 
   // Relationships
   assets            Asset[]
+  templates         Template[]
   categories        Category[]
   notes             Note[]
   qrCodes           Qr[]
@@ -391,8 +392,33 @@ model TierLimit {
   canExportAssets  Boolean  @default(false)
   maxCustomFields  Int      @default(0)
   maxOrganizations Int      @default(1)
+  maxTemplates     Int      @default(5)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+}
+
+enum TemplateType {
+  CUSTODY
+  BOOKINGS
+}
+
+model Template {
+  id                String       @id @default(cuid())
+  name              String
+  description       String?
+  type              TemplateType @default(BOOKINGS)
+  signatureRequired Boolean      @default(false)
+  isDefault         Boolean      @default(false)
+  isActive          Boolean      @default(true)
+  pdfUrl            String?
+  pdfSize           Int?
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String?
 }
 
 model CustomField {
@@ -498,15 +524,14 @@ model Invite {
   updatedAt DateTime @updatedAt
 }
 
-
 model Announcement {
   id String @id @default(cuid())
-  
-  name   String
+
+  name    String
   content String
 
-  link String?
-  linkText String?
+  link      String?
+  linkText  String?
   published Boolean @default(false)
 
   // Datetime

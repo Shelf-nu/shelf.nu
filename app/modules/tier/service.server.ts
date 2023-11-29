@@ -88,6 +88,25 @@ export const assertUserCanCreateMoreCustomFields = async ({
   }
 };
 
+export const assertUserCanCreateMoreTemplates = async ({
+  userId,
+}: {
+  userId: User["id"];
+}) => {
+  /** Get the tier limit and check if they can export */
+  const tierLimit = await getUserTierLimit(userId);
+  const canCreateMore = canCreateMoreCustomFields({
+    tierLimit,
+    totalCustomFields: await db.template.count({
+      where: { userId },
+    }),
+  });
+
+  if (!canCreateMore) {
+    throw new Error("Your user cannot create more templates");
+  }
+}
+
 /**
  * This validates if more users can be invited to organization
  * It simply checks the organization type
