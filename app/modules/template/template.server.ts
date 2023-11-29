@@ -24,17 +24,17 @@ export async function createTemplate({
   };
 
   const template = await db.template.create({ data });
-  
+
   // Check whether there are templates of same type for the user
   const result = await db.template.findMany({
-      where: { type, userId },
+    where: { type, userId },
   });
   // If there is only one template, make it default
   if (result.length === 1) {
-      await db.template.update({
-          where: { id: result[0].id },
-          data: { isDefault: true },
-      });
+    await db.template.update({
+      where: { id: result[0].id },
+      data: { isDefault: true },
+    });
   }
 
   template.isDefault = result.length > 0 ? false : true;
@@ -48,10 +48,7 @@ export async function updateTemplate({
   description,
   signatureRequired,
   userId,
-}: Pick<
-  Template,
-  "id" | "name" | "description" | "signatureRequired"
-> & {
+}: Pick<Template, "id" | "name" | "description" | "signatureRequired"> & {
   userId: User["id"];
 }) {
   const data = {
@@ -73,7 +70,7 @@ export async function updateTemplate({
 export async function updateTemplatePDF({
   request,
   templateId,
-  userId
+  userId,
 }: {
   request: Request;
   templateId: string;
@@ -81,32 +78,37 @@ export async function updateTemplatePDF({
 }) {
   const res = await db.template.findFirst({
     where: { id: templateId, userId },
-    select: { name: true, pdfUrl: true }
+    select: { name: true, pdfUrl: true },
   });
 
   if (!res) return null;
 
-  const newFileName: string = `${userId}/${templateId}_${res.name.replace(/\s/g, "-").toLowerCase()}`;
-  console.log('T/F: ', res.pdfUrl !== null && res.pdfUrl !== undefined)
+  const newFileName: string = `${userId}/${templateId}_${res.name
+    .replace(/\s/g, "-")
+    .toLowerCase()}`;
+  console.log("T/F: ", res.pdfUrl !== null && res.pdfUrl !== undefined);
   const fileData = await parseFileFormData({
     request,
     bucketName: "templates",
     newFileName,
-    updateExisting: res.pdfUrl !== null && res.pdfUrl !== undefined
-  })
+    updateExisting: res.pdfUrl !== null && res.pdfUrl !== undefined,
+  });
 
-  console.log('fileData: ', fileData)
+  console.log("fileData: ", fileData);
 
   const pdf = fileData.get("pdf") as string;
   const pdfSize = parseInt(fileData.get("pdfSize") as string);
 
   if (!pdf) return null;
 
-  const publicUrl = getPublicFileURL({ bucketName: "templates", filename: newFileName });
+  const publicUrl = getPublicFileURL({
+    bucketName: "templates",
+    filename: newFileName,
+  });
 
   const data = {
     pdfUrl: publicUrl + ".pdf",
-    pdfSize
+    pdfSize,
   };
 
   return db.template.update({
@@ -115,7 +117,10 @@ export async function updateTemplatePDF({
   });
 }
 
-export async function makeInactive({ id, userId }: Pick<Template, "id"> & { userId: User["id"] }) {
+export async function makeInactive({
+  id,
+  userId,
+}: Pick<Template, "id"> & { userId: User["id"] }) {
   return db.template.update({
     where: { id, userId },
     data: {
@@ -125,7 +130,10 @@ export async function makeInactive({ id, userId }: Pick<Template, "id"> & { user
   });
 }
 
-export async function makeActive({id, userId}: Pick<Template, "id"> & { userId: User["id"] }) {
+export async function makeActive({
+  id,
+  userId,
+}: Pick<Template, "id"> & { userId: User["id"] }) {
   return db.template.update({
     where: { id, userId },
     data: {
@@ -157,14 +165,13 @@ export async function makeDefault({
 }
 
 export async function getTemplateById({
-    id,
-    userId,
-    }: Pick<Template, "id"> & { userId: User["id"] }) {
-    return db.template.findFirst({
-        where: { id, userId },
-    });
-    }
-    
+  id,
+  userId,
+}: Pick<Template, "id"> & { userId: User["id"] }) {
+  return db.template.findFirst({
+    where: { id, userId },
+  });
+}
 
 export async function getTemplates({
   userId,

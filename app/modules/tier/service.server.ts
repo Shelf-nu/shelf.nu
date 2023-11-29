@@ -105,7 +105,7 @@ export const assertUserCanCreateMoreTemplates = async ({
   if (!canCreateMore) {
     throw new Error("Your user cannot create more templates");
   }
-}
+};
 
 /**
  * This validates if more users can be invited to organization

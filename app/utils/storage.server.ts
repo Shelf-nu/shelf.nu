@@ -55,24 +55,30 @@ export async function createSignedUrl({
 
 async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
-  { filename, contentType, bucketName, resizeOptions, updateExisting }: UploadOptions
+  {
+    filename,
+    contentType,
+    bucketName,
+    resizeOptions,
+    updateExisting,
+  }: UploadOptions
 ) {
   try {
-    let file = await getFileArrayBuffer(fileData) 
+    let file = await getFileArrayBuffer(fileData);
     resizeOptions && cropImage(file, resizeOptions);
-    console.log(updateExisting)
-    const {data, error} = updateExisting ? await getSupabaseAdmin()
-    .storage.from(bucketName)
-    .update(filename, file, { contentType, upsert: true }) : 
-    await getSupabaseAdmin()
-      .storage.from(bucketName)
-      .upload(filename, file, { contentType, upsert: true });
+    console.log(updateExisting);
+    const { data, error } = updateExisting
+      ? await getSupabaseAdmin()
+          .storage.from(bucketName)
+          .update(filename, file, { contentType, upsert: true })
+      : await getSupabaseAdmin()
+          .storage.from(bucketName)
+          .upload(filename, file, { contentType, upsert: true });
 
-      console.log('upload data: ', data, 'error: ', error);
+    console.log("upload data: ", data, "error: ", error);
     if (error) {
       throw error;
     }
-
 
     return data.path;
   } catch (error) {
@@ -96,7 +102,7 @@ export async function parseFileFormData({
   newFileName,
   bucketName = "profile-pictures",
   resizeOptions,
-  updateExisting = false
+  updateExisting = false,
 }: {
   request: Request;
   newFileName: string;
@@ -109,15 +115,18 @@ export async function parseFileFormData({
   const uploadHandler = unstable_composeUploadHandlers(
     async ({ contentType, data, filename }) => {
       if (!contentType) return undefined;
-      if (contentType?.includes("image") && contentType.includes("pdf")) return undefined;
-      const fileExtension = contentType.includes('pdf') ? 'pdf' : filename?.split(".").pop();
-      console.log('data: ', data)
+      if (contentType?.includes("image") && contentType.includes("pdf"))
+        return undefined;
+      const fileExtension = contentType.includes("pdf")
+        ? "pdf"
+        : filename?.split(".").pop();
+      console.log("data: ", data);
       const uploadedFilePath = await uploadFile(data, {
         filename: `${newFileName}.${fileExtension}`,
         contentType,
         bucketName,
         resizeOptions,
-        updateExisting
+        updateExisting,
       });
       return uploadedFilePath;
     }
