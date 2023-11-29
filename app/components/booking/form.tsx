@@ -52,148 +52,150 @@ export function BookingForm({
   const zo = useZorm("NewQuestionWizardScreen", NewBookingFormSchema);
   const disabled = isFormProcessing(navigation.state);
 
-  console.log(NewBookingFormSchema);
-
   const [, updateName] = useAtom(updateDynamicTitleAtom);
   const navigate = useNavigate();
   return (
-    <div className="flex items-center gap-4">
-      <div className="w-[328px]">
-        <Form
-          ref={zo.ref}
-          method="post"
-          className="flex w-full flex-col gap-2"
-          encType="multipart/form-data"
-        >
-          <Card>
-            <FormRow
-              rowLabel={"Name"}
-              className="border-b-0 pb-[10px]"
-              // required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
-            >
-              <Input
-                label="Name"
-                hideLabel
-                name={zo.fields.name()}
-                disabled={disabled}
-                error={zo.errors.name()?.message}
-                autoFocus
-                onChange={updateName}
-                className="w-full"
-                defaultValue={name || undefined}
-                placeholder="Booking"
+    <div>
+      <div className="mb-4 mt-[-42px] text-right">
+        <Button type="submit" disabled={disabled}>
+          {disabled ? <Spinner /> : "Reserve"}
+        </Button>
+      </div>
+      <div className="flex items-center gap-4">
+        <div className="mt-2 w-[328px]">
+          <Form
+            ref={zo.ref}
+            method="post"
+            className="flex w-full flex-col gap-3"
+            encType="multipart/form-data"
+          >
+            <Card className="m-0">
+              <FormRow
+                rowLabel={"Name"}
+                className="mobile-styling-only border-b-0 p-0"
                 // required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
-              />
-            </FormRow>
-          </Card>
-          <Card>
-            <FormRow
-              rowLabel={"Start Date"}
-              className="border-b-0 pb-[10px]"
-              // required={zodFieldIsRequired(
-              //   NewBookingFormSchema.shape.startDate
-              // )}
-            >
-              <Input
-                label="Start Date"
-                type="datetime-local"
-                hideLabel
-                name={zo.fields.startDate()}
-                disabled={disabled}
-                error={zo.errors.startDate()?.message}
-                className="w-full"
-                defaultValue={startDate || undefined}
-                placeholder="Booking"
+              >
+                <Input
+                  label="Name"
+                  hideLabel
+                  name={zo.fields.name()}
+                  disabled={disabled}
+                  error={zo.errors.name()?.message}
+                  autoFocus
+                  onChange={updateName}
+                  className="mobile-styling-only w-full p-0"
+                  defaultValue={name || undefined}
+                  placeholder="Booking"
+                  // required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
+                />
+              </FormRow>
+            </Card>
+            <Card className="m-0 pt-0">
+              <FormRow
+                rowLabel={"Start Date"}
+                className="mobile-styling-only border-b-0 pb-[10px]"
                 // required={zodFieldIsRequired(
                 //   NewBookingFormSchema.shape.startDate
                 // )}
-              />
-            </FormRow>
-            <FormRow
-              rowLabel={"End Date"}
-              className="border-b-0 pb-[10px]"
-              // required={zodFieldIsRequired(NewBookingFormSchema.shape.endDate)}
-            >
-              <Input
-                label="End Date"
-                type="datetime-local"
-                hideLabel
-                name={zo.fields.endDate()}
-                disabled={disabled}
-                error={zo.errors.endDate()?.message}
-                className="w-full"
-                defaultValue={endDate || undefined}
-                placeholder="Booking"
-                // required={zodFieldIsRequired(
-                //   NewBookingFormSchema.shape.endDate
-                // )}
-              />
-            </FormRow>
-            <p className="text-[14px] text-gray-600">
-              Within this period the assets in this booking will be in custody
-              and unavailable for other bookings.
-            </p>
-          </Card>
-          <Card>
-            <CustodianSelect />
-            <p className="text-[14px] text-gray-600">
-              The person that will be in custody of or responsible for the
-              assets during the duration of the booking period.
-            </p>
-          </Card>
-
-          <div className="text-right">
-            <Button type="submit" disabled={disabled}>
-              {disabled ? <Spinner /> : "Save"}
-            </Button>
-          </div>
-        </Form>
-      </div>
-      <div className="flex-1">
-        <div className=" w-full lg:ml-8">
-          <TextualDivider text="Assets" className="mb-8 lg:hidden" />
-          <div className="mb-3 flex gap-4 lg:hidden">
-            <Button
-              as="button"
-              to="add-assets"
-              variant="primary"
-              icon="plus"
-              width="full"
-            >
-              Manage Assets
-            </Button>
-          </div>
-          <div className="flex flex-col md:gap-2">
-            <Filters className="responsive-filters mb-2 lg:mb-0">
-              <div className="flex items-center justify-normal gap-6 xl:justify-end">
-                <div className="hidden lg:block">
-                  <Button
-                    as="button"
-                    to="add-assets"
-                    variant="primary"
-                    icon="plus"
-                  >
-                    Manage Assets
-                  </Button>
+              >
+                <Input
+                  label="Start Date"
+                  type="datetime-local"
+                  hideLabel
+                  name={zo.fields.startDate()}
+                  disabled={disabled}
+                  error={zo.errors.startDate()?.message}
+                  className="w-full"
+                  defaultValue={startDate || undefined}
+                  placeholder="Booking"
+                  // required={zodFieldIsRequired(
+                  //   NewBookingFormSchema.shape.startDate
+                  // )}
+                />
+              </FormRow>
+              <FormRow
+                rowLabel={"End Date"}
+                className="mobile-styling-only mb-2.5 border-b-0 p-0"
+                // required={zodFieldIsRequired(NewBookingFormSchema.shape.endDate)}
+              >
+                <Input
+                  label="End Date"
+                  type="datetime-local"
+                  hideLabel
+                  name={zo.fields.endDate()}
+                  disabled={disabled}
+                  error={zo.errors.endDate()?.message}
+                  className="w-full"
+                  defaultValue={endDate || undefined}
+                  placeholder="Booking"
+                  // required={zodFieldIsRequired(
+                  //   NewBookingFormSchema.shape.endDate
+                  // )}
+                />
+              </FormRow>
+              <p className="text-[14px] text-gray-600">
+                Within this period the assets in this booking will be in custody
+                and unavailable for other bookings.
+              </p>
+            </Card>
+            <Card className="m-0">
+              <label className="mb-2.5 block font-medium text-gray-700">
+                <span className="required-input-label">Custodian</span>
+              </label>
+              <CustodianSelect />
+              <p className="mt-2 text-[14px] text-gray-600">
+                The person that will be in custody of or responsible for the
+                assets during the duration of the booking period.
+              </p>
+            </Card>
+          </Form>
+        </div>
+        <div className="flex-1">
+          <div className=" w-full lg:ml-8">
+            <TextualDivider text="Assets" className="mb-8 lg:hidden" />
+            <div className="mb-3 flex gap-4 lg:hidden">
+              <Button
+                as="button"
+                to="add-assets"
+                variant="primary"
+                icon="plus"
+                width="full"
+              >
+                Manage Assets
+              </Button>
+            </div>
+            <div className="flex flex-col md:gap-2">
+              <Filters className="responsive-filters mb-2 lg:mb-0">
+                <div className="flex items-center justify-normal gap-6 xl:justify-end">
+                  <div className="hidden lg:block">
+                    <Button
+                      as="button"
+                      to="add-assets"
+                      variant="primary"
+                      icon="plus"
+                    >
+                      Manage Assets
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </Filters>
-            <List
-              ItemComponent={ListAssetContent}
-              navigate={(itemId) => navigate(`/assets/${itemId}`)}
-              headerChildren={
-                <>
-                  <Th className="hidden md:table-cell">Category</Th>
-                  <Th className="hidden md:table-cell">Tags</Th>
-                </>
-              }
-              customEmptyStateContent={{
-                title: "Start by defining a booking period",
-                text: "Your assets for this booking will show here. Start by defining a booking period.",
-                newButtonRoute: "add-assets",
-                newButtonContent: "Add asset",
-              }}
-            />
+              </Filters>
+              <List
+                ItemComponent={ListAssetContent}
+                navigate={(itemId) => navigate(`/assets/${itemId}`)}
+                headerChildren={
+                  <>
+                    <Th className="hidden md:table-cell">Category</Th>
+                    <Th className="hidden md:table-cell">Tags</Th>
+                  </>
+                }
+                customEmptyStateContent={{
+                  title: "Start by defining a booking period",
+                  text: "Your assets for this booking will show here. Start by defining a booking period.",
+                  newButtonRoute: "add-assets",
+                  newButtonContent: "Add asset",
+                }}
+              />
+            </div>
           </div>
         </div>
       </div>
