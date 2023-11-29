@@ -22,6 +22,7 @@ import { createLocation } from "~/modules/location";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 const title = "New Location";
 
@@ -89,7 +90,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const file = formDataFile.get("image") as File | null;
   invariant(file instanceof File, "file not the right type");
 
-  const location = await createLocation({
+  const rsp = await createLocation({
     name,
     description,
     address,
@@ -97,6 +98,22 @@ export async function action({ request }: ActionFunctionArgs) {
     organizationId,
     image: file || null,
   });
+
+  // Handle unique constraint error for name
+  if (rsp.error) {
+    return json(
+      {
+        errors: {
+          name: rsp.error,
+        },
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
+  const { location } = rsp;
 
   sendNotification({
     title: "Location created",

@@ -1,5 +1,4 @@
 import type { PropsWithChildren } from "react";
-import { MetronomeLinks } from "@metronome-sh/react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -81,7 +80,6 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
         <Meta />
         {title ? <title>{title}</title> : null}
         <Links />
-        <MetronomeLinks />
         <Clarity />
       </head>
       <body className="h-full">

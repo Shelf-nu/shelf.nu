@@ -16,19 +16,14 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
-import {
-  createAssetsFromBackupImport,
-  createAssetsFromContentImport,
-} from "~/modules/asset";
+import { createAssetsFromContentImport } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanImportAssets } from "~/modules/tier";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
-import {
-  extractCSVDataFromBackupImport,
-  extractCSVDataFromContentImport,
-} from "~/utils/import.server";
+import { ShelfStackError } from "~/utils/error";
+import { extractCSVDataFromContentImport } from "~/utils/import.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
@@ -54,13 +49,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     switch (intent) {
       case "backup":
-        const backupData = extractCSVDataFromBackupImport(csvData);
-        await createAssetsFromBackupImport({
-          data: backupData,
-          userId,
-          organizationId,
+        throw new ShelfStackError({
+          message: "This feature is not available for you",
         });
-        return json({ success: true, error }, { status: 200 });
       case "content":
         const contentData = extractCSVDataFromContentImport(csvData);
         await createAssetsFromContentImport({

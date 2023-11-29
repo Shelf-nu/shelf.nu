@@ -1,5 +1,11 @@
 import type { Asset, Qr } from "@prisma/client";
-import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  Link,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
@@ -86,6 +92,13 @@ export const AssetForm = ({
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
   const { currency } = useLoaderData<typeof loader>();
+  const actionData = useActionData<{
+    errors?: {
+      title?: {
+        message: string;
+      };
+    };
+  }>();
 
   return (
     <Form
@@ -107,7 +120,9 @@ export const AssetForm = ({
           hideLabel
           name={zo.fields.title()}
           disabled={disabled}
-          error={zo.errors.title()?.message}
+          error={
+            actionData?.errors?.title?.message || zo.errors.title()?.message
+          }
           autoFocus
           onChange={updateDynamicTitle}
           className="w-full"
