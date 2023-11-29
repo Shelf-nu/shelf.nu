@@ -1,6 +1,7 @@
 import type { Category, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database";
 import { getRandomColor } from "~/utils";
+import { handleUniqueConstraintError } from "~/utils/error";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function createCategory({
@@ -12,23 +13,28 @@ export async function createCategory({
 }: Pick<Category, "description" | "name" | "color" | "organizationId"> & {
   userId: User["id"];
 }) {
-  return db.category.create({
-    data: {
-      name,
-      description,
-      color,
-      user: {
-        connect: {
-          id: userId,
+  try {
+    const category = await db.category.create({
+      data: {
+        name,
+        description,
+        color,
+        user: {
+          connect: {
+            id: userId,
+          },
+        },
+        organization: {
+          connect: {
+            id: organizationId,
+          },
         },
       },
-      organization: {
-        connect: {
-          id: organizationId,
-        },
-      },
-    },
-  });
+    });
+    return { category, error: null };
+  } catch (cause: any) {
+    return handleUniqueConstraintError(cause, "Category");
+  }
 }
 
 export async function getCategories({
@@ -162,14 +168,19 @@ export async function updateCategory({
   description,
   color,
 }: Pick<Category, "id" | "description" | "name" | "color">) {
-  return db.category.update({
-    where: {
-      id,
-    },
-    data: {
-      name,
-      description,
-      color,
-    },
-  });
+  try {
+    const category = await db.category.update({
+      where: {
+        id,
+      },
+      data: {
+        name,
+        description,
+        color,
+      },
+    });
+    return { category, error: null };
+  } catch (cause: any) {
+    return handleUniqueConstraintError(cause, "Category");
+  }
 }

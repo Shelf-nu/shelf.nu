@@ -95,6 +95,8 @@ model Asset {
   tags            Tag[]
   customFields    AssetCustomFieldValue[]
   assetSearchView AssetSearchView?
+
+  //@@unique([title, organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 view AssetSearchView {
@@ -131,6 +133,8 @@ model Category {
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String
+
+  //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 model Tag {
@@ -149,6 +153,8 @@ model Tag {
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+ //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 model Note {
@@ -262,6 +268,8 @@ model Location {
   organizationId String
 
   assets Asset[]
+
+ // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 // Master data for roles
@@ -284,7 +292,8 @@ model TeamMember {
   id   String @id @unique @default(cuid())
   name String
 
-  organizations   Organization[]
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
   custodies       Custody[]
   receivedInvites Invite[]
   user            User?          @relation(fields: [userId], references: [id], onUpdate: Cascade)
@@ -442,6 +451,8 @@ model CustomField {
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
   assetCustomFieldsValues AssetCustomFieldValue[]
+
+  //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 enum CustomFieldType {
