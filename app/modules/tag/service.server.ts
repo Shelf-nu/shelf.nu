@@ -6,6 +6,7 @@ import type {
   User,
 } from "@prisma/client";
 import { db } from "~/database";
+import { handleUniqueConstraintError } from "~/utils/error";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 export async function getTags({
@@ -70,22 +71,27 @@ export async function createTag({
 }: Pick<Tag, "description" | "name" | "organizationId"> & {
   userId: User["id"];
 }) {
-  return db.tag.create({
-    data: {
-      name,
-      description,
-      user: {
-        connect: {
-          id: userId,
+  try {
+    const tag = await db.tag.create({
+      data: {
+        name,
+        description,
+        user: {
+          connect: {
+            id: userId,
+          },
+        },
+        organization: {
+          connect: {
+            id: organizationId,
+          },
         },
       },
-      organization: {
-        connect: {
-          id: organizationId,
-        },
-      },
-    },
-  });
+    });
+    return { tag, error: null };
+  } catch (cause: any) {
+    return handleUniqueConstraintError(cause, "Tag");
+  }
 }
 
 export async function deleteTag({
@@ -168,13 +174,18 @@ export async function updateTag({
   name,
   description,
 }: Pick<Tag, "id" | "name" | "description">) {
-  return db.tag.update({
-    where: {
-      id,
-    },
-    data: {
-      name,
-      description,
-    },
-  });
+  try {
+    const tag = await db.tag.update({
+      where: {
+        id,
+      },
+      data: {
+        name,
+        description,
+      },
+    });
+    return { tag, error: null };
+  } catch (cause: any) {
+    return handleUniqueConstraintError(cause, "Tag");
+  }
 }

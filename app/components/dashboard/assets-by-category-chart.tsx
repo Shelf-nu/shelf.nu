@@ -4,6 +4,7 @@ import { DonutChart } from "@tremor/react";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
+import FallbackLoading from "./fallback-loading";
 import { Badge, Button } from "../shared";
 import { InfoTooltip } from "../shared/info-tooltip";
 
@@ -28,30 +29,30 @@ export default function AssetsByCategoryChart() {
   ];
 
   return (
-    <ClientOnly fallback={null}>
-      {() => (
-        <div className="border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
-              Assets by category (top 6)
-            </div>
-            <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
-              <InfoTooltip
-                content={
-                  <>
-                    <h6>Assets by Category</h6>
-                    <p>
-                      Below graph shows how many percent of assets are in which
-                      category{" "}
-                    </p>
-                  </>
-                }
-              />
-            </div>
-          </div>
-          <div className="h-full p-8">
-            {assetsByCategory.length > 0 ? (
-              <div className="flex flex-col items-center gap-4 lg:flex-row lg:justify-between">
+    <div className="border border-gray-200">
+      <div className="flex items-center justify-between">
+        <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
+          Assets by category (top 6)
+        </div>
+        <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
+          <InfoTooltip
+            content={
+              <>
+                <h6>Assets by Category</h6>
+                <p>
+                  Below graph shows how many percent of assets are in which
+                  category{" "}
+                </p>
+              </>
+            }
+          />
+        </div>
+      </div>
+      <div className="h-full p-8">
+        {assetsByCategory.length > 0 ? (
+          <div className="flex flex-col items-center gap-4 lg:flex-row lg:justify-between">
+            <ClientOnly fallback={<FallbackLoading className="h-80 w-80" />}>
+              {() => (
                 <DonutChart
                   className="mt-6 h-[240px] w-[240px]  2xl:h-[320px] 2xl:w-[320px]"
                   data={assetsByCategory}
@@ -61,40 +62,38 @@ export default function AssetsByCategoryChart() {
                   animationDuration={400}
                   colors={chartColors}
                 />
-                <div className="min-w-[140px]">
-                  <ul className="flex flex-wrap items-center lg:block">
-                    {assetsByCategory.map((cd, i) => (
-                      <li className="my-1" key={cd.category}>
-                        <Button
-                          to={`/assets?category=${cd.id}`}
-                          variant="link"
-                          className="border text-gray-700 hover:text-gray-500"
-                        >
-                          <Badge color={correspondingChartColorsHex[i]} noBg>
-                            <span className="text-gray-600">
-                              <strong className="text-gray-900">
-                                {cd.assets}
-                              </strong>{" "}
-                              {cd.category}
-                            </span>
-                          </Badge>
-                        </Button>
-                      </li>
-                    ))}
-                    <li>
-                      <Button to="/categories" variant="link">
-                        See all
-                      </Button>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            ) : (
-              <EmptyState text="No assets in database" />
-            )}
+              )}
+            </ClientOnly>
+            <div className="min-w-[140px]">
+              <ul className="flex flex-wrap items-center lg:block">
+                {assetsByCategory.map((cd, i) => (
+                  <li className="my-1" key={cd.category}>
+                    <Button
+                      to={`/assets?category=${cd.id}`}
+                      variant="link"
+                      className="border text-gray-700 hover:text-gray-500"
+                    >
+                      <Badge color={correspondingChartColorsHex[i]} noBg>
+                        <span className="text-gray-600">
+                          <strong className="text-gray-900">{cd.assets}</strong>{" "}
+                          {cd.category}
+                        </span>
+                      </Badge>
+                    </Button>
+                  </li>
+                ))}
+                <li>
+                  <Button to="/categories" variant="link">
+                    See all
+                  </Button>
+                </li>
+              </ul>
+            </div>
           </div>
-        </div>
-      )}
-    </ClientOnly>
+        ) : (
+          <EmptyState text="No assets in database" />
+        )}
+      </div>
+    </div>
   );
 }

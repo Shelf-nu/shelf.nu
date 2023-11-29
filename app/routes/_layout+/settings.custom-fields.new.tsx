@@ -18,6 +18,7 @@ import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 import { assertIsPost } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Custom Field";
@@ -71,7 +72,7 @@ export async function action({ request }: LoaderFunctionArgs) {
 
   const { name, helpText, required, type, active, options } = result.data;
 
-  await createCustomField({
+  const rsp = await createCustomField({
     name,
     helpText,
     required,
@@ -81,6 +82,18 @@ export async function action({ request }: LoaderFunctionArgs) {
     userId: authSession.userId,
     options,
   });
+
+  if (rsp.error) {
+    return json(
+      {
+        errors: { name: rsp.error },
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
 
   sendNotification({
     title: "Custom Field created",

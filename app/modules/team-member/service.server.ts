@@ -19,7 +19,7 @@ export async function createTeamMember({
   return db.teamMember.create({
     data: {
       name,
-      organizations: {
+      organization: {
         connect: {
           id: organizationId,
         },
@@ -52,7 +52,7 @@ export async function createTeamMemberIfNotExists({
       where: {
         deletedAt: null,
         name: teamMember,
-        organizations: { some: { id: organizationId } },
+        organizationId,
       },
     });
 
@@ -94,7 +94,7 @@ export async function getTeamMembers({
   /** Default value of where. Takes the assetss belonging to current user */
   let where: Prisma.TeamMemberWhereInput = {
     deletedAt: null,
-    organizations: { some: { id: organizationId } },
+    organizationId,
   };
 
   /** If the search string exists, add it to the where object */
