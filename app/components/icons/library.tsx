@@ -1283,7 +1283,6 @@ export const StarsIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-
 export const CalendarIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -1317,7 +1316,6 @@ export const CustomFiedIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeWidth="1.33333"
       strokeLinecap="round"
       strokeLinejoin="round"
-
     />
   </svg>
 );
