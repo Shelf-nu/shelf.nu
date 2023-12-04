@@ -8,32 +8,87 @@ import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { BookingForm, BookingFormSchema } from "~/components/booking";
+import { BookingForm, NewBookingFormSchema } from "~/components/booking";
+import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { Badge } from "~/components/shared";
+import { db } from "~/database";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost, getRequiredParam } from "~/utils";
+import {
+  assertIsPost,
+  generatePageMeta,
+  getCurrentSearchParams,
+  getParamsValues,
+  getRequiredParam,
+} from "~/utils";
+import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { bookingStatusColorMap } from "./bookings._index";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
+export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
-  const id = getRequiredParam(params, "locationId");
 
-  // const { location } = await getLocation({ organizationId, id });
-  // if (!location) {
-  //   throw new ShelfStackError({ message: "Location Not Found", status: 404 });
-  // }
-
-  // const header: HeaderData = {
-  //   title: `Edit | ${location.name}`,
-  // };
-
-  return json({
-    booking: {},
-    // header,
+  const teamMembers = await db.teamMember.findMany({
+    where: {
+      deletedAt: null,
+      organizationId,
+    },
+    include: {
+      user: true,
+    },
+    orderBy: {
+      userId: "asc",
+    },
   });
+  const booking = {
+    status: "DRAFT",
+    assets: [],
+    name: "Booking XYZ",
+    id: 1,
+    from: { date: "12 Jul 2024", day: "Tue", time: "10:00" },
+    to: { date: "14 Jul 2024", day: "Fri", time: "20:00" },
+    custodian: "Olivia Rhye",
+  };
+
+  const searchParams = getCurrentSearchParams(request);
+  const { page, perPageParam } = getParamsValues(searchParams);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+  const modelName = {
+    singular: "asset",
+    plural: "assets",
+  };
+  const totalItems = 0;
+  const totalPages = 1 / perPage;
+  const { prev, next } = generatePageMeta(request);
+
+  const header: HeaderData = {
+    title: `Edit | ${booking.name}`,
+  };
+
+  return json(
+    {
+      header,
+      booking,
+      modelName,
+      items: booking.assets,
+      page,
+      totalItems,
+      perPage,
+      totalPages,
+      next,
+      prev,
+      teamMembers,
+    },
+    {
+      headers: {
+        "Set-Cookie": await userPrefs.serialize(cookie),
+      },
+    }
+  );
 }
 
 // export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -51,7 +106,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const id = getRequiredParam(params, "bookingId");
   const formData = await request.formData();
-  const result = await BookingFormSchema.safeParseAsync(parseFormAny(formData));
+  const result = await NewBookingFormSchema.safeParseAsync(
+    parseFormAny(formData)
+  );
 
   if (!result.success) {
     return json(
@@ -104,14 +161,13 @@ export default function BookingEditPage() {
 
   return (
     <>
-      {/* <Header title={hasName ? name : booking.name} /> */}
-      <div className=" items-top flex justify-between">
-        <BookingForm
-          name={""}
-          startDate={undefined}
-          endDate={undefined}
-          custodianId={""}
-        />
+      <Header title={hasName ? name : booking.name} />
+      <div className="mr-auto">
+        <Badge color={bookingStatusColorMap[booking.status]}>Draft</Badge>
+      </div>
+      <div>
+        <BookingForm />
+        <ContextualModal />
       </div>
     </>
   );

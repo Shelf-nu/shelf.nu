@@ -212,3 +212,11 @@ dialog {
 .onboarding-checklist .completed i {
   @apply block;
 }
+
+.mobile-styling-only .hidden {
+  display: none;
+}
+
+.mobile-styling-only .lg\:hidden {
+  display: block;
+}
