@@ -150,7 +150,10 @@ export async function upsertCustomField(
   for (const def of definitions) {
     let existingCustomField = await db.customField.findFirst({
       where: {
-        name: def.name,
+        name: {
+          equals: def.name,
+          mode: "insensitive",
+        },
         organizationId: def.organizationId,
       },
     });

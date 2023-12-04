@@ -131,7 +131,7 @@ export async function createTagsIfNotExists({
   for (const tag of Object.keys(tags)) {
     const existingTag = await db.tag.findFirst({
       where: {
-        name: tag,
+        name: { equals: tag, mode: "insensitive" },
         organizationId,
       },
     });
