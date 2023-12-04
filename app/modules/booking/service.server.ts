@@ -7,6 +7,9 @@ import {
 } from "@prisma/client";
 import { db } from "~/database";
 import { ShelfStackError } from "~/utils/error";
+import { sendEmail } from "~/utils/mail.server";
+import { scheduler } from "~/utils/scheduler.server";
+import { schedulerKeys } from "./constants";
 
 const commonInclude: Prisma.BookingInclude = {
   custodianTeamMember: true,
@@ -83,11 +86,45 @@ export const upsertBooking = async (
       connect: { id: organizationId },
     };
   }
-
-  return db.booking.create({
+  const res = await db.booking.create({
     data: data as Prisma.BookingCreateInput,
-    include: commonInclude,
+    include: { ...commonInclude, organization: true },
   });
+  if (data.from) {
+    const when = new Date(data.from as string);
+    when.setHours(when.getHours() - 1); //1hour before send checkout reminder
+    const jobId = await scheduler.sendAfter(
+      schedulerKeys.checkoutReminder,
+      { id: res.id },
+      {},
+      when
+    );
+    await db.booking.update({
+      where: { id: res.id },
+      data: { activeSchedulerReference: jobId },
+    });
+  }
+  if (
+    data.status &&
+    (data.status === BookingStatus.RESERVED ||
+      data.status === BookingStatus.COMPLETE)
+  ) {
+    const email = res.custodianUser?.email;
+    if (email) {
+      let subject = `Booking reserved`;
+      let text = `Your assets have been reserved by ${res.organization.name} under ${res.name}`;
+      if (data.status === BookingStatus.COMPLETE) {
+        subject = `Booking complete`;
+        text = `Your checkin complete for booking ${res.name}`;
+      }
+      await sendEmail({
+        to: email,
+        subject,
+        text,
+      });
+    }
+  }
+  return res;
 };
 
 export async function getBookings({
@@ -209,13 +246,8 @@ export const deleteBooking = async (booking: Pick<Booking, "id">) => {
     where: { id },
     include: { ...commonInclude, assets: true },
   });
-  if (
-    (
-      [BookingStatus.ONGOING, BookingStatus.OVERDUE] as BookingStatus[]
-    ).includes(b.status)
-  ) {
-    //@TODO check if asset is ongoing in some other booking(only in case of overdue) and update status
-  }
+  if (b.activeSchedulerReference)
+    await scheduler.cancel(b.activeSchedulerReference);
   return b;
 };
 

@@ -544,8 +544,10 @@ enum BookingStatus {
 model Booking {
   id String @id @default(cuid())
 
-  name   String?
+  name   String
   status BookingStatus @default(DRAFT)
+
+  activeSchedulerReference   String?
 
   // Relationships
   creator   User   @relation("creator", fields: [creatorId], references: [id], onDelete: Cascade, onUpdate: Cascade)
