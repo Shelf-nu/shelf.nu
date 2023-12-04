@@ -9,6 +9,8 @@ CREATE TABLE "Template" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT,
+    "pdfSize" INTEGER,
+    "pdfUrl" TEXT,
     "type" "TemplateType" NOT NULL DEFAULT 'BOOKINGS',
     "signatureRequired" BOOLEAN NOT NULL DEFAULT false,
     "isDefault" BOOLEAN NOT NULL DEFAULT false,
