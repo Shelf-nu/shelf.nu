@@ -40,21 +40,11 @@ export const upsertBooking = async (
   } = booking;
   let data: Prisma.BookingUpdateInput = { ...rest };
   if (assetIds?.length) {
-    //@TODO check if asset is available at that time, not so important as FE will do that check anyway and this is not a rest api
     data.assets = {
       connect: assetIds.map((id) => ({
         id,
       })),
     };
-  }
-  if (
-    booking.status &&
-    (
-      [BookingStatus.ONGOING, BookingStatus.OVERDUE] as BookingStatus[]
-    ).includes(booking.status)
-  ) {
-    //@TODO update asset status to booked
-    //@TODO validate booking state machine, not so important as FE does it anyway
   }
   if (custodianUserId) {
     data.custodianUser = {
@@ -100,7 +90,6 @@ export const upsertBooking = async (
   });
 };
 
-//@TODO status,custodian and sort
 export async function getBookings({
   organizationId,
   page = 1,
@@ -110,6 +99,9 @@ export async function getBookings({
   custodianUserId,
   custodianTeamMemberId,
   assetIds,
+  bookingTo,
+  excludeBookingIds,
+  bookingFrom,
 }: {
   organizationId: Organization["id"];
 
@@ -123,8 +115,11 @@ export async function getBookings({
 
   statuses?: Booking["status"][] | null;
   assetIds?: Asset["id"][] | null;
-  custodianUserId: Booking["custodianUserId"] | null;
-  custodianTeamMemberId: Booking["custodianTeamMemberId"] | null;
+  custodianUserId?: Booking["custodianUserId"] | null;
+  custodianTeamMemberId?: Booking["custodianTeamMemberId"] | null;
+  excludeBookingIds?: Booking["id"][] | null;
+  bookingFrom?: Booking["from"] | null;
+  bookingTo?: Booking["to"] | null;
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
@@ -159,6 +154,22 @@ export async function getBookings({
         },
       },
     };
+  }
+
+  if (excludeBookingIds?.length) {
+    where.id = { notIn: excludeBookingIds };
+  }
+  if (bookingFrom && bookingTo) {
+    where.OR = [
+      {
+        from: { lte: bookingTo },
+        to: { gte: bookingFrom },
+      },
+      {
+        from: { gte: bookingFrom },
+        to: { lte: bookingTo },
+      },
+    ];
   }
 
   const [bookings, bookingCount] = await Promise.all([

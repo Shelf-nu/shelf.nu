@@ -190,10 +190,12 @@ export async function getAssets({
           status: { in: unavailableBookingStatuses },
           OR: [
             {
-              to: { gt: bookingFrom },
+              from: { lte: bookingTo },
+              to: { gte: bookingFrom },
             },
             {
-              from: { lt: bookingTo },
+              from: { gte: bookingFrom },
+              to: { lte: bookingTo },
             },
           ],
         },
