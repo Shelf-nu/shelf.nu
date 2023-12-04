@@ -8,6 +8,7 @@ import { List } from "~/components/list";
 import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";
+import { getBookings } from "~/modules/booking";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
   generatePageMeta,
@@ -21,73 +22,6 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 
-const bookings = [
-  {
-    id: 1,
-    name: "Untitled booking",
-    status: "DRAFT",
-    from: null,
-    to: null,
-    custodian: null,
-  },
-  {
-    id: 2,
-    name: "Bit Summit 2024",
-    status: "DRAFT",
-    from: { date: "12 Jul 2024", day: "Tue", time: "10:00" },
-    to: { date: "14 Jul 2024", day: "Fri", time: "20:00" },
-    custodian: "Olivia Rhye",
-  },
-  {
-    id: 3,
-    name: "Random convention 2023",
-    status: "ACTIVE",
-    from: { date: "12 Jul 2024", day: "Tue", time: "10:00" },
-    to: { date: "14 Jul 2024", day: "Fri", time: "20:00" },
-    custodian: "Olivia Rhye",
-  },
-  {
-    id: 4,
-    name: "Bit Summit 2023",
-    status: "ACTIVE",
-    from: { date: "12 Jul 2024", day: "Tue", time: "10:00" },
-    to: { date: "14 Jul 2024", day: "Fri", time: "20:00" },
-    custodian: "Olivia Rhye",
-  },
-  {
-    id: 5,
-    name: "Random convention 2023",
-    status: "COMPLETED",
-    from: { date: "12 Jul 2024", day: "Tue", time: "10:00" },
-    to: { date: "14 Jul 2024", day: "Fri", time: "20:00" },
-    custodian: "Olivia Rhye",
-  },
-  {
-    id: 6,
-    name: "Random convention 2022",
-    status: "COMPLETED",
-    from: { date: "12 Jul 2024", day: "Tue", time: "10:00" },
-    to: { date: "14 Jul 2024", day: "Fri", time: "20:00" },
-    custodian: "Olivia Rhye",
-  },
-  {
-    id: 7,
-    name: "Random convention 2021",
-    status: "COMPLETED",
-    from: { date: "12 Jul 2024", day: "Tue", time: "10:00" },
-    to: { date: "14 Jul 2024", day: "Fri", time: "20:00" },
-    custodian: "Olivia Rhye",
-  },
-  {
-    id: 8,
-    name: "Random convention 2020",
-    status: "COMPLETED",
-    from: { date: "12 Jul 2024", day: "Tue", time: "10:00" },
-    to: { date: "14 Jul 2024", day: "Fri", time: "20:00" },
-    custodian: "Olivia Rhye",
-  },
-];
-
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
@@ -98,13 +32,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const { prev, next } = generatePageMeta(request);
 
-  // const { locations, totalLocations } = await getLocations({
-  //   organizationId,
-  //   page,
-  //   perPage,
-  //   search,
-  // });
-  // const totalPages = Math.ceil(totalLocations / perPage);
+  const { bookings, bookingCount } = await getBookings({
+    organizationId,
+    page,
+    perPage,
+    search,
+  });
+
+  const totalPages = Math.ceil(bookingCount / perPage);
 
   const header: HeaderData = {
     title: "Bookings",
@@ -120,7 +55,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       search,
       page,
       totalItems: bookings.length,
-      totalPages: 1,
+      totalPages,
       perPage,
       prev,
       next,
@@ -151,6 +86,7 @@ export default function BookingsIndexPage() {
         </Button>
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
+        {/* @TODO - add filters */}
         <List
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(id)}
@@ -202,12 +138,10 @@ const ListAssetContent = ({ item }: { item: { [key: string]: any } }) => (
     <Td className="hidden md:table-cell">
       {item.from ? (
         <div className="min-w-[130px]">
-          <span className="word-break mb-1 block font-medium">
-            {item.from.date}
-          </span>
-          <span className="block text-gray-600">
+          <span className="word-break mb-1 block font-medium">{item.from}</span>
+          {/* <span className="block text-gray-600">
             {item.from.day} {item.from.time}
-          </span>
+          </span> */}
         </div>
       ) : null}
     </Td>
@@ -216,12 +150,10 @@ const ListAssetContent = ({ item }: { item: { [key: string]: any } }) => (
     <Td className="hidden md:table-cell">
       {item.to ? (
         <div className="min-w-[130px]">
-          <span className="word-break mb-1 block font-medium">
-            {item.to.date}
-          </span>
-          <span className="block text-gray-600">
+          <span className="word-break mb-1 block font-medium">{item.to}</span>
+          {/* <span className="block text-gray-600">
             {item.to.day} {item.to.time}
-          </span>
+          </span> */}
         </div>
       ) : null}
     </Td>

@@ -6,7 +6,6 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { isFormProcessing } from "~/utils/form";
-import { zodFieldIsRequired } from "~/utils/zod";
 import { AssetImage } from "../assets/asset-image";
 import CustodianSelect from "../custody/custodian-select";
 import FormRow from "../forms/form-row";
@@ -20,7 +19,9 @@ import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
 import TextualDivider from "../shared/textual-divider";
 import { Th, Td } from "../table";
+
 type FormData = {
+  id?: string;
   name?: string;
   startDate?: Date;
   endDate?: Date;
@@ -30,12 +31,21 @@ type FormData = {
 //z.coerce.date() is used to convert the string to a date object.
 export const NewBookingFormSchema = z
   .object({
+    id: z.string().min(1),
     name: z.string().min(2, "Name is required"),
     startDate: z.coerce.date().refine((data) => data > new Date(), {
       message: "Start date must be in the future",
     }),
     endDate: z.coerce.date(),
-    custodianId: z.string().min(1, "Custodian is required").cuid(),
+    custodian: z.coerce
+      .string()
+
+      .transform((data) => {
+        if (data === "") {
+          throw new Error("Custodian is required");
+        }
+        return JSON.parse(data).id;
+      }),
   })
   .refine((data) => data.endDate > data.startDate, {
     message: "End date cannot be earlier than start date.",
@@ -43,6 +53,7 @@ export const NewBookingFormSchema = z
   });
 
 export function BookingForm({
+  id,
   name,
   startDate,
   endDate,
@@ -56,12 +67,28 @@ export function BookingForm({
   const navigate = useNavigate();
   return (
     <div>
-      <div className="mb-4 mt-[-42px] text-right">
-        <Button type="submit" disabled={disabled}>
-          {disabled ? <Spinner /> : "Reserve"}
-        </Button>
-      </div>
-      <div className="lg:flex lg:items-center lg:gap-4">
+      {/* <div className="mb-4 mt-[-42px] flex justify-end text-right">
+        <div className="flex gap-3">
+          <Button
+            type="submit"
+            disabled={disabled}
+            variant="secondary"
+            name="intent"
+            value="save"
+          >
+            {disabled ? <Spinner /> : "Save"}
+          </Button>
+          <Button
+            type="submit"
+            disabled={disabled}
+            name="intent"
+            value="reserve"
+          >
+            {disabled ? <Spinner /> : "Reserve"}
+          </Button>
+        </div>
+      </div> */}
+      <div className="lg:flex lg:items-start lg:gap-4">
         <div className="mb-8 mt-2 w-full lg:mb-0 lg:w-[328px]">
           <Form
             ref={zo.ref}
@@ -69,6 +96,7 @@ export function BookingForm({
             className="flex w-full flex-col gap-3"
             encType="multipart/form-data"
           >
+            {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
             <Card className="m-0">
               <FormRow
                 rowLabel={"Name"}
@@ -145,11 +173,38 @@ export function BookingForm({
                 <span className="required-input-label">Custodian</span>
               </label>
               <CustodianSelect />
+
+              {zo.errors.custodian()?.message ? (
+                <div className="text-sm text-error-500">
+                  {zo.errors.custodian()?.message}
+                </div>
+              ) : null}
               <p className="mt-2 text-[14px] text-gray-600">
                 The person that will be in custody of or responsible for the
                 assets during the duration of the booking period.
               </p>
             </Card>
+            <div className="mb-4 flex justify-end text-right">
+              <div className="flex gap-3">
+                <Button
+                  type="submit"
+                  disabled={disabled}
+                  variant="secondary"
+                  name="intent"
+                  value="save"
+                >
+                  {disabled ? <Spinner /> : "Save"}
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={disabled}
+                  name="intent"
+                  value="reserve"
+                >
+                  {disabled ? <Spinner /> : "Reserve"}
+                </Button>
+              </div>
+            </div>
           </Form>
         </div>
         <div className="flex-1">

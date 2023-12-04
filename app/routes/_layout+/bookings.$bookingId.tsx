@@ -15,6 +15,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { db } from "~/database";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { getBooking } from "~/modules/booking";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
   assertIsPost,
@@ -23,13 +24,16 @@ import {
   getParamsValues,
   getRequiredParam,
 } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfStackError } from "~/utils/error";
 import { bookingStatusColorMap } from "./bookings._index";
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
+  const bookingId = getRequiredParam(params, "bookingId");
 
   const teamMembers = await db.teamMember.findMany({
     where: {
@@ -43,15 +47,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       userId: "asc",
     },
   });
-  const booking = {
-    status: "DRAFT",
-    assets: [],
-    name: "Booking XYZ",
-    id: 1,
-    from: { date: "12 Jul 2024", day: "Tue", time: "10:00" },
-    to: { date: "14 Jul 2024", day: "Fri", time: "20:00" },
-    custodian: "Olivia Rhye",
-  };
+  const booking = await getBooking({ id: bookingId });
+  if (!booking) {
+    throw new ShelfStackError({ message: "Booking not found", status: 404 });
+  }
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam } = getParamsValues(searchParams);
@@ -91,9 +90,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 }
 
-// export const meta: MetaFunction<typeof loader> = ({ data }) => [
-//   { title: data ? appendToMetaTitle(data.header.title) : "" },
-// ];
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
+];
 
 export const handle = {
   breadcrumb: () => "Edit",
@@ -103,8 +102,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
-
   const id = getRequiredParam(params, "bookingId");
+
   const formData = await request.formData();
   const result = await NewBookingFormSchema.safeParseAsync(
     parseFormAny(formData)
@@ -124,8 +123,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }
     );
   }
+  const intent = formData.get("intent") as "save" | "reserve";
+  const { name, startDate, endDate, custodian } = result.data;
 
-  const { name, startDate, endDate, custodianId } = result.data;
+  console.log(result.data);
 
   // await updateLocation({
   //   id,
@@ -166,7 +167,8 @@ export default function BookingEditPage() {
         <Badge color={bookingStatusColorMap[booking.status]}>Draft</Badge>
       </div>
       <div>
-        <BookingForm />
+        {/* @ts-ignore @TODO fix after name is made required */}
+        <BookingForm name={booking.name} />
         <ContextualModal />
       </div>
     </>

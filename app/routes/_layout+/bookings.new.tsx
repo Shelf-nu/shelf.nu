@@ -1,3 +1,4 @@
+import { BookingStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -16,7 +17,11 @@ import { Badge } from "~/components/shared";
 import { db } from "~/database";
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { upsertBooking } from "~/modules/booking";
+import {
+  requireOrganisationId,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import {
   assertIsPost,
   generatePageMeta,
@@ -24,7 +29,11 @@ import {
   getParamsValues,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { bookingStatusColorMap } from "./bookings._index";
 const title = "New Booking";
@@ -49,7 +58,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       userId: "asc",
     },
   });
-  const booking = { status: "DRAFT", assets: [] };
+
+  const booking = await upsertBooking({
+    organizationId,
+    name: "Draft booking",
+    creatorId: authSession.userId,
+  });
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam } = getParamsValues(searchParams);
@@ -66,9 +80,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json(
     {
       header,
-      booking,
       modelName,
-      items: booking.assets,
+      booking,
       page,
       totalItems,
       perPage,
@@ -116,32 +129,44 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     );
   }
+  const { id, name, startDate, endDate, custodian } = result.data;
+  const intent = formData.get("intent");
 
-  const { name, startDate, endDate, custodianId } = result.data;
-  /** This checks if tags are passed and build the  */
+  switch (intent) {
+    case "save":
+      /** This checks if tags are passed and build the  */
+      const booking = await upsertBooking({
+        organizationId,
+        id,
+        name,
+        from: startDate,
+        to: endDate,
+        custodianTeamMemberId: custodian, // @TODO this needs to be managed based on custodian type
+      });
 
-  // const location = await createLocation({
-  //   name,
-  //   description,
-  //   address,
-  //   userId: authSession.userId,
-  //   organizationId,
-  //   image: file || null,
-  // });
-
-  sendNotification({
-    title: "Location created",
-    message: "Your location has been created successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  // return redirect(`/locations/${location.id}`, {
-  //   headers: {
-  //     "Set-Cookie": await commitAuthSession(request, { authSession }),
-  //   },
-  // });
-  return null;
+      // @TODO - dynamic messages based on intent
+      sendNotification({
+        title: "Booking saved",
+        message: "Your draft booking has been saved successfully",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+      return json(
+        { booking },
+        {
+          status: 200,
+          headers: [
+            setCookie(await commitAuthSession(request, { authSession })),
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+          ],
+        }
+      );
+    case "reserve":
+      console.log("reserve");
+      return null;
+    default:
+      return null;
+  }
 }
 
 export default function NewBookingPage() {
@@ -155,7 +180,7 @@ export default function NewBookingPage() {
         <Badge color={bookingStatusColorMap[booking.status]}>Draft</Badge>
       </div>
       <div>
-        <BookingForm />
+        <BookingForm id={booking.id} />
         <ContextualModal />
       </div>
     </>
