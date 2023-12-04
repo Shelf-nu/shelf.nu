@@ -273,7 +273,10 @@ export async function createLocationsIfNotExists({
   // now we loop through the locations and check if they exist
   for (const [location, _] of locations) {
     const existingCategory = await db.location.findFirst({
-      where: { name: location, organizationId },
+      where: {
+        name: { equals: location, mode: "insensitive" },
+        organizationId,
+      },
     });
 
     if (!existingCategory) {
