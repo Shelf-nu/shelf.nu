@@ -4,6 +4,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -11,6 +12,7 @@ import { BookingForm, NewBookingFormSchema } from "~/components/booking";
 import ContextualModal from "~/components/layout/contextual-modal";
 
 import Header from "~/components/layout/header";
+import { Badge } from "~/components/shared";
 import { db } from "~/database";
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
@@ -24,6 +26,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { bookingStatusColorMap } from "./bookings._index";
 const title = "New Booking";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -37,11 +40,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const teamMembers = await db.teamMember.findMany({
     where: {
       deletedAt: null,
-      organizations: {
-        some: {
-          id: organizationId,
-        },
-      },
+      organizationId,
     },
     include: {
       user: true,
@@ -147,10 +146,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function NewBookingPage() {
   const title = useAtomValue(dynamicTitleAtom);
+  const { booking } = useLoaderData<typeof loader>();
 
   return (
     <>
       <Header title={title ? title : "Untitled booking"} />
+      <div className="mr-auto">
+        <Badge color={bookingStatusColorMap[booking.status]}>Draft</Badge>
+      </div>
       <div>
         <BookingForm />
         <ContextualModal />

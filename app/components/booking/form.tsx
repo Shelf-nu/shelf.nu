@@ -61,8 +61,8 @@ export function BookingForm({
           {disabled ? <Spinner /> : "Reserve"}
         </Button>
       </div>
-      <div className="flex items-center gap-4">
-        <div className="mt-2 w-[328px]">
+      <div className="lg:flex lg:items-center lg:gap-4">
+        <div className="mb-8 mt-2 w-full lg:mb-0 lg:w-[328px]">
           <Form
             ref={zo.ref}
             method="post"
