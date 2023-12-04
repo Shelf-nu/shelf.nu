@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { Template } from "@prisma/client";
 import { TemplateType } from "@prisma/client";
 import { Form, useFetcher, useNavigation } from "@remix-run/react";
@@ -28,7 +28,10 @@ export const NewTemplateFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
   type: z.nativeEnum(TemplateType),
   description: z.string().optional(),
-  signatureRequired: z.boolean().optional(),
+  signatureRequired: z
+    .string()
+    .optional()
+    .transform((val) => (val === "on" ? true : false)),
   pdf: z.any().optional(),
   // pdfSize: z.number().optional(),
 });
@@ -65,7 +68,7 @@ export const TemplateForm = ({
     type || TemplateType.BOOKINGS
   );
   const [pdf, setPdf] = useState<File | null>(null);
-  const [size, setSize] = useState<number>(pdfSize || 0);
+  const [_, setSize] = useState<number>(pdfSize || 0);
 
   const onDropAccepted = useCallback((files: File[]) => {
     setPdf(files[0]);
@@ -141,15 +144,13 @@ export const TemplateForm = ({
         </Select>
       </FormRow>
       <FormRow
-        required={zodFieldIsRequired(
-          NewTemplateFormSchema.shape.signatureRequired
-        )}
+        required={false}
         rowLabel="Ask for signature"
         subHeading={<p>Users will be asked to sign document</p>}
         className="border-b-0 pb-0"
       >
         <Switch
-          name={zo.fields.signatureRequired()}
+          required={false}
           disabled={disabled}
           defaultChecked={signatureRequired}
         />

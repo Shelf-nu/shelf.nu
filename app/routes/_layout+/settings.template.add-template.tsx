@@ -51,8 +51,8 @@ export async function action({ request }: LoaderFunctionArgs) {
   assertIsPost(request);
   await assertUserCanCreateMoreTemplates({ userId: authSession.userId });
 
-  const formData = await request.formData();
   const clonedData = request.clone();
+  const formData = await request.formData();
   const result = await NewTemplateFormSchema.safeParseAsync(
     parseFormAny(formData)
   );

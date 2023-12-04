@@ -62,7 +62,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const result = await NewTemplateFormSchema.safeParseAsync(
     parseFormAny(formData)
   );
-  console.log(result);
 
   if (!result.success) {
     return json(
@@ -88,6 +87,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     signatureRequired: signatureRequired ?? false,
     userId: authSession.userId,
   });
+
   await updateTemplatePDF({
     request: clonedData,
     templateId: id,
@@ -101,12 +101,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return null;
-  // return redirect("/settings/template", {
-  //   headers: {
-  //     "Set-Cookie": await commitAuthSession(request, { authSession }),
-  //   },
-  // });
+  return redirect("/settings/template", {
+    headers: {
+      "Set-Cookie": await commitAuthSession(request, { authSession }),
+    },
+  });
 }
 
 export default function TemplateEditPage() {
