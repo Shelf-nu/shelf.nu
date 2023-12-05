@@ -141,10 +141,11 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
           assetId={item.id}
           // @TODO this still needs to be handled
           // We have to find a way to make getFilteredAndPaginatedAssets to include bookings only when asked for as well as to be able to receive the hideUnavailable
-          isChecked={
-            item.bookings.filter((booking) => booking.id === bookingId)
-              ?.length > 0 || false
-          }
+          // isChecked={
+          //   item.bookings.filter((booking) => booking.id === bookingId)
+          //     ?.length > 0 || false
+          // }
+          isChecked={false}
         />
       </Td>
     </>

@@ -200,7 +200,7 @@ export function BookingForm({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={disabled || booking.assets.length === 0}
+                  disabled={disabled || booking.assets?.length === 0}
                   name="intent"
                   value="reserve"
                 >
