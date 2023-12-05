@@ -16,7 +16,7 @@ import { Badge } from "~/components/shared";
 import { db } from "~/database";
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { upsertBooking } from "~/modules/booking";
+import { saveBooking, upsertBooking } from "~/modules/booking";
 import {
   requireOrganisationId,
   setSelectedOrganizationIdCookie,
@@ -34,7 +34,6 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
 import { bookingStatusColorMap } from "./bookings._index";
 const title = "New Booking";
 
@@ -134,38 +133,20 @@ export async function action({ request }: ActionFunctionArgs) {
 
   switch (intent) {
     case "save":
-      const custodianUser = await db.teamMember.findUnique({
-        where: {
-          id: custodian,
-        },
-        select: {
-          id: true,
-          user: true,
-        },
-      });
-
-      if (!custodianUser) {
-        throw new ShelfStackError({ message: "Cannot find team member" });
-      }
-
-      const userParams = custodianUser.user
-        ? { custodianUserId: custodianUser.user.id }
-        : { custodianTeamMemberId: custodianUser.id };
-
-      /** This checks if tags are passed and build the  */
-      const booking = await upsertBooking({
+      const booking = await saveBooking({
+        custodianId: custodian,
         organizationId,
-        id,
-        name,
-        from: startDate,
-        to: endDate,
-        ...userParams,
+        booking: {
+          id,
+          name,
+          from: startDate,
+          to: endDate,
+        },
       });
 
-      // @TODO - dynamic messages based on intent
       sendNotification({
         title: "Booking saved",
-        message: "Your draft booking has been saved successfully",
+        message: "Your booking has been saved successfully",
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
       });

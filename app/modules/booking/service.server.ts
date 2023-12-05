@@ -6,6 +6,7 @@ import {
   BookingStatus,
 } from "@prisma/client";
 import { db } from "~/database";
+import { ShelfStackError } from "~/utils/error";
 
 const commonInclude: Prisma.BookingInclude = {
   custodianTeamMember: true,
@@ -225,4 +226,60 @@ export const getBooking = async (booking: Pick<Booking, "id">) => {
     where: { id },
     include: { ...commonInclude, assets: true },
   });
+};
+
+/** Used for saving a bookings details */
+export const saveBooking = async ({
+  custodianId,
+  organizationId,
+  booking,
+}: {
+  custodianId: string;
+  organizationId: string;
+  booking: Partial<
+    Pick<
+      Booking,
+      | "from"
+      | "id"
+      | "name"
+      | "organizationId"
+      | "status"
+      | "to"
+      | "custodianTeamMemberId"
+      | "custodianUserId"
+    > & { assetIds: Asset["id"][] }
+  >;
+}) => {
+  const custodianUser = await db.teamMember.findUnique({
+    where: {
+      id: custodianId,
+    },
+    select: {
+      id: true,
+      user: true,
+    },
+  });
+
+  if (!custodianUser) {
+    throw new ShelfStackError({ message: "Cannot find team member" });
+  }
+
+  const userParams = custodianUser.user
+    ? { custodianUserId: custodianUser.user.id }
+    : { custodianTeamMemberId: custodianUser.id };
+
+  /** This checks if tags are passed and build the  */
+  const updatedBooking = await upsertBooking({
+    organizationId,
+    id: booking.id,
+    name: booking.name,
+    from: booking.from,
+    to: booking.to,
+    ...userParams,
+  });
+
+  if (!updatedBooking) {
+    throw new ShelfStackError({ message: "Cannot update booking" });
+  }
+  return updatedBooking;
 };

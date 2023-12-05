@@ -15,8 +15,12 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { db } from "~/database";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { getBooking } from "~/modules/booking";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { getBooking, saveBooking } from "~/modules/booking";
+import type { ExtendedBooking } from "~/modules/booking/types";
+import {
+  requireOrganisationId,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import {
   assertIsPost,
   generatePageMeta,
@@ -25,7 +29,12 @@ import {
   getRequiredParam,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
+import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { bookingStatusColorMap } from "./bookings._index";
@@ -48,6 +57,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     },
   });
   const booking = await getBooking({ id: bookingId });
+
   if (!booking) {
     throw new ShelfStackError({ message: "Booking not found", status: 404 });
   }
@@ -68,10 +78,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     title: `Edit | ${booking.name}`,
   };
 
+  if (booking.from) {
+    Object.assign(booking, {
+      fromForDateInput: dateForDateTimeInputValue(booking.from),
+    });
+  }
+  if (booking.to) {
+    Object.assign(booking, {
+      toForDateInput: dateForDateTimeInputValue(booking.to),
+    });
+  }
+
   return json(
     {
       header,
-      booking,
+      booking: booking as ExtendedBooking,
       modelName,
       items: booking.assets,
       page,
@@ -126,33 +147,40 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const intent = formData.get("intent") as "save" | "reserve";
   const { name, startDate, endDate, custodian } = result.data;
 
-  console.log(result.data);
+  switch (intent) {
+    case "save":
+      const booking = await saveBooking({
+        custodianId: custodian,
+        organizationId,
+        booking: {
+          id,
+          name,
+          from: startDate,
+          to: endDate,
+        },
+      });
 
-  // await updateLocation({
-  //   id,
-  //   userId: authSession.userId,
-  //   name,
-  //   description,
-  //   address,
-  //   image: file || null,
-  //   organizationId,
-  // });
-
-  sendNotification({
-    title: "Location updated",
-    message: "Your location  has been updated successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return json(
-    { success: true },
-    {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, { authSession }),
-      },
-    }
-  );
+      sendNotification({
+        title: "Booking saved",
+        message: "Your booking has been saved successfully",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+      return json(
+        { booking },
+        {
+          status: 200,
+          headers: [
+            setCookie(await commitAuthSession(request, { authSession })),
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+          ],
+        }
+      );
+    case "reserve":
+      return null;
+    default:
+      return null;
+  }
 }
 
 export default function BookingEditPage() {
@@ -167,8 +195,12 @@ export default function BookingEditPage() {
         <Badge color={bookingStatusColorMap[booking.status]}>Draft</Badge>
       </div>
       <div>
-        {/* @ts-ignore @TODO fix after name is made required */}
-        <BookingForm name={booking.name} />
+        <BookingForm
+          // {/* @ts-ignore @TODO fix after name is made required */}
+          name={booking.name || undefined}
+          startDate={booking.fromForDateInput || undefined}
+          endDate={booking.toForDateInput || undefined}
+        />
         <ContextualModal />
       </div>
     </>

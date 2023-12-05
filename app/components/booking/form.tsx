@@ -23,8 +23,8 @@ import { Th, Td } from "../table";
 type FormData = {
   id?: string;
   name?: string;
-  startDate?: Date;
-  endDate?: Date;
+  startDate?: string;
+  endDate?: string;
   custodianId?: string; // This holds the ID of the custodian
 };
 
@@ -134,8 +134,7 @@ export function BookingForm({
                   disabled={disabled}
                   error={zo.errors.startDate()?.message}
                   className="w-full"
-                  // @ts-ignore @TODO fix this
-                  defaultValue={startDate || undefined}
+                  defaultValue={startDate}
                   placeholder="Booking"
                   // required={zodFieldIsRequired(
                   //   NewBookingFormSchema.shape.startDate
@@ -155,8 +154,7 @@ export function BookingForm({
                   disabled={disabled}
                   error={zo.errors.endDate()?.message}
                   className="w-full"
-                  // @ts-ignore @TODO fix this
-                  defaultValue={endDate || undefined}
+                  defaultValue={endDate}
                   placeholder="Booking"
                   // required={zodFieldIsRequired(
                   //   NewBookingFormSchema.shape.endDate
