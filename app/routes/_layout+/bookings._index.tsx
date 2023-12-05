@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
@@ -16,6 +17,7 @@ import {
   getParamsValues,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -48,10 +50,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
     singular: "booking",
     plural: "bookings",
   };
+
   return json(
     {
       header,
-      items: bookings,
+      items: bookings.map((b) => {
+        /** We format the dates on the server based on the users timezone and locale  */
+        if (b.from && b.to) {
+          const from = new Date(b.from);
+          const displayFrom = getDateTimeFormat(request, {
+            dateStyle: "short",
+            timeStyle: "short",
+          }).format(from);
+
+          const to = new Date(b.to);
+          const displayTo = getDateTimeFormat(request, {
+            dateStyle: "short",
+            timeStyle: "short",
+          }).format(to);
+
+          return {
+            ...b,
+            displayFrom: displayFrom.split(","),
+            displayTo: displayTo.split(","),
+          };
+        }
+        return b;
+      }),
       search,
       page,
       totalItems: bookings.length,
@@ -109,7 +134,15 @@ export const bookingStatusColorMap: { [key: string]: string } = {
   ACTIVE: "#7A5AF8",
   COMPLETED: "#17B26A",
 };
-const ListAssetContent = ({ item }: { item: { [key: string]: any } }) => (
+const ListAssetContent = ({
+  item,
+}: {
+  item: BookingWithCustodians & {
+    /** First element is date, second element is time */
+    displayFrom?: string[];
+    displayTo?: string[];
+  };
+}) => (
   <>
     {/* Item */}
     <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -136,41 +169,62 @@ const ListAssetContent = ({ item }: { item: { [key: string]: any } }) => (
     </Td>
     {/* From */}
     <Td className="hidden md:table-cell">
-      {item.from ? (
+      {item.displayFrom ? (
         <div className="min-w-[130px]">
-          <span className="word-break mb-1 block font-medium">{item.from}</span>
-          {/* <span className="block text-gray-600">
-            {item.from.day} {item.from.time}
-          </span> */}
+          <span className="word-break mb-1 block font-medium">
+            {item.displayFrom[0]}
+          </span>
+          <span className="block text-gray-600">{item.displayFrom[1]}</span>
         </div>
       ) : null}
     </Td>
 
     {/* To */}
     <Td className="hidden md:table-cell">
-      {item.to ? (
+      {item.displayTo ? (
         <div className="min-w-[130px]">
-          <span className="word-break mb-1 block font-medium">{item.to}</span>
-          {/* <span className="block text-gray-600">
-            {item.to.day} {item.to.time}
-          </span> */}
+          <span className="word-break mb-1 block font-medium">
+            {item.displayTo[0]}
+          </span>
+          <span className="block text-gray-600">{item.displayTo[1]}</span>
         </div>
       ) : null}
     </Td>
 
     {/* Custodian */}
     <Td className="hidden md:table-cell">
-      {item.custodian ? (
-        <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
-          <img
-            src={"/images/default_pfp.jpg"}
-            className="mr-1 h-4 w-4 rounded-full"
-            alt=""
-          />
+      {item?.custodianUser ? (
+        <CustodianColumn
+          img={item?.custodianUser?.profilePicture || "/images/default_pfp.jpg"}
+          name={`${item?.custodianUser.firstName} ${item?.custodianUser.lastName}`}
+        />
+      ) : null}
 
-          <span className="mt-[1px]">{item.custodian}</span>
-        </span>
+      {item?.custodianTeamMember ? (
+        <CustodianColumn name={item.custodianTeamMember.name} />
       ) : null}
     </Td>
   </>
 );
+
+function CustodianColumn({ img, name }: { img?: string; name: string }) {
+  return (
+    <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
+      <img
+        src={img || "/images/default_pfp.jpg"}
+        className="mr-1 h-4 w-4 rounded-full"
+        alt=""
+      />
+      <span className="mt-[1px]">{name}</span>
+    </span>
+  );
+}
+
+export type BookingWithCustodians = Prisma.BookingGetPayload<{
+  include: {
+    from: true;
+    to: true;
+    custodianUser: true;
+    custodianTeamMember: true;
+  };
+}>;

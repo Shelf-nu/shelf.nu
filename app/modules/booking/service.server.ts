@@ -3,7 +3,6 @@ import {
   type Prisma,
   type Organization,
   type Asset,
-  AssetStatus,
   BookingStatus,
 } from "@prisma/client";
 import { db } from "~/database";

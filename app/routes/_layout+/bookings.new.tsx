@@ -1,4 +1,3 @@
-import { BookingStatus } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -35,6 +34,7 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfStackError } from "~/utils/error";
 import { bookingStatusColorMap } from "./bookings._index";
 const title = "New Booking";
 
@@ -134,6 +134,24 @@ export async function action({ request }: ActionFunctionArgs) {
 
   switch (intent) {
     case "save":
+      const custodianUser = await db.teamMember.findUnique({
+        where: {
+          id: custodian,
+        },
+        select: {
+          id: true,
+          user: true,
+        },
+      });
+
+      if (!custodianUser) {
+        throw new ShelfStackError({ message: "Cannot find team member" });
+      }
+
+      const userParams = custodianUser.user
+        ? { custodianUserId: custodianUser.user.id }
+        : { custodianTeamMemberId: custodianUser.id };
+
       /** This checks if tags are passed and build the  */
       const booking = await upsertBooking({
         organizationId,
@@ -141,7 +159,7 @@ export async function action({ request }: ActionFunctionArgs) {
         name,
         from: startDate,
         to: endDate,
-        custodianTeamMemberId: custodian, // @TODO this needs to be managed based on custodian type
+        ...userParams,
       });
 
       // @TODO - dynamic messages based on intent
@@ -162,7 +180,6 @@ export async function action({ request }: ActionFunctionArgs) {
         }
       );
     case "reserve":
-      console.log("reserve");
       return null;
     default:
       return null;
