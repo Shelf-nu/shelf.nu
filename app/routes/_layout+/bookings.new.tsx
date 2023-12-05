@@ -16,7 +16,7 @@ import { Badge } from "~/components/shared";
 import { db } from "~/database";
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { saveBooking, upsertBooking } from "~/modules/booking";
+import { upsertBooking } from "~/modules/booking";
 import {
   requireOrganisationId,
   setSelectedOrganizationIdCookie,
@@ -133,15 +133,13 @@ export async function action({ request }: ActionFunctionArgs) {
 
   switch (intent) {
     case "save":
-      const booking = await saveBooking({
-        custodianId: custodian,
+      const booking = await upsertBooking({
+        custodianTeamMemberId: custodian,
         organizationId,
-        booking: {
-          id,
-          name,
-          from: startDate,
-          to: endDate,
-        },
+        id,
+        name,
+        from: startDate,
+        to: endDate,
       });
       sendNotification({
         title: "Booking saved",

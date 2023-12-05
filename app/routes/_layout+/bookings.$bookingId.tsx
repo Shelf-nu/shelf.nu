@@ -15,7 +15,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { db } from "~/database";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { getBooking, saveBooking } from "~/modules/booking";
+import { getBooking, upsertBooking } from "~/modules/booking";
 import type { ExtendedBooking } from "~/modules/booking/types";
 import {
   requireOrganisationId,
@@ -149,15 +149,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   switch (intent) {
     case "save":
-      const booking = await saveBooking({
-        custodianId: custodian,
+      const booking = await upsertBooking({
+        custodianTeamMemberId: custodian,
         organizationId,
-        booking: {
-          id,
-          name,
-          from: startDate,
-          to: endDate,
-        },
+        id,
+        name,
+        from: startDate,
+        to: endDate,
       });
 
       sendNotification({

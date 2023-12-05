@@ -257,10 +257,12 @@ export async function getAssets({
                         bookingFrom && {
                           OR: [
                             {
-                              to: { gt: bookingFrom },
+                              from: { lte: bookingTo },
+                              to: { gte: bookingFrom },
                             },
                             {
-                              from: { lt: bookingTo },
+                              from: { gte: bookingFrom },
+                              to: { lte: bookingTo },
                             },
                           ],
                         }),
@@ -814,8 +816,16 @@ export const getPaginatedAndFilterableAssets = async ({
   extraInclude?: Prisma.AssetInclude;
 }) => {
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search, categoriesIds, tagsIds } =
-    getParamsValues(searchParams);
+  const {
+    page,
+    perPageParam,
+    search,
+    categoriesIds,
+    tagsIds,
+    bookingFrom,
+    bookingTo,
+    hideUnavailable,
+  } = getParamsValues(searchParams);
 
   const { prev, next } = generatePageMeta(request);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -836,6 +846,9 @@ export const getPaginatedAndFilterableAssets = async ({
     search,
     categoriesIds,
     tagsIds,
+    bookingFrom,
+    bookingTo,
+    hideUnavailable,
   });
   const totalPages = Math.ceil(totalAssets / perPage);
 

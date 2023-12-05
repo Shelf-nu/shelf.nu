@@ -7,6 +7,9 @@ import {
 } from "@prisma/client";
 import { db } from "~/database";
 import { ShelfStackError } from "~/utils/error";
+import { sendEmail } from "~/utils/mail.server";
+import { scheduler } from "~/utils/scheduler.server";
+import { schedulerKeys } from "./constants";
 
 const commonInclude: Prisma.BookingInclude = {
   custodianTeamMember: true,
@@ -55,12 +58,33 @@ export const upsertBooking = async (
       disconnect: true,
     };
   } else if (custodianTeamMemberId) {
+    const custodianUser = await db.teamMember.findUnique({
+      where: {
+        id: custodianTeamMemberId,
+      },
+      select: {
+        id: true,
+        user: true,
+      },
+    });
+
+    if (!custodianUser) {
+      throw new ShelfStackError({ message: "Cannot find team member" });
+    }
+
     data.custodianTeamMember = {
       connect: { id: custodianTeamMemberId },
     };
-    data.custodianUser = {
-      disconnect: true,
-    };
+    if (custodianUser.user?.id) {
+      data.custodianUser = {
+        connect: { id: custodianUser.user.id },
+      };
+    } else {
+      //disconnect any stake userId
+      data.custodianUser = {
+        disconnect: true,
+      };
+    }
   }
 
   if (id) {
@@ -83,11 +107,45 @@ export const upsertBooking = async (
       connect: { id: organizationId },
     };
   }
-
-  return db.booking.create({
+  const res = await db.booking.create({
     data: data as Prisma.BookingCreateInput,
-    include: commonInclude,
+    include: { ...commonInclude, organization: true },
   });
+  if (data.from) {
+    const when = new Date(data.from as string);
+    when.setHours(when.getHours() - 1); //1hour before send checkout reminder
+    const jobId = await scheduler.sendAfter(
+      schedulerKeys.checkoutReminder,
+      { id: res.id },
+      {},
+      when
+    );
+    await db.booking.update({
+      where: { id: res.id },
+      data: { activeSchedulerReference: jobId },
+    });
+  }
+  if (
+    data.status &&
+    (data.status === BookingStatus.RESERVED ||
+      data.status === BookingStatus.COMPLETE)
+  ) {
+    const email = res.custodianUser?.email;
+    if (email) {
+      let subject = `Booking reserved`;
+      let text = `Your assets have been reserved by ${res.organization.name} under ${res.name}`;
+      if (data.status === BookingStatus.COMPLETE) {
+        subject = `Booking complete`;
+        text = `Your checkin complete for booking ${res.name}`;
+      }
+      await sendEmail({
+        to: email,
+        subject,
+        text,
+      });
+    }
+  }
+  return res;
 };
 
 export async function getBookings({
@@ -209,13 +267,8 @@ export const deleteBooking = async (booking: Pick<Booking, "id">) => {
     where: { id },
     include: { ...commonInclude, assets: true },
   });
-  if (
-    (
-      [BookingStatus.ONGOING, BookingStatus.OVERDUE] as BookingStatus[]
-    ).includes(b.status)
-  ) {
-    //@TODO check if asset is ongoing in some other booking(only in case of overdue) and update status
-  }
+  if (b.activeSchedulerReference)
+    await scheduler.cancel(b.activeSchedulerReference);
   return b;
 };
 
@@ -226,60 +279,4 @@ export const getBooking = async (booking: Pick<Booking, "id">) => {
     where: { id },
     include: { ...commonInclude, assets: true },
   });
-};
-
-/** Used for saving a bookings details */
-export const saveBooking = async ({
-  custodianId,
-  organizationId,
-  booking,
-}: {
-  custodianId: string;
-  organizationId: string;
-  booking: Partial<
-    Pick<
-      Booking,
-      | "from"
-      | "id"
-      | "name"
-      | "organizationId"
-      | "status"
-      | "to"
-      | "custodianTeamMemberId"
-      | "custodianUserId"
-    > & { assetIds: Asset["id"][] }
-  >;
-}) => {
-  const custodianUser = await db.teamMember.findUnique({
-    where: {
-      id: custodianId,
-    },
-    select: {
-      id: true,
-      user: true,
-    },
-  });
-
-  if (!custodianUser) {
-    throw new ShelfStackError({ message: "Cannot find team member" });
-  }
-
-  const userParams = custodianUser.user
-    ? { custodianUserId: custodianUser.user.id }
-    : { custodianTeamMemberId: custodianUser.id };
-
-  /** This checks if tags are passed and build the  */
-  const updatedBooking = await upsertBooking({
-    organizationId,
-    id: booking.id,
-    name: booking.name,
-    from: booking.from,
-    to: booking.to,
-    ...userParams,
-  });
-
-  if (!updatedBooking) {
-    throw new ShelfStackError({ message: "Cannot update booking" });
-  }
-  return updatedBooking;
 };
