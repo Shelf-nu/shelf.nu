@@ -1,6 +1,6 @@
 import type { ChangeEvent } from "react";
 import { atom } from "jotai";
-import { verifyAccept } from "~/utils";
+import { formatBytes, verifyAccept } from "~/utils";
 
 export const fileErrorAtom = atom<string | undefined>(undefined);
 
@@ -12,17 +12,20 @@ export const validateFileAtom = atom(
       const file = event?.target?.files?.[0];
       if (file) {
         const allowedType = verifyAccept(file.type, event.target.accept);
-        const allowedSize = file.size < 4_000_000;
+        const maxSize = event.target.size || 4_000_000;
+        const allowedSize = file.size < maxSize;
 
         if (!allowedType) {
           event.target.value = "";
-          return `Allowed file types are: PNG, JPG or JPEG`;
+          return `Allowed file types are: ${
+            event.target.accept === "pdf" ? "PDF" : "PNG, JPG or JPEG"
+          }`;
         }
 
         if (!allowedSize) {
           /** Clean the field */
           event.target.value = "";
-          return "Max file size is 4MB";
+          return `Max file size is ${formatBytes(maxSize)}`;
         }
 
         return undefined;

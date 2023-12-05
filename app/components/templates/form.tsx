@@ -1,11 +1,13 @@
+import type { ChangeEvent } from "react";
 import { useCallback, useState } from "react";
 import type { Template } from "@prisma/client";
 import { TemplateType } from "@prisma/client";
-import { Form, useFetcher, useNavigation } from "@remix-run/react";
-import { useAtom } from "jotai";
+import { Form, useNavigation } from "@remix-run/react";
+import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { Badge, Button } from "~/components/shared";
 import { formatBytes, isFormProcessing } from "~/utils";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -20,7 +22,6 @@ import {
 } from "../forms/select";
 import { Switch } from "../forms/switch";
 import { Card } from "../shared/card";
-import { FileDropzone } from "../shared/file-dropzone";
 import iconsMap from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
 
@@ -32,8 +33,7 @@ export const NewTemplateFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "on" ? true : false)),
-  pdf: z.any().optional(),
-  // pdfSize: z.number().optional(),
+  pdf: z.any(),
 });
 
 interface Props {
@@ -43,11 +43,9 @@ interface Props {
   signatureRequired?: Template["signatureRequired"];
   pdfUrl?: Template["pdfUrl"];
   pdfSize?: Template["pdfSize"];
+  pdfName?: Template["pdfName"];
   isEdit?: boolean;
 }
-
-const extractTemplateNameFromUrl = (url: string) =>
-  url.substring(url.indexOf("_") + 1);
 
 export const TemplateForm = ({
   name = "",
@@ -56,25 +54,32 @@ export const TemplateForm = ({
   signatureRequired = false,
   pdfSize,
   pdfUrl,
+  pdfName,
   isEdit = false,
 }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewTemplateFormSchema);
   const disabled = isFormProcessing(navigation.state);
-  const fetcher = useFetcher();
+  const fileError = useAtomValue(fileErrorAtom);
+  const [, validateFile] = useAtom(validateFileAtom);
 
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
   const [selectedType, setSelectedType] = useState<TemplateType>(
     type || TemplateType.BOOKINGS
   );
   const [pdf, setPdf] = useState<File | null>(null);
-  const [_, setSize] = useState<number>(pdfSize || 0);
+  const [size, setSize] = useState<number>(pdfSize || 0);
 
-  const onDropAccepted = useCallback((files: File[]) => {
-    setPdf(files[0]);
-    setSize(files[0].size);
-    // NewTemplateFormSchema.parse({ pdf: files[0], pdfSize: files[0].size });
-  }, []);
+  const handleFileChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files) return;
+      setPdf(files[0]);
+      setSize(files[0].size);
+      validateFile(e);
+    },
+    [validateFile]
+  );
 
   return (
     <Form
@@ -173,33 +178,24 @@ export const TemplateForm = ({
           required={false}
         />
       </FormRow>
-      {/* <Input
-        label="Description"
-        hideLabel
-        hidden
-        inputType="textarea"
-        name={zo.fields.pdfSize()}
-        disabled={disabled}
-        className="w-full border-b-0 pb-0"
-        value={size}
-        placeholder="Store the booking arrangement for 2023"
-        required={zodFieldIsRequired(NewTemplateFormSchema.shape.pdfSize)}
-      /> */}
-      <FormRow rowLabel="Upload PDF">
-        <FileDropzone
-          variant="pdf"
-          onDropAccepted={onDropAccepted}
-          fetcher={fetcher}
-          fileInputName={"pdf"}
-          dropzoneOptions={{
-            maxSize: 5_000_000,
-            accept: {
-              "application/pdf": [".pdf"],
-            },
-            disabled,
-            maxFiles: 1,
-          }}
-        />
+      <FormRow required={!isEdit} rowLabel="Upload PDF">
+        <div>
+          <p className="hidden lg:block">Accepts PDF (max. 5 MB)</p>
+          <Input
+            required={!isEdit}
+            disabled={disabled}
+            accept="application/pdf,.pdf"
+            name={"pdf"}
+            type="file"
+            size={5_000_000}
+            onChange={handleFileChange}
+            label={""}
+            hideLabel
+            error={fileError}
+            className="mt-2"
+            inputClassName="border-0 shadow-none p-0 rounded-none"
+          />
+        </div>
         {pdfUrl && (
           <Card className="flex w-full items-center gap-x-5">
             <div className={"flex grow gap-x-3"}>
@@ -211,10 +207,10 @@ export const TemplateForm = ({
                   rel="noreferrer"
                   className="grow text-sm font-semibold text-gray-600"
                 >
-                  {extractTemplateNameFromUrl(pdfUrl)}
+                  {pdfName}
                 </a>
                 <span className="text-sm font-light text-gray-700">
-                  ({formatBytes(pdfSize! as number)})
+                  {formatBytes(pdfSize! as number)}
                 </span>
               </div>
             </div>
@@ -248,7 +244,7 @@ export const TemplateForm = ({
           </Card>
         )}
       </FormRow>
-
+      <input type="hidden" name={"pdfSize"} value={size} />
       <div className="text-right">
         <Button type="submit" disabled={disabled}>
           {disabled ? <Spinner /> : "Save"}

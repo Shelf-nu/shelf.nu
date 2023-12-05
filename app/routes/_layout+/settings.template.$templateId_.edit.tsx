@@ -78,7 +78,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     );
   }
 
-  const { name, description, signatureRequired } = result.data;
+  const { name, description, signatureRequired, pdf } = result.data;
 
   await updateTemplate({
     id,
@@ -88,7 +88,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
     userId: authSession.userId,
   });
 
+  const pdfSize = pdf.size;
+  const pdfName = pdf.name;
+
   await updateTemplatePDF({
+    pdfName,
+    pdfSize,
     request: clonedData,
     templateId: id,
     userId: authSession.userId,
@@ -125,6 +130,7 @@ export default function TemplateEditPage() {
           signatureRequired={template.signatureRequired}
           pdfUrl={template.pdfUrl}
           pdfSize={template.pdfSize}
+          pdfName={template.pdfName}
         />
       </div>
     </>

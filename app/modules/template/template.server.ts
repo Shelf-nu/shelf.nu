@@ -69,11 +69,15 @@ export async function updateTemplate({
 
 export async function updateTemplatePDF({
   request,
+  pdfName,
+  pdfSize,
   templateId,
   userId,
 }: {
   request: Request;
   templateId: string;
+  pdfName: string;
+  pdfSize: number;
   userId: User["id"];
 }) {
   const res = await db.template.findFirst({
@@ -83,10 +87,7 @@ export async function updateTemplatePDF({
 
   if (!res) return null;
 
-  const newFileName: string = `${userId}/${templateId}_${res.name
-    .replace(/\s/g, "-")
-    .toLowerCase()}`;
-  console.log("T/F: ", res.pdfUrl !== null && res.pdfUrl !== undefined);
+  const newFileName: string = `${userId}/${templateId}`;
   const fileData = await parseFileFormData({
     request,
     bucketName: "templates",
@@ -94,10 +95,7 @@ export async function updateTemplatePDF({
     updateExisting: res.pdfUrl !== null && res.pdfUrl !== undefined,
   });
 
-  console.log("fileData: ", fileData);
-
   const pdf = fileData.get("pdf") as string;
-  const pdfSize = parseInt(fileData.get("pdfSize") as string);
 
   if (!pdf) return null;
 
@@ -109,6 +107,7 @@ export async function updateTemplatePDF({
   const data = {
     pdfUrl: publicUrl + ".pdf",
     pdfSize,
+    pdfName,
   };
 
   return db.template.update({

@@ -65,8 +65,8 @@ async function uploadFile(
 ) {
   try {
     let file = await getFileArrayBuffer(fileData);
-    resizeOptions && cropImage(file, resizeOptions);
-    console.log(updateExisting);
+    if (resizeOptions) file = await cropImage(file, resizeOptions);
+
     const { data, error } = updateExisting
       ? await getSupabaseAdmin()
           .storage.from(bucketName)
@@ -75,7 +75,6 @@ async function uploadFile(
           .storage.from(bucketName)
           .upload(filename, file, { contentType, upsert: true });
 
-    console.log("upload data: ", data, "error: ", error);
     if (error) {
       throw error;
     }
@@ -120,7 +119,7 @@ export async function parseFileFormData({
       const fileExtension = contentType.includes("pdf")
         ? "pdf"
         : filename?.split(".").pop();
-      console.log("data: ", data);
+
       const uploadedFilePath = await uploadFile(data, {
         filename: `${newFileName}.${fileExtension}`,
         contentType,
