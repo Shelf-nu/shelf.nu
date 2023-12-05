@@ -26,10 +26,7 @@ export default function CustodianSelect(
 
   return (
     <div className="relative w-full">
-      <Select
-        name="custodian"
-        // defaultValue={defaultValue}
-      >
+      <Select name="custodian" defaultValue={defaultValue}>
         <SelectTrigger>
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>
