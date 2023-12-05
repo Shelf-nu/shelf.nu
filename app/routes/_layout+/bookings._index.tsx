@@ -222,6 +222,7 @@ function CustodianColumn({ img, name }: { img?: string; name: string }) {
 
 export type BookingWithCustodians = Prisma.BookingGetPayload<{
   include: {
+    assets: true;
     from: true;
     to: true;
     custodianUser: true;

@@ -1,10 +1,16 @@
 import type { Asset, Category, Tag } from "@prisma/client";
-import { Form, useNavigate, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  useLoaderData,
+  useNavigate,
+  useNavigation,
+} from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { Tag as TagBadge } from "~/components/shared/tag";
+import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
 import { isFormProcessing } from "~/utils/form";
 import { AssetImage } from "../assets/asset-image";
 import CustodianSelect from "../custody/custodian-select";
@@ -16,7 +22,6 @@ import { Filters } from "../list/filters";
 import { Badge } from "../shared";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
-import { Spinner } from "../shared/spinner";
 import TextualDivider from "../shared/textual-divider";
 import { Th, Td } from "../table";
 
@@ -65,6 +70,7 @@ export function BookingForm({
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
   const navigate = useNavigate();
+  const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   return (
     <div>
       {/* <div className="mb-4 mt-[-42px] flex justify-end text-right">
@@ -91,7 +97,7 @@ export function BookingForm({
       <div className="lg:flex lg:items-start lg:gap-4">
         <div className="mb-8 mt-2 w-full lg:mb-0 lg:w-[328px]">
           <Form
-            // ref={zo.ref}
+            ref={zo.ref}
             method="post"
             className="flex w-full flex-col gap-3"
           >
@@ -185,20 +191,20 @@ export function BookingForm({
               <div className="flex gap-3">
                 <Button
                   type="submit"
-                  // disabled={disabled}
+                  disabled={disabled}
                   variant="secondary"
                   name="intent"
                   value="save"
                 >
-                  {disabled ? <Spinner /> : "Save"}
+                  Save
                 </Button>
                 <Button
                   type="submit"
-                  // disabled={disabled}
+                  disabled={disabled || booking.assets.length === 0}
                   name="intent"
                   value="reserve"
                 >
-                  {disabled ? <Spinner /> : "Reserve"}
+                  Reserve
                 </Button>
               </div>
             </div>

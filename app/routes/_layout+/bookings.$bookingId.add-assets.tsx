@@ -1,4 +1,4 @@
-import type { Asset } from "@prisma/client";
+import type { Asset, Booking } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useParams } from "@remix-run/react";
@@ -8,26 +8,16 @@ import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 import { Td } from "~/components/table";
 import { db } from "~/database";
-import {
-  createLocationChangeNote,
-  getPaginatedAndFilterableAssets,
-} from "~/modules/asset";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
+import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
 import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost } from "~/utils";
-import { ShelfStackError } from "~/utils/error";
+import { assertIsPost, getRequiredParam } from "~/utils";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
-  const locationId = params.locationId as string;
-  const location = await db.location.findUnique({
-    where: {
-      id: locationId,
-    },
-  });
-
+  const id = getRequiredParam(params, "bookingId");
   const {
     search,
     totalAssets,
@@ -48,8 +38,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     singular: "asset",
     plural: "assets",
   };
+  const booking = await getBooking({ id });
+
   return json({
     showModal: true,
+    booking,
     items: assets,
     categories,
     tags,
@@ -61,69 +54,40 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     next,
     prev,
     modelName,
-    location,
   });
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   assertIsPost(request);
   await requireAuthSession(request);
-  const { locationId } = params;
+  const bookingId = getRequiredParam(params, "bookingId");
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
   const isChecked = formData.get("isChecked") === "yes";
-  const asset = await db.asset.findUnique({
-    where: {
-      id: assetId,
-    },
-    include: {
-      location: true,
-      user: true,
-    },
-  });
 
-  const location = await db.location.update({
-    where: {
-      id: locationId,
-    },
-    data: {
-      assets: isChecked
-        ? { connect: { id: assetId } }
-        : { disconnect: { id: assetId } },
-    },
-  });
-
-  if (!location) {
-    throw new ShelfStackError({ message: "Something went wrong", status: 500 });
-  }
-
-  if (asset) {
-    await createLocationChangeNote({
-      currentLocation: asset?.location || null,
-      newLocation: location,
-      firstName: asset?.user.firstName || "",
-      lastName: asset?.user.lastName || "",
-      assetName: asset?.title,
-      assetId: asset.id,
-      userId: asset?.user.id,
-      isRemoving: !isChecked,
+  if (isChecked) {
+    await upsertBooking({
+      id: bookingId,
+      assetIds: [assetId],
+    });
+  } else {
+    await removeAssets({
+      id: bookingId,
+      assetIds: [assetId],
     });
   }
 
   return json({ ok: true });
 };
 
-export default function AddAssetsToLocation() {
-  const { location } = useLoaderData<typeof loader>();
+export default function AddAssetsToNewBooking() {
+  const { booking } = useLoaderData<typeof loader>();
 
   return (
     <div>
       <header className="mb-5">
-        <h2>Move assets to ‘{location?.name}’ location</h2>
-        <p>
-          Search your database for assets that you would like to move to this
-          location.
-        </p>
+        <h2>Move assets to ‘{booking?.name}’ booking</h2>
+        <p>Fill up the booking with the assets of your choice</p>
       </header>
       <Filters className="mb-2" />
 
@@ -138,21 +102,18 @@ export default function AddAssetsToLocation() {
         }}
       />
       <Button variant="secondary" width="full" to={".."}>
-        Done
+        Save
       </Button>
     </div>
   );
 }
 
-type AssetWithLocation = Asset & {
-  location: {
-    name: string;
-  };
+type AssetWithBooking = Asset & {
+  bookings: Booking[];
 };
 
-const RowComponent = ({ item }: { item: AssetWithLocation }) => {
-  const { locationId } = useParams();
-
+const RowComponent = ({ item }: { item: AssetWithBooking }) => {
+  const { bookingId } = useParams();
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -171,15 +132,6 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
             </div>
             <div className="flex flex-col">
               <div className="font-medium">{item.title}</div>
-              {item.location ? (
-                <div
-                  className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
-                  title={`Current location: ${item.location.name}`}
-                >
-                  <div className="h-2 w-2 rounded-full bg-gray-500"></div>
-                  <span>{item.location.name}</span>
-                </div>
-              ) : null}
             </div>
           </div>
         </div>
@@ -188,7 +140,12 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
       <Td>
         <AddAssetForm
           assetId={item.id}
-          isChecked={item.locationId === locationId || false}
+          // @TODO this still needs to be handled
+          // We have to find a way to make getFilteredAndPaginatedAssets to include bookings only when asked for as well as to be able to receive the hideUnavailable
+          isChecked={
+            item.bookings.filter((booking) => booking.id === bookingId)
+              ?.length > 0 || false
+          }
         />
       </Td>
     </>

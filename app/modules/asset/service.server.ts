@@ -808,10 +808,11 @@ export async function getAllRelatedEntries({
 export const getPaginatedAndFilterableAssets = async ({
   request,
   organizationId,
+  extraInclude,
 }: {
   request: LoaderFunctionArgs["request"];
-  userId: User["id"];
   organizationId: Organization["id"];
+  extraInclude?: Prisma.AssetInclude;
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, categoriesIds, tagsIds } =

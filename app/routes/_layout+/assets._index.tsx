@@ -128,7 +128,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cookie,
   } = await getPaginatedAndFilterableAssets({
     request,
-    userId,
     organizationId,
   });
 
