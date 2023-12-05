@@ -808,7 +808,6 @@ export async function getAllRelatedEntries({
 export const getPaginatedAndFilterableAssets = async ({
   request,
   organizationId,
-  extraInclude,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];

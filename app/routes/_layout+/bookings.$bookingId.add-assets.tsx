@@ -7,7 +7,6 @@ import { List, Filters } from "~/components/list";
 import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 import { Td } from "~/components/table";
-import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
