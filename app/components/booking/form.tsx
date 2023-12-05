@@ -216,7 +216,12 @@ export function BookingForm({
             <div className="mb-3 flex gap-4 lg:hidden">
               <Button
                 as="button"
-                to="add-assets"
+                to={`add-assets?${new URLSearchParams({
+                  // @ts-ignore @TODO fix me
+                  bookingFrom: new Date(booking.from).toISOString(),
+                  // @ts-ignore @TODO fix me
+                  bookingTo: new Date(booking.to).toISOString(),
+                })}`}
                 variant="primary"
                 icon="plus"
                 width="full"
@@ -230,7 +235,12 @@ export function BookingForm({
                   <div className="hidden lg:block">
                     <Button
                       as="button"
-                      to="add-assets"
+                      to={`add-assets?${new URLSearchParams({
+                        // @ts-ignore @TODO fix me
+                        bookingFrom: new Date(booking.from).toISOString(),
+                        // @ts-ignore @TODO fix me
+                        bookingTo: new Date(booking.to).toISOString(),
+                      })}`}
                       variant="primary"
                       icon="plus"
                     >

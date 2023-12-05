@@ -113,6 +113,7 @@ type AssetWithBooking = Asset & {
 
 const RowComponent = ({ item }: { item: AssetWithBooking }) => {
   const { bookingId } = useParams();
+
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -139,13 +140,10 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
       <Td>
         <AddAssetForm
           assetId={item.id}
-          // @TODO this still needs to be handled
-          // We have to find a way to make getFilteredAndPaginatedAssets to include bookings only when asked for as well as to be able to receive the hideUnavailable
-          // isChecked={
-          //   item.bookings.filter((booking) => booking.id === bookingId)
-          //     ?.length > 0 || false
-          // }
-          isChecked={false}
+          isChecked={
+            item.bookings.filter((booking) => booking.id === bookingId)
+              ?.length > 0
+          }
         />
       </Td>
     </>

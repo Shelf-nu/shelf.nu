@@ -272,6 +272,7 @@ export async function getAssets({
                       from: true,
                       to: true,
                       status: true,
+                      id: true,
                     }, //@TODO more needed?
                   },
                 }
