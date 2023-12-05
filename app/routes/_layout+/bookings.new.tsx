@@ -3,7 +3,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
@@ -143,23 +143,18 @@ export async function action({ request }: ActionFunctionArgs) {
           to: endDate,
         },
       });
-
       sendNotification({
         title: "Booking saved",
         message: "Your booking has been saved successfully",
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
       });
-      return json(
-        { booking },
-        {
-          status: 200,
-          headers: [
-            setCookie(await commitAuthSession(request, { authSession })),
-            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-          ],
-        }
-      );
+      return redirect(`/bookings/${booking.id}`, {
+        headers: [
+          setCookie(await commitAuthSession(request, { authSession })),
+          setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+        ],
+      });
     case "reserve":
       return null;
     default:

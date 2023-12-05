@@ -10,11 +10,26 @@ import {
 import { UserIcon } from "../icons";
 import { Button } from "../shared";
 
-export default function CustodianSelect() {
+export default function CustodianSelect(
+  { defaultCustodianId }: { defaultCustodianId?: string } = {
+    defaultCustodianId: "",
+  }
+) {
   const { teamMembers } = useLoaderData<typeof loader>();
+  const defaultValue = defaultCustodianId
+    ? JSON.stringify({
+        id: defaultCustodianId,
+        name: teamMembers.find((member) => member.id === defaultCustodianId)
+          ?.name,
+      })
+    : undefined;
+
   return (
     <div className="relative w-full">
-      <Select name="custodian">
+      <Select
+        name="custodian"
+        // defaultValue={defaultValue}
+      >
         <SelectTrigger>
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>

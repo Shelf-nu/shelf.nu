@@ -91,17 +91,16 @@ export function BookingForm({
       <div className="lg:flex lg:items-start lg:gap-4">
         <div className="mb-8 mt-2 w-full lg:mb-0 lg:w-[328px]">
           <Form
-            ref={zo.ref}
+            // ref={zo.ref}
             method="post"
             className="flex w-full flex-col gap-3"
-            encType="multipart/form-data"
           >
             {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
             <Card className="m-0">
               <FormRow
                 rowLabel={"Name"}
                 className="mobile-styling-only border-b-0 p-0"
-                // required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
+                //@TODO required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
               >
                 <Input
                   label="Name"
@@ -114,7 +113,7 @@ export function BookingForm({
                   className="mobile-styling-only w-full p-0"
                   defaultValue={name || undefined}
                   placeholder="Booking"
-                  // required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
+                  // @TODO required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
                 />
               </FormRow>
             </Card>
@@ -122,7 +121,7 @@ export function BookingForm({
               <FormRow
                 rowLabel={"Start Date"}
                 className="mobile-styling-only border-b-0 pb-[10px]"
-                // required={zodFieldIsRequired(
+                // @TODO required={zodFieldIsRequired(
                 //   NewBookingFormSchema.shape.startDate
                 // )}
               >
@@ -170,7 +169,7 @@ export function BookingForm({
               <label className="mb-2.5 block font-medium text-gray-700">
                 <span className="required-input-label">Custodian</span>
               </label>
-              <CustodianSelect />
+              <CustodianSelect defaultCustodianId={custodianId} />
 
               {zo.errors.custodian()?.message ? (
                 <div className="text-sm text-error-500">
@@ -186,7 +185,7 @@ export function BookingForm({
               <div className="flex gap-3">
                 <Button
                   type="submit"
-                  disabled={disabled}
+                  // disabled={disabled}
                   variant="secondary"
                   name="intent"
                   value="save"
@@ -195,7 +194,7 @@ export function BookingForm({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={disabled}
+                  // disabled={disabled}
                   name="intent"
                   value="reserve"
                 >

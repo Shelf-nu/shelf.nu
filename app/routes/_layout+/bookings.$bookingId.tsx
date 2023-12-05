@@ -186,8 +186,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
-  const { booking } = useLoaderData<typeof loader>();
-
+  const { booking, teamMembers } = useLoaderData<typeof loader>();
   return (
     <>
       <Header title={hasName ? name : booking.name} />
@@ -197,9 +196,16 @@ export default function BookingEditPage() {
       <div>
         <BookingForm
           // {/* @ts-ignore @TODO fix after name is made required */}
+          id={booking.id}
           name={booking.name || undefined}
           startDate={booking.fromForDateInput || undefined}
           endDate={booking.toForDateInput || undefined}
+          custodianId={
+            booking.custodianTeamMemberId ||
+            teamMembers.find(
+              (member) => member.user?.id === booking.custodianUserId
+            )?.id
+          }
         />
         <ContextualModal />
       </div>
