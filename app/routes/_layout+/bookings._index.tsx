@@ -5,7 +5,7 @@ import { useNavigate } from "@remix-run/react";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { List } from "~/components/list";
+import { Filters, List } from "~/components/list";
 import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";
@@ -112,6 +112,7 @@ export default function BookingsIndexPage() {
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         {/* @TODO - add filters */}
+        <Filters className="mb-2" />
         <List
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(id)}

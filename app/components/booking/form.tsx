@@ -94,7 +94,7 @@ export function BookingForm({
           </Button>
         </div>
       </div> */}
-      <div className="lg:flex lg:items-start lg:gap-4">
+      <div className="mt-5 lg:flex lg:items-start lg:gap-4">
         <div className="mb-8 mt-2 w-full lg:mb-0 lg:w-[328px]">
           <Form
             ref={zo.ref}
@@ -211,7 +211,7 @@ export function BookingForm({
           </Form>
         </div>
         <div className="flex-1">
-          <div className=" w-full lg:ml-8">
+          <div className=" w-full">
             <TextualDivider text="Assets" className="mb-8 lg:hidden" />
             <div className="mb-3 flex gap-4 lg:hidden">
               <Button
