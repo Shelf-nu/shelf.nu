@@ -13,7 +13,9 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
   bookingTo: searchParams.get("bookingTo")?.length
     ? new Date(searchParams.get("bookingTo") as string)
     : null,
-  hideUnavailable: searchParams.get("hideUnavailable") == "true",
+  hideUnavailable: searchParams.get("hideUnavailable")?.length
+    ? searchParams.get("hideUnavailable") == "true"
+    : undefined,
 });
 
 /** Generates prev & next links  */
