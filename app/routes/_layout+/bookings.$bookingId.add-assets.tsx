@@ -140,6 +140,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
       <Td>
         <AddAssetForm
           assetId={item.id}
+          // @TODO this is not working as expected.
           isChecked={
             item.bookings.filter((booking) => booking.id === bookingId)
               ?.length > 0
