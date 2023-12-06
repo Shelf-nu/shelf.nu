@@ -190,7 +190,7 @@ export default function TemplatePage() {
                 customContent={{
                   title: "No templates on database",
                   text: "What are you waiting for? Add your first template now!",
-                  newButtonRoute: `add-template`,
+                  newButtonRoute: `new`,
                   newButtonContent: "Add Template",
                 }}
                 modelName={{
@@ -205,13 +205,13 @@ export default function TemplatePage() {
                   <PremiumFeatureButton
                     canUseFeature={canCreateMoreTemplates}
                     buttonContent={{
-                      title: "New template",
+                      title: "Add template",
                       message: upgradeMessage,
                       ctaText: "upgrading to team plan",
                     }}
                     skipCta={tier.id === TierId.tier_2}
                     buttonProps={{
-                      to: "add-template",
+                      to: "new",
                       role: "link",
                       icon: "plus",
                       "aria-label": `new template`,
