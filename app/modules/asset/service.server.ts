@@ -847,9 +847,9 @@ export const getPaginatedAndFilterableAssets = async ({
     search,
     categoriesIds,
     tagsIds,
-    // bookingFrom,
-    // bookingTo,
-    // hideUnavailable,
+    bookingFrom,
+    bookingTo,
+    hideUnavailable,
   });
   const totalPages = Math.ceil(totalAssets / perPage);
 

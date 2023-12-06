@@ -13,7 +13,6 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       FORMBRICKS_ENV_ID: string;
       MAINTENANCE_MODE: string;
-      DATABASE_URL: string;
     };
   }
 }

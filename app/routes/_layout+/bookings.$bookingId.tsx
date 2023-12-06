@@ -193,9 +193,8 @@ export default function BookingEditPage() {
       </div>
       <div>
         <BookingForm
-          // {/* @ts-ignore @TODO fix after name is made required */}
           id={booking.id}
-          name={booking.name || undefined}
+          name={booking.name}
           startDate={booking.fromForDateInput || undefined}
           endDate={booking.toForDateInput || undefined}
           custodianId={

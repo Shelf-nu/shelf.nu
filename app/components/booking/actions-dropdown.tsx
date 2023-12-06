@@ -18,7 +18,7 @@ interface Props {
   fullWidth?: boolean;
 }
 
-export const ActionsDopdown = ({ booking, fullWidth }: Props) => (
+export const ActionsDropdown = ({ booking, fullWidth }: Props) => (
   <DropdownMenu modal={false}>
     <DropdownMenuTrigger
       className={tw("asset-actions", fullWidth ? "w-full" : "")}

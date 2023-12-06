@@ -12,6 +12,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
 import { isFormProcessing } from "~/utils/form";
+import { ActionsDropdown } from "./actions-dropdown";
 import { AssetImage } from "../assets/asset-image";
 import CustodianSelect from "../custody/custodian-select";
 import FormRow from "../forms/form-row";
@@ -189,6 +190,7 @@ export function BookingForm({
             </Card>
             <div className="mb-4 flex justify-end text-right">
               <div className="flex gap-3">
+                <ActionsDropdown booking={booking} />
                 <Button
                   type="submit"
                   disabled={disabled}
