@@ -401,7 +401,7 @@ model TierLimit {
   canExportAssets  Boolean  @default(false)
   maxCustomFields  Int      @default(0)
   maxOrganizations Int      @default(1)
-  maxTemplates     Int      @default(5)
+  maxTemplates     Int      @default(3)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }

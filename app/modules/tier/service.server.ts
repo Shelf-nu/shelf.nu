@@ -5,6 +5,7 @@ import { isPersonalOrg } from "~/utils/organization";
 import {
   canCreateMoreCustomFields,
   canCreateMoreOrganizations,
+  canCreateMoreTemplates,
   canExportAssets,
   canImportAssets,
 } from "~/utils/subscription";
@@ -95,9 +96,9 @@ export const assertUserCanCreateMoreTemplates = async ({
 }) => {
   /** Get the tier limit and check if they can export */
   const tierLimit = await getUserTierLimit(userId);
-  const canCreateMore = canCreateMoreCustomFields({
+  const canCreateMore = canCreateMoreTemplates({
     tierLimit,
-    totalCustomFields: await db.template.count({
+    totalTemplates: await db.template.count({
       where: { userId },
     }),
   });

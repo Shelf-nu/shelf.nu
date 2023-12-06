@@ -21,7 +21,7 @@ import {
   makeActive,
   makeDefault,
   makeInactive,
-} from "~/modules/template/template.server";
+} from "~/modules/template/service.server";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -68,6 +68,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const templates = user.templates;
 
+  const defaultTemplates: { [key: string]: TTemplate } = {};
+  templates.forEach((template) => {
+    if (template.isDefault) defaultTemplates[template.type] = template;
+  });
+
   return json({
     userId,
     tier: user.tier,
@@ -79,6 +84,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     items: templates,
     totalItems: templates.length,
     title: "Templates",
+    defaultTemplates,
   });
 };
 
@@ -86,45 +92,23 @@ export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
   const userId = authSession.userId;
-  const url = new URL(request.url);
-  const id = url.searchParams.get("templateId");
 
-  if (id) {
-    const isActive = new URL(request.url).searchParams.get("isActive");
-    const action = new URL(request.url).searchParams.get("action");
+  const formData = await request.clone().formData();
+  const intent = formData.get("intent") as "toggleActive" | "makeDefault";
 
-    if (action === "make-default") {
-      const templateType = new URL(request.url).searchParams.get(
-        "templateType"
-      ) as Template["type"];
+  switch (intent) {
+    case "toggleActive": {
+      const isActive = formData.get("isActive") === "true";
+      const templateId = formData.get("templateId") as string;
 
-      await makeDefault({
-        id,
-        type: templateType,
-        userId,
-      });
-
-      sendNotification({
-        title: "Template updated",
-        message: "Your template has been updated successfully",
-        icon: { name: "success", variant: "success" },
-        senderId: authSession.userId,
-      });
-
-      return redirect(`/settings/template`, {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      });
-    } else if (action === "toggle-active") {
-      if (isActive === false.toString()) {
-        await makeActive({
-          id,
+      if (isActive) {
+        await makeInactive({
+          id: templateId,
           userId,
         });
       } else {
-        await makeInactive({
-          id,
+        await makeActive({
+          id: templateId,
           userId,
         });
       }
@@ -141,8 +125,29 @@ export async function action({ request }: ActionFunctionArgs) {
           "Set-Cookie": await commitAuthSession(request, { authSession }),
         },
       });
-    } else {
-      return null;
+    }
+    case "makeDefault": {
+      const templateId = formData.get("templateId") as string;
+      const templateType = formData.get("templateType") as Template["type"];
+
+      await makeDefault({
+        id: templateId,
+        type: templateType,
+        userId,
+      });
+
+      sendNotification({
+        title: "Template updated",
+        message: "Your template has been updated successfully",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+
+      return redirect(`/settings/template`, {
+        headers: {
+          "Set-Cookie": await commitAuthSession(request, { authSession }),
+        },
+      });
     }
   }
 }
@@ -160,7 +165,7 @@ export default function TemplatePage() {
   const hasItems = totalItems > 0;
 
   let upgradeMessage =
-    "You are currently able to create a max of 10 templates. If you want to create more than 10 Team templates, please get in touch with sales";
+    "You are currently able to create a max of 3 templates. If you want to create more than 3 Team templates, please get in touch with sales";
   if (tier.id == TierId.free || tier.id == TierId.tier_1) {
     upgradeMessage = `You cannot create more than ${tier.tierLimit} template on a ${tier.name} subscription. `;
   }

@@ -25,6 +25,8 @@ import { Card } from "../shared/card";
 import iconsMap from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
 
+const MAX_FILE_SIZE = 5_000_000;
+
 export const NewTemplateFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
   type: z.nativeEnum(TemplateType),
@@ -74,6 +76,13 @@ export const TemplateForm = ({
     (e: ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files) return;
+
+      const file = files[0];
+
+      // We don't want to update the state if the file is
+      // more than 5 MB
+      if (file.size > MAX_FILE_SIZE) return;
+
       setPdf(files[0]);
       setSize(files[0].size);
       validateFile(e);
@@ -187,7 +196,7 @@ export const TemplateForm = ({
             accept="application/pdf,.pdf"
             name={"pdf"}
             type="file"
-            size={5_000_000}
+            size={MAX_FILE_SIZE}
             onChange={handleFileChange}
             label={""}
             hideLabel

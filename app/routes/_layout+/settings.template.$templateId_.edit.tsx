@@ -19,7 +19,7 @@ import {
   getTemplateById,
   updateTemplate,
   updateTemplatePDF,
-} from "~/modules/template/template.server";
+} from "~/modules/template/service.server";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

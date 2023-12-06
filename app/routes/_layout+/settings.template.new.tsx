@@ -14,7 +14,7 @@ import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import {
   createTemplate,
   updateTemplatePDF,
-} from "~/modules/template/template.server";
+} from "~/modules/template/service.server";
 import { assertUserCanCreateMoreTemplates } from "~/modules/tier";
 
 import { assertIsPost } from "~/utils";

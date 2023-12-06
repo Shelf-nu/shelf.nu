@@ -11,6 +11,11 @@ export async function createTemplate({
 }: Pick<Template, "name" | "type" | "description" | "signatureRequired"> & {
   userId: User["id"];
 }) {
+  // Count the number of templates of same type for the user
+  const sameExistingTemplateCount = await db.template.count({
+    where: { type, userId },
+  });
+
   const data = {
     name,
     type,
@@ -21,23 +26,10 @@ export async function createTemplate({
         id: userId,
       },
     },
+    isDefault: sameExistingTemplateCount === 0
   };
 
   const template = await db.template.create({ data });
-
-  // Check whether there are templates of same type for the user
-  const result = await db.template.findMany({
-    where: { type, userId },
-  });
-  // If there is only one template, make it default
-  if (result.length === 1) {
-    await db.template.update({
-      where: { id: result[0].id },
-      data: { isDefault: true },
-    });
-  }
-
-  template.isDefault = result.length > 0 ? false : true;
 
   return template;
 }

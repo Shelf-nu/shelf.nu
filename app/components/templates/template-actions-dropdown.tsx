@@ -1,7 +1,6 @@
-import { useState } from "react";
 import type { Template } from "@prisma/client";
-import { useFetcher, useLoaderData, useSubmit } from "@remix-run/react";
-import { TrashIcon, VerticalDotsIcon } from "~/components/icons";
+import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { VerticalDotsIcon } from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,16 +27,7 @@ type TTemplate = Pick<
 >;
 
 export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
-  const submit = useSubmit();
-  const { items } = useLoaderData<typeof loader>();
-
-  const [defaultItem] = useState<Map<string, TTemplate>>(() => {
-    const map = new Map<string, TTemplate>();
-    items.forEach((item) => {
-      if (item.isDefault) map.set(item.type, item);
-    });
-    return map;
-  });
+  const { defaultTemplates } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -57,7 +47,7 @@ export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
             className="px-4 py-3"
           >
             <MakeDefaultButton
-              typeDefault={defaultItem.get(template.type)}
+              typeDefault={defaultTemplates[template.type]}
               template={template}
             />
           </DropdownMenuItem>
@@ -73,27 +63,31 @@ export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
               Edit
             </Button>
           </DropdownMenuItem>
-          <DropdownMenuItem className="px-4 py-3">
-            {/* <Form method="post"> */}
-            {/* <input type="submit" value={"submit"} /> */}
-            <Button
-              onClick={() =>
-                submit(null, {
-                  method: "post",
-                  action: `?index&isActive=${template.isActive}&templateId=${template.id}&action=toggle-active`,
-                })
-              }
-              type="submit"
-              icon="deactivate"
-              role="link"
-              variant="link"
-              className="justify-start text-gray-700 hover:text-gray-700"
-              width="full"
+          <Form method="post">
+            <input type="hidden" name="templateId" value={template.id} />
+            <input
+              type="hidden"
+              name="isActive"
+              value={template.isActive + ""}
+            />
+            <DropdownMenuItem
+              onSelect={(e) => e.preventDefault()}
+              className="px-4 py-3"
             >
-              {template.isActive ? "Deactivate" : "Activate"}
-            </Button>
-            {/* </Form> */}
-          </DropdownMenuItem>
+              <Button
+                name="intent"
+                value="toggleActive"
+                type="submit"
+                icon="deactivate"
+                role="link"
+                variant="link"
+                className="justify-start text-gray-700 hover:text-gray-700"
+                width="full"
+              >
+                {template.isActive ? "Deactivate" : "Activate"}
+              </Button>
+            </DropdownMenuItem>
+          </Form>
         </DropdownMenuContent>
       </DropdownMenu>
     </>
@@ -107,16 +101,8 @@ const MakeDefaultButton = ({
   typeDefault?: TTemplate;
   template: TTemplate;
 }) => {
-  const fetcher = useFetcher();
-  const disabled = isFormProcessing(fetcher.state);
-  const submit = useSubmit();
-
-  const handleMakeDefault = () => {
-    submit(null, {
-      method: "post",
-      action: `?index&isActive=${template.isActive}&templateId=${template.id}&templateType=${template.type}&action=make-default`,
-    });
-  };
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
 
   return (
     <>
@@ -125,8 +111,7 @@ const MakeDefaultButton = ({
           disabled={true}
           icon="star"
           variant="tertiary"
-          className="border-0"
-          width="full"
+          className="w-full justify-start border-0 px-0 py-1"
         >
           Make default
         </Button>
@@ -136,7 +121,6 @@ const MakeDefaultButton = ({
             <Button
               disabled={disabled}
               variant="link"
-              type="submit"
               className="w-full justify-start rounded-none border-b-2 text-gray-700 hover:bg-gray-100 hover:text-gray-700"
               icon={"star"}
               title={"Make default"}
@@ -146,9 +130,6 @@ const MakeDefaultButton = ({
           </AlertDialogTrigger>
           <AlertDialogContent className="relative w-full">
             <AlertDialogHeader>
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
-                <TrashIcon />
-              </span>
               <AlertDialogTitle>Change default template?</AlertDialogTitle>
               <AlertDialogDescription>
                 <span className="font-semibold">{typeDefault.name}</span> is
@@ -162,30 +143,52 @@ const MakeDefaultButton = ({
               <AlertDialogCancel asChild>
                 <Button variant="secondary">Cancel</Button>
               </AlertDialogCancel>
-              {/* <Form method="delete" action="/categories"> */}
-              {/* <input type="hidden" name="id" value={"WQfegrht"} /> */}
-              <Button
-                className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
-                type="submit"
-                onClick={handleMakeDefault}
-              >
-                Confirm
-              </Button>
-              {/* </Form> */}
+              <Form method="post">
+                <input type="hidden" name="templateId" value={template.id} />
+                <input
+                  type="hidden"
+                  name="templateType"
+                  value={template.type}
+                />
+                <input
+                  type="hidden"
+                  name="isActive"
+                  value={template.isActive.toString()}
+                />
+                <Button
+                  type="submit"
+                  name="intent"
+                  value="makeDefault"
+                  role="link"
+                  variant="primary"
+                >
+                  Confirm
+                </Button>
+              </Form>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
       ) : (
-        <Button
-          icon="star"
-          role="link"
-          variant="link"
-          onClick={handleMakeDefault}
-          className="justify-start  border-b-2 text-gray-700 hover:text-gray-700"
-          width="full"
-        >
-          Make default
-        </Button>
+        <Form method="post">
+          <input type="hidden" name="templateId" value={template.id} />
+          <input type="hidden" name="templateType" value={template.type} />
+          <input
+            type="hidden"
+            name="isActive"
+            value={template.isActive.toString()}
+          />
+          <Button
+            name="intent"
+            value="makeDefault"
+            icon="star"
+            role="link"
+            variant="link"
+            className="justify-start  border-b-2 text-gray-700 hover:text-gray-700"
+            width="full"
+          >
+            Make default
+          </Button>
+        </Form>
       )}
     </>
   );
