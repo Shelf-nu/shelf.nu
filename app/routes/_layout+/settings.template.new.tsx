@@ -72,10 +72,29 @@ export async function action({ request }: LoaderFunctionArgs) {
   }
   const { name, type, description, signatureRequired, pdf } = result.data;
 
+  if (pdf.type === "application/octet-stream") {
+    return json(
+      {
+        errors: [
+          {
+            code: "custom",
+            message: "File is required.",
+          },
+        ],
+      },
+      {
+        status: 400,
+        headers: {
+          "Set-Cookie": await commitAuthSession(request, { authSession }),
+        },
+      }
+    );
+  }
+
   const pdfSize = pdf.size;
   const pdfName = pdf.name;
 
-  await createTemplate({
+  const { id } = await createTemplate({
     name,
     type,
     description: description ?? "",
@@ -87,7 +106,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     pdfName,
     pdfSize,
     request: clonedData,
-    templateId: authSession.userId,
+    templateId: id,
     userId: authSession.userId,
   });
 

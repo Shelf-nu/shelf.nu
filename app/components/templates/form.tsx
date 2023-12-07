@@ -10,7 +10,6 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { validateFileAtom } from "~/atoms/file";
 import { Badge, Button } from "~/components/shared";
 import { formatBytes, isFormProcessing } from "~/utils";
-import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import {
@@ -27,7 +26,7 @@ import { Spinner } from "../shared/spinner";
 
 const MAX_FILE_SIZE = 5_000_000;
 
-export const NewTemplateFormSchema = z.object({
+export const base = z.object({
   name: z.string().min(2, "Name is required"),
   type: z.nativeEnum(TemplateType),
   description: z.string().optional(),
@@ -35,18 +34,48 @@ export const NewTemplateFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "on" ? true : false)),
-  pdf: z
-    .any()
-    .refine(
-      (file) => file?.type !== "application/octet-stream",
-      "PDF is required."
-    )
-    .refine((file) => file?.size <= MAX_FILE_SIZE, `Max file size is 5MB.`)
-    .refine(
-      (file) => file?.type === "application/pdf",
-      ".pdf files are accepted."
-    ),
 });
+
+export const NewTemplateFormSchema = z.discriminatedUnion("isEdit", [
+  z
+    .object({
+      isEdit: z.literal("false"),
+      pdf: z
+        .any()
+        .refine(
+          (val: File) => val.type !== "application/octet-stream",
+          "A file is required"
+        )
+        .refine(
+          (val: File) => val.size <= MAX_FILE_SIZE,
+          "File size is too big"
+        )
+        .refine(
+          (val: File) => val.type === "application/pdf",
+          "Only .pdf is accepted"
+        ),
+    })
+    .merge(base),
+  z
+    .object({
+      isEdit: z.literal("true"),
+      pdf: z
+        .any()
+        .refine(
+          (val: File) =>
+            val.type !== "application/octet-stream" ||
+            val.size <= MAX_FILE_SIZE,
+          "File size is too big"
+        )
+        .refine(
+          (val: File) =>
+            val.type === "application/octet-stream" ||
+            val.type === "application/pdf",
+          "Only .pdf is accepted"
+        ),
+    })
+    .merge(base),
+]);
 
 interface Props {
   name?: Template["name"];
@@ -79,7 +108,6 @@ export const TemplateForm = ({
     type || TemplateType.BOOKINGS
   );
   const [pdf, setPdf] = useState<File | null>(null);
-  const [size, setSize] = useState<number>(pdfSize || 0);
 
   const handleFileChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
@@ -93,7 +121,6 @@ export const TemplateForm = ({
       if (file.size > MAX_FILE_SIZE) return;
 
       setPdf(files[0]);
-      setSize(files[0].size);
       validateFile(e);
     },
     [validateFile]
@@ -106,11 +133,7 @@ export const TemplateForm = ({
       className="flex w-full flex-col gap-2"
       encType="multipart/form-data"
     >
-      <FormRow
-        rowLabel="Name"
-        className="border-b-0 pb-0"
-        required={zodFieldIsRequired(NewTemplateFormSchema.shape.name)}
-      >
+      <FormRow rowLabel="Name" className="border-b-0 pb-0" required={true}>
         <Input
           label="Name"
           hideLabel
@@ -122,14 +145,10 @@ export const TemplateForm = ({
           className="w-full"
           defaultValue={name || ""}
           placeholder="Booking Arrangement 2023"
-          required={zodFieldIsRequired(NewTemplateFormSchema.shape.name)}
+          required={true}
         />
       </FormRow>
-      <FormRow
-        rowLabel="Type"
-        className="border-b-0 pb-0"
-        required={zodFieldIsRequired(NewTemplateFormSchema.shape.type)}
-      >
+      <FormRow rowLabel="Type" className="border-b-0 pb-0" required={true}>
         <Select
           name={zo.fields.type()}
           defaultValue={selectedType}
@@ -211,7 +230,6 @@ export const TemplateForm = ({
             hideLabel
             error={zo.errors.pdf()?.message}
             className="mt-2"
-            defaultValue={pdfUrl ?? ""}
             inputClassName="border-0 shadow-none p-0 rounded-none"
           />
         </div>
@@ -255,15 +273,12 @@ export const TemplateForm = ({
               variant="text"
               icon="x"
               className="border-0 p-1 text-primary-700 hover:text-primary-800"
-              onClick={() => {
-                setPdf(null);
-                setSize(0);
-              }}
+              onClick={() => setPdf(null)}
             />
           </Card>
         )}
       </FormRow>
-      <input type="hidden" name={"pdfSize"} value={size} />
+      <input name={"isEdit"} type="hidden" value={isEdit.toString()} />
       <div className="text-right">
         <Button type="submit" disabled={disabled}>
           {disabled ? <Spinner /> : "Save"}
