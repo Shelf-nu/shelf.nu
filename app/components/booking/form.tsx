@@ -2,6 +2,7 @@ import type { Asset, Category, Tag } from "@prisma/client";
 import {
   Form,
   useLoaderData,
+  useLocation,
   useNavigate,
   useNavigation,
 } from "@remix-run/react";
@@ -68,6 +69,7 @@ export function BookingForm({
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewBookingFormSchema);
   const disabled = isFormProcessing(navigation.state);
+  const routeIsNewBooking = useLocation().pathname.includes("new");
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
   const navigate = useNavigate();
@@ -190,7 +192,10 @@ export function BookingForm({
             </Card>
             <div className="mb-4 flex justify-end text-right">
               <div className="flex gap-3">
-                <ActionsDropdown booking={booking} />
+                {/* We only render the actions when we are not on the .new route */}
+                {routeIsNewBooking ? null : (
+                  <ActionsDropdown booking={booking} />
+                )}
                 <Button
                   type="submit"
                   disabled={disabled}

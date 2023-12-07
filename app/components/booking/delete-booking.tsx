@@ -44,7 +44,7 @@ export const DeleteBooking = ({
         <AlertDialogTitle>Delete {booking.name}</AlertDialogTitle>
         <AlertDialogDescription>
           Are you sure you want to delete this Booking? This action cannot be
-          undone.
+          undone. All assets associated with this booking will be released.
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
@@ -57,7 +57,9 @@ export const DeleteBooking = ({
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               type="submit"
-              data-test-id="confirmdeleteLocationButton"
+              data-test-id="confirmDeleteBookingButton"
+              name="intent"
+              value="delete"
             >
               Delete
             </Button>

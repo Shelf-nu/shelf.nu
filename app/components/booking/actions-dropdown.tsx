@@ -4,7 +4,6 @@ import { ChevronRight } from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import { tw } from "~/utils";
@@ -38,7 +37,7 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => (
       align="end"
       className="order w-[180px] rounded-md bg-white p-1.5 text-right "
     >
-      <DropdownMenuItem>
+      {/* <DropdownMenuItem>
         <Button
           icon="pen"
           role="link"
@@ -48,7 +47,7 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => (
         >
           Cancel
         </Button>
-      </DropdownMenuItem>
+      </DropdownMenuItem> */}
 
       <DeleteBooking booking={booking} />
     </DropdownMenuContent>

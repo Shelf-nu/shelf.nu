@@ -1,4 +1,4 @@
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
   MetaFunction,
@@ -15,14 +15,13 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { db } from "~/database";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { getBooking, upsertBooking } from "~/modules/booking";
+import { deleteBooking, getBooking, upsertBooking } from "~/modules/booking";
 import type { ExtendedBooking } from "~/modules/booking/types";
 import {
   requireOrganisationId,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import {
-  assertIsPost,
   generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
@@ -120,35 +119,34 @@ export const handle = {
 };
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  assertIsPost(request);
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
   const id = getRequiredParam(params, "bookingId");
 
   const formData = await request.formData();
-  const result = await NewBookingFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
-
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-        success: false,
-      },
-      {
-        status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
-    );
-  }
-  const intent = formData.get("intent") as "save" | "reserve";
-  const { name, startDate, endDate, custodian } = result.data;
+  const intent = formData.get("intent") as "save" | "reserve" | "delete";
 
   switch (intent) {
     case "save":
+      const result = await NewBookingFormSchema.safeParseAsync(
+        parseFormAny(formData)
+      );
+
+      if (!result.success) {
+        return json(
+          {
+            errors: result.error,
+            success: false,
+          },
+          {
+            status: 400,
+            headers: {
+              "Set-Cookie": await commitAuthSession(request, { authSession }),
+            },
+          }
+        );
+      }
+      const { name, startDate, endDate, custodian } = result.data;
       const booking = await upsertBooking({
         custodianTeamMemberId: custodian,
         organizationId,
@@ -176,6 +174,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
       );
     case "reserve":
       return null;
+    case "delete":
+      await deleteBooking({ id });
+      sendNotification({
+        title: "Booking deleted",
+        message: "Your booking has been deleted successfully",
+        icon: { name: "trash", variant: "error" },
+        senderId: authSession.userId,
+      });
+      return redirect("/bookings", {
+        headers: [
+          setCookie(await commitAuthSession(request, { authSession })),
+          setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+        ],
+      });
+      break;
     default:
       return null;
   }
