@@ -64,8 +64,9 @@ async function uploadFile(
   }: UploadOptions
 ) {
   try {
-    let file = await getFileArrayBuffer(fileData);
-    if (resizeOptions) file = await cropImage(file, resizeOptions);
+    let file = resizeOptions
+      ? await cropImage(fileData, resizeOptions)
+      : await getFileArrayBuffer(fileData);
 
     const { data, error } = updateExisting
       ? await getSupabaseAdmin()
