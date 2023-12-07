@@ -1,4 +1,9 @@
-import type { Asset, Category, Tag } from "@prisma/client";
+import {
+  BookingStatus,
+  type Asset,
+  type Category,
+  type Tag,
+} from "@prisma/client";
 import {
   Form,
   useLoaderData,
@@ -75,6 +80,8 @@ export function BookingForm({
   const navigate = useNavigate();
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const hasAssets = booking.assets?.length > 0;
+  const isReserved = booking.status === BookingStatus.RESERVED;
+
   return (
     <div>
       {/* <div className="mb-4 mt-[-42px] flex justify-end text-right">
@@ -116,7 +123,7 @@ export function BookingForm({
                   label="Name"
                   hideLabel
                   name={zo.fields.name()}
-                  disabled={disabled}
+                  disabled={disabled || isReserved}
                   error={zo.errors.name()?.message}
                   autoFocus
                   onChange={updateName}
@@ -140,7 +147,7 @@ export function BookingForm({
                   type="datetime-local"
                   hideLabel
                   name={zo.fields.startDate()}
-                  disabled={disabled}
+                  disabled={disabled || isReserved}
                   error={zo.errors.startDate()?.message}
                   className="w-full"
                   defaultValue={startDate}
@@ -160,7 +167,7 @@ export function BookingForm({
                   type="datetime-local"
                   hideLabel
                   name={zo.fields.endDate()}
-                  disabled={disabled}
+                  disabled={disabled || isReserved}
                   error={zo.errors.endDate()?.message}
                   className="w-full"
                   defaultValue={endDate}
@@ -179,7 +186,10 @@ export function BookingForm({
               <label className="mb-2.5 block font-medium text-gray-700">
                 <span className="required-input-label">Custodian</span>
               </label>
-              <CustodianSelect defaultCustodianId={custodianId} />
+              <CustodianSelect
+                defaultCustodianId={custodianId}
+                disabled={disabled || isReserved}
+              />
 
               {zo.errors.custodian()?.message ? (
                 <div className="text-sm text-error-500">
@@ -206,14 +216,30 @@ export function BookingForm({
                 >
                   Save
                 </Button>
-                <Button
-                  type="submit"
-                  disabled={disabled || !hasAssets}
-                  name="intent"
-                  value="reserve"
-                >
-                  Reserve
-                </Button>
+
+                {/* When booking is draft, we show the reserve button */}
+                {booking.status === BookingStatus.DRAFT ? (
+                  <Button
+                    type="submit"
+                    disabled={disabled || !hasAssets}
+                    name="intent"
+                    value="reserve"
+                  >
+                    Reserve
+                  </Button>
+                ) : null}
+
+                {/* When booking is draft, we show the reserve check-out */}
+                {booking.status === BookingStatus.RESERVED ? (
+                  <Button
+                    type="submit"
+                    disabled={disabled}
+                    name="intent"
+                    value="checkOut"
+                  >
+                    Check-out
+                  </Button>
+                ) : null}
               </div>
             </div>
           </Form>

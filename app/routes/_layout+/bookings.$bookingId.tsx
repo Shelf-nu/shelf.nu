@@ -1,3 +1,4 @@
+import { BookingStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -171,7 +172,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       );
     case "reserve":
-      return null;
+      await upsertBooking({ id, status: BookingStatus.RESERVED });
+      sendNotification({
+        title: "Booking reserved",
+        message: "Your booking has been reserved successfully",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+      return json(
+        { success: true },
+        {
+          headers: [
+            setCookie(await commitAuthSession(request, { authSession })),
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+          ],
+        }
+      );
     case "delete":
       await deleteBooking({ id });
       sendNotification({
@@ -198,9 +214,14 @@ export default function BookingEditPage() {
   return (
     <>
       <Header title={hasName ? name : booking.name} />
-      <div className="mr-auto">
-        <Badge color={bookingStatusColorMap[booking.status]}>Draft</Badge>
+      <div>
+        <Badge color={bookingStatusColorMap[booking.status]}>
+          <span className="block lowercase first-letter:uppercase">
+            {booking.status}
+          </span>
+        </Badge>
       </div>
+
       <div>
         <BookingForm
           id={booking.id}

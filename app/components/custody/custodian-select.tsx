@@ -11,8 +11,12 @@ import { UserIcon } from "../icons";
 import { Button } from "../shared";
 
 export default function CustodianSelect(
-  { defaultCustodianId }: { defaultCustodianId?: string } = {
+  {
+    defaultCustodianId,
+    disabled,
+  }: { defaultCustodianId?: string; disabled?: boolean } = {
     defaultCustodianId: "",
+    disabled: false,
   }
 ) {
   const { teamMembers } = useLoaderData<typeof loader>();
@@ -26,8 +30,8 @@ export default function CustodianSelect(
 
   return (
     <div className="relative w-full">
-      <Select name="custodian" defaultValue={defaultValue}>
-        <SelectTrigger>
+      <Select name="custodian" defaultValue={defaultValue} disabled={disabled}>
+        <SelectTrigger className={disabled ? "cursor-not-allowed" : ""}>
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>
         <div>
