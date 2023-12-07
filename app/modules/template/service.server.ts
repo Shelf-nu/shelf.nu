@@ -26,7 +26,7 @@ export async function createTemplate({
         id: userId,
       },
     },
-    isDefault: sameExistingTemplateCount === 0
+    isDefault: sameExistingTemplateCount === 0,
   };
 
   const template = await db.template.create({ data });

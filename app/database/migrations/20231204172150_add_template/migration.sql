@@ -24,4 +24,7 @@ CREATE TABLE "Template" (
 );
 
 -- AddForeignKey
-ALTER TABLE "Template" ADD CONSTRAINT "Template_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE ENABLE row level security;
+ALTER TABLE "Template" ADD CONSTRAINT "Template_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Enable RLS
+ALTER TABLE "Template" ENABLE row level security;
