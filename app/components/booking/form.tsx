@@ -74,6 +74,7 @@ export function BookingForm({
   const [, updateName] = useAtom(updateDynamicTitleAtom);
   const navigate = useNavigate();
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
+  const hasAssets = booking.assets?.length > 0;
   return (
     <div>
       {/* <div className="mb-4 mt-[-42px] flex justify-end text-right">
@@ -207,7 +208,7 @@ export function BookingForm({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={disabled || booking.assets?.length === 0}
+                  disabled={disabled || !hasAssets}
                   name="intent"
                   value="reserve"
                 >
@@ -232,6 +233,7 @@ export function BookingForm({
                 variant="primary"
                 icon="plus"
                 width="full"
+                disabled={!booking.from || !booking.to} // If from and to are not set, we disable the button
               >
                 Manage Assets
               </Button>
@@ -250,6 +252,7 @@ export function BookingForm({
                       })}`}
                       variant="primary"
                       icon="plus"
+                      disabled={!booking.from || !booking.to} // If from and to are not set, we disable the button
                     >
                       Manage Assets
                     </Button>
@@ -267,9 +270,17 @@ export function BookingForm({
                 }
                 customEmptyStateContent={{
                   title: "Start by defining a booking period",
-                  text: "Your assets for this booking will show here. Start by defining a booking period.",
-                  newButtonRoute: "add-assets",
-                  newButtonContent: "Add asset",
+                  text: "Assets added to your booking will show up here. You must select a Start and End date in order to be able to add assets to your booking.",
+                  newButtonRoute: `add-assets?${new URLSearchParams({
+                    // @ts-ignore @TODO fix me
+                    bookingFrom: new Date(booking.from).toISOString(),
+                    // @ts-ignore @TODO fix me
+                    bookingTo: new Date(booking.to).toISOString(),
+                  })}`,
+                  newButtonContent: "Add assets",
+                  buttonProps: {
+                    disabled: !booking.from || !booking.to,
+                  },
                 }}
               />
             </div>

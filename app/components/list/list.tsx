@@ -30,6 +30,7 @@ export const List = ({
     text: string;
     newButtonRoute: string;
     newButtonContent: string;
+    buttonProps?: any;
   };
 }) => {
   const { items } = useLoaderData<IndexResponse>();

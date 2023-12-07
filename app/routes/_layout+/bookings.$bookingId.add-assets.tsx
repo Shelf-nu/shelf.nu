@@ -1,7 +1,7 @@
 import type { Asset, Booking } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
 import { List, Filters } from "~/components/list";
 import { AddAssetForm } from "~/components/location/add-asset-form";
@@ -81,7 +81,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 export default function AddAssetsToNewBooking() {
   const { booking } = useLoaderData<typeof loader>();
-
   return (
     <div>
       <header className="mb-5">
@@ -112,7 +111,9 @@ type AssetWithBooking = Asset & {
 };
 
 const RowComponent = ({ item }: { item: AssetWithBooking }) => {
-  const { bookingId } = useParams();
+  const { booking } = useLoaderData<typeof loader>();
+  const isChecked =
+    booking?.assets.some((asset) => asset.id === item.id) ?? false;
 
   return (
     <>
@@ -138,14 +139,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
       </Td>
 
       <Td>
-        <AddAssetForm
-          assetId={item.id}
-          // @TODO this is not working as expected.
-          isChecked={
-            item.bookings.filter((booking) => booking.id === bookingId)
-              ?.length > 0
-          }
-        />
+        <AddAssetForm assetId={item.id} isChecked={isChecked} />
       </Td>
     </>
   );

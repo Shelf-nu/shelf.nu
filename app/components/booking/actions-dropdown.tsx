@@ -24,11 +24,11 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => (
     >
       <Button
         variant="secondary"
-        to="#"
         width={fullWidth ? "full" : "auto"}
         data-test-id="assetActionsButton"
       >
         <span className="flex items-center gap-2">
+          {/* // @TODO for some reason clicking on the actions Actions causes a network request and revalidates the view. That shouldnt be happening. Because the button is within the form it actually makes a submit. THat shouldnt be happenign */}
           Actions <ChevronRight className="chev" />
         </span>
       </Button>

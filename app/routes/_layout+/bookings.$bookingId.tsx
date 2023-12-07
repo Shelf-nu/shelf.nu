@@ -69,8 +69,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     singular: "asset",
     plural: "assets",
   };
-  const totalItems = 0;
-  const totalPages = 1 / perPage;
   const { prev, next } = generatePageMeta(request);
 
   const header: HeaderData = {
@@ -95,9 +93,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       modelName,
       items: booking.assets,
       page,
-      totalItems,
+      totalItems: booking.assets.length,
       perPage,
-      totalPages,
+      totalPages: booking.assets.length / perPage,
       next,
       prev,
       teamMembers,
@@ -188,7 +186,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
           setCookie(await setSelectedOrganizationIdCookie(organizationId)),
         ],
       });
-      break;
     default:
       return null;
   }
