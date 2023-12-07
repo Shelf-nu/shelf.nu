@@ -3,11 +3,11 @@ import { useCallback, useState } from "react";
 import type { Template } from "@prisma/client";
 import { TemplateType } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { validateFileAtom } from "~/atoms/file";
 import { Badge, Button } from "~/components/shared";
 import { formatBytes, isFormProcessing } from "~/utils";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -35,7 +35,17 @@ export const NewTemplateFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "on" ? true : false)),
-  pdf: z.any(),
+  pdf: z
+    .any()
+    .refine(
+      (file) => file?.type !== "application/octet-stream",
+      "PDF is required."
+    )
+    .refine((file) => file?.size <= MAX_FILE_SIZE, `Max file size is 5MB.`)
+    .refine(
+      (file) => file?.type === "application/pdf",
+      ".pdf files are accepted."
+    ),
 });
 
 interface Props {
@@ -62,7 +72,6 @@ export const TemplateForm = ({
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewTemplateFormSchema);
   const disabled = isFormProcessing(navigation.state);
-  const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
 
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
@@ -200,8 +209,9 @@ export const TemplateForm = ({
             onChange={handleFileChange}
             label={""}
             hideLabel
-            error={fileError}
+            error={zo.errors.pdf()?.message}
             className="mt-2"
+            defaultValue={pdfUrl ?? ""}
             inputClassName="border-0 shadow-none p-0 rounded-none"
           />
         </div>

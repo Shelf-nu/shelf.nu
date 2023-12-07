@@ -72,26 +72,6 @@ export async function action({ request }: LoaderFunctionArgs) {
   }
   const { name, type, description, signatureRequired, pdf } = result.data;
 
-  if (!pdf || pdf.size === 0) {
-    // Invalid PDF
-    return json(
-      {
-        errors: [
-          {
-            path: ["pdf"],
-            message: "PDF is required",
-          },
-        ],
-      },
-      {
-        status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
-    );
-  }
-
   const pdfSize = pdf.size;
   const pdfName = pdf.name;
 
