@@ -273,12 +273,20 @@ const TemplateRow = ({ item }: { item: TTemplate }) => (
     </Td>
     <Td>
       {item.isDefault && (
-        <Badge withDot={false} color="#6b6b6b">
+        <Badge withDot={false} color="#334054">
           Default
         </Badge>
       )}
     </Td>
-    <Td>{item.isActive && <Badge color="#0dec5d">Active</Badge>}</Td>
+    <Td>
+      {item.isActive ? (
+        <Badge color="#0dec5d">Active</Badge>
+      ) : (
+        <Badge color="#344054" withDot={false}>
+          Inactive
+        </Badge>
+      )}
+    </Td>
     <Td>
       <TemplateActionsDropdown template={item} />
     </Td>
