@@ -251,6 +251,7 @@ export default function UserPage() {
                 accept="image/png,.png,image/jpeg,.jpg,.jpeg"
                 name="profile-picture"
                 type="file"
+                size={4_000_000}
                 onChange={validateFile}
                 label={"profile-picture"}
                 hideLabel
