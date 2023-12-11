@@ -9,6 +9,7 @@ import {
   canExportAssets,
   canImportAssets,
 } from "~/utils/subscription";
+import { countAcviteCustomFields } from "../custom-field";
 export async function getUserTierLimit(id: User["id"]) {
   try {
     const { tier } = await db.user.findUniqueOrThrow({
@@ -72,16 +73,21 @@ export async function assertUserCanExportAssets({
 
 export const assertUserCanCreateMoreCustomFields = async ({
   userId,
+  organizationId,
 }: {
   userId: User["id"];
+  organizationId: Organization["id"];
 }) => {
   /** Get the tier limit and check if they can export */
   const tierLimit = await getUserTierLimit(userId);
+
+  const totalActiveCustomFields = await countAcviteCustomFields({
+    organizationId,
+  });
+
   const canCreateMore = canCreateMoreCustomFields({
     tierLimit,
-    totalCustomFields: await db.customField.count({
-      where: { userId },
-    }),
+    totalCustomFields: totalActiveCustomFields,
   });
 
   if (!canCreateMore) {
