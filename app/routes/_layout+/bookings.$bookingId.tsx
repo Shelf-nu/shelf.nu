@@ -56,8 +56,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       userId: "asc",
     },
   });
+
   const booking = await getBooking({ id: bookingId });
 
+  // @TODO something wrong here. WHen refreshing the page this gets thrown
   if (!booking) {
     throw new ShelfStackError({ message: "Booking not found", status: 404 });
   }

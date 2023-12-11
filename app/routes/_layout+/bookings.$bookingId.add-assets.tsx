@@ -1,8 +1,14 @@
 import type { Asset, Booking } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LinksFunction,
+  LoaderFunctionArgs,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AvailabilitySelect } from "~/components/booking/availability-select";
+import styles from "~/components/booking/styles.css";
 import { List, Filters } from "~/components/list";
 import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
@@ -12,6 +18,8 @@ import { requireAuthSession } from "~/modules/auth";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost, getRequiredParam } from "~/utils";
+
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
@@ -87,7 +95,10 @@ export default function AddAssetsToNewBooking() {
         <h2>Move assets to ‘{booking?.name}’ booking</h2>
         <p>Fill up the booking with the assets of your choice</p>
       </header>
-      <Filters className="mb-2" />
+      {/* @TODO the search is not working properly. It should keep params */}
+      <Filters className="mb-2">
+        <AvailabilitySelect />
+      </Filters>
 
       <List
         ItemComponent={RowComponent}
@@ -134,6 +145,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
             <div className="flex flex-col">
               <div className="font-medium">{item.title}</div>
             </div>
+            {/* @TODO here we need to add the labels for assets which are unavailable */}
           </div>
         </div>
       </Td>

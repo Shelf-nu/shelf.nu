@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   BookingStatus,
   type Asset,
@@ -82,11 +83,25 @@ export function BookingForm({
   const hasAssets = booking.assets?.length > 0;
   const isReserved = booking.status === BookingStatus.RESERVED;
 
+  const manageAssetsUrl = useMemo(
+    () =>
+      `add-assets?${new URLSearchParams({
+        // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
+        // This button wouldnt be available at all if there is no booking.from and booking.to
+        bookingFrom: new Date(booking.from as string).toISOString(),
+        bookingTo: new Date(booking.to as string).toISOString(),
+        hideUnavailable: "true",
+      })}`,
+    [booking]
+  );
+
   return (
     <div>
-      {/* <div className="mb-4 mt-[-42px] flex justify-end text-right">
+      <div className="mb-4 mt-[-42px] flex justify-end text-right">
         <div className="flex gap-3">
-          <Button
+          {/* We only render the actions when we are not on the .new route */}
+          {routeIsNewBooking ? null : <ActionsDropdown booking={booking} />}
+          {/* <Button
             type="submit"
             disabled={disabled}
             variant="secondary"
@@ -102,9 +117,9 @@ export function BookingForm({
             value="reserve"
           >
             {disabled ? <Spinner /> : "Reserve"}
-          </Button>
+          </Button> */}
         </div>
-      </div> */}
+      </div>
       <div className="mt-5 lg:flex lg:items-start lg:gap-4">
         <div className="mb-8 mt-2 w-full lg:mb-0 lg:w-[328px]">
           <Form
@@ -203,10 +218,6 @@ export function BookingForm({
             </Card>
             <div className="mb-4 flex justify-end text-right">
               <div className="flex gap-3">
-                {/* We only render the actions when we are not on the .new route */}
-                {routeIsNewBooking ? null : (
-                  <ActionsDropdown booking={booking} />
-                )}
                 <Button
                   type="submit"
                   disabled={disabled}
@@ -250,12 +261,7 @@ export function BookingForm({
             <div className="mb-3 flex gap-4 lg:hidden">
               <Button
                 as="button"
-                to={`add-assets?${new URLSearchParams({
-                  // @ts-ignore @TODO fix me
-                  bookingFrom: new Date(booking.from).toISOString(),
-                  // @ts-ignore @TODO fix me
-                  bookingTo: new Date(booking.to).toISOString(),
-                })}`}
+                to={manageAssetsUrl}
                 variant="primary"
                 icon="plus"
                 width="full"
@@ -270,12 +276,7 @@ export function BookingForm({
                   <div className="hidden lg:block">
                     <Button
                       as="button"
-                      to={`add-assets?${new URLSearchParams({
-                        // @ts-ignore @TODO fix me
-                        bookingFrom: new Date(booking.from).toISOString(),
-                        // @ts-ignore @TODO fix me
-                        bookingTo: new Date(booking.to).toISOString(),
-                      })}`}
+                      to={manageAssetsUrl}
                       variant="primary"
                       icon="plus"
                       disabled={!booking.from || !booking.to} // If from and to are not set, we disable the button
@@ -297,12 +298,7 @@ export function BookingForm({
                 customEmptyStateContent={{
                   title: "Start by defining a booking period",
                   text: "Assets added to your booking will show up here. You must select a Start and End date in order to be able to add assets to your booking.",
-                  newButtonRoute: `add-assets?${new URLSearchParams({
-                    // @ts-ignore @TODO fix me
-                    bookingFrom: new Date(booking.from).toISOString(),
-                    // @ts-ignore @TODO fix me
-                    bookingTo: new Date(booking.to).toISOString(),
-                  })}`,
+                  newButtonRoute: manageAssetsUrl,
                   newButtonContent: "Add assets",
                   buttonProps: {
                     disabled: !booking.from || !booking.to,

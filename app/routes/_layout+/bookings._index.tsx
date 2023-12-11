@@ -200,9 +200,7 @@ const ListAssetContent = ({
           img={item?.custodianUser?.profilePicture || "/images/default_pfp.jpg"}
           name={`${item?.custodianUser.firstName} ${item?.custodianUser.lastName}`}
         />
-      ) : null}
-
-      {item?.custodianTeamMember ? (
+      ) : item?.custodianTeamMember ? (
         <CustodianColumn name={item.custodianTeamMember.name} />
       ) : null}
     </Td>
