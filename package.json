@@ -32,7 +32,7 @@
     "prepare": "husky install"
   },
   "dependencies": {
-    "@formbricks/js": "^1.1.2",
+    "@formbricks/js": "^1.2.7",
     "@markdoc/markdoc": "^0.2.2",
     "@prisma/client": "^5.4.2",
     "@radix-ui/react-alert-dialog": "^1.0.4",
