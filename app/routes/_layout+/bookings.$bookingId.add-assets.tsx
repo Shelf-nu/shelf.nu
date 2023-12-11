@@ -9,7 +9,7 @@ import { useLoaderData } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css";
-import { List, Filters } from "~/components/list";
+import { List } from "~/components/list";
 import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 import { Td } from "~/components/table";
@@ -95,11 +95,15 @@ export default function AddAssetsToNewBooking() {
         <h2>Move assets to ‘{booking?.name}’ booking</h2>
         <p>Fill up the booking with the assets of your choice</p>
       </header>
-      {/* @TODO the search is not working properly. It should keep params */}
-      <Filters className="mb-2">
-        <AvailabilitySelect />
-      </Filters>
+      {/**
+       * @TODO the search is not working properly its completely cracked.
+       * We have to rework it with new strategy using useSearchParams
+       */}
+      {/* <Filters></Filters> */}
 
+      <div className="mb-2">
+        <AvailabilitySelect />
+      </div>
       <List
         ItemComponent={RowComponent}
         className="mb-8"

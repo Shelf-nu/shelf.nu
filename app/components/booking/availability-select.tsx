@@ -23,17 +23,10 @@ export function AvailabilitySelect() {
   }, [hideUnavailable]);
 
   function handleSelectChange(value: string) {
-    if (value === "show") {
-      setSearchParams((prev) => {
-        prev.set("hideUnavailable", "false");
-        return prev;
-      });
-    } else {
-      setSearchParams((prev) => {
-        prev.set("hideUnavailable", "true");
-        return prev;
-      });
-    }
+    setSearchParams((prev) => {
+      prev.set("hideUnavailable", value === "show" ? "false" : "true");
+      return prev;
+    });
   }
 
   return (
