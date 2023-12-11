@@ -15,11 +15,17 @@ import {
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { getCustomField, updateCustomField } from "~/modules/custom-field";
+import {
+  countAcviteCustomFields,
+  getCustomField,
+  updateCustomField,
+} from "~/modules/custom-field";
 import { requireOrganisationId } from "~/modules/organization/context.server";
+import { getUserTierLimit } from "~/modules/tier";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { canCreateMoreCustomFields } from "~/utils/subscription";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
@@ -52,6 +58,7 @@ export const handle = {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
 
   const id = getRequiredParam(params, "fieldId");
   const formData = await request.formData();
@@ -75,6 +82,38 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   const { name, helpText, active, required, options } = result.data;
+
+  /** If they are activating a field, we have to make sure that they are not already at the limit */
+  if (active) {
+    const tierLimit = await getUserTierLimit(authSession.userId);
+
+    const totalActiveCustomFields = await countAcviteCustomFields({
+      organizationId,
+    });
+
+    const canCreateMore = canCreateMoreCustomFields({
+      tierLimit,
+      totalCustomFields: totalActiveCustomFields,
+    });
+    if (!canCreateMore) {
+      return json(
+        {
+          errors: {
+            active: {
+              message: `You have reached your limit of active custom fields. Please upgrade your plan to add more.`,
+            },
+          },
+          success: false,
+        },
+        {
+          status: 400,
+          headers: {
+            "Set-Cookie": await commitAuthSession(request, { authSession }),
+          },
+        }
+      );
+    }
+  }
 
   const rsp = await updateCustomField({
     id,

@@ -9,7 +9,6 @@ import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { Toaster } from "~/components/shared/toast";
 import { db } from "~/database";
-import { useFormbricks } from "~/hooks/use-formbricks";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
@@ -106,7 +105,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   useCrisp();
-  useFormbricks();
 
   return (
     <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
