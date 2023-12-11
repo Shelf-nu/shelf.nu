@@ -24,9 +24,11 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 const title = "New Custom Field";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { userId } = authSession;
 
-  await assertUserCanCreateMoreCustomFields({ userId });
+  await assertUserCanCreateMoreCustomFields({ userId, organizationId });
 
   const header = {
     title,
@@ -49,7 +51,10 @@ export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
   assertIsPost(request);
-  await assertUserCanCreateMoreCustomFields({ userId: authSession.userId });
+  await assertUserCanCreateMoreCustomFields({
+    userId: authSession.userId,
+    organizationId,
+  });
 
   const formData = await request.formData();
   const result = await NewCustomFieldFormSchema.safeParseAsync(

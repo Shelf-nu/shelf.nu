@@ -89,8 +89,12 @@ export const CustomFieldForm = ({
       name?: {
         message: string;
       };
+      active?: {
+        message: string;
+      };
     };
   }>();
+
   return (
     <Form
       ref={zo.ref}
@@ -211,6 +215,11 @@ export const CustomFieldForm = ({
             </p>
           </div>
         </div>
+        {actionData?.errors?.active?.message ? (
+          <div className="text-sm text-error-500">
+            {actionData?.errors?.active?.message}
+          </div>
+        ) : null}
       </FormRow>
 
       <div>

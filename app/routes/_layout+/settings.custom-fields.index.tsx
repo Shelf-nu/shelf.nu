@@ -10,7 +10,10 @@ import { Badge } from "~/components/shared";
 import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
 import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";
-import { getFilteredAndPaginatedCustomFields } from "~/modules/custom-field";
+import {
+  countAcviteCustomFields,
+  getFilteredAndPaginatedCustomFields,
+} from "~/modules/custom-field";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { getUserTierLimit } from "~/modules/tier";
 
@@ -59,6 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     singular: "custom fields",
     plural: "custom Fields",
   };
+
   return json(
     {
       header,
@@ -73,7 +77,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       modelName,
       canCreateMoreCustomFields: canCreateMoreCustomFields({
         tierLimit,
-        totalCustomFields,
+        totalCustomFields: await countAcviteCustomFields({ organizationId }),
       }),
     },
     {
@@ -95,7 +99,7 @@ export default function CustomFieldsIndexPage() {
           buttonContent={{
             title: "New Custom Field",
             message:
-              "You are not able to create more custom fields within your current plan.",
+              "You are not able to create more active custom fields within your current plan.",
           }}
           buttonProps={{
             to: "new",

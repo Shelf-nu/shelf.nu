@@ -244,3 +244,13 @@ export async function getActiveCustomFields({
     },
   });
 }
+
+export async function countAcviteCustomFields({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  return await db.customField.count({
+    where: { organizationId, active: true },
+  });
+}
