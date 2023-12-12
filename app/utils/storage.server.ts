@@ -19,6 +19,8 @@ export function getPublicFileURL({
   filename: string;
   bucketName?: string;
 }) {
+  bucketExists(bucketName);
+
   const { data } = getSupabaseAdmin()
     .storage.from(bucketName)
     .getPublicUrl(filename);
@@ -33,6 +35,8 @@ export async function createSignedUrl({
   filename: string;
   bucketName?: string;
 }) {
+  await bucketExists(bucketName);
+
   try {
     // Check if there is a leading slash and we need to remove it as signing will not work with the slash included
     if (filename.startsWith("/")) {
@@ -49,6 +53,16 @@ export async function createSignedUrl({
     return new ShelfStackError({
       message:
         "Something went wrong with updating your image. Please refresh the page. If the issue persists contact support.",
+    });
+  }
+}
+
+async function bucketExists(bucketName: string) {
+  const { error } = await getSupabaseAdmin().storage.getBucket(bucketName);
+
+  if (error) {
+    throw new ShelfStackError({
+      message: `Storage bucket "${bucketName}" does not exist. If the issue persists, please contact administrator.`,
     });
   }
 }
@@ -111,6 +125,7 @@ export async function parseFileFormData({
   updateExisting?: boolean;
 }) {
   await requireAuthSession(request);
+  await bucketExists(bucketName);
 
   const uploadHandler = unstable_composeUploadHandlers(
     async ({ contentType, data, filename }) => {
