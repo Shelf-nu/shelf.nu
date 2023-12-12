@@ -11,6 +11,7 @@ import {
   TemplateForm,
 } from "~/components/templates/form";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { createTemplate, updateTemplatePDF } from "~/modules/template";
 import { assertUserCanCreateMoreTemplates } from "~/modules/tier";
 
@@ -45,6 +46,7 @@ export const handle = {
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   assertIsPost(request);
   await assertUserCanCreateMoreTemplates({ userId: authSession.userId });
 
@@ -88,23 +90,21 @@ export async function action({ request }: LoaderFunctionArgs) {
     );
   }
 
-  const pdfSize = pdf.size;
-  const pdfName = pdf.name;
-
   const { id } = await createTemplate({
     name,
     type,
     description: description ?? "",
     signatureRequired: signatureRequired ?? false,
     userId: authSession.userId,
+    organizationId,
   });
 
   await updateTemplatePDF({
-    pdfName,
-    pdfSize,
+    pdfName: pdf.name,
+    pdfSize: pdf.size,
     request: clonedData,
     templateId: id,
-    userId: authSession.userId,
+    organizationId,
   });
 
   sendNotification({

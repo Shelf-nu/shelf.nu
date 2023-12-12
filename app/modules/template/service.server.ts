@@ -1,4 +1,4 @@
-import type { Template, User } from "@prisma/client";
+import type { Organization, Template, User } from "@prisma/client";
 import { db } from "~/database";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
 
@@ -8,8 +8,10 @@ export async function createTemplate({
   description,
   signatureRequired,
   userId,
+  organizationId,
 }: Pick<Template, "name" | "type" | "description" | "signatureRequired"> & {
   userId: User["id"];
+  organizationId: Organization["id"];
 }) {
   // Count the number of templates of same type for the user
   const sameExistingTemplateCount = await db.template.count({
@@ -21,9 +23,14 @@ export async function createTemplate({
     type,
     description,
     signatureRequired,
-    user: {
+    creator: {
       connect: {
         id: userId,
+      },
+    },
+    organization: {
+      connect: {
+        id: organizationId,
       },
     },
     isDefault: sameExistingTemplateCount === 0,
@@ -39,22 +46,14 @@ export async function updateTemplate({
   name,
   description,
   signatureRequired,
-  userId,
-}: Pick<Template, "id" | "name" | "description" | "signatureRequired"> & {
-  userId: User["id"];
-}) {
+}: Pick<Template, "id" | "name" | "description" | "signatureRequired">) {
   const data = {
     name,
     description,
     signatureRequired,
-    user: {
-      connect: {
-        id: userId,
-      },
-    },
   };
   return db.template.update({
-    where: { id, userId },
+    where: { id },
     data,
   });
 }
@@ -64,22 +63,22 @@ export async function updateTemplatePDF({
   pdfName,
   pdfSize,
   templateId,
-  userId,
+  organizationId,
 }: {
   request: Request;
   templateId: string;
   pdfName: string;
   pdfSize: number;
-  userId: User["id"];
+  organizationId: User["id"];
 }) {
   const res = await db.template.findFirst({
-    where: { id: templateId, userId },
+    where: { id: templateId, organizationId },
     select: { name: true, pdfUrl: true },
   });
 
   if (!res) return null;
 
-  const newFileName: string = `${userId}/${templateId}`;
+  const newFileName: string = `${organizationId}/${templateId}`;
   const fileData = await parseFileFormData({
     request,
     bucketName: "templates",
@@ -103,17 +102,17 @@ export async function updateTemplatePDF({
   };
 
   return db.template.update({
-    where: { id: templateId, userId },
+    where: { id: templateId, organizationId },
     data,
   });
 }
 
 export async function makeInactive({
   id,
-  userId,
-}: Pick<Template, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Template, "id"> & { organizationId: Organization["id"] }) {
   return db.template.update({
-    where: { id, userId },
+    where: { id, organizationId },
     data: {
       isActive: false,
       isDefault: false,
@@ -123,10 +122,10 @@ export async function makeInactive({
 
 export async function makeActive({
   id,
-  userId,
-}: Pick<Template, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Template, "id"> & { organizationId: Organization["id"] }) {
   return db.template.update({
-    where: { id, userId },
+    where: { id, organizationId },
     data: {
       isActive: true,
     },
@@ -136,45 +135,42 @@ export async function makeActive({
 export async function makeDefault({
   id,
   type,
-  userId,
+  organizationId,
 }: {
   id: Template["id"];
   type: Template["type"];
-  userId: User["id"];
+  organizationId: Organization["id"];
 }) {
   // Make all the templates of the same type of the user non-default
   await db.template.updateMany({
-    where: { type, userId },
+    where: { type, organizationId },
     data: { isDefault: false },
   });
 
   // Make the selected template default
   return db.template.update({
-    where: { id, userId },
+    where: { id, organizationId },
     data: { isDefault: true },
   });
 }
 
-export async function getTemplateById({
-  id,
-  userId,
-}: Pick<Template, "id"> & { userId: User["id"] }) {
+export async function getTemplateById({ id }: Pick<Template, "id">) {
   return db.template.findFirst({
-    where: { id, userId },
+    where: { id },
   });
 }
 
 export async function getTemplates({
-  userId,
+  organizationId,
   page = 1,
   perPage = 8,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
   page?: number;
   perPage?: number;
 }) {
   const where = {
-    userId,
+    organizationId,
   };
 
   const [templates, totalTemplates] = await Promise.all([
@@ -188,20 +184,4 @@ export async function getTemplates({
   ]);
 
   return { templates, totalTemplates };
-}
-
-export async function isTemplateDefaultForType({
-  templateId,
-  type,
-  userId,
-}: {
-  templateId: Template["id"];
-  type: Template["type"];
-  userId: User["id"];
-}) {
-  const template = await db.template.findFirst({
-    where: { id: templateId, type, userId },
-  });
-
-  return template?.isDefault;
 }

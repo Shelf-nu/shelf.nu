@@ -15,6 +15,7 @@ import {
   TemplateForm,
 } from "~/components/templates/form";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
   getTemplateById,
   updateTemplate,
@@ -25,11 +26,10 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { userId } = authSession;
+  await requireAuthSession(request);
   const id = getRequiredParam(params, "templateId");
 
-  const template = await getTemplateById({ userId, id });
+  const template = await getTemplateById({ id });
   if (!template) {
     throw new Response("Not Found", { status: 404 });
   }
@@ -55,6 +55,7 @@ export const handle = {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
 
   const id = getRequiredParam(params, "templateId");
   const clonedData = request.clone();
@@ -85,7 +86,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
     name,
     description: description ?? "",
     signatureRequired: signatureRequired ?? false,
-    userId: authSession.userId,
   });
 
   await updateTemplatePDF({
@@ -93,7 +93,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     pdfSize: pdf.size,
     request: clonedData,
     templateId: id,
-    userId: authSession.userId,
+    organizationId,
   });
 
   sendNotification({

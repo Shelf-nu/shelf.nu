@@ -17,6 +17,7 @@ import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
 import { db } from "~/database";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
 import { makeActive, makeDefault, makeInactive } from "~/modules/template";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -26,6 +27,7 @@ import { canCreateMoreTemplates } from "~/utils/subscription";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
+  const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
 
   const user = await db.user.findUnique({
@@ -38,7 +40,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         include: { tierLimit: true },
       },
       templates: {
-        orderBy: { updatedAt: "desc" },
+        where: { organizationId },
+        orderBy: { createdAt: "desc" },
         select: {
           id: true,
           name: true,
@@ -87,7 +90,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
-  const userId = authSession.userId;
+  const { organizationId } = await requireOrganisationId(authSession, request);
 
   const formData = await request.clone().formData();
   const intent = formData.get("intent") as "toggleActive" | "makeDefault";
@@ -100,12 +103,12 @@ export async function action({ request }: ActionFunctionArgs) {
       if (isActive) {
         await makeInactive({
           id: templateId,
-          userId,
+          organizationId,
         });
       } else {
         await makeActive({
           id: templateId,
-          userId,
+          organizationId,
         });
       }
 
@@ -129,7 +132,7 @@ export async function action({ request }: ActionFunctionArgs) {
       await makeDefault({
         id: templateId,
         type: templateType,
-        userId,
+        organizationId,
       });
 
       sendNotification({

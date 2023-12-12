@@ -149,6 +149,7 @@ export const TemplateForm = ({
         />
       </FormRow>
       <FormRow rowLabel="Type" className="border-b-0 pb-0" required={true}>
+        {/* @TODO style this with capital letter */}
         <Select
           name={zo.fields.type()}
           defaultValue={selectedType}

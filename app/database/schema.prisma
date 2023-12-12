@@ -333,8 +333,6 @@ model Organization {
   image   Image?  @relation("orgImage", fields: [imageId], references: [id])
   imageId String? @unique
 
-  // members           TeamMember[]
-  // assets            Asset[]
   locations         Location[]
   categories        Category[]
   tags              Tag[]
@@ -346,6 +344,7 @@ model Organization {
   updatedAt    DateTime      @updatedAt
   customFields CustomField[]
   images       Image[]       @relation("owner")
+  templates    Template[]
 }
 
 model UserOrganization {
@@ -427,8 +426,11 @@ model Template {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId String?
+  creator User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId  String
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
 }
 
 model CustomField {
