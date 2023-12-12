@@ -17,11 +17,7 @@ import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
 import { db } from "~/database";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import {
-  makeActive,
-  makeDefault,
-  makeInactive,
-} from "~/modules/template/service.server";
+import { makeActive, makeDefault, makeInactive } from "~/modules/template";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

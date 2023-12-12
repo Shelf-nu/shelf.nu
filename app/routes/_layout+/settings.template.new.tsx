@@ -11,10 +11,7 @@ import {
   TemplateForm,
 } from "~/components/templates/form";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import {
-  createTemplate,
-  updateTemplatePDF,
-} from "~/modules/template/service.server";
+import { createTemplate, updateTemplatePDF } from "~/modules/template";
 import { assertUserCanCreateMoreTemplates } from "~/modules/tier";
 
 import { assertIsPost } from "~/utils";
