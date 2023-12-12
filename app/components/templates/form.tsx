@@ -149,7 +149,6 @@ export const TemplateForm = ({
         />
       </FormRow>
       <FormRow rowLabel="Type" className="border-b-0 pb-0" required={true}>
-        {/* @TODO style this with capital letter */}
         <Select
           name={zo.fields.type()}
           defaultValue={selectedType}
@@ -177,7 +176,7 @@ export const TemplateForm = ({
             <div className=" max-h-[320px] overflow-auto">
               {[TemplateType.BOOKINGS, TemplateType.CUSTODY].map((value) => (
                 <SelectItem value={value} key={value}>
-                  <span className="mr-4 text-[14px] text-gray-700">
+                  <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
                     {value}
                   </span>
                 </SelectItem>
@@ -225,7 +224,6 @@ export const TemplateForm = ({
             accept="application/pdf,.pdf"
             name={"pdf"}
             type="file"
-            size={MAX_FILE_SIZE}
             onChange={handleFileChange}
             label={""}
             hideLabel
