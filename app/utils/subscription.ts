@@ -46,4 +46,17 @@ export const canCreateMoreOrganizations = ({
   return totalOrganizations < tierLimit?.maxOrganizations;
 };
 
+export const canCreateMoreTemplates = ({
+  tierLimit,
+  totalTemplates,
+}: {
+  tierLimit: { maxTemplates: number } | null | undefined;
+  totalTemplates: number;
+}) => {
+  if (!premiumIsEnabled()) return true;
+  if (!tierLimit?.maxTemplates) return false;
+
+  return totalTemplates < tierLimit?.maxTemplates;
+};
+
 export const premiumIsEnabled = () => ENABLE_PREMIUM_FEATURES;

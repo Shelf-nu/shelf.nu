@@ -5,6 +5,7 @@ import { isPersonalOrg } from "~/utils/organization";
 import {
   canCreateMoreCustomFields,
   canCreateMoreOrganizations,
+  canCreateMoreTemplates,
   canExportAssets,
   canImportAssets,
 } from "~/utils/subscription";
@@ -91,6 +92,25 @@ export const assertUserCanCreateMoreCustomFields = async ({
 
   if (!canCreateMore) {
     throw new Error("Your user cannot create more custom fields");
+  }
+};
+
+export const assertUserCanCreateMoreTemplates = async ({
+  userId,
+}: {
+  userId: User["id"];
+}) => {
+  /** Get the tier limit and check if they can export */
+  const tierLimit = await getUserTierLimit(userId);
+  const canCreateMore = canCreateMoreTemplates({
+    tierLimit,
+    totalTemplates: await db.template.count({
+      where: { userId },
+    }),
+  });
+
+  if (!canCreateMore) {
+    throw new Error("Your user cannot create more templates");
   }
 };
 

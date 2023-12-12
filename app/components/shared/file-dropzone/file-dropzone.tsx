@@ -17,12 +17,14 @@ export function FileDropzone({
   dropzoneOptions,
   fileInputName,
   className,
+  variant = "image",
 }: {
   fetcher: Fetcher;
   onDropAccepted: DropzoneOptions["onDropAccepted"];
   fileInputName: string;
   dropzoneOptions?: DropzoneOptions;
   className?: string;
+  variant?: "image" | "pdf";
 }) {
   const [fileInfo, updateAllFileInfo] = useAtom(derivedFileInfoAtom);
   const { filename, message, error } = fileInfo;
@@ -113,7 +115,7 @@ export function FileDropzone({
           drop
         </p>
         <p>
-          PNG, JPG or JPEG (max.{" "}
+          {variant === "image" ? "PNG, JPG or JPEG" : "PDF"} (max.{" "}
           {formatBytes(mergedDropzoneOptions?.maxSize as number)})
         </p>
       </div>

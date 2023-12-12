@@ -33,6 +33,7 @@ export default function SettingsPage() {
   const items = [
     { to: "user", content: "User details" },
     { to: "workspace", content: "Workspaces" },
+    { to: "template", content: "Templates" },
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },
   ];
