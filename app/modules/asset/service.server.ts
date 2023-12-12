@@ -248,26 +248,23 @@ export async function getAssets({
                 },
               },
             },
-            ...(hideUnavailable === false
+            ...(bookingTo && bookingFrom
               ? {
                   bookings: {
                     where: {
                       status: { in: unavailableBookingStatuses },
-                      ...(bookingTo &&
-                        bookingFrom && {
-                          OR: [
-                            {
-                              from: { lte: bookingTo },
-                              to: { gte: bookingFrom },
-                            },
-                            {
-                              from: { gte: bookingFrom },
-                              to: { lte: bookingTo },
-                            },
-                          ],
-                        }),
+                      OR: [
+                        {
+                          from: { lte: bookingTo },
+                          to: { gte: bookingFrom },
+                        },
+                        {
+                          from: { gte: bookingFrom },
+                          to: { lte: bookingTo },
+                        },
+                      ],
                     },
-                    take: 1, //just to show in UI if its booked, so take only 1
+                    take: 1, //just to show in UI if its booked, so take only 1, also at a given slot only 1 booking can be created for an asset
                     select: {
                       from: true,
                       to: true,
