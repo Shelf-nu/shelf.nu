@@ -88,12 +88,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     userId: authSession.userId,
   });
 
-  const pdfSize = pdf.size;
-  const pdfName = pdf.name;
-
   await updateTemplatePDF({
-    pdfName,
-    pdfSize,
+    pdfName: pdf.name,
+    pdfSize: pdf.size,
     request: clonedData,
     templateId: id,
     userId: authSession.userId,
