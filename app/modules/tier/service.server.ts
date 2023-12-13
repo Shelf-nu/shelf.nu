@@ -1,4 +1,4 @@
-import type { Organization, User } from "@prisma/client";
+import type { Organization, OrganizationType, User } from "@prisma/client";
 import { db } from "~/database";
 import { ShelfStackError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
@@ -27,43 +27,55 @@ export async function getUserTierLimit(id: User["id"]) {
 }
 
 export async function assertUserCanImportAssets({
-  userId,
   organizationId,
+  organizations,
 }: {
-  userId: User["id"];
   organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
 }) {
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      tier: {
-        include: { tierLimit: true },
-      },
-      organizations: {
-        select: {
-          id: true,
-          type: true,
-        },
-      },
-    },
-  });
-  const currentOrg = user?.organizations.find((o) => o.id === organizationId);
-  //to have a team org you need subscription hence we only assert for personal org for now
-  if (currentOrg?.type !== "TEAM" && !canImportAssets(user?.tier?.tierLimit)) {
+  /** Find the current organization as we need the owner */
+  const currentOrganization = organizations.find(
+    (org) => org.id === organizationId
+  );
+  /** We get the owner ID so we can check if the organization has permissions for importing */
+  const ownerId = currentOrganization?.userId as string;
+
+  /* Check the tier limit */
+  const tierLimit = await getUserTierLimit(ownerId);
+
+  if (!canImportAssets(tierLimit)) {
     throw new Error("Your user cannot import assets");
   }
-  return { user };
 }
 
 export async function assertUserCanExportAssets({
-  userId,
+  organizationId,
+  organizations,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
 }) {
-  /** Get the tier limit and check if they can export */
-  const tierLimit = await getUserTierLimit(userId);
+  /** Find the current organization as we need the owner */
+  const currentOrganization = organizations.find(
+    (org) => org.id === organizationId
+  );
+  /** We get the owner ID so we can check if the organization has permissions for importing */
+  const ownerId = currentOrganization?.userId as string;
+
+  /* Check the tier limit */
+  const tierLimit = await getUserTierLimit(ownerId);
 
   if (!canExportAssets(tierLimit)) {
     throw new Error("Your user cannot export assets");

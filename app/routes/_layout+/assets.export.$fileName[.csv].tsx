@@ -6,10 +6,12 @@ import { exportAssetsToCsv } from "~/utils/csv.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
 
-  await assertUserCanExportAssets({ userId });
+  await assertUserCanExportAssets({ organizationId, organizations });
 
   /** Join the rows with a new line */
   const csvString = await exportAssetsToCsv({ organizationId });
