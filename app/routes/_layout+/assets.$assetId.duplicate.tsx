@@ -25,6 +25,8 @@ import {
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await requireAuthSession(request);
@@ -52,8 +54,12 @@ const DuplicateAssetSchema = z.object({
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   assertIsPost(request);
 
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
+
   const { userId } = authSession;
 
   const assetId = params.assetId as string;

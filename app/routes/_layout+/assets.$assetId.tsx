@@ -47,11 +47,16 @@ import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.read
+  );
   const { userId } = authSession;
   const locale = getLocale(request);
   const id = getRequiredParam(params, "assetId");
@@ -106,8 +111,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsDelete(request);
   const id = getRequiredParam(params, "assetId");
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.delete
+  );
   const formData = await request.formData();
   const mainImageUrl = formData.get("mainImage") as string;
 

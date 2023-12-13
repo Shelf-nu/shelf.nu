@@ -24,10 +24,15 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfStackError } from "~/utils/error";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.import
+  );
   const { userId } = authSession;
 
   const error = {
@@ -80,8 +85,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.import
+  );
   const { userId } = authSession;
   await assertUserCanImportAssets({ userId, organizationId });
 
