@@ -4,6 +4,9 @@ import type {
   Tag,
   Custody,
   Organization,
+  User,
+  Tier,
+  TierLimit,
 } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
@@ -75,6 +78,14 @@ export interface IndexResponse {
   };
 }
 
+type OrganizationWithOwnerTierLimit = Organization & {
+  owner: User & {
+    tier: Tier & {
+      tierLimit: TierLimit;
+    };
+  };
+};
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
@@ -100,6 +111,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
               id: true,
               name: true,
               type: true,
+              owner: {
+                select: {
+                  tier: {
+                    include: { tierLimit: true },
+                  },
+                },
+              },
             },
           },
         },
@@ -109,10 +127,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const organizations = user?.userOrganizations.map(
     (userOrganization) => userOrganization.organization
-  ) as Organization[];
+  ) as OrganizationWithOwnerTierLimit[];
+
   const currentOrganization = organizations.find(
     (org) => org.id === organizationId
-  );
+  ) as OrganizationWithOwnerTierLimit;
+
+  /** For importing we need to check the tier of the org owner rather than currentUser */
+  const ownerTierLimit = currentOrganization?.owner?.tier?.tierLimit;
 
   const {
     search,
@@ -173,8 +195,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       next,
       prev,
       modelName,
-      canExportAssets: canExportAssets(user?.tier?.tierLimit),
-      canImportAssets: canImportAssets(user?.tier?.tierLimit),
+      canExportAssets: canExportAssets(ownerTierLimit),
+      canImportAssets: canImportAssets(ownerTierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",

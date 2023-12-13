@@ -167,7 +167,13 @@ export const getUserOrganizations = async ({ userId }: { userId: string }) => {
     where: { userId },
     select: {
       organization: {
-        select: { id: true, type: true, name: true, imageId: true },
+        select: {
+          id: true,
+          type: true,
+          name: true,
+          imageId: true,
+          userId: true,
+        },
       },
     },
   });
