@@ -5,14 +5,13 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { authSession, organizationId } = await requirePermision(
+  const { organizationId, organizations } = await requirePermision(
     request,
     PermissionEntity.asset,
     PermissionAction.export
   );
-  const { userId } = authSession;
 
-  await assertUserCanExportAssets({ userId });
+  await assertUserCanExportAssets({ organizationId, organizations });
 
   /** Join the rows with a new line */
   const csvString = await exportAssetsToCsv({ organizationId });

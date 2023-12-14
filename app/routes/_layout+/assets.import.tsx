@@ -28,7 +28,7 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { authSession, organizationId } = await requirePermision(
+  const { authSession, organizationId, organizations } = await requirePermision(
     request,
     PermissionEntity.asset,
     PermissionAction.import
@@ -43,7 +43,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   };
 
   try {
-    await assertUserCanImportAssets({ userId, organizationId });
+    await assertUserCanImportAssets({ organizationId, organizations });
     const intent = (await request.clone().formData()).get("intent") as
       | "backup"
       | "content";
@@ -85,13 +85,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { authSession, organizationId } = await requirePermision(
+  const { authSession, organizationId, organizations } = await requirePermision(
     request,
     PermissionEntity.asset,
     PermissionAction.import
   );
   const { userId } = authSession;
-  await assertUserCanImportAssets({ userId, organizationId });
+  await assertUserCanImportAssets({ organizationId, organizations });
 
   return json({
     header: {

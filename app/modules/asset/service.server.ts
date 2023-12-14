@@ -977,7 +977,7 @@ export const createAssetsFromContentImport = async ({
     userId,
   });
 
-  for (const asset of data) {
+  for (let asset of data) {
     const customFieldsValues: ShelfAssetCustomFieldValueType[] = Object.entries(
       asset
     ).reduce((res, [key, val]) => {
