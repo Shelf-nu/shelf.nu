@@ -39,6 +39,8 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -76,8 +78,11 @@ export interface IndexResponse {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.read
+  );
 
   const { userId } = authSession;
 

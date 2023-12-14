@@ -73,9 +73,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   /** There could be a case when you get removed from an organization while browsing it.
    * In this case what we do is we set the current organization to the first one in the list
    */
-  const userOrganizations = await getUserOrganizations({
-    userId: authSession.userId,
-  });
+  const userOrganizations = (
+    await getUserOrganizations({
+      userId: authSession.userId,
+    })
+  ).map((uo) => uo.organization);
   const userOrganizationIds = userOrganizations.map((org) => org.id);
   const personalOrganization = userOrganizations.find(
     (org) => org.type === "PERSONAL"

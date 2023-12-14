@@ -37,6 +37,8 @@ import {
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings._index";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -120,12 +122,20 @@ export const handle = {
 };
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const id = getRequiredParam(params, "bookingId");
-
   const formData = await request.formData();
   const intent = formData.get("intent") as "save" | "reserve" | "delete";
+
+  const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
+    delete: PermissionAction.delete,
+    reserve: PermissionAction.create,
+    save: PermissionAction.update,
+  };
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.booking,
+    intent2ActionMap[intent]
+  );
+  const id = getRequiredParam(params, "bookingId");
 
   switch (intent) {
     case "save":

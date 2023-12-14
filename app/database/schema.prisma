@@ -378,6 +378,7 @@ enum OrganizationRoles {
   ADMIN
   TEAM_MEMBER
   OWNER
+  SELF_SERVICE
 }
 
 // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.

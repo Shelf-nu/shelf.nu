@@ -14,10 +14,15 @@ import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
 
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({
@@ -53,7 +58,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { userId } = await requireAuthSession(request);
+  const {
+    authSession: { userId },
+  } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
   const formData = await request.formData();
   const assetId = params.assetId as string;
   const custodian = formData.get("custodian");
