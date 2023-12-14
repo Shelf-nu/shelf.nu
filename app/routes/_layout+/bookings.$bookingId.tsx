@@ -132,13 +132,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
     | "save"
     | "reserve"
     | "delete"
-    | "removeAsset";
+    | "removeAsset"
+    | "checkOut";
 
   const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
     delete: PermissionAction.delete,
     reserve: PermissionAction.create,
     save: PermissionAction.update,
     removeAsset: PermissionAction.update,
+    checkOut: PermissionAction.update,
   };
   const { authSession, organizationId } = await requirePermision(
     request,
@@ -237,6 +239,24 @@ export async function action({ request, params }: ActionFunctionArgs) {
         { booking },
         {
           status: 200,
+          headers: [
+            setCookie(await commitAuthSession(request, { authSession })),
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+          ],
+        }
+      );
+    case "checkOut":
+      // @TODO here we have to make sure assets are updated to checked-out
+      var booking = await upsertBooking({ id, status: BookingStatus.ONGOING });
+      sendNotification({
+        title: "Booking checked-out",
+        message: "Your booking has been checked-out successfully",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+      return json(
+        { success: true },
+        {
           headers: [
             setCookie(await commitAuthSession(request, { authSession })),
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),

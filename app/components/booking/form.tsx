@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import {
   Form,
   useLoaderData,
@@ -68,6 +68,9 @@ export function BookingForm({
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
 
   const hasAssets = booking.assets?.length > 0;
+  const hasUnavailableAssets = booking.assets?.some(
+    (asset) => asset.status !== AssetStatus.AVAILABLE
+  );
   const isReserved = booking.status === BookingStatus.RESERVED;
 
   return (
@@ -205,16 +208,22 @@ export function BookingForm({
                   />
                 ) : null}
 
-                {/* When booking is draft, we show the reserve check-out */}
+                {/* When booking is reserved, we show the check-out button */}
                 {booking.status === BookingStatus.RESERVED ? (
-                  <Button
-                    type="submit"
-                    disabled={disabled}
-                    name="intent"
-                    value="checkOut"
-                  >
-                    Check-out
-                  </Button>
+                  <ControlledActionButton
+                    canUseFeature={!disabled && !hasUnavailableAssets}
+                    buttonContent={{
+                      title: "Check-out",
+                      message:
+                        "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking or have assigned custody. Either check-in the missing assets or remove the assets from this booking.",
+                    }}
+                    buttonProps={{
+                      type: "submit",
+                      name: "intent",
+                      value: "checkOut",
+                    }}
+                    skipCta={true}
+                  />
                 ) : null}
               </div>
             </div>

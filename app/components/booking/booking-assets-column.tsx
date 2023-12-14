@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { Asset, Category, Tag } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
+import { userFriendlyAssetStatus } from "~/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AssetImage } from "../assets/asset-image";
 import { ChevronRight } from "../icons";
@@ -120,14 +121,23 @@ const ListAssetContent = ({
               />
             </div>
             <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-              <div className="font-medium">
-                <Button
-                  to={`/assets/${item.id}`}
-                  variant="link"
-                  className="text-gray-900 hover:text-gray-700"
-                >
-                  {item.title}
-                </Button>
+              <div className="min-w-[130px]">
+                <span className="word-break mb-1 block font-medium">
+                  <Button
+                    to={`/assets/${item.id}`}
+                    variant="link"
+                    className="text-gray-900 hover:text-gray-700"
+                  >
+                    {item.title}
+                  </Button>
+                </span>
+                <div>
+                  <Badge
+                    color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
+                  >
+                    {userFriendlyAssetStatus(item.status)}
+                  </Badge>
+                </div>
               </div>
               <div className="block md:hidden">
                 {category ? (
