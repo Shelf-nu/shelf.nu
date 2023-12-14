@@ -7,7 +7,7 @@ import {
   HoverCardTrigger,
 } from "../shared/hover-card";
 
-export const PremiumFeatureButton = ({
+export const ControlledActionButton = ({
   canUseFeature,
   buttonContent = {
     title: "Use",

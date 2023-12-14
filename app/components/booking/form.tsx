@@ -31,6 +31,7 @@ import { Badge } from "../shared";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import TextualDivider from "../shared/textual-divider";
+import { ControlledActionButton } from "../subscription/premium-feature-button";
 import { Th, Td } from "../table";
 
 type FormData = {
@@ -230,14 +231,21 @@ export function BookingForm({
 
                 {/* When booking is draft, we show the reserve button */}
                 {booking.status === BookingStatus.DRAFT ? (
-                  <Button
-                    type="submit"
-                    disabled={disabled || !hasAssets}
-                    name="intent"
-                    value="reserve"
-                  >
-                    Reserve
-                  </Button>
+                  <ControlledActionButton
+                    canUseFeature={!disabled && hasAssets}
+                    buttonContent={{
+                      title: "Reserve",
+                      message:
+                        "You need to add assets to your booking before you can reserve it",
+                    }}
+                    buttonProps={{
+                      type: "submit",
+                      role: "link",
+                      name: "intent",
+                      value: "reserve",
+                    }}
+                    skipCta={true}
+                  />
                 ) : null}
 
                 {/* When booking is draft, we show the reserve check-out */}
@@ -274,15 +282,20 @@ export function BookingForm({
               <Filters className="responsive-filters mb-2 lg:mb-0">
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
-                    <Button
-                      as="button"
-                      to={manageAssetsUrl}
-                      variant="primary"
-                      icon="plus"
-                      disabled={!booking.from || !booking.to} // If from and to are not set, we disable the button
-                    >
-                      Manage Assets
-                    </Button>
+                    <ControlledActionButton
+                      canUseFeature={!!booking.from && !!booking.to}
+                      buttonContent={{
+                        title: "Add Assets",
+                        message:
+                          "You need to select a start and end date and save your booking before you can add assets to your booking",
+                      }}
+                      buttonProps={{
+                        as: "button",
+                        to: manageAssetsUrl,
+                        icon: "plus",
+                      }}
+                      skipCta={true}
+                    />
                   </div>
                 </div>
               </Filters>
