@@ -277,6 +277,14 @@ export const getBooking = async (booking: Pick<Booking, "id">) => {
 
   return db.booking.findFirst({
     where: { id },
-    include: { ...commonInclude, assets: true },
+    include: {
+      ...commonInclude,
+      assets: {
+        include: {
+          category: true,
+          custody: true,
+        },
+      },
+    },
   });
 };

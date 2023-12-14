@@ -1,6 +1,8 @@
 import { useMemo } from "react";
-import type { Asset, Category, Tag } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+
+import { useLoaderData, useParams } from "@remix-run/react";
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import { AvailabilityLabel } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
 import { userFriendlyAssetStatus } from "~/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
@@ -43,39 +45,38 @@ export function BookingAssetsColumn() {
             Manage Assets
           </Button>
         </div>
-        <div className="flex flex-col md:gap-2">
+        <div className="flex flex-col">
+          {/* THis is a fake table header */}
+          <div className="flex justify-between border border-b-0 bg-white p-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t-[12px] md:px-6">
+            <div>
+              <div className=" text-md font-semibold text-gray-900">Assets</div>
+              <div>{booking.assets.length} items</div>
+            </div>
+            <ControlledActionButton
+              canUseFeature={!!booking.from && !!booking.to}
+              buttonContent={{
+                title: "Add Assets",
+                message:
+                  "You need to select a start and end date and save your booking before you can add assets to your booking",
+              }}
+              buttonProps={{
+                as: "button",
+                to: manageAssetsUrl,
+                icon: "plus",
+                className: "whitespace-nowrap",
+              }}
+              skipCta={true}
+            />
+          </div>
           <List
             ItemComponent={ListAssetContent}
             hideFirstHeaderColumn={true}
             headerChildren={
               <>
-                <Th className="hidden md:table-cell">
-                  {" "}
-                  <div>
-                    <div className=" text-md font-semibold text-gray-900">
-                      Assets
-                    </div>
-                    <div>{booking.assets.length} items</div>
-                  </div>
-                </Th>
-                <Th> </Th>
-                <Th className="hidden md:table-cell">
-                  <ControlledActionButton
-                    canUseFeature={!!booking.from && !!booking.to}
-                    buttonContent={{
-                      title: "Add Assets",
-                      message:
-                        "You need to select a start and end date and save your booking before you can add assets to your booking",
-                    }}
-                    buttonProps={{
-                      as: "button",
-                      to: manageAssetsUrl,
-                      icon: "plus",
-                      className: "whitespace-nowrap",
-                    }}
-                    skipCta={true}
-                  />
-                </Th>
+                <Th className="hidden md:table-cell">Name</Th>
+                <Th className="hidden md:table-cell"> </Th>
+                <Th className="hidden md:table-cell">Category</Th>
+                <Th className="hidden md:table-cell"> </Th>
               </>
             }
             customEmptyStateContent={{
@@ -87,6 +88,7 @@ export function BookingAssetsColumn() {
                 disabled: !booking.from || !booking.to,
               },
             }}
+            className="md:rounded-t-[0px]"
           />
         </div>
       </div>
@@ -94,16 +96,11 @@ export function BookingAssetsColumn() {
   );
 }
 
-const ListAssetContent = ({
-  item,
-}: {
-  item: Asset & {
-    category?: Category;
-    tags?: Tag[];
-    location?: Location;
-  };
-}) => {
+const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { category } = item;
+  const { bookindId } = useParams();
+  const isChecked = item?.bookings?.some((b) => b.id === bookindId) ?? false;
+
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -153,6 +150,19 @@ const ListAssetContent = ({
             <ChevronRight />
           </button>
         </div>
+      </Td>
+      {/* If asset status is different than available, we need to show a label */}
+      <Td>
+        {/* {item.status !== AssetStatus.AVAILABLE || !item.availableToBook ? (
+          <AvailabilityBadge
+            badgeText={"Unavailable"}
+            tooltipTitle={"Asset is unavailable for bookings"}
+            tooltipContent={
+              "This asset is not available for check-out. This could be because it's part of another booking or because it has assigned custody, or because it's marked as unavailable for bookings."
+            }
+          />
+        ) : null} */}
+        <AvailabilityLabel asset={item} isChecked={isChecked} />
       </Td>
       <Td className="hidden md:table-cell">
         {category ? (

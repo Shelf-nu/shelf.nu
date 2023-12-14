@@ -1,4 +1,4 @@
-import type { Asset, Booking, Custody } from "@prisma/client";
+import type { Asset, Booking, Category, Custody } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -131,9 +131,10 @@ export default function AddAssetsToNewBooking() {
   );
 }
 
-type AssetWithBooking = Asset & {
+export type AssetWithBooking = Asset & {
   bookings: Booking[];
   custody: Custody | null;
+  category: Category;
 };
 
 const RowComponent = ({ item }: { item: AssetWithBooking }) => {
@@ -183,7 +184,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
  *
  * Each reason has its own tooltip and label
  */
-function AvailabilityLabel({
+export function AvailabilityLabel({
   asset,
   isChecked,
 }: {
@@ -224,7 +225,7 @@ function AvailabilityLabel({
   /**
    * Is booked for period
    */
-  if (asset.bookings.length > 0 && !isChecked) {
+  if (asset.bookings?.length > 0 && !isChecked) {
     return (
       <AvailabilityBadge
         badgeText={"Already booked"}
@@ -239,7 +240,7 @@ function AvailabilityLabel({
   return null;
 }
 
-function AvailabilityBadge({
+export function AvailabilityBadge({
   badgeText,
   tooltipTitle,
   tooltipContent,
