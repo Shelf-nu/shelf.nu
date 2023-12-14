@@ -1,4 +1,4 @@
-import type { Asset, Booking } from "@prisma/client";
+import type { Asset, Booking, Custody } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -12,12 +12,19 @@ import styles from "~/components/booking/styles.css";
 import { List } from "~/components/list";
 import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { Td } from "~/components/table";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
 import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost, getRequiredParam } from "~/utils";
+import { assertIsPost, getRequiredParam, tw } from "~/utils";
+import { ShelfStackError } from "~/utils/error";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -46,6 +53,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     plural: "assets",
   };
   const booking = await getBooking({ id });
+  if (!booking) {
+    throw new ShelfStackError({ message: "Booking not found" });
+  }
 
   return json({
     showModal: true,
@@ -115,7 +125,7 @@ export default function AddAssetsToNewBooking() {
         }}
       />
       <Button variant="secondary" width="full" to={".."}>
-        Save
+        Close
       </Button>
     </div>
   );
@@ -123,6 +133,7 @@ export default function AddAssetsToNewBooking() {
 
 type AssetWithBooking = Asset & {
   bookings: Booking[];
+  custody: Custody | null;
 };
 
 const RowComponent = ({ item }: { item: AssetWithBooking }) => {
@@ -149,9 +160,12 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
             <div className="flex flex-col">
               <div className="font-medium">{item.title}</div>
             </div>
-            {/* @TODO here we need to add the labels for assets which are unavailable */}
           </div>
         </div>
+      </Td>
+
+      <Td className="text-right">
+        <AvailabilityLabel asset={item} isChecked={isChecked} />
       </Td>
 
       <Td>
@@ -160,3 +174,105 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
     </>
   );
 };
+
+/**
+ * There are 3 reasons an asset can be unavailable:
+ * 1. Its marked as not allowed for booking
+ * 2. It is already in custody
+ * 3. It is already booked for that period (within current or another booking)
+ *
+ * Each reason has its own tooltip and label
+ */
+function AvailabilityLabel({
+  asset,
+  isChecked,
+}: {
+  asset: AssetWithBooking;
+  isChecked: boolean;
+}) {
+  /**
+   * Marked as not allowed for booking
+   */
+
+  if (!asset.availableToBook) {
+    return (
+      <AvailabilityBadge
+        badgeText={"Unavailable"}
+        tooltipTitle={"Asset is unavailable for bookings"}
+        tooltipContent={
+          "This asset is marked as unavailable for bookings by an administrator."
+        }
+      />
+    );
+  }
+
+  /**
+   * Has custody
+   */
+  if (asset.custody) {
+    return (
+      <AvailabilityBadge
+        badgeText={"In custody"}
+        tooltipTitle={"Asset is in custody"}
+        tooltipContent={
+          "This asset is in custody of a team member making it currently unavailable for bookings."
+        }
+      />
+    );
+  }
+
+  /**
+   * Is booked for period
+   */
+  if (asset.bookings.length > 0 && !isChecked) {
+    return (
+      <AvailabilityBadge
+        badgeText={"Already booked"}
+        tooltipTitle={"Asset is already part of a booking"}
+        tooltipContent={
+          "This asset is added to a booking that is overlapping the selected time period."
+        }
+      />
+    );
+  }
+
+  return null;
+}
+
+function AvailabilityBadge({
+  badgeText,
+  tooltipTitle,
+  tooltipContent,
+}: {
+  badgeText: string;
+  tooltipTitle: string;
+  tooltipContent: string;
+}) {
+  return (
+    <TooltipProvider delayDuration={100}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={tw(
+              "inline-block bg-warning-50 px-[6px] py-[2px]",
+              "rounded-md border border-warning-200",
+              "text-xs text-warning-700"
+            )}
+          >
+            {badgeText}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="end">
+          <div className="max-w-[260px] text-left sm:max-w-[320px]">
+            <h6 className="mb-1 text-xs font-semibold text-gray-700">
+              {tooltipTitle}
+            </h6>
+            <div className="whitespace-normal text-xs font-medium text-gray-500">
+              {tooltipContent}
+            </div>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}

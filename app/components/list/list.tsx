@@ -16,12 +16,14 @@ import { Table } from "../table";
 export const List = ({
   ItemComponent,
   headerChildren,
+  hideFirstHeaderColumn = false,
   navigate,
   className,
   customEmptyStateContent,
 }: {
   ItemComponent: any;
   headerChildren?: ReactNode;
+  hideFirstHeaderColumn?: boolean;
   /** Function to be passed if the rows of the table should navigate */
   navigate?: (id: string) => void;
   className?: string;
@@ -48,7 +50,10 @@ export const List = ({
       ) : (
         <>
           <Table>
-            <ListHeader children={headerChildren} />
+            <ListHeader
+              children={headerChildren}
+              hideFirstColumn={hideFirstHeaderColumn}
+            />
             <tbody>
               {items.map((item) => (
                 <ListItem item={item} key={item.id} navigate={navigate}>

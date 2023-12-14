@@ -16,7 +16,12 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { db } from "~/database";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { deleteBooking, getBooking, upsertBooking } from "~/modules/booking";
+import {
+  deleteBooking,
+  getBooking,
+  removeAssets,
+  upsertBooking,
+} from "~/modules/booking";
 import type { ExtendedBooking } from "~/modules/booking/types";
 import {
   requireOrganisationId,
@@ -123,12 +128,17 @@ export const handle = {
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const formData = await request.formData();
-  const intent = formData.get("intent") as "save" | "reserve" | "delete";
+  const intent = formData.get("intent") as
+    | "save"
+    | "reserve"
+    | "delete"
+    | "removeAsset";
 
   const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
     delete: PermissionAction.delete,
     reserve: PermissionAction.create,
     save: PermissionAction.update,
+    removeAsset: PermissionAction.update,
   };
   const { authSession, organizationId } = await requirePermision(
     request,
@@ -158,7 +168,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         );
       }
       const { name, startDate, endDate, custodian } = result.data;
-      const booking = await upsertBooking({
+      var booking = await upsertBooking({
         custodianTeamMemberId: custodian,
         organizationId,
         id,
@@ -214,6 +224,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
           setCookie(await setSelectedOrganizationIdCookie(organizationId)),
         ],
       });
+    case "removeAsset":
+      const assetId = formData.get("assetId");
+      var booking = await removeAssets({ id, assetIds: [assetId as string] });
+      sendNotification({
+        title: "Asset removed",
+        message: "Your asset has been removed from the booking",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+      return json(
+        { booking },
+        {
+          status: 200,
+          headers: [
+            setCookie(await commitAuthSession(request, { authSession })),
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+          ],
+        }
+      );
     default:
       return null;
   }

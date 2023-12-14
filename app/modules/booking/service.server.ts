@@ -236,7 +236,7 @@ export async function getBookings({
       take,
       where,
       include: commonInclude,
-      orderBy: { createdAt: "desc" },
+      orderBy: { from: "asc" },
     }),
     db.booking.count({ where }),
   ]);
