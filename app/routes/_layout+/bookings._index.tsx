@@ -8,9 +8,12 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
-import { requireAuthSession } from "~/modules/auth";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getBookings } from "~/modules/booking";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import {
+  requireOrganisationId,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import {
   generatePageMeta,
   getCurrentSearchParams,
@@ -23,6 +26,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { AvailabilityBadge } from "./bookings.$bookingId.add-assets";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
@@ -51,32 +55,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
     plural: "bookings",
   };
 
+  /** We format the dates on the server based on the users timezone and locale  */
+  const items = bookings.map((b) => {
+    if (b.from && b.to) {
+      const from = new Date(b.from);
+      const displayFrom = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(from);
+
+      const to = new Date(b.to);
+      const displayTo = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(to);
+
+      return {
+        ...b,
+        displayFrom: displayFrom.split(","),
+        displayTo: displayTo.split(","),
+      };
+    }
+    return b;
+  });
+
   return json(
     {
       header,
-      items: bookings.map((b) => {
-        /** We format the dates on the server based on the users timezone and locale  */
-        if (b.from && b.to) {
-          const from = new Date(b.from);
-          const displayFrom = getDateTimeFormat(request, {
-            dateStyle: "short",
-            timeStyle: "short",
-          }).format(from);
-
-          const to = new Date(b.to);
-          const displayTo = getDateTimeFormat(request, {
-            dateStyle: "short",
-            timeStyle: "short",
-          }).format(to);
-
-          return {
-            ...b,
-            displayFrom: displayFrom.split(","),
-            displayTo: displayTo.split(","),
-          };
-        }
-        return b;
-      }),
+      items,
       search,
       page,
       totalItems: bookings.length,
@@ -87,7 +93,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       modelName,
     },
     {
-      headers: [setCookie(await userPrefs.serialize(cookie))],
+      headers: [
+        setCookie(await userPrefs.serialize(cookie)),
+        setCookie(await commitAuthSession(request, { authSession })),
+        setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+      ],
     }
   );
 }
@@ -136,76 +146,117 @@ export const bookingStatusColorMap: { [key: string]: string } = {
   COMPLETED: "#17B26A",
   RESERVED: "#175CD3",
 };
+
 const ListAssetContent = ({
   item,
 }: {
-  item: BookingWithCustodians & {
-    /** First element is date, second element is time */
+  item: Prisma.BookingGetPayload<{
+    include: {
+      assets: {
+        select: {
+          id: true;
+          availableToBook: true;
+          custody: true;
+        };
+      };
+      from: true;
+      to: true;
+      custodianUser: true;
+      custodianTeamMember: true;
+    };
+  }> & {
     displayFrom?: string[];
     displayTo?: string[];
   };
-}) => (
-  <>
-    {/* Item */}
-    <Td className="w-full whitespace-normal p-0 md:p-0">
-      <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-        <div className="flex items-center gap-3">
-          <div className="min-w-[130px]">
-            <span className="word-break mb-1 block font-medium">
-              {item.name}
-            </span>
-            <div className="">
-              <Badge color={bookingStatusColorMap[item.status]}>
-                <span className="block lowercase first-letter:uppercase">
-                  {item.status}
-                </span>
-              </Badge>
+}) => {
+  // @TODO - here we miss some cases
+  const hasUnavaiableAssets = item.assets.some(
+    (asset) => !asset.availableToBook || asset.custody !== null
+  );
+  return (
+    <>
+      {/* Item */}
+      <Td className="w-full whitespace-normal p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="min-w-[130px]">
+              <span className="word-break mb-1 block font-medium">
+                {item.name}
+              </span>
+              <div className="">
+                <Badge color={bookingStatusColorMap[item.status]}>
+                  <span className="block lowercase first-letter:uppercase">
+                    {item.status}
+                  </span>
+                </Badge>
+              </div>
             </div>
           </div>
-        </div>
 
-        <button className="block md:hidden">
-          <ChevronRight />
-        </button>
-      </div>
-    </Td>
-    {/* From */}
-    <Td className="hidden md:table-cell">
-      {item.displayFrom ? (
-        <div className="min-w-[130px]">
-          <span className="word-break mb-1 block font-medium">
-            {item.displayFrom[0]}
-          </span>
-          <span className="block text-gray-600">{item.displayFrom[1]}</span>
+          <button className="block md:hidden">
+            <ChevronRight />
+          </button>
         </div>
-      ) : null}
-    </Td>
+      </Td>
 
-    {/* To */}
-    <Td className="hidden md:table-cell">
-      {item.displayTo ? (
-        <div className="min-w-[130px]">
-          <span className="word-break mb-1 block font-medium">
-            {item.displayTo[0]}
-          </span>
-          <span className="block text-gray-600">{item.displayTo[1]}</span>
-        </div>
-      ) : null}
-    </Td>
+      {/**
+       * Optional label when the booking inlcudes assets that are either:
+       * 1. Marked as not available for boooking
+       * 2. Have custody
+       * 3. Have other bookings with the same period - this I am not sure how to handle yet
+       * */}
+      <Td className="hidden md:table-cell">
+        {hasUnavaiableAssets ? (
+          <AvailabilityBadge
+            badgeText={"Inlcudes unavailable assets"}
+            tooltipTitle={"Booking includes unavailable assets"}
+            tooltipContent={
+              "There are some assets within this booking that are unavailable for reservation becuase they are checked-out, have custody assigned or are marked as not allowed to book"
+            }
+          />
+        ) : null}
+      </Td>
 
-    {/* Custodian */}
-    <Td className="hidden md:table-cell">
-      {item?.custodianUser ? (
-        <CustodianColumn
-          img={item?.custodianUser?.profilePicture || "/images/default_pfp.jpg"}
-          name={`${item?.custodianUser.firstName} ${item?.custodianUser.lastName}`}
-        />
-      ) : item?.custodianTeamMember ? (
-        <CustodianColumn name={item.custodianTeamMember.name} />
-      ) : null}
-    </Td>
-  </>
-);
+      {/* From */}
+      <Td className="hidden md:table-cell">
+        {item.displayFrom ? (
+          <div className="min-w-[130px]">
+            <span className="word-break mb-1 block font-medium">
+              {item.displayFrom[0]}
+            </span>
+            <span className="block text-gray-600">{item.displayFrom[1]}</span>
+          </div>
+        ) : null}
+      </Td>
+
+      {/* To */}
+      <Td className="hidden md:table-cell">
+        {item.displayTo ? (
+          <div className="min-w-[130px]">
+            <span className="word-break mb-1 block font-medium">
+              {item.displayTo[0]}
+            </span>
+            <span className="block text-gray-600">{item.displayTo[1]}</span>
+          </div>
+        ) : null}
+      </Td>
+
+      {/* Custodian */}
+      <Td className="hidden md:table-cell">
+        {item?.custodianUser ? (
+          <CustodianColumn
+            img={
+              item?.custodianUser?.profilePicture || "/images/default_pfp.jpg"
+            }
+            name={`${item?.custodianUser.firstName} ${item?.custodianUser.lastName}`}
+          />
+        ) : item?.custodianTeamMember ? (
+          <CustodianColumn name={item.custodianTeamMember.name} />
+        ) : null}
+      </Td>
+    </>
+  );
+};
 
 function CustodianColumn({ img, name }: { img?: string; name: string }) {
   return (

@@ -235,7 +235,16 @@ export async function getBookings({
       skip,
       take,
       where,
-      include: commonInclude,
+      include: {
+        ...commonInclude,
+        assets: {
+          select: {
+            id: true,
+            custody: true,
+            availableToBook: true,
+          },
+        },
+      },
       orderBy: { from: "asc" },
     }),
     db.booking.count({ where }),
