@@ -25,6 +25,7 @@ export function BookingAssetsColumn() {
         bookingFrom: new Date(booking.from as string).toISOString(),
         bookingTo: new Date(booking.to as string).toISOString(),
         hideUnavailable: "true",
+        unhideAssetsBookigIds: booking.id,
       })}`,
     [booking]
   );
