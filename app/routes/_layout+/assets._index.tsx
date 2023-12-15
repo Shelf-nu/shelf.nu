@@ -26,8 +26,7 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -73,11 +72,12 @@ export interface IndexResponse {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.read
-  );
+  const { authSession, organizationId, organizations, currentOrganization } =
+    await requirePermision(
+      request,
+      PermissionEntity.asset,
+      PermissionAction.read
+    );
 
   const { userId } = authSession;
 

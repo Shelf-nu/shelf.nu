@@ -43,8 +43,12 @@ export async function requirePermision(
   action: PermissionAction
 ) {
   const authSession = await requireAuthSession(request);
-  const { organizationId, userOrganizations, organizations } =
-    await requireOrganisationId(authSession, request);
+  const {
+    organizationId,
+    userOrganizations,
+    organizations,
+    currentOrganization,
+  } = await requireOrganisationId(authSession, request);
   const roles = userOrganizations.find(
     (o) => o.organization.id === organizationId
   )?.roles;
@@ -55,5 +59,5 @@ export async function requirePermision(
     organizationId,
     userId: authSession.userId,
   });
-  return { authSession, organizations, organizationId };
+  return { authSession, organizations, organizationId, currentOrganization };
 }

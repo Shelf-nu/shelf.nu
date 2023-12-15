@@ -54,7 +54,7 @@ export async function requireOrganisationId(
   const personalOrganization = organizations.find(
     (org) => org.type === "PERSONAL"
   );
-  const currentOrganization = userOrganizations.find(
+  const currentOrganization = organizations.find(
     (org) => org.id === organizationId
   );
 
@@ -87,6 +87,10 @@ export async function requireOrganisationId(
     });
   }
 
-  return { organizationId, organizations, userOrganizations, currentOrganization };
-
+  return {
+    organizationId,
+    organizations,
+    userOrganizations,
+    currentOrganization,
+  };
 }
