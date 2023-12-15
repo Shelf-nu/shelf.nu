@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import {
   Form,
@@ -67,11 +68,26 @@ export function BookingForm({
   const [, updateName] = useAtom(updateDynamicTitleAtom);
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
 
-  const hasAssets = booking.assets?.length > 0;
-  const hasUnavailableAssets = booking.assets?.some(
-    (asset) => asset.status !== AssetStatus.AVAILABLE
+  const hasAssets = useMemo(() => booking.assets?.length > 0, [booking.assets]);
+  const hasUnavailableAssets = useMemo(
+    () =>
+      booking.assets?.some((asset) => asset.status !== AssetStatus.AVAILABLE),
+    [booking.assets]
   );
-  const isReserved = booking.status === BookingStatus.RESERVED;
+  const isDraft = useMemo(
+    () => booking.status === BookingStatus.DRAFT,
+    [booking.status]
+  );
+  const isReserved = useMemo(
+    () => booking.status === BookingStatus.RESERVED,
+    [booking.status]
+  );
+  const isOngoing = useMemo(
+    () => booking.status === BookingStatus.ONGOING,
+    [booking.status]
+  );
+
+  const inputFieldIsDisabled = disabled || isReserved || isOngoing;
 
   return (
     <div>
@@ -99,7 +115,7 @@ export function BookingForm({
                   label="Name"
                   hideLabel
                   name={zo.fields.name()}
-                  disabled={disabled || isReserved}
+                  disabled={inputFieldIsDisabled}
                   error={zo.errors.name()?.message}
                   autoFocus
                   onChange={updateName}
@@ -123,7 +139,7 @@ export function BookingForm({
                   type="datetime-local"
                   hideLabel
                   name={zo.fields.startDate()}
-                  disabled={disabled || isReserved}
+                  disabled={inputFieldIsDisabled}
                   error={zo.errors.startDate()?.message}
                   className="w-full"
                   defaultValue={startDate}
@@ -143,7 +159,7 @@ export function BookingForm({
                   type="datetime-local"
                   hideLabel
                   name={zo.fields.endDate()}
-                  disabled={disabled || isReserved}
+                  disabled={inputFieldIsDisabled}
                   error={zo.errors.endDate()?.message}
                   className="w-full"
                   defaultValue={endDate}
@@ -164,7 +180,7 @@ export function BookingForm({
               </label>
               <CustodianSelect
                 defaultCustodianId={custodianId}
-                disabled={disabled || isReserved}
+                disabled={inputFieldIsDisabled}
               />
 
               {zo.errors.custodian()?.message ? (
@@ -179,18 +195,20 @@ export function BookingForm({
             </Card>
             <div className="mb-4 flex justify-end text-right">
               <div className="flex gap-3">
-                <Button
-                  type="submit"
-                  disabled={disabled}
-                  variant="secondary"
-                  name="intent"
-                  value="save"
-                >
-                  Save
-                </Button>
+                {!isOngoing ? (
+                  <Button
+                    type="submit"
+                    disabled={disabled}
+                    variant="secondary"
+                    name="intent"
+                    value="save"
+                  >
+                    Save
+                  </Button>
+                ) : null}
 
                 {/* When booking is draft, we show the reserve button */}
-                {booking.status === BookingStatus.DRAFT ? (
+                {isDraft ? (
                   <ControlledActionButton
                     canUseFeature={!disabled && hasAssets}
                     buttonContent={{
@@ -209,7 +227,7 @@ export function BookingForm({
                 ) : null}
 
                 {/* When booking is reserved, we show the check-out button */}
-                {booking.status === BookingStatus.RESERVED ? (
+                {isReserved ? (
                   <ControlledActionButton
                     canUseFeature={!disabled && !hasUnavailableAssets}
                     buttonContent={{
@@ -224,6 +242,12 @@ export function BookingForm({
                     }}
                     skipCta={true}
                   />
+                ) : null}
+
+                {isOngoing ? (
+                  <Button type="submit" name="intent" value="checkIn">
+                    Check-in
+                  </Button>
                 ) : null}
               </div>
             </div>

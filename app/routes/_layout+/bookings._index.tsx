@@ -142,7 +142,7 @@ export default function BookingsIndexPage() {
 
 export const bookingStatusColorMap: { [key: string]: string } = {
   DRAFT: "#667085",
-  ACTIVE: "#7A5AF8",
+  ONGOING: "#7A5AF8",
   COMPLETED: "#17B26A",
   RESERVED: "#175CD3",
 };

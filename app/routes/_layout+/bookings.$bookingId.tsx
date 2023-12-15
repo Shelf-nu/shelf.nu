@@ -66,7 +66,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const booking = await getBooking({ id: bookingId });
 
-  // @TODO something wrong here. WHen refreshing the page this gets thrown
   if (!booking) {
     throw new ShelfStackError({ message: "Booking not found", status: 404 });
   }
@@ -133,7 +132,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     | "reserve"
     | "delete"
     | "removeAsset"
-    | "checkOut";
+    | "checkOut"
+    | "checkIn";
 
   const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
     delete: PermissionAction.delete,
@@ -141,6 +141,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     save: PermissionAction.update,
     removeAsset: PermissionAction.update,
     checkOut: PermissionAction.update,
+    checkIn: PermissionAction.update,
   };
   const { authSession, organizationId } = await requirePermision(
     request,
@@ -251,6 +252,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
       sendNotification({
         title: "Booking checked-out",
         message: "Your booking has been checked-out successfully",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+      return json(
+        { success: true },
+        {
+          headers: [
+            setCookie(await commitAuthSession(request, { authSession })),
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+          ],
+        }
+      );
+    case "checkIn":
+      // TODO - status of assets should be updated to available
+      var booking = await upsertBooking({
+        id,
+        status: BookingStatus.COMPLETE,
+      });
+      sendNotification({
+        title: "Booking checked-in",
+        message: "Your booking has been checked-in successfully",
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
       });

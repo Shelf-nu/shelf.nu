@@ -118,6 +118,7 @@ enum AssetStatus {
   AVAILABLE
   IN_CUSTODY
   BOOKED
+  CHECKED_OUT
 }
 
 model Category {

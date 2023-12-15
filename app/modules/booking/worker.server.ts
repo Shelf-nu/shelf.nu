@@ -7,6 +7,7 @@ interface SchedulerData {
   id: string;
 }
 
+/** Check-out reminder */
 scheduler.work<SchedulerData>(
   schedulerKeys.checkoutReminder,
   async ({ data }) => {
@@ -52,6 +53,7 @@ scheduler.work<SchedulerData>(
   }
 );
 
+/** Check-in reminder */
 scheduler.work<SchedulerData>(
   schedulerKeys.checkinReminder,
   async ({ data }) => {
@@ -97,6 +99,7 @@ scheduler.work<SchedulerData>(
   }
 );
 
+/** Overdue reminder */
 scheduler.work<SchedulerData>(
   schedulerKeys.overdueReminder,
   async ({ data }) => {
