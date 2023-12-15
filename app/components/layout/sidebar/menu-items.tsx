@@ -48,7 +48,7 @@ const menuItemsTop = [
 const menuItemsBottom = [
   {
     icon: <SettingsIcon />,
-    to: "settings",
+    to: "settings/account",
     label: "Settings",
     end: true,
   },

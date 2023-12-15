@@ -31,7 +31,7 @@ export const shouldRevalidate = () => false;
 
 export default function SettingsPage() {
   const items = [
-    { to: "user", content: "User details" },
+    { to: "account", content: "Account" },
     { to: "workspace", content: "Workspaces" },
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },
