@@ -39,15 +39,11 @@ export async function assertUserCanImportAssets({
     userId: string;
   }[];
 }) {
-  /** Find the current organization as we need the owner */
-  const currentOrganization = organizations.find(
-    (org) => org.id === organizationId
-  );
-  /** We get the owner ID so we can check if the organization has permissions for importing */
-  const ownerId = currentOrganization?.userId as string;
-
   /* Check the tier limit */
-  const tierLimit = await getUserTierLimit(ownerId);
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
 
   if (!canImportAssets(tierLimit)) {
     throw new Error("Your user cannot import assets");
@@ -67,15 +63,11 @@ export async function assertUserCanExportAssets({
     userId: string;
   }[];
 }) {
-  /** Find the current organization as we need the owner */
-  const currentOrganization = organizations.find(
-    (org) => org.id === organizationId
-  );
-  /** We get the owner ID so we can check if the organization has permissions for importing */
-  const ownerId = currentOrganization?.userId as string;
-
   /* Check the tier limit */
-  const tierLimit = await getUserTierLimit(ownerId);
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
 
   if (!canExportAssets(tierLimit)) {
     throw new Error("Your user cannot export assets");
@@ -83,15 +75,22 @@ export async function assertUserCanExportAssets({
 }
 
 export const assertUserCanCreateMoreCustomFields = async ({
-  userId,
   organizationId,
+  organizations,
 }: {
-  userId: User["id"];
   organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
 }) => {
-  /** Get the tier limit and check if they can export */
-  const tierLimit = await getUserTierLimit(userId);
-
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
   const totalActiveCustomFields = await countAcviteCustomFields({
     organizationId,
   });
@@ -116,7 +115,6 @@ export async function assertUserCanInviteUsersToWorkspace({
   organizationId: Organization["id"];
 }) {
   /** Get the tier limit and check if they can export */
-  // const tierLimit = await getUserTierLimit(userId);
   const org = await db.organization.findUnique({
     where: { id: organizationId },
     select: {
@@ -177,3 +175,31 @@ export const assertUserCanCreateMoreOrganizations = async (userId: string) => {
   }
   return true;
 };
+
+/**
+ * @returns The tier limit of the organization's owner
+ * This is needed as the tier is based on the organization rather than the current user
+ */
+export async function getOrganizationTierLimit({
+  organizationId,
+  organizations,
+}: {
+  organizationId?: string;
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
+}) {
+  /** Find the current organization as we need the owner */
+  const currentOrganization = organizations.find(
+    (org) => org.id === organizationId
+  );
+  /** We get the owner ID so we can check if the organization has permissions for importing */
+  const ownerId = currentOrganization?.userId as string;
+
+  /** Get the tier limit and check if they can export */
+  return await getUserTierLimit(ownerId);
+}
