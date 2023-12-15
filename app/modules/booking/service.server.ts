@@ -125,6 +125,8 @@ export const upsertBooking = async (
       data: { activeSchedulerReference: jobId },
     });
   }
+
+  /** Handle email notification when booking status changes */
   if (
     data.status &&
     (data.status === BookingStatus.RESERVED ||

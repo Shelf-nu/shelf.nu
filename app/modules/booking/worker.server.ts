@@ -38,6 +38,7 @@ scheduler.work<SchedulerData>(
     //schedule the next job
     if (booking.to) {
       const when = new Date(booking.to);
+      // @TODO not sure why we do the -1. Can you explain @mahendra?
       when.setHours(when.getHours() - 1);
       const id = await scheduler.sendAfter(
         schedulerKeys.checkinReminder,

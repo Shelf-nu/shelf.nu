@@ -233,7 +233,7 @@ export function BookingForm({
                     buttonContent={{
                       title: "Check-out",
                       message:
-                        "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking or have assigned custody. Either check-in the missing assets or remove the assets from this booking.",
+                        "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking or have assigned custody. Either check-in the missing assets or remove the assets from this booking",
                     }}
                     buttonProps={{
                       type: "submit",

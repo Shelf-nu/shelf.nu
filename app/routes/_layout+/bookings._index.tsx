@@ -129,6 +129,7 @@ export default function BookingsIndexPage() {
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
+              <Th className="hidden md:table-cell"> </Th>
               <Th className="hidden md:table-cell">From</Th>
               <Th className="hidden md:table-cell">To</Th>
               <Th className="hidden md:table-cell">Custodian</Th>
@@ -143,7 +144,7 @@ export default function BookingsIndexPage() {
 export const bookingStatusColorMap: { [key: string]: string } = {
   DRAFT: "#667085",
   ONGOING: "#7A5AF8",
-  COMPLETED: "#17B26A",
+  COMPLETE: "#17B26A",
   RESERVED: "#175CD3",
 };
 
