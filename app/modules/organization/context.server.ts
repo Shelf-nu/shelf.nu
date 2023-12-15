@@ -54,6 +54,9 @@ export async function requireOrganisationId(
   const personalOrganization = organizations.find(
     (org) => org.type === "PERSONAL"
   );
+  const currentOrganization = userOrganizations.find(
+    (org) => org.id === organizationId
+  );
 
   if (!personalOrganization) {
     throw new ShelfStackError({
@@ -84,5 +87,6 @@ export async function requireOrganisationId(
     });
   }
 
-  return { organizationId, organizations, userOrganizations };
+  return { organizationId, organizations, userOrganizations, currentOrganization };
+
 }

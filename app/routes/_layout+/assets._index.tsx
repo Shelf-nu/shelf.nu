@@ -1,13 +1,4 @@
-import type {
-  Category,
-  Asset,
-  Tag,
-  Custody,
-  Organization,
-  User,
-  Tier,
-  TierLimit,
-} from "@prisma/client";
+import type { Category, Asset, Tag, Custody } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
@@ -35,7 +26,9 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
+import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { requireOrganisationId } from "~/modules/organization/context.server";
+import { getOrganizationTierLimit } from "~/modules/tier";
 import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
@@ -79,14 +72,6 @@ export interface IndexResponse {
   };
 }
 
-type OrganizationWithOwnerTierLimit = Organization & {
-  owner: User & {
-    tier: Tier & {
-      tierLimit: TierLimit;
-    };
-  };
-};
-
 export async function loader({ request }: LoaderFunctionArgs) {
   const { authSession, organizationId } = await requirePermision(
     request,
@@ -129,16 +114,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
-  const organizations = user?.userOrganizations.map(
-    (userOrganization) => userOrganization.organization
-  ) as OrganizationWithOwnerTierLimit[];
-
-  const currentOrganization = organizations.find(
-    (org) => org.id === organizationId
-  ) as OrganizationWithOwnerTierLimit;
-
-  /** For importing we need to check the tier of the org owner rather than currentUser */
-  const ownerTierLimit = currentOrganization?.owner?.tier?.tierLimit;
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
 
   const {
     search,
@@ -198,8 +177,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       next,
       prev,
       modelName,
-      canExportAssets: canExportAssets(ownerTierLimit),
-      canImportAssets: canImportAssets(ownerTierLimit),
+      canExportAssets: canExportAssets(tierLimit),
+      canImportAssets: canImportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",

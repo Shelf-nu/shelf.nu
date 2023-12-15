@@ -21,7 +21,7 @@ import {
   updateCustomField,
 } from "~/modules/custom-field";
 import { requireOrganisationId } from "~/modules/organization/context.server";
-import { getUserTierLimit } from "~/modules/tier";
+import { getOrganizationTierLimit } from "~/modules/tier";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -58,7 +58,10 @@ export const handle = {
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
 
   const id = getRequiredParam(params, "fieldId");
   const formData = await request.formData();
@@ -85,7 +88,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   /** If they are activating a field, we have to make sure that they are not already at the limit */
   if (active) {
-    const tierLimit = await getUserTierLimit(authSession.userId);
+    /** Get the tier limit and check if they can export */
+    const tierLimit = await getOrganizationTierLimit({
+      organizationId,
+      organizations,
+    });
 
     const totalActiveCustomFields = await countAcviteCustomFields({
       organizationId,
