@@ -15,8 +15,6 @@ import { createCustomField } from "~/modules/custom-field";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 
-import { assertIsPost } from "~/utils";
-
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -25,10 +23,12 @@ const title = "New Custom Field";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
 
-  await assertUserCanCreateMoreCustomFields({ userId, organizationId });
+  await assertUserCanCreateMoreCustomFields({ organizations, organizationId });
 
   const header = {
     title,
@@ -49,10 +49,12 @@ export const handle = {
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  assertIsPost(request);
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
   await assertUserCanCreateMoreCustomFields({
-    userId: authSession.userId,
+    organizations,
     organizationId,
   });
 
