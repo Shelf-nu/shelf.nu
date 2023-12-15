@@ -23,6 +23,10 @@ import {
   PrintIcon,
   SettingsIcon,
   SendIcon,
+  LogoutIcon,
+  HelpIcon,
+  ChevronDown,
+  Profile,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -49,6 +53,10 @@ export type Icon =
   | "download"
   | "print"
   | "settings"
+  | "logout"
+  | "help"
+  | "chevron-down"
+  | "profile"
   | "send";
 
 type IconsMap = {
@@ -78,6 +86,10 @@ export const iconsMap: IconsMap = {
   download: <DownloadIcon />,
   print: <PrintIcon />,
   settings: <SettingsIcon />,
+  help: <HelpIcon />,
+  "chevron-down": <ChevronDown />,
+  profile: <Profile />,
+  logout: <LogoutIcon />,
   send: <SendIcon />,
 };
 

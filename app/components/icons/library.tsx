@@ -1147,6 +1147,44 @@ export const DownloadIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const ChevronDown = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 20 20"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M5 7.5L10 12.5L15 7.5"
+      stroke="#667085"
+      stroke-width="1.66667"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </svg>
+);
+
+export const Profile = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 16 16"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    {...props}
+  >
+    <path
+      d="M13.3332 14C13.3332 13.0696 13.3332 12.6044 13.2183 12.2259C12.9598 11.3736 12.2929 10.7067 11.4406 10.4482C11.0621 10.3333 10.5969 10.3333 9.6665 10.3333H6.33317C5.4028 10.3333 4.93761 10.3333 4.55908 10.4482C3.70681 10.7067 3.03986 11.3736 2.78133 12.2259C2.6665 12.6044 2.6665 13.0696 2.6665 14M10.9998 5C10.9998 6.65685 9.65669 8 7.99984 8C6.34298 8 4.99984 6.65685 4.99984 5C4.99984 3.34315 6.34298 2 7.99984 2C9.65669 2 10.9998 3.34315 10.9998 5Z"
+      stroke="#344054"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </svg>
+);
+
 export const ScanQRIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="24"
