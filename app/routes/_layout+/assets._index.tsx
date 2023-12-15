@@ -72,10 +72,8 @@ export interface IndexResponse {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const { organizationId, organizations } = await requireOrganisationId(
-    authSession,
-    request
-  );
+  const { organizationId, organizations, currentOrganization } =
+    await requireOrganisationId(authSession, request);
 
   const { userId } = authSession;
 
@@ -111,9 +109,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     },
   });
-  const currentOrganization = organizations.find(
-    (org) => org.id === organizationId
-  );
 
   const tierLimit = await getOrganizationTierLimit({
     organizationId,
