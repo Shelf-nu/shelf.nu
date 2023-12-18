@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { BookingStatus } from "@prisma/client";
 import { useLoaderData, useParams } from "@remix-run/react";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import { AvailabilityLabel } from "~/routes/_layout+/bookings.$bookingId.add-assets";
@@ -30,21 +31,33 @@ export function BookingAssetsColumn() {
     [booking]
   );
 
+  const isCompleted = useMemo(
+    () => booking.status === BookingStatus.COMPLETE,
+    [booking.status]
+  );
+
   return (
     <div className="flex-1">
       <div className=" w-full">
         <TextualDivider text="Assets" className="mb-8 lg:hidden" />
         <div className="mb-3 flex gap-4 lg:hidden">
-          <Button
-            as="button"
-            to={manageAssetsUrl}
-            variant="primary"
-            icon="plus"
-            width="full"
-            disabled={!booking.from || !booking.to} // If from and to are not set, we disable the button
-          >
-            Manage Assets
-          </Button>
+          <ControlledActionButton
+            canUseFeature={!!booking.from && !!booking.to && !isCompleted}
+            buttonContent={{
+              title: "Manage Assets",
+              message: isCompleted
+                ? "Booking is completed. You cannot change the assets anymore"
+                : "You need to select a start and end date and save your booking before you can add assets to your booking",
+            }}
+            buttonProps={{
+              as: "button",
+              to: manageAssetsUrl,
+              icon: "plus",
+              className: "whitespace-nowrap",
+              width: "full",
+            }}
+            skipCta={true}
+          />
         </div>
         <div className="flex flex-col">
           {/* THis is a fake table header */}
@@ -54,11 +67,12 @@ export function BookingAssetsColumn() {
               <div>{booking.assets.length} items</div>
             </div>
             <ControlledActionButton
-              canUseFeature={!!booking.from && !!booking.to}
+              canUseFeature={!!booking.from && !!booking.to && !isCompleted}
               buttonContent={{
                 title: "Add Assets",
-                message:
-                  "You need to select a start and end date and save your booking before you can add assets to your booking",
+                message: isCompleted
+                  ? "Booking is completed. You cannot change the assets anymore"
+                  : "You need to select a start and end date and save your booking before you can add assets to your booking",
               }}
               buttonProps={{
                 as: "button",

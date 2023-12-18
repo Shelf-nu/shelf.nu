@@ -133,7 +133,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     | "delete"
     | "removeAsset"
     | "checkOut"
-    | "checkIn";
+    | "checkIn"
+    | "archive";
 
   const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
     delete: PermissionAction.delete,
@@ -142,6 +143,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     removeAsset: PermissionAction.update,
     checkOut: PermissionAction.update,
     checkIn: PermissionAction.update,
+    archive: PermissionAction.update,
   };
   const { authSession, organizationId } = await requirePermision(
     request,
@@ -273,6 +275,23 @@ export async function action({ request, params }: ActionFunctionArgs) {
       sendNotification({
         title: "Booking checked-in",
         message: "Your booking has been checked-in successfully",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+      return json(
+        { success: true },
+        {
+          headers: [
+            setCookie(await commitAuthSession(request, { authSession })),
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+          ],
+        }
+      );
+    case "archive":
+      await upsertBooking({ id, status: BookingStatus.ARCHIVED });
+      sendNotification({
+        title: "Booking archived",
+        message: "Your booking has been archived successfully",
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
       });

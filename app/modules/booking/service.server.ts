@@ -17,6 +17,7 @@ const cancelSheduler = async (b?: Booking | null) => {
   if (b?.activeSchedulerReference) {
     scheduler.cancel(b.activeSchedulerReference).catch((err) => {
       //no need to worry, workers will check the state of booking before handling, even if we fail to cancel here
+      // eslint-disable-next-line no-console
       console.warn(`Failed to cancel the scheduler for booking ${b.id}`, err);
     });
   }
@@ -366,6 +367,7 @@ export const deleteBooking = async (booking: Pick<Booking, "id">) => {
     where: { id },
     include: { ...commonInclude, assets: true },
   });
+  /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
   if (activeBooking) {
     await updateBookinAssetStates(b, AssetStatus.AVAILABLE);
   }

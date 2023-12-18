@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { BookingStatus } from "@prisma/client";
 import { db } from "~/database";
 import { sendEmail } from "~/utils/mail.server";

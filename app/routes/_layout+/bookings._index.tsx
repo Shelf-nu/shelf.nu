@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { BookingStatus, Prisma } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
@@ -141,11 +141,14 @@ export default function BookingsIndexPage() {
   );
 }
 
-export const bookingStatusColorMap: { [key: string]: string } = {
+export const bookingStatusColorMap: { [key in BookingStatus]: string } = {
   DRAFT: "#667085",
-  ONGOING: "#7A5AF8",
-  COMPLETE: "#17B26A",
   RESERVED: "#175CD3",
+  ONGOING: "#7A5AF8",
+  OVERDUE: "#B54708",
+  COMPLETE: "#17B26A",
+  ARCHIVED: "#667085",
+  CANCELLED: "#667085",
 };
 
 const ListAssetContent = ({
