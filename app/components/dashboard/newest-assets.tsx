@@ -1,9 +1,9 @@
 import type { Asset, Category } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { userFriendlyAssetStatus } from "~/utils";
 import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image";
+import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { Badge } from "../shared";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Td, Table, Tr } from "../table";
@@ -88,11 +88,7 @@ const Row = ({
                 {item.title}
               </span>
               <div>
-                <Badge
-                  color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-                >
-                  {userFriendlyAssetStatus(item.status)}
-                </Badge>
+                <AssetStatusBadge status={item.status} />
               </div>
             </div>
           </div>

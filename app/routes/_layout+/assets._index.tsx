@@ -5,6 +5,7 @@ import { useLoaderData, useNavigate } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ExportButton } from "~/components/assets/export-button";
 import { ImportButton } from "~/components/assets/import-button";
 import { ChevronRight } from "~/components/icons";
@@ -28,7 +29,6 @@ import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
-import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
@@ -315,11 +315,7 @@ const ListAssetContent = ({
                 {item.title}
               </span>
               <div>
-                <Badge
-                  color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-                >
-                  {userFriendlyAssetStatus(item.status)}
-                </Badge>
+                <AssetStatusBadge status={item.status} />
               </div>
             </div>
           </div>

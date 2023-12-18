@@ -4,9 +4,9 @@ import { useLoaderData, useParams } from "@remix-run/react";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import { AvailabilityLabel } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
-import { userFriendlyAssetStatus } from "~/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AssetImage } from "../assets/asset-image";
+import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { ChevronRight } from "../icons";
 import { List } from "../list";
 import { Badge, Button } from "../shared";
@@ -130,11 +130,7 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
                   </Button>
                 </span>
                 <div>
-                  <Badge
-                    color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-                  >
-                    {userFriendlyAssetStatus(item.status)}
-                  </Badge>
+                  <AssetStatusBadge status={item.status} />
                 </div>
               </div>
               <div className="block md:hidden">
