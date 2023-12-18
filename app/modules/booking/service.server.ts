@@ -4,12 +4,52 @@ import {
   type Organization,
   type Asset,
   BookingStatus,
+  AssetStatus,
 } from "@prisma/client";
 import { db } from "~/database";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
+import type { SchedulerData } from "./types";
+
+const cancelSheduler = async (b?: Booking | null) => {
+  if (b?.activeSchedulerReference) {
+    scheduler.cancel(b.activeSchedulerReference).catch((err) => {
+      //no need to worry, workers will check the state of booking before handling, even if we fail to cancel here
+      // eslint-disable-next-line no-console
+      console.warn(`Failed to cancel the scheduler for booking ${b.id}`, err);
+    });
+  }
+};
+
+export const scheduleNextBookingJob = async ({
+  data,
+  when,
+  key,
+}: {
+  data: SchedulerData;
+  when: Date;
+  key: string;
+}) => {
+  const id = await scheduler.sendAfter(key, data, {}, when);
+  await db.booking.update({
+    where: { id: data.id },
+    data: { activeSchedulerReference: id },
+  });
+};
+
+const updateBookinAssetStates = (
+  booking: Booking & { assets: Asset[] },
+  status: AssetStatus
+) =>
+  db.asset.updateMany({
+    where: {
+      status: { not: status },
+      id: { in: booking.assets.map((a) => a.id) },
+    },
+    data: { status },
+  });
 
 const commonInclude: Prisma.BookingInclude = {
   custodianTeamMember: true,
@@ -88,12 +128,60 @@ export const upsertBooking = async (
   }
 
   if (id) {
+    let newAssetStatus;
+    const isTerminalState = [
+      BookingStatus.ARCHIVED,
+      BookingStatus.CANCELLED,
+      BookingStatus.COMPLETE,
+    ].includes(booking.status as any);
+
+    //no need to fetch old booking always, we need only for this case(for now)
+    const oldBooking = isTerminalState
+      ? await db.booking.findFirst({ where: { id } })
+      : null;
+
+    if (isTerminalState) {
+      if (
+        oldBooking &&
+        [BookingStatus.ONGOING, BookingStatus.OVERDUE].includes(
+          oldBooking.status as any
+        )
+      ) {
+        //booking has ended, make asset available
+        newAssetStatus = AssetStatus.AVAILABLE;
+      }
+      //cancel any active schedulers
+      await cancelSheduler(oldBooking);
+    } else if (booking.status === BookingStatus.ONGOING) {
+      //booking is ongoing, make asset checked out
+      //no need to worry about overdue as the previous state is always ongoing
+      newAssetStatus = AssetStatus.CHECKED_OUT;
+    }
+
     //update
-    return await db.booking.update({
+    const res = await db.booking.update({
       where: { id },
       data,
-      include: commonInclude,
+      include: { ...commonInclude, assets: true },
     });
+    const promises = [];
+    if (newAssetStatus) {
+      promises.push(updateBookinAssetStates(res, newAssetStatus));
+    }
+    if (res.from && booking.status === BookingStatus.RESERVED) {
+      promises.push(cancelSheduler(res));
+      const when = new Date(res.from);
+      when.setHours(when.getHours() - 1); //1hour before send checkout reminder
+      promises.push(
+        scheduleNextBookingJob({
+          data: { id: res.id },
+          key: schedulerKeys.checkoutReminder,
+          when,
+        })
+      );
+    }
+    await Promise.all(promises);
+    return res;
   }
 
   //only while creating we can connect creator and org, updating is not allowed
@@ -111,18 +199,14 @@ export const upsertBooking = async (
     data: data as Prisma.BookingCreateInput,
     include: { ...commonInclude, organization: true },
   });
-  if (data.from) {
-    const when = new Date(data.from as string);
+  if (res.from && booking.status === BookingStatus.RESERVED) {
+    await cancelSheduler(res);
+    const when = new Date(res.from);
     when.setHours(when.getHours() - 1); //1hour before send checkout reminder
-    const jobId = await scheduler.sendAfter(
-      schedulerKeys.checkoutReminder,
-      { id: res.id },
-      {},
-      when
-    );
-    await db.booking.update({
-      where: { id: res.id },
-      data: { activeSchedulerReference: jobId },
+    await scheduleNextBookingJob({
+      data: { id: res.id },
+      key: schedulerKeys.checkoutReminder,
+      when,
     });
   }
 
@@ -273,13 +357,21 @@ export const removeAssets = async (
 
 export const deleteBooking = async (booking: Pick<Booking, "id">) => {
   const { id } = booking;
-
+  const activeBooking = await db.booking.findFirst({
+    where: {
+      id,
+      status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
+    },
+  });
   const b = await db.booking.delete({
     where: { id },
     include: { ...commonInclude, assets: true },
   });
-  if (b.activeSchedulerReference)
-    await scheduler.cancel(b.activeSchedulerReference);
+  /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
+  if (activeBooking) {
+    await updateBookinAssetStates(b, AssetStatus.AVAILABLE);
+  }
+  await cancelSheduler(b);
   return b;
 };
 

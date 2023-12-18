@@ -13,6 +13,7 @@ import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { useRef } from "react";
 import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
 import { Switch } from "~/components/forms/switch";
@@ -35,8 +36,7 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
@@ -49,6 +49,7 @@ import {
   isFormProcessing,
   assertIsPost,
 } from "~/utils";
+
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
@@ -231,9 +232,7 @@ export default function AssetDetailsPage() {
       <Header
         subHeading={
           <div className="mt-3 flex gap-2">
-            <Badge color={assetIsAvailable ? "#12B76A" : "#2E90FA"}>
-              {userFriendlyAssetStatus(asset.status)}
-            </Badge>
+            <AssetStatusBadge status={asset.status} />
             {location ? (
               <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700">
                 {location.name}

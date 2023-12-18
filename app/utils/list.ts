@@ -16,6 +16,7 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
   hideUnavailable: searchParams.get("hideUnavailable")?.length
     ? searchParams.get("hideUnavailable") == "true"
     : undefined,
+  unhideAssetsBookigIds: searchParams.getAll("unhideAssetsBookigIds") || [],
 });
 
 /** Generates prev & next links  */

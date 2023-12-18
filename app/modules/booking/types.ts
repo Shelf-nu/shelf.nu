@@ -14,3 +14,7 @@ export type ExtendedBooking = BookingWithIncludes & {
   fromForDateInput?: ReturnType<typeof dateForDateTimeInputValue>;
   toForDateInput?: ReturnType<typeof dateForDateTimeInputValue>;
 };
+
+export interface SchedulerData {
+  id: string;
+}

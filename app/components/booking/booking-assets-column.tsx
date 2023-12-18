@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 
+import { BookingStatus } from "@prisma/client";
 import { useLoaderData, useParams } from "@remix-run/react";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import { AvailabilityLabel } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
-import { userFriendlyAssetStatus } from "~/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AssetImage } from "../assets/asset-image";
+import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { ChevronRight } from "../icons";
 import { List } from "../list";
 import { Badge, Button } from "../shared";
@@ -25,8 +26,14 @@ export function BookingAssetsColumn() {
         bookingFrom: new Date(booking.from as string).toISOString(),
         bookingTo: new Date(booking.to as string).toISOString(),
         hideUnavailable: "true",
+        unhideAssetsBookigIds: booking.id,
       })}`,
     [booking]
+  );
+
+  const isCompleted = useMemo(
+    () => booking.status === BookingStatus.COMPLETE,
+    [booking.status]
   );
 
   return (
@@ -34,16 +41,23 @@ export function BookingAssetsColumn() {
       <div className=" w-full">
         <TextualDivider text="Assets" className="mb-8 lg:hidden" />
         <div className="mb-3 flex gap-4 lg:hidden">
-          <Button
-            as="button"
-            to={manageAssetsUrl}
-            variant="primary"
-            icon="plus"
-            width="full"
-            disabled={!booking.from || !booking.to} // If from and to are not set, we disable the button
-          >
-            Manage Assets
-          </Button>
+          <ControlledActionButton
+            canUseFeature={!!booking.from && !!booking.to && !isCompleted}
+            buttonContent={{
+              title: "Manage Assets",
+              message: isCompleted
+                ? "Booking is completed. You cannot change the assets anymore"
+                : "You need to select a start and end date and save your booking before you can add assets to your booking",
+            }}
+            buttonProps={{
+              as: "button",
+              to: manageAssetsUrl,
+              icon: "plus",
+              className: "whitespace-nowrap",
+              width: "full",
+            }}
+            skipCta={true}
+          />
         </div>
         <div className="flex flex-col">
           {/* THis is a fake table header */}
@@ -53,11 +67,12 @@ export function BookingAssetsColumn() {
               <div>{booking.assets.length} items</div>
             </div>
             <ControlledActionButton
-              canUseFeature={!!booking.from && !!booking.to}
+              canUseFeature={!!booking.from && !!booking.to && !isCompleted}
               buttonContent={{
                 title: "Add Assets",
-                message:
-                  "You need to select a start and end date and save your booking before you can add assets to your booking",
+                message: isCompleted
+                  ? "Booking is completed. You cannot change the assets anymore"
+                  : "You need to select a start and end date and save your booking before you can add assets to your booking",
               }}
               buttonProps={{
                 as: "button",
@@ -129,11 +144,7 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
                   </Button>
                 </span>
                 <div>
-                  <Badge
-                    color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-                  >
-                    {userFriendlyAssetStatus(item.status)}
-                  </Badge>
+                  <AssetStatusBadge status={item.status} />
                 </div>
               </div>
               <div className="block md:hidden">

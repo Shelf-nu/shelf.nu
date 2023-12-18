@@ -86,14 +86,20 @@ export function BookingForm({
     () => booking.status === BookingStatus.ONGOING,
     [booking.status]
   );
+  const isCompleted = useMemo(
+    () => booking.status === BookingStatus.COMPLETE,
+    [booking.status]
+  );
 
-  const inputFieldIsDisabled = disabled || isReserved || isOngoing;
+  const inputFieldIsDisabled =
+    disabled || isReserved || isOngoing || isCompleted;
 
   return (
     <div>
       <div className="mb-4 mt-[-42px] flex justify-end text-right">
         <div className="flex gap-3">
           {/* We only render the actions when we are not on the .new route */}
+          {/* @ts-ignore */}
           {routeIsNewBooking ? null : <ActionsDropdown booking={booking} />}
         </div>
       </div>

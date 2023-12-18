@@ -58,10 +58,9 @@ export const LocationSelect = () => {
               position="popper"
               align="end"
               sideOffset={4}
-              ref={(ref) => {
-                if (!ref) return;
-                ref.ontouchstart = (e) => e.preventDefault();
-              }}
+              ref={(ref) =>
+                ref?.addEventListener("touchend", (e) => e.preventDefault())
+              }
             >
               {!hasLocations && !isSearchingLocations ? (
                 <div>

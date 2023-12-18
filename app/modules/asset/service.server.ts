@@ -118,6 +118,7 @@ export async function getAssets({
   bookingFrom,
   bookingTo,
   hideUnavailable,
+  unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
 }: {
   organizationId: Organization["id"];
 
@@ -134,6 +135,7 @@ export async function getAssets({
   hideUnavailable?: Asset["availableToBook"];
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
+  unhideAssetsBookigIds?: Booking["id"][];
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
@@ -187,6 +189,9 @@ export async function getAssets({
       //reserved during that time
       where.asset.bookings = {
         none: {
+          ...(unhideAssetsBookigIds?.length && {
+            id: { notIn: unhideAssetsBookigIds },
+          }),
           status: { in: unavailableBookingStatuses },
           OR: [
             {
@@ -202,7 +207,7 @@ export async function getAssets({
       };
     }
   }
-  if (hideUnavailable === false && (!bookingFrom || !bookingTo)) {
+  if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
     throw new ShelfStackError({
       message: "booking dates are needed to hide unavailable assets",
     });
@@ -822,6 +827,7 @@ export const getPaginatedAndFilterableAssets = async ({
     bookingFrom,
     bookingTo,
     hideUnavailable,
+    unhideAssetsBookigIds,
   } = getParamsValues(searchParams);
 
   const { prev, next } = generatePageMeta(request);
@@ -846,6 +852,7 @@ export const getPaginatedAndFilterableAssets = async ({
     bookingFrom,
     bookingTo,
     hideUnavailable,
+    unhideAssetsBookigIds,
   });
   const totalPages = Math.ceil(totalAssets / perPage);
 

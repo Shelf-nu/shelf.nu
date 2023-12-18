@@ -9,19 +9,15 @@ import {
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import Input from "~/components/forms/input";
-import { Badge, Button } from "~/components/shared";
+import { Button } from "~/components/shared";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
 import { duplicateAsset } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/custom-modal.css";
-import {
-  assertIsPost,
-  isFormProcessing,
-  userFriendlyAssetStatus,
-} from "~/utils";
+import { assertIsPost, isFormProcessing } from "~/utils";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
@@ -138,11 +134,7 @@ export default function DuplicateAsset() {
               {asset.title}
             </span>
             <div>
-              <Badge
-                color={asset.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-              >
-                {userFriendlyAssetStatus(asset.status)}
-              </Badge>
+              <AssetStatusBadge status={asset.status} />
             </div>
           </div>
         </div>
