@@ -1,11 +1,23 @@
 /* eslint-disable no-console */
 import { BookingStatus } from "@prisma/client";
 import { db } from "~/database";
+import { calcTimeDifference } from "~/utils/date-fns";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
 import { scheduleNextBookingJob } from "./service.server";
 import type { SchedulerData } from "./types";
+
+function getTimeRemainingMessage(date1: Date, date2: Date): string {
+  const { hours, minutes } = calcTimeDifference(date1, date2);
+  if (hours > 0) {
+    return `${hours} hour${hours > 1 ? "s" : ""}`;
+  } else if (minutes > 0) {
+    return `${minutes} minute${minutes > 1 ? "s" : ""}`;
+  } else {
+    return ""; //this should not happen
+  }
+}
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
 
@@ -29,11 +41,16 @@ export const registerBookingWorkers = () => {
         return;
       }
       const email = booking.custodianUser?.email;
-      if (email) {
+      if (email && booking.from) {
         await sendEmail({
           to: email,
           subject: `checkout reminder`,
-          text: `you have 1 hour to checkout your booking ${booking.name} of ${booking.organization.name}`,
+          text: `you have ${getTimeRemainingMessage(
+            new Date(booking.from),
+            new Date()
+          )} to checkout your booking ${booking.name} of ${
+            booking.organization.name
+          }`,
         }).catch((err) => {
           console.error(`failed to send checkoutReminder email`, err);
         });
@@ -71,11 +88,16 @@ export const registerBookingWorkers = () => {
         return;
       }
       const email = booking.custodianUser?.email;
-      if (email) {
+      if (email && booking.to) {
         await sendEmail({
           to: email,
           subject: `checkin reminder`,
-          text: `you have 1 hour to checkin your booking ${booking.name} of ${booking.organization.name}`,
+          text: `you have ${getTimeRemainingMessage(
+            new Date(booking.to),
+            new Date()
+          )} to checkin your booking ${booking.name} of ${
+            booking.organization.name
+          }`,
         }).catch((err) => {
           console.error(`failed to send checkin reminder email`, err);
         });
