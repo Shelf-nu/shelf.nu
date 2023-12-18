@@ -25,7 +25,6 @@ import {
   SendIcon,
   LogoutIcon,
   HelpIcon,
-  ChevronDown,
   Profile,
 } from "../icons/library";
 
@@ -55,7 +54,6 @@ export type Icon =
   | "settings"
   | "logout"
   | "help"
-  | "chevron-down"
   | "profile"
   | "send";
 
@@ -87,7 +85,6 @@ export const iconsMap: IconsMap = {
   print: <PrintIcon />,
   settings: <SettingsIcon />,
   help: <HelpIcon />,
-  "chevron-down": <ChevronDown />,
   profile: <Profile />,
   logout: <LogoutIcon />,
   send: <SendIcon />,

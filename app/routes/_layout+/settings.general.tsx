@@ -48,21 +48,6 @@ const EditWorkspaceFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
 });
 
-// const EditWorkspaceFormSchema = z.discriminatedUnion("isPersonal", [
-//   z
-//     .object({
-//       isPersonal: z.literal("true"),
-//       name: z.string().optional(),
-//     })
-//     .merge(base),
-//   z
-//     .object({
-//       isPersonal: z.literal("false"),
-//       name: z.string().min(2, "Name is required"),
-//     })
-//     .merge(base),
-// ]);
-
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
@@ -350,12 +335,9 @@ function TooltipContent() {
         Unable to change the Name or Logo of Personal workspace.
       </p>
       <p className="text-sm">
-        Create a Plus or Team workspace to fully customize them and enjoy extra
+        Create a Team workspace to fully customize them and enjoy extra
         features. Check out{" "}
-        <Link
-          className="font-bold text-primary-400"
-          to="https://app.shelf.nu/settings/subscription"
-        >
+        <Link className="font-bold text-primary-400" to="settings/subscription">
           Subscriptions
         </Link>{" "}
         to learn more.
