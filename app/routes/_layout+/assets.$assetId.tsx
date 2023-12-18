@@ -7,13 +7,15 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import { useRef } from "react";
 import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
+import { Switch } from "~/components/forms/switch";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
@@ -27,7 +29,11 @@ import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks";
-import { deleteAsset, getAsset } from "~/modules/asset";
+import {
+  deleteAsset,
+  getAsset,
+  updateAssetBookingAvailability,
+} from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
@@ -40,9 +46,12 @@ import {
   tw,
   userFriendlyAssetStatus,
   isLink,
+  isFormProcessing,
+  assertIsPost,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
+import { setCookie } from "~/utils/cookies.server";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
@@ -108,35 +117,76 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     locale,
   });
 }
+
 export async function action({ request, params }: ActionFunctionArgs) {
-  assertIsDelete(request);
-  const id = getRequiredParam(params, "assetId");
+  const formData = await request.formData();
+  const intent = formData.get("intent") as "delete" | "toggleAvailability";
+
+  const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
+    delete: PermissionAction.delete,
+    toggleAvailability: PermissionAction.update,
+  };
   const { authSession, organizationId } = await requirePermision(
     request,
     PermissionEntity.asset,
-    PermissionAction.delete
+    intent2ActionMap[intent]
   );
-  const formData = await request.formData();
-  const mainImageUrl = formData.get("mainImage") as string;
+  const id = getRequiredParam(params, "assetId");
 
-  await deleteAsset({ organizationId, id });
-  await deleteAssetImage({
-    url: mainImageUrl,
-    bucketName: "assets",
-  });
+  switch (intent) {
+    case "delete":
+      assertIsDelete(request);
+      const mainImageUrl = formData.get("mainImage") as string;
 
-  sendNotification({
-    title: "Asset deleted",
-    message: "Your asset has been deleted successfully",
-    icon: { name: "trash", variant: "error" },
-    senderId: authSession.userId,
-  });
+      await deleteAsset({ organizationId, id });
+      await deleteAssetImage({
+        url: mainImageUrl,
+        bucketName: "assets",
+      });
 
-  return redirect(`/assets`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+      sendNotification({
+        title: "Asset deleted",
+        message: "Your asset has been deleted successfully",
+        icon: { name: "trash", variant: "error" },
+        senderId: authSession.userId,
+      });
+
+      return redirect(`/assets`, {
+        headers: {
+          "Set-Cookie": await commitAuthSession(request, { authSession }),
+        },
+      });
+    case "toggleAvailability":
+      assertIsPost(request);
+      const availability = formData.get("availableToBook") ? true : false;
+      const rsp = await updateAssetBookingAvailability(id, availability);
+      if (rsp.error) {
+        return json(
+          {
+            errors: {
+              title: rsp.error,
+            },
+          },
+          {
+            status: 400,
+            headers: [
+              setCookie(await commitAuthSession(request, { authSession })),
+            ],
+          }
+        );
+      }
+
+      sendNotification({
+        title: "Asset availability status updated successfully",
+        message: "Your asset's availability for booking has been updated",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+
+      return json({ rsp });
+    default:
+      return null;
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -164,6 +214,8 @@ export default function AssetDetailsPage() {
    */
   const location = asset?.location as SerializeFrom<Location>;
   usePosition();
+  const formRef = useRef<HTMLFormElement>(null);
+  const fetcher = useFetcher();
 
   return (
     <>
@@ -221,6 +273,29 @@ export default function AssetDetailsPage() {
               <p className=" text-gray-600">{asset.description}</p>
             </Card>
           ) : null}
+
+          <Card>
+            <fetcher.Form ref={formRef} method="POST">
+              <div className="flex justify-between gap-3">
+                <div>
+                  <p className="text-[14px] font-medium text-gray-700">
+                    Available for bookings
+                  </p>
+                  <p className="text-[12px] text-gray-600">
+                    Asset is available for being used in bookings
+                  </p>
+                </div>
+                <Switch
+                  name="availableToBook"
+                  disabled={isFormProcessing(fetcher.state)}
+                  defaultChecked={asset.availableToBook}
+                  onCheckedChange={() => fetcher.submit(formRef.current)}
+                  required
+                />
+                <input type="hidden" value="toggleAvailabilty" name="intent" />
+              </div>
+            </fetcher.Form>
+          </Card>
 
           {/* We simply check if the asset is available and we can assume that if it't not, there is a custodian assigned */}
           {!assetIsAvailable && asset?.custody?.createdAt ? (
