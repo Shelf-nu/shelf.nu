@@ -9,12 +9,6 @@ export type BookingWithIncludes = Prisma.BookingGetPayload<{
   };
 }>;
 
-/** Extend it to add formatted dates */
-export type ExtendedBooking = BookingWithIncludes & {
-  fromForDateInput?: ReturnType<typeof dateForDateTimeInputValue>;
-  toForDateInput?: ReturnType<typeof dateForDateTimeInputValue>;
-};
-
 export interface SchedulerData {
   id: string;
 }
