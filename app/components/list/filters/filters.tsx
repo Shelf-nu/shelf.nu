@@ -77,7 +77,7 @@ export const Filters = ({
           <div className="flex items-center gap-5">
             <SearchForm />
           </div>
-          <div className="flex-1">{children}</div>
+          <div className="flex flex-1 justify-end">{children}</div>
         </div>
       </Form>
     </div>

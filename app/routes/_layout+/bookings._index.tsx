@@ -1,7 +1,9 @@
-import type { BookingStatus, Prisma } from "@prisma/client";
+import type { Prisma, BookingStatus } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
+import { StatusFilter } from "~/components/booking/status-filter";
+
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -32,7 +34,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search } = getParamsValues(searchParams);
+  const { page, perPageParam, search, status } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -43,6 +45,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     page,
     perPage,
     search,
+    ...(status && {
+      // If status is in the params, we filter based on it
+      statuses: [status],
+    }),
   });
 
   const totalPages = Math.ceil(bookingCount / perPage);
@@ -121,8 +127,9 @@ export default function BookingsIndexPage() {
         </Button>
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
-        {/* @TODO - add filters */}
-        <Filters className="mb-2" />
+        <Filters className="mb-2">
+          <StatusFilter />
+        </Filters>
         <List
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(id)}

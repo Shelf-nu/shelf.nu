@@ -35,6 +35,10 @@ export function BookingAssetsColumn() {
     () => booking.status === BookingStatus.COMPLETE,
     [booking.status]
   );
+  const isArchived = useMemo(
+    () => booking.status === BookingStatus.ARCHIVED,
+    [booking.status]
+  );
 
   return (
     <div className="flex-1">
@@ -42,7 +46,9 @@ export function BookingAssetsColumn() {
         <TextualDivider text="Assets" className="mb-8 lg:hidden" />
         <div className="mb-3 flex gap-4 lg:hidden">
           <ControlledActionButton
-            canUseFeature={!!booking.from && !!booking.to && !isCompleted}
+            canUseFeature={
+              !!booking.from && !!booking.to && !isCompleted && !isArchived
+            }
             buttonContent={{
               title: "Manage Assets",
               message: isCompleted
@@ -54,7 +60,6 @@ export function BookingAssetsColumn() {
               to: manageAssetsUrl,
               icon: "plus",
               className: "whitespace-nowrap",
-              width: "full",
             }}
             skipCta={true}
           />
@@ -67,9 +72,11 @@ export function BookingAssetsColumn() {
               <div>{booking.assets.length} items</div>
             </div>
             <ControlledActionButton
-              canUseFeature={!!booking.from && !!booking.to && !isCompleted}
+              canUseFeature={
+                !!booking.from && !!booking.to && !isCompleted && !isArchived
+              }
               buttonContent={{
-                title: "Add Assets",
+                title: "Manage Assets",
                 message: isCompleted
                   ? "Booking is completed. You cannot change the assets anymore"
                   : "You need to select a start and end date and save your booking before you can add assets to your booking",
@@ -98,7 +105,7 @@ export function BookingAssetsColumn() {
               title: "Start by defining a booking period",
               text: "Assets added to your booking will show up here. You must select a Start and End date in order to be able to add assets to your booking.",
               newButtonRoute: manageAssetsUrl,
-              newButtonContent: "Add assets",
+              newButtonContent: "Manage Assets",
               buttonProps: {
                 disabled: !booking.from || !booking.to,
               },

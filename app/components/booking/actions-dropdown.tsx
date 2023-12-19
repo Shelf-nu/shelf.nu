@@ -1,11 +1,11 @@
 import { useMemo } from "react";
 import { BookingStatus } from "@prisma/client";
 
-import { Form } from "@remix-run/react";
 import { ChevronRight } from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuPortal,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
@@ -34,15 +34,16 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
           as="span"
         >
           <span className="flex items-center gap-2">
-            Actions <ChevronRight className="chev" />
+            Actions <ChevronRight className="chev rotate-90" />
           </span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        className="order w-[180px] rounded-md bg-white p-1.5 text-right "
-      >
-        {/* <DropdownMenuItem>
+      <DropdownMenuPortal>
+        <DropdownMenuContent
+          align="end"
+          className="order w-[180px] rounded-md bg-white p-1.5 text-right "
+        >
+          {/* <DropdownMenuItem>
         <Button
           icon="pen"
           role="link"lo
@@ -53,22 +54,21 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
           Cancel
         </Button>
       </DropdownMenuItem> */}
-        {isCompleted ? (
-          <Form method="post">
+          {/* @TODO - this needs to be a controlled input */}
+          {isCompleted ? (
             <Button
               variant="link"
               className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
               width="full"
-              type="submit"
               name="intent"
               value="archive"
             >
               Archive
             </Button>
-          </Form>
-        ) : null}
-        <DeleteBooking booking={booking} />
-      </DropdownMenuContent>
+          ) : null}
+          <DeleteBooking booking={booking} />
+        </DropdownMenuContent>
+      </DropdownMenuPortal>
     </DropdownMenu>
   );
 };
