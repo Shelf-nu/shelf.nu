@@ -11,6 +11,8 @@ import { useFetcher, useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { useRef } from "react";
+import { parseFormAny, useZorm } from "react-zorm";
+import { z } from "zod";
 import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -159,8 +161,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
     case "toggleAvailability":
       assertIsPost(request);
-      const availability = formData.get("availableToBook") ? true : false;
-      const rsp = await updateAssetBookingAvailability(id, availability);
+      const result = await AvailabilityForBookingFormSchema.safeParseAsync(
+        parseFormAny(formData)
+      );
+      if (!result.success) {
+        return json(
+          {
+            errors: result.error,
+          },
+          {
+            status: 400,
+            headers: {
+              "Set-Cookie": await commitAuthSession(request, { authSession }),
+            },
+          }
+        );
+      }
+
+      const { availableToBook } = result.data;
+      const rsp = await updateAssetBookingAvailability(id, availableToBook);
       if (rsp.error) {
         return json(
           {
@@ -203,6 +222,10 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: mapCss },
 ];
 
+export const AvailabilityForBookingFormSchema = z.object({
+  availableToBook: z.string().transform((val) => (val === "on" ? true : false)),
+});
+
 export default function AssetDetailsPage() {
   const { asset, locale } = useLoaderData<typeof loader>();
   const customFieldsValues =
@@ -215,8 +238,11 @@ export default function AssetDetailsPage() {
    */
   const location = asset?.location as SerializeFrom<Location>;
   usePosition();
-  const formRef = useRef<HTMLFormElement>(null);
   const fetcher = useFetcher();
+  const zo = useZorm(
+    "NewQuestionWizardScreen",
+    AvailabilityForBookingFormSchema
+  );
 
   return (
     <>
@@ -274,7 +300,12 @@ export default function AssetDetailsPage() {
           ) : null}
 
           <Card>
-            <fetcher.Form ref={formRef} method="POST">
+            <fetcher.Form
+              ref={zo.ref}
+              method="POST"
+              encType="multipart/form-data"
+              onChange={(e) => fetcher.submit(e.currentTarget)}
+            >
               <div className="flex justify-between gap-3">
                 <div>
                   <p className="text-[14px] font-medium text-gray-700">
@@ -285,10 +316,9 @@ export default function AssetDetailsPage() {
                   </p>
                 </div>
                 <Switch
-                  name="availableToBook"
+                  name={zo.fields.availableToBook()}
                   disabled={isFormProcessing(fetcher.state)}
                   defaultChecked={asset.availableToBook}
-                  onCheckedChange={() => fetcher.submit(formRef.current)}
                   required
                 />
                 <input type="hidden" value="toggleAvailabilty" name="intent" />
