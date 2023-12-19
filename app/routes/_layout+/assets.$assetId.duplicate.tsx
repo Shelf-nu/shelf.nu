@@ -134,7 +134,10 @@ export default function DuplicateAsset() {
               {asset.title}
             </span>
             <div>
-              <AssetStatusBadge status={asset.status} />
+              <AssetStatusBadge
+                status={asset.status}
+                availableToBook={asset.availableToBook}
+              />
             </div>
           </div>
         </div>

@@ -1266,3 +1266,18 @@ export const createAssetsFromBackupImport = async ({
     }
   });
 };
+
+export async function updateAssetBookingAvailability(
+  id: Asset["id"],
+  availability: Asset["availableToBook"]
+) {
+  try {
+    const asset = await db.asset.update({
+      where: { id },
+      data: { availableToBook: availability },
+    });
+    return { asset, error: null };
+  } catch (cause: any) {
+    return handleUniqueConstraintError(cause, "Asset");
+  }
+}
