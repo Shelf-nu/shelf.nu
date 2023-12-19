@@ -7,7 +7,7 @@ import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared";
-import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
+import { ControlledActionButton } from "~/components/subscription/premium-feature-button";
 import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";
 import {
@@ -99,7 +99,7 @@ export default function CustomFieldsIndexPage() {
     <>
       <div className="mb-2.5 flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
         <h2 className=" text-lg text-gray-900">Custom Fields</h2>
-        <PremiumFeatureButton
+        <ControlledActionButton
           canUseFeature={canCreateMoreCustomFields}
           buttonContent={{
             title: "New Custom Field",

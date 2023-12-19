@@ -138,7 +138,7 @@ export function getDateTimeFormat(
   };
 
   options = {
-    ...defaultOptions,
+    ...(options?.timeStyle ? {} : defaultOptions),
     ...options,
     timeZone: options?.timeZone ?? getHints(request).timeZone,
   };

@@ -7,6 +7,16 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
   search: searchParams.get("s") || null,
   categoriesIds: searchParams.getAll("category") || [],
   tagsIds: searchParams.getAll("tag") || [],
+  bookingFrom: searchParams.get("bookingFrom")?.length
+    ? new Date(searchParams.get("bookingFrom") as string)
+    : null,
+  bookingTo: searchParams.get("bookingTo")?.length
+    ? new Date(searchParams.get("bookingTo") as string)
+    : null,
+  hideUnavailable: searchParams.get("hideUnavailable")?.length
+    ? searchParams.get("hideUnavailable") == "true"
+    : undefined,
+  unhideAssetsBookigIds: searchParams.getAll("unhideAssetsBookigIds") || [],
 });
 
 /** Generates prev & next links  */
