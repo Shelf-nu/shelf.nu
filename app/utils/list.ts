@@ -1,3 +1,4 @@
+import type { BookingStatus } from "@prisma/client";
 import { getCurrentSearchParams } from "./http.server";
 import { mergeSearchParams } from "./merge-search-params";
 
@@ -17,6 +18,7 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
     ? searchParams.get("hideUnavailable") == "true"
     : undefined,
   unhideAssetsBookigIds: searchParams.getAll("unhideAssetsBookigIds") || [],
+  status: (searchParams.get("status") || null) as BookingStatus | null,
 });
 
 /** Generates prev & next links  */

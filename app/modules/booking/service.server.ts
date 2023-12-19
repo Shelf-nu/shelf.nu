@@ -288,6 +288,10 @@ export async function getBookings({
     where.status = {
       in: statuses,
     };
+  } else {
+    where.status = {
+      notIn: [BookingStatus.ARCHIVED], // By default we dont show archived bookings
+    };
   }
 
   if (assetIds?.length) {
