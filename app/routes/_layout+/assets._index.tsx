@@ -315,7 +315,10 @@ const ListAssetContent = ({
                 {item.title}
               </span>
               <div>
-                <AssetStatusBadge status={item.status} />
+                <AssetStatusBadge
+                  status={item.status}
+                  availableToBook={item.availableToBook}
+                />
               </div>
             </div>
           </div>

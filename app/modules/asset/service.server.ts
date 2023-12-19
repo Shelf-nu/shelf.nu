@@ -255,29 +255,29 @@ export async function getAssets({
             },
             ...(bookingTo && bookingFrom
               ? {
-                bookings: {
-                  where: {
-                    status: { in: unavailableBookingStatuses },
-                    OR: [
-                      {
-                        from: { lte: bookingTo },
-                        to: { gte: bookingFrom },
-                      },
-                      {
-                        from: { gte: bookingFrom },
-                        to: { lte: bookingTo },
-                      },
-                    ],
+                  bookings: {
+                    where: {
+                      status: { in: unavailableBookingStatuses },
+                      OR: [
+                        {
+                          from: { lte: bookingTo },
+                          to: { gte: bookingFrom },
+                        },
+                        {
+                          from: { gte: bookingFrom },
+                          to: { lte: bookingTo },
+                        },
+                      ],
+                    },
+                    take: 1, //just to show in UI if its booked, so take only 1, also at a given slot only 1 booking can be created for an asset
+                    select: {
+                      from: true,
+                      to: true,
+                      status: true,
+                      id: true,
+                    }, //@TODO more needed?
                   },
-                  take: 1, //just to show in UI if its booked, so take only 1, also at a given slot only 1 booking can be created for an asset
-                  select: {
-                    from: true,
-                    to: true,
-                    status: true,
-                    id: true,
-                  }, //@TODO more needed?
-                },
-              }
+                }
               : {}),
           },
         },
@@ -342,15 +342,15 @@ export async function createAsset({
       qr && qr.organizationId === organizationId && qr.assetId === null
         ? { connect: { id: qrId } }
         : {
-          create: [
-            {
-              version: 0,
-              errorCorrection: ErrorCorrection["L"],
-              user,
-              organization,
-            },
-          ],
-        };
+            create: [
+              {
+                version: 0,
+                errorCorrection: ErrorCorrection["L"],
+                user,
+                organization,
+              },
+            ],
+          };
 
     /** Data object we send via prisma to create Asset */
     const data = {
@@ -573,18 +573,18 @@ export async function updateAsset(payload: UpdateAssetPayload) {
 
       const currentLocation = currentLocationId
         ? await db.location.findFirst({
-          where: {
-            id: currentLocationId,
-          },
-        })
+            where: {
+              id: currentLocationId,
+            },
+          })
         : null;
 
       const newLocation = newLocationId
         ? await db.location.findFirst({
-          where: {
-            id: newLocationId,
-          },
-        })
+            where: {
+              id: newLocationId,
+            },
+          })
         : null;
 
       await createLocationChangeNote({
@@ -740,8 +740,9 @@ export async function duplicateAsset({
 
   for (const i of [...Array(amountOfDuplicates)].keys()) {
     const rsp = await createAsset({
-      title: `${asset.title} (copy ${amountOfDuplicates > 1 ? i : ""
-        } ${Date.now()})`,
+      title: `${asset.title} (copy ${
+        amountOfDuplicates > 1 ? i : ""
+      } ${Date.now()})`,
       organizationId,
       description: asset.description,
       userId,
@@ -1013,10 +1014,10 @@ export const createAssetsFromContentImport = async ({
       tags:
         asset.tags.length > 0
           ? {
-            set: asset.tags
-              .filter((t) => tags[t])
-              .map((t) => ({ id: tags[t] })),
-          }
+              set: asset.tags
+                .filter((t) => tags[t])
+                .map((t) => ({ id: tags[t] })),
+            }
           : undefined,
       valuation: asset.valuation ? +asset.valuation : null,
       customFieldsValues,
@@ -1214,8 +1215,8 @@ export const createAssetsFromBackupImport = async ({
         tags:
           asset.tags.length > 0
             ? {
-              connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
-            }
+                connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
+              }
             : undefined,
       });
     }
@@ -1266,7 +1267,10 @@ export const createAssetsFromBackupImport = async ({
   });
 };
 
-export async function updateAssetBookingAvailability(id: Asset["id"], availability: Asset["availableToBook"]) {
+export async function updateAssetBookingAvailability(
+  id: Asset["id"],
+  availability: Asset["availableToBook"]
+) {
   try {
     const asset = await db.asset.update({
       where: { id },

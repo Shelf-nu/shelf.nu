@@ -151,7 +151,10 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
                   </Button>
                 </span>
                 <div>
-                  <AssetStatusBadge status={item.status} />
+                  <AssetStatusBadge
+                    status={item.status}
+                    availableToBook={item.availableToBook}
+                  />
                 </div>
               </div>
               <div className="block md:hidden">

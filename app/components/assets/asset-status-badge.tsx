@@ -23,7 +23,18 @@ export const assetStatusColorMap = (status: AssetStatus) => {
   }
 };
 
-export function AssetStatusBadge({ status }: { status: AssetStatus }) {
+export function AssetStatusBadge({
+  status,
+  availableToBook = true,
+}: {
+  status: AssetStatus;
+  availableToBook: boolean;
+}) {
+  // If the asset is not available to book, it is unavailable
+  // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil
+  if (!availableToBook) {
+    return <Badge color="#B42318">Unavailable</Badge>;
+  }
   return (
     <Badge color={assetStatusColorMap(status)}>
       {userFriendlyAssetStatus(status)}

@@ -10,8 +10,7 @@ import { redirect, json } from "@remix-run/node";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
-import { useRef } from "react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -42,15 +41,7 @@ import { commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
-import {
-  assertIsDelete,
-  getRequiredParam,
-  tw,
-  userFriendlyAssetStatus,
-  isLink,
-  isFormProcessing,
-  assertIsPost,
-} from "~/utils";
+import { getRequiredParam, tw, isLink, isFormProcessing } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
@@ -62,6 +53,10 @@ import { parseMarkdownToReact } from "~/utils/md.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
+
+export const AvailabilityForBookingFormSchema = z.object({
+  availableToBook: z.string().transform((val) => val === "on"),
+});
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { authSession, organizationId } = await requirePermision(
@@ -123,22 +118,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const formData = await request.formData();
-  const intent = formData.get("intent") as "delete" | "toggleAvailability";
-
+  const intent = formData.get("intent") as "delete" | "toggle";
   const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
     delete: PermissionAction.delete,
-    toggleAvailability: PermissionAction.update,
+    toggle: PermissionAction.update,
   };
+
   const { authSession, organizationId } = await requirePermision(
     request,
     PermissionEntity.asset,
     intent2ActionMap[intent]
   );
   const id = getRequiredParam(params, "assetId");
-
   switch (intent) {
     case "delete":
-      assertIsDelete(request);
       const mainImageUrl = formData.get("mainImage") as string;
 
       await deleteAsset({ organizationId, id });
@@ -159,26 +152,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
           "Set-Cookie": await commitAuthSession(request, { authSession }),
         },
       });
-    case "toggleAvailability":
-      assertIsPost(request);
-      const result = await AvailabilityForBookingFormSchema.safeParseAsync(
-        parseFormAny(formData)
-      );
-      if (!result.success) {
-        return json(
-          {
-            errors: result.error,
-          },
-          {
-            status: 400,
-            headers: {
-              "Set-Cookie": await commitAuthSession(request, { authSession }),
-            },
-          }
-        );
-      }
-
-      const { availableToBook } = result.data;
+    case "toggle":
+      const availableToBook = formData.get("availableToBook") === "on";
       const rsp = await updateAssetBookingAvailability(id, availableToBook);
       if (rsp.error) {
         return json(
@@ -203,7 +178,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
         senderId: authSession.userId,
       });
 
-      return json({ rsp });
+      return json(
+        { success: true },
+        {
+          headers: {
+            "Set-Cookie": await commitAuthSession(request, { authSession }),
+          },
+        }
+      );
     default:
       return null;
   }
@@ -221,10 +203,6 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
   { rel: "stylesheet", href: mapCss },
 ];
-
-export const AvailabilityForBookingFormSchema = z.object({
-  availableToBook: z.string().transform((val) => (val === "on" ? true : false)),
-});
 
 export default function AssetDetailsPage() {
   const { asset, locale } = useLoaderData<typeof loader>();
@@ -258,7 +236,10 @@ export default function AssetDetailsPage() {
       <Header
         subHeading={
           <div className="mt-3 flex gap-2">
-            <AssetStatusBadge status={asset.status} />
+            <AssetStatusBadge
+              status={asset.status}
+              availableToBook={asset.availableToBook}
+            />
             {location ? (
               <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700">
                 {location.name}
@@ -302,8 +283,7 @@ export default function AssetDetailsPage() {
           <Card>
             <fetcher.Form
               ref={zo.ref}
-              method="POST"
-              encType="multipart/form-data"
+              method="post"
               onChange={(e) => fetcher.submit(e.currentTarget)}
             >
               <div className="flex justify-between gap-3">
@@ -321,7 +301,7 @@ export default function AssetDetailsPage() {
                   defaultChecked={asset.availableToBook}
                   required
                 />
-                <input type="hidden" value="toggleAvailabilty" name="intent" />
+                <input type="hidden" value="toggle" name="intent" />
               </div>
             </fetcher.Form>
           </Card>
