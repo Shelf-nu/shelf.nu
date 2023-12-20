@@ -26,6 +26,11 @@ import {
   StarIcon,
   DeactivateIcon,
   PdfIcon,
+  LogoutIcon,
+  HelpIcon,
+  Profile,
+  CopyIcon,
+  SignIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -55,7 +60,13 @@ export type Icon =
   | "send"
   | "star"
   | "deactivate"
-  | "pdf";
+  | "pdf"
+  | "logout"
+  | "help"
+  | "profile"
+  | "send"
+  | "copy"
+  | "sign";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -84,10 +95,15 @@ export const iconsMap: IconsMap = {
   download: <DownloadIcon />,
   print: <PrintIcon />,
   settings: <SettingsIcon />,
+  help: <HelpIcon />,
+  profile: <Profile />,
+  logout: <LogoutIcon />,
   send: <SendIcon />,
   star: <StarIcon />,
   deactivate: <DeactivateIcon />,
   pdf: <PdfIcon />,
+  copy: <CopyIcon />,
+  sign: <SignIcon />,
 };
 
 export default iconsMap;

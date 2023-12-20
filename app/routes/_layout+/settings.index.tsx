@@ -8,7 +8,7 @@ import { requireAuthSession } from "~/modules/auth";
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
 
-  return redirect("user");
+  return redirect("account");
 }
 
 export const shouldRevalidate = () => false;

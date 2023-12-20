@@ -68,11 +68,12 @@ export function handleUniqueConstraintError(cause: any, modelName: string) {
       },
     };
   } else {
-    return {
-      item: null,
-      error: {
-        message: "Something went wrong. Please try again later.",
+    throw new ShelfStackError({
+      message: `Error creating ${modelName}: ${cause}`,
+      cause,
+      metadata: {
+        modelName,
       },
-    };
+    });
   }
 }

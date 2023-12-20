@@ -76,6 +76,8 @@ export async function getAsset({
         select: {
           createdAt: true,
           custodian: true,
+          template: true,
+          templateSigned: true,
         },
       },
       organization: {
@@ -195,6 +197,12 @@ export async function getAssets({
             },
             custody: {
               select: {
+                templateSigned: true,
+                template: {
+                  select: {
+                    signatureRequired: true,
+                  },
+                },
                 custodian: {
                   select: {
                     name: true,
@@ -899,7 +907,7 @@ export const createAssetsFromContentImport = async ({
     userId,
   });
 
-  for (const asset of data) {
+  for (let asset of data) {
     const customFieldsValues: ShelfAssetCustomFieldValueType[] = Object.entries(
       asset
     ).reduce((res, [key, val]) => {
