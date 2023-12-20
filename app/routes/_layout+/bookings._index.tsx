@@ -211,7 +211,7 @@ const ListAssetContent = ({
       </Td>
 
       {/**
-       * Optional label when the booking inlcudes assets that are either:
+       * Optional label when the booking includes assets that are either:
        * 1. Marked as not available for boooking
        * 2. Have custody
        * 3. Have other bookings with the same period - this I am not sure how to handle yet
@@ -219,10 +219,10 @@ const ListAssetContent = ({
       <Td className="hidden md:table-cell">
         {hasUnavaiableAssets ? (
           <AvailabilityBadge
-            badgeText={"Inlcudes unavailable assets"}
+            badgeText={"Includes unavailable assets"}
             tooltipTitle={"Booking includes unavailable assets"}
             tooltipContent={
-              "There are some assets within this booking that are unavailable for reservation becuase they are checked-out, have custody assigned or are marked as not allowed to book"
+              "There are some assets within this booking that are unavailable for reservation because they are checked-out, have custody assigned or are marked as not allowed to book"
             }
           />
         ) : null}
