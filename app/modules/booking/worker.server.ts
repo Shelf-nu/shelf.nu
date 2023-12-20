@@ -1,23 +1,15 @@
 /* eslint-disable no-console */
 import { BookingStatus } from "@prisma/client";
 import { db } from "~/database";
-import { calcTimeDifference } from "~/utils/date-fns";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
+import {
+  checkinReminderEmailContent,
+  checkoutReminderEmailContent,
+} from "./email-helpers";
 import { scheduleNextBookingJob } from "./service.server";
 import type { SchedulerData } from "./types";
-
-function getTimeRemainingMessage(date1: Date, date2: Date): string {
-  const { hours, minutes } = calcTimeDifference(date1, date2);
-  if (hours > 0) {
-    return `${hours} hour${hours > 1 ? "s" : ""}`;
-  } else if (minutes > 0) {
-    return `${minutes} minute${minutes > 1 ? "s" : ""}`;
-  } else {
-    return ""; //this should not happen
-  }
-}
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
 
@@ -32,6 +24,9 @@ export const registerBookingWorkers = () => {
           custodianTeamMember: true,
           custodianUser: true,
           organization: true,
+          _count: {
+            select: { assets: true },
+          },
         },
       });
       if (!booking) {
@@ -41,16 +36,20 @@ export const registerBookingWorkers = () => {
         return;
       }
       const email = booking.custodianUser?.email;
-      if (email && booking.from) {
+      if (email && booking.from && booking.to) {
         await sendEmail({
           to: email,
-          subject: `checkout reminder`,
-          text: `you have ${getTimeRemainingMessage(
-            new Date(booking.from),
-            new Date()
-          )} to checkout your booking ${booking.name} of ${
-            booking.organization.name
-          }`,
+          subject: `Checkout reminder - shelf.nu`,
+          text: checkoutReminderEmailContent({
+            bookingName: booking.name,
+            assetsCount: booking._count.assets,
+            custodian:
+              `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+              (booking.custodianTeamMember?.name as string),
+            from: booking.from.toISOString(),
+            to: booking.to.toISOString(),
+            bookingId: booking.id,
+          }),
         }).catch((err) => {
           console.error(`failed to send checkoutReminder email`, err);
         });
@@ -58,7 +57,6 @@ export const registerBookingWorkers = () => {
       //schedule the next job
       if (booking.to) {
         const when = new Date(booking.to);
-        // @TODO not sure why we do the -1. Can you explain @mahendra?
         when.setHours(when.getHours() - 1);
         await scheduleNextBookingJob({
           data,
@@ -88,16 +86,20 @@ export const registerBookingWorkers = () => {
         return;
       }
       const email = booking.custodianUser?.email;
-      if (email && booking.to) {
+      if (email && booking.from && booking.to) {
         await sendEmail({
           to: email,
-          subject: `checkin reminder`,
-          text: `you have ${getTimeRemainingMessage(
-            new Date(booking.to),
-            new Date()
-          )} to checkin your booking ${booking.name} of ${
-            booking.organization.name
-          }`,
+          subject: `Checkout reminder - shelf.nu`,
+          text: checkinReminderEmailContent({
+            bookingName: booking.name,
+            assetsCount: 0,
+            custodian:
+              `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+              (booking.custodianTeamMember?.name as string),
+            from: booking.from.toISOString(),
+            to: booking.to.toISOString(),
+            bookingId: booking.id,
+          }),
         }).catch((err) => {
           console.error(`failed to send checkin reminder email`, err);
         });

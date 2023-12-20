@@ -212,15 +212,12 @@ export const upsertBooking = async (
   }
 
   /** Handle email notification when booking status changes */
-  console.log("res", res);
-  console.log("data", data);
   if (
     data.status &&
     (data.status === BookingStatus.RESERVED ||
       data.status === BookingStatus.COMPLETE)
   ) {
     const email = res.custodianUser?.email;
-    console.log("email", email);
     if (email) {
       let subject = `Booking reserved`;
       let text = assetReservedEmailContent({
