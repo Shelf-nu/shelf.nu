@@ -212,13 +212,15 @@ export const upsertBooking = async (
   }
 
   /** Handle email notification when booking status changes */
-  // @TODO - this email needs to be tested but I cant test it because of the sendAfter bug reported in the PR: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1863057693
+  console.log("res", res);
+  console.log("data", data);
   if (
     data.status &&
     (data.status === BookingStatus.RESERVED ||
       data.status === BookingStatus.COMPLETE)
   ) {
     const email = res.custodianUser?.email;
+    console.log("email", email);
     if (email) {
       let subject = `Booking reserved`;
       let text = assetReservedEmailContent({
