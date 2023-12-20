@@ -95,7 +95,7 @@ export function BookingForm({
               {/* @ts-ignore */}
               {routeIsNewBooking ? null : <ActionsDropdown booking={booking} />}
 
-              {!isOngoing && !isArchived && !isCompleted && !isOverdue ? (
+              {!isReserved && !isOngoing && !isCompleted && !isOverdue ? (
                 <Button
                   type="submit"
                   disabled={disabled}

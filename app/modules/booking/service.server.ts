@@ -11,6 +11,7 @@ import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
+import { assetReservedEmailContent } from "./email-helpers";
 import type { SchedulerData } from "./types";
 
 const cancelSheduler = async (b?: Booking | null) => {
@@ -211,6 +212,7 @@ export const upsertBooking = async (
   }
 
   /** Handle email notification when booking status changes */
+  // @TODO - this email needs to be tested but I cant test it because of the sendAfter bug reported in the PR: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1863057693
   if (
     data.status &&
     (data.status === BookingStatus.RESERVED ||
@@ -219,7 +221,17 @@ export const upsertBooking = async (
     const email = res.custodianUser?.email;
     if (email) {
       let subject = `Booking reserved`;
-      let text = `Your assets have been reserved by ${res.organization.name} under ${res.name}`;
+      let text = assetReservedEmailContent({
+        bookingName: res.name,
+        assetsCount: res.assets.length,
+        custodian:
+          `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
+          (res.custodianTeamMember?.name as string),
+        from: res.from?.toISOString() as string,
+        to: res.to?.toISOString() as string,
+        bookingId: res.id,
+      });
+
       if (data.status === BookingStatus.COMPLETE) {
         subject = `Booking complete`;
         text = `Your checkin complete for booking ${res.name}`;
