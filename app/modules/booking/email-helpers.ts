@@ -25,10 +25,11 @@ export const baseBookingEmailContent = ({
 
 ${emailContent}
 
-${bookingName} | ${assetsCount}
+${bookingName} | ${assetsCount} assets
+
 Custodian: ${custodian}
 From: ${from}
-From: ${to}
+To: ${to}
 
 To view the booking, follow the link below:
 ${SERVER_URL}/booking/${bookingId}

@@ -77,6 +77,9 @@ export const registerBookingWorkers = () => {
           custodianTeamMember: true,
           custodianUser: true,
           organization: true,
+          _count: {
+            select: { assets: true },
+          },
         },
       });
       if (!booking) {
@@ -89,10 +92,10 @@ export const registerBookingWorkers = () => {
       if (email && booking.from && booking.to) {
         await sendEmail({
           to: email,
-          subject: `Checkout reminder - shelf.nu`,
+          subject: `Checkin reminder - shelf.nu`,
           text: checkinReminderEmailContent({
             bookingName: booking.name,
-            assetsCount: 0,
+            assetsCount: booking._count.assets,
             custodian:
               `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
               (booking.custodianTeamMember?.name as string),
