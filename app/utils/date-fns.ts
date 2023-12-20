@@ -22,14 +22,15 @@ export function calcTimeDifference(
   date2: Date
 ): { hours: number; minutes: number } {
   // Calculate the time difference in milliseconds
-  const diffInMs = date2.getTime() - date1.getTime();
+  const diffInMs = Math.abs(date2.getTime() - date1.getTime());
 
   // Convert milliseconds to minutes and hours
-  const minutes = Math.floor(diffInMs / (1000 * 60));
+  let minutes = Math.floor(diffInMs / (1000 * 60));
   let hours = Math.floor(minutes / 60);
 
   if (minutes >= 58) {
     hours++; //just to round it to hours
+    minutes = 0;
   }
 
   return { hours, minutes };

@@ -181,6 +181,40 @@ export const upsertBooking = async (
         })
       );
     }
+    /** Handle email notification when booking status changes */
+    if (
+      data.status &&
+      (data.status === BookingStatus.RESERVED ||
+        data.status === BookingStatus.COMPLETE)
+    ) {
+      const email = res.custodianUser?.email;
+      if (email) {
+        let subject = `Booking reserved`;
+        let text = assetReservedEmailContent({
+          bookingName: res.name,
+          assetsCount: res.assets.length,
+          custodian:
+            `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
+            (res.custodianTeamMember?.name as string),
+          from: res.from?.toISOString() as string,
+          to: res.to?.toISOString() as string,
+          bookingId: res.id,
+        });
+
+        if (data.status === BookingStatus.COMPLETE) {
+          subject = `Booking complete`;
+          text = `Your checkin complete for booking ${res.name}`;
+        }
+        promises.push(
+          sendEmail({
+            to: email,
+            subject,
+            text,
+          })
+        );
+      }
+    }
+
     await Promise.all(promises);
     return res;
   }
@@ -209,38 +243,6 @@ export const upsertBooking = async (
       key: schedulerKeys.checkoutReminder,
       when,
     });
-  }
-
-  /** Handle email notification when booking status changes */
-  if (
-    data.status &&
-    (data.status === BookingStatus.RESERVED ||
-      data.status === BookingStatus.COMPLETE)
-  ) {
-    const email = res.custodianUser?.email;
-    if (email) {
-      let subject = `Booking reserved`;
-      let text = assetReservedEmailContent({
-        bookingName: res.name,
-        assetsCount: res.assets.length,
-        custodian:
-          `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
-          (res.custodianTeamMember?.name as string),
-        from: res.from?.toISOString() as string,
-        to: res.to?.toISOString() as string,
-        bookingId: res.id,
-      });
-
-      if (data.status === BookingStatus.COMPLETE) {
-        subject = `Booking complete`;
-        text = `Your checkin complete for booking ${res.name}`;
-      }
-      await sendEmail({
-        to: email,
-        subject,
-        text,
-      });
-    }
   }
   return res;
 };
