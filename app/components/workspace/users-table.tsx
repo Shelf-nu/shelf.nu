@@ -19,7 +19,7 @@ export const UsersTable = () => {
       <div className="flex flex-1 flex-col gap-2">
         <div
           className={tw(
-            "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded-[12px]"
+            "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded"
           )}
         >
           <div className="flex w-full items-center justify-between border-b px-6 py-4">

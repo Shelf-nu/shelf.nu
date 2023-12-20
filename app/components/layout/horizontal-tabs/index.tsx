@@ -3,7 +3,7 @@ import type { HorizontalTabsProps } from "./types";
 
 export default function HorizontalTabs({ items }: HorizontalTabsProps) {
   return (
-    <div className="horizontal-menu -mr-4 mb-9 mt-6 flex overflow-scroll lg:mr-0">
+    <div className="horizontal-menu -mr-4 mb-9 mt-5 flex overflow-scroll lg:mr-0">
       {items.map((item, index) => (
         <NavLink
           to={item.to}

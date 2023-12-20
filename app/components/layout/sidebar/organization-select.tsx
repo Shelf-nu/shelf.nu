@@ -28,14 +28,10 @@ export const OrganizationSelect = () => {
       }}
     >
       <Select name="organizationId" defaultValue={currentOrganizationId}>
-        <SelectTrigger className="p-3">
+        <SelectTrigger className="w-[262px] p-3">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent
-          position="popper"
-          className="w-full min-w-[300px]"
-          align="start"
-        >
+        <SelectContent position="popper" className="w-[262px]" align="start">
           <div className=" max-h-[320px] overflow-auto">
             {organizations.map((org) => (
               <SelectItem value={org.id} key={org.id} className="p-2">

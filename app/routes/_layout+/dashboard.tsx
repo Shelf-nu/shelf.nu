@@ -17,6 +17,8 @@ import MostScannedAssets from "~/components/dashboard/most-scanned-assets";
 import MostScannedCategories from "~/components/dashboard/most-scanned-categories";
 import NewestAssets from "~/components/dashboard/newest-assets";
 import { ErrorBoundryComponent } from "~/components/errors";
+import Header from "~/components/layout/header";
+import { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database";
 
 import { requireAuthSession } from "~/modules/auth";
@@ -144,6 +146,7 @@ export default function DashboardPage() {
 
   return (
     <div>
+      <Header />
       {completedAllChecks || skipOnboardingChecklist ? (
         <div className="pb-8">
           <AnnouncementBar />
