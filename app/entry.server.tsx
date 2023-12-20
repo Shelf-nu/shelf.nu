@@ -24,6 +24,7 @@ export default async function handleRequest(
   await schedulerService.init();
   registerBookingWorkers();
   // === end: register scheduler and workers ===
+
   return new Promise(async (res, reject) => {
     let didError = false;
 

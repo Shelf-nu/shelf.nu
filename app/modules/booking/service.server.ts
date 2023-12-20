@@ -11,6 +11,7 @@ import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
+import { assetReservedEmailContent } from "./email-helpers";
 import type { SchedulerData } from "./types";
 
 const cancelSheduler = async (b?: Booking | null) => {
@@ -219,7 +220,17 @@ export const upsertBooking = async (
     const email = res.custodianUser?.email;
     if (email) {
       let subject = `Booking reserved`;
-      let text = `Your assets have been reserved by ${res.organization.name} under ${res.name}`;
+      let text = assetReservedEmailContent({
+        bookingName: res.name,
+        assetsCount: res.assets.length,
+        custodian:
+          `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
+          (res.custodianTeamMember?.name as string),
+        from: res.from?.toISOString() as string,
+        to: res.to?.toISOString() as string,
+        bookingId: res.id,
+      });
+
       if (data.status === BookingStatus.COMPLETE) {
         subject = `Booking complete`;
         text = `Your checkin complete for booking ${res.name}`;

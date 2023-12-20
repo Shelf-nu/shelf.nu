@@ -34,3 +34,14 @@ export function calcTimeDifference(
 
   return { hours, minutes };
 }
+
+export function getTimeRemainingMessage(date1: Date, date2: Date): string {
+  const { hours, minutes } = calcTimeDifference(date1, date2);
+  if (hours > 0) {
+    return `${hours} hour${hours > 1 ? "s" : ""}`;
+  } else if (minutes > 0) {
+    return `${minutes} minute${minutes > 1 ? "s" : ""}`;
+  } else {
+    return ""; //this should not happen
+  }
+}
