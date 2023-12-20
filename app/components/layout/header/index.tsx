@@ -26,8 +26,11 @@ export default function Header({
     <header className="-mx-4">
       <div className="block">
         <div className="mb-4 sm:mb-0">
-          <div className="items-centerms flex w-full justify-between border-b border-gray-200 px-4 pb-3">
+          <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 pb-2 md:pb-3">
             <Breadcrumbs />
+            <div className="hidden shrink-0 gap-3 md:flex">{children}</div>
+          </div>
+          <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:hidden">
             <div className="flex shrink-0 gap-3">{children}</div>
           </div>
           <div className="border-b border-gray-200 p-4 ">
