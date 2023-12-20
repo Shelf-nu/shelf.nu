@@ -112,7 +112,10 @@ export default function Sidebar() {
         </div>
 
         <div className="mt-auto">
-          <SidebarBottom user={user} />
+          <SidebarBottom
+            isSidebarMinimized={optimisticMinimizedSidebar}
+            user={user}
+          />
         </div>
       </aside>
     </>

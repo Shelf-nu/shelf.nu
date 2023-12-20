@@ -27,7 +27,10 @@ import { extractCSVDataFromContentImport } from "~/utils/import.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
   const { userId } = authSession;
 
   const error = {
@@ -38,7 +41,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   };
 
   try {
-    await assertUserCanImportAssets({ userId, organizationId });
+    await assertUserCanImportAssets({ organizationId, organizations });
     const intent = (await request.clone().formData()).get("intent") as
       | "backup"
       | "content";
@@ -81,9 +84,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
-  await assertUserCanImportAssets({ userId, organizationId });
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
+  await assertUserCanImportAssets({ organizationId, organizations });
 
   return json({
     header: {
