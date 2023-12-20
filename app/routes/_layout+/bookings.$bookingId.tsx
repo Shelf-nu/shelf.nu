@@ -7,6 +7,7 @@ import type {
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { DateTime } from "luxon";
 import { parseFormAny } from "react-zorm";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking";
@@ -22,7 +23,6 @@ import {
   removeAssets,
   upsertBooking,
 } from "~/modules/booking";
-import type { ExtendedBooking } from "~/modules/booking/types";
 import {
   requireOrganisationId,
   setSelectedOrganizationIdCookie,
@@ -34,6 +34,7 @@ import {
   getRequiredParam,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getHints } from "~/utils/client-hints";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -84,21 +85,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     title: `Edit | ${booking.name}`,
   };
 
-  if (booking.from) {
-    Object.assign(booking, {
-      fromForDateInput: dateForDateTimeInputValue(booking.from),
-    });
-  }
-  if (booking.to) {
-    Object.assign(booking, {
-      toForDateInput: dateForDateTimeInputValue(booking.to),
-    });
-  }
-
   return json(
     {
       header,
-      booking: booking as ExtendedBooking,
+      booking: booking,
       modelName,
       items: booking.assets,
       page,
@@ -172,14 +162,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
           }
         );
       }
-      const { name, startDate, endDate, custodian } = result.data;
+
+      const { name, custodian } = result.data;
+      const hints = getHints(request);
+      const startDate = formData.get("startDate")!.toString();
+      const endDate = formData.get("endDate")!.toString();
+      const fmt = "yyyy-MM-dd'T'HH:mm";
+      const from = DateTime.fromFormat(startDate, fmt, {
+        zone: hints.timeZone,
+      }).toJSDate();
+      const to = DateTime.fromFormat(endDate, fmt, {
+        zone: hints.timeZone,
+      }).toJSDate();
       var booking = await upsertBooking({
         custodianTeamMemberId: custodian,
         organizationId,
         id,
         name,
-        from: startDate,
-        to: endDate,
+        from,
+        to,
       });
 
       sendNotification({
@@ -328,8 +329,16 @@ export default function BookingEditPage() {
         <BookingForm
           id={booking.id}
           name={booking.name}
-          startDate={booking.fromForDateInput || undefined}
-          endDate={booking.toForDateInput || undefined}
+          startDate={
+            booking.from
+              ? dateForDateTimeInputValue(new Date(booking.from))
+              : undefined
+          }
+          endDate={
+            booking.to
+              ? dateForDateTimeInputValue(new Date(booking.to))
+              : undefined
+          }
           custodianId={
             booking.custodianTeamMemberId ||
             teamMembers.find(
