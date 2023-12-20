@@ -23,10 +23,10 @@ export default function Header({
   const header = data?.header;
 
   return header ? (
-    <header className="-mx-4">
+    <header className="-mx-4 bg-white">
       <div className="block">
         <div className="mb-4 sm:mb-0">
-          <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 pb-2 md:pb-3">
+          <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:py-3">
             <Breadcrumbs />
             <div className="hidden shrink-0 gap-3 md:flex">{children}</div>
           </div>
