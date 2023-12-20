@@ -3,6 +3,7 @@ import Heading from "~/components/shared/heading";
 import SubHeading from "~/components/shared/sub-heading";
 
 import type { HeaderData } from "./types";
+import { Breadcrumbs } from "../breadcrumbs";
 
 export default function Header({
   title = null,
@@ -22,23 +23,27 @@ export default function Header({
   const header = data?.header;
 
   return header ? (
-    <header>
-      <div className="block sm:flex sm:items-center sm:justify-between sm:gap-3">
+    <header className="-mx-4">
+      <div className="block">
         <div className="mb-4 sm:mb-0">
-          <Heading
-            as="h2"
-            className="break-all text-display-xs font-semibold md:text-display-sm"
-          >
-            {title || header?.title}
-          </Heading>
-          {subHeading ? (
-            <SubHeading>{subHeading}</SubHeading>
-          ) : (
-            header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>
-          )}
+          <div className="items-centerms flex w-full justify-between border-b border-gray-200 px-4 pb-3">
+            <Breadcrumbs />
+            <div className="flex shrink-0 gap-3">{children}</div>
+          </div>
+          <div className="border-b border-gray-200 p-4 ">
+            <Heading
+              as="h2"
+              className="break-all text-display-xs font-semibold md:text-display-sm"
+            >
+              {title || header?.title}
+            </Heading>
+            {subHeading ? (
+              <SubHeading>{subHeading}</SubHeading>
+            ) : (
+              header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>
+            )}
+          </div>
         </div>
-
-        <div className="flex shrink-0 gap-3">{children}</div>
       </div>
     </header>
   ) : null;
