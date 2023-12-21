@@ -91,7 +91,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       items,
       search,
       page,
-      totalItems: bookings.length,
+      totalItems: bookingCount,
       totalPages,
       perPage,
       prev,

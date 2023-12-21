@@ -5,6 +5,7 @@ import { ChevronRight } from "~/components/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuPortal,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
@@ -43,17 +44,6 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
           align="end"
           className="order w-[180px] rounded-md bg-white p-1.5 text-right "
         >
-          {/* <DropdownMenuItem>
-        <Button
-          icon="pen"
-          role="link"lo
-          variant="link"
-          className="justify-start text-gray-700 hover:text-gray-700"
-          width="full"
-        >
-          Cancel
-        </Button>
-      </DropdownMenuItem> */}
           {/* @TODO - this needs to be a controlled input */}
           {isCompleted ? (
             <Button

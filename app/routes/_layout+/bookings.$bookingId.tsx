@@ -56,6 +56,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     where: {
       deletedAt: null,
       organizationId,
+      userId: {
+        not: null,
+      },
     },
     include: {
       user: true,
