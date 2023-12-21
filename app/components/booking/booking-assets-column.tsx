@@ -174,15 +174,6 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
       </Td>
       {/* If asset status is different than available, we need to show a label */}
       <Td>
-        {/* {item.status !== AssetStatus.AVAILABLE || !item.availableToBook ? (
-          <AvailabilityBadge
-            badgeText={"Unavailable"}
-            tooltipTitle={"Asset is unavailable for bookings"}
-            tooltipContent={
-              "This asset is not available for check-out. This could be because it's part of another booking or because it has assigned custody, or because it's marked as unavailable for bookings."
-            }
-          />
-        ) : null} */}
         <AvailabilityLabel asset={item} isChecked={isChecked} />
       </Td>
       <Td className="hidden md:table-cell">

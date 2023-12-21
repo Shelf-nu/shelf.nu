@@ -110,11 +110,14 @@ export function BookingForm({
               {/* When booking is draft, we show the reserve button */}
               {isDraft ? (
                 <ControlledActionButton
-                  canUseFeature={!disabled && hasAssets}
+                  canUseFeature={
+                    !disabled && hasAssets && !hasUnavailableAssets
+                  }
                   buttonContent={{
                     title: "Reserve",
-                    message:
-                      "You need to add assets to your booking before you can reserve it",
+                    message: hasUnavailableAssets
+                      ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
+                      : "You need to add assets to your booking before you can reserve it",
                   }}
                   buttonProps={{
                     type: "submit",

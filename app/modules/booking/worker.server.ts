@@ -89,13 +89,21 @@ export const registerBookingWorkers = () => {
         return;
       }
       const email = booking.custodianUser?.email;
-      if (email && booking.from && booking.to) {
+      /**
+       * We need to meet some conditions to send the reminder, most important the booking needs to be ongoing so we dont send check-in reminder for assets that are not even checked out yet
+       */
+      if (
+        email &&
+        booking.from &&
+        booking.to &&
+        booking.status === BookingStatus.ONGOING
+      ) {
         await sendEmail({
           to: email,
           subject: `Checkin reminder - shelf.nu`,
           text: checkinReminderEmailContent({
             bookingName: booking.name,
-            assetsCount: booking._count.assets,
+            assetsCount: booking._count.assets, // @TODO for some reason this returns 0. Works on checkout reminder but not here
             custodian:
               `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
               (booking.custodianTeamMember?.name as string),

@@ -94,7 +94,7 @@ export const checkoutReminderEmailContent = ({
     emailContent: `Your booking is due for checkout in ${getTimeRemainingMessage(
       new Date(from),
       new Date()
-    )} minutes`,
+    )} minutes.`,
   });
 
 /**
@@ -126,5 +126,5 @@ export const checkinReminderEmailContent = ({
     emailContent: `Your booking is due for checkin in ${getTimeRemainingMessage(
       new Date(to),
       new Date()
-    )} minutes`,
+    )} minutes.`,
   });

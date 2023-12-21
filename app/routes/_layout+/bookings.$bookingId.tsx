@@ -314,6 +314,7 @@ export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
   const { booking, teamMembers } = useLoaderData<typeof loader>();
+
   return (
     <>
       <Header title={hasName ? name : booking.name} />

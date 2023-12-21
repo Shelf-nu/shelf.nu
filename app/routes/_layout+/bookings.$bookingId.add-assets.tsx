@@ -180,7 +180,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
  * There are 3 reasons an asset can be unavailable:
  * 1. Its marked as not allowed for booking
  * 2. It is already in custody
- * 3. It is already booked for that period (within current or another booking)
+ * 3. It is already booked for that period (within another booking)
  *
  * Each reason has its own tooltip and label
  */
@@ -232,6 +232,22 @@ export function AvailabilityLabel({
         tooltipTitle={"Asset is already part of a booking"}
         tooltipContent={
           "This asset is added to a booking that is overlapping the selected time period."
+        }
+      />
+    );
+  }
+
+  /**
+   * Is currently checked out
+   */
+
+  if (asset.status === "CHECKED_OUT") {
+    return (
+      <AvailabilityBadge
+        badgeText={"Checked out"}
+        tooltipTitle={"Asset is currently checked out"}
+        tooltipContent={
+          "This asset is currently checked out. Once it gets returned you will be able to check it out again"
         }
       />
     );

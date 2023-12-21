@@ -1,18 +1,19 @@
 import { useMemo } from "react";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import type { AssetStatus } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 
 type BookingSubset = {
   status: BookingStatus;
   assets: {
     status: AssetStatus;
+    availableToBook: boolean;
   }[];
 };
 
 export function useBookingStatus(booking: BookingSubset) {
   const hasAssets = useMemo(() => booking.assets?.length > 0, [booking.assets]);
   const hasUnavailableAssets = useMemo(
-    () =>
-      booking.assets?.some((asset) => asset.status !== AssetStatus.AVAILABLE),
+    () => booking.assets?.some((asset) => !asset.availableToBook),
     [booking.assets]
   );
 
