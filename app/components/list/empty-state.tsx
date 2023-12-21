@@ -9,6 +9,7 @@ export interface CustomEmptyState {
     text: string;
     newButtonRoute: string;
     newButtonContent: string;
+    buttonProps?: any;
   };
   modelName?: {
     singular: string;
@@ -68,6 +69,7 @@ export const EmptyState = ({ customContent, modelName }: CustomEmptyState) => {
           }
           aria-label={`new ${singular}`}
           icon="plus"
+          {...(customContent?.buttonProps || undefined)}
         >
           {customContent?.newButtonContent
             ? customContent.newButtonContent

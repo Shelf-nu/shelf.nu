@@ -12,9 +12,15 @@ import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
   const custody = await db.custody.findUnique({
     where: { assetId: params.assetId as string },
     select: {
@@ -42,7 +48,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { userId } = await requireAuthSession(request);
+  const {
+    authSession: { userId },
+  } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
   const assetId = params.assetId as string;
   const user = await getUserByID(userId);
 

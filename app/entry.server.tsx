@@ -5,6 +5,8 @@ import type { EntryContext } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import isbot from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { registerBookingWorkers } from "./modules/booking";
+import * as schedulerService from "./utils/scheduler.server";
 
 const ABORT_DELAY = 5000;
 
@@ -17,6 +19,11 @@ export default async function handleRequest(
   const callbackName = isbot(request.headers.get("user-agent"))
     ? "onAllReady"
     : "onShellReady";
+
+  // === start: register scheduler and workers ===
+  await schedulerService.init();
+  registerBookingWorkers();
+  // === end: register scheduler and workers ===
 
   return new Promise(async (res, reject) => {
     let didError = false;

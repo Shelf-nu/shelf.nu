@@ -5,6 +5,7 @@ import { useLoaderData, useNavigate } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ExportButton } from "~/components/assets/export-button";
 import { ImportButton } from "~/components/assets/import-button";
 import { ChevronRight } from "~/components/icons";
@@ -26,14 +27,14 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
-import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -71,9 +72,12 @@ export interface IndexResponse {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId, organizations, currentOrganization } =
-    await requireOrganisationId(authSession, request);
+  const { authSession, organizationId, organizations, currentOrganization } =
+    await requirePermision(
+      request,
+      PermissionEntity.asset,
+      PermissionAction.read
+    );
 
   const { userId } = authSession;
 
@@ -129,7 +133,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cookie,
   } = await getPaginatedAndFilterableAssets({
     request,
-    userId,
     organizationId,
   });
 
@@ -312,11 +315,10 @@ const ListAssetContent = ({
                 {item.title}
               </span>
               <div>
-                <Badge
-                  color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-                >
-                  {userFriendlyAssetStatus(item.status)}
-                </Badge>
+                <AssetStatusBadge
+                  status={item.status}
+                  availableToBook={item.availableToBook}
+                />
               </div>
             </div>
           </div>

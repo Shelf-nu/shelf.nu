@@ -9,7 +9,7 @@ import { ListItem } from "~/components/list/list-item";
 import { Badge } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import { UserBadge } from "~/components/shared/user-badge";
-import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
+import { ControlledActionButton } from "~/components/subscription/premium-feature-button";
 import { Table, Td, Th } from "~/components/table";
 import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
 import { db } from "~/database";
@@ -110,7 +110,7 @@ export default function WorkspacePage() {
       <div className="w-full">
         <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
           <h2 className=" text-lg text-gray-900">Workspaces</h2>
-          <PremiumFeatureButton
+          <ControlledActionButton
             canUseFeature={canCreateMoreOrganizations}
             buttonContent={{
               title: "New workspace",

@@ -1,3 +1,4 @@
+import { tw } from "~/utils";
 import type { ButtonVariant } from "../layout/header/types";
 import type { ButtonProps } from "../shared";
 import { Button } from "../shared";
@@ -7,7 +8,7 @@ import {
   HoverCardTrigger,
 } from "../shared/hover-card";
 
-export const PremiumFeatureButton = ({
+export const ControlledActionButton = ({
   canUseFeature,
   buttonContent = {
     title: "Use",
@@ -36,12 +37,14 @@ export const PremiumFeatureButton = ({
         ctaText: buttonContent?.ctaText || "Upgrade to a paid plan",
       }}
       skipCta={skipCta}
+      buttonProps={buttonProps}
     />
   );
 
 const HoverMessage = ({
   buttonContent,
   skipCta,
+  buttonProps,
 }: {
   buttonContent: {
     title: string | JSX.Element | JSX.Element[];
@@ -50,10 +53,16 @@ const HoverMessage = ({
     ctaText: string;
   };
   skipCta: boolean;
+  buttonProps: ButtonProps;
 }) => (
   <HoverCard>
-    <HoverCardTrigger className="disabled inline-flex cursor-not-allowed items-center justify-center border-none p-0 text-left text-text-sm font-semibold text-primary-700 hover:text-primary-800">
-      <Button variant={buttonContent.variant || "primary"} disabled>
+    <HoverCardTrigger
+      className={tw(
+        "disabled inline-flex cursor-not-allowed items-center justify-center border-none p-0 text-left text-text-sm font-semibold text-primary-700 hover:text-primary-800",
+        buttonProps?.width === "full" ? "w-full" : ""
+      )}
+    >
+      <Button {...buttonProps} disabled>
         {buttonContent.title}
       </Button>
     </HoverCardTrigger>

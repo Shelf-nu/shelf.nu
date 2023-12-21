@@ -3,9 +3,15 @@ import { Link, Outlet } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.read
+  );
 
   return json(
     {},
