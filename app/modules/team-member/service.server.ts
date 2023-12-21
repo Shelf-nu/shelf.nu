@@ -46,6 +46,11 @@ export async function createTeamMemberIfNotExists({
       .map((asset) => [asset.custodian, ""])
   );
 
+  // Handle the case where there are no teamMembers
+  if (teamMembers.has(undefined)) {
+    return {};
+  }
+
   // now we loop through the categories and check if they exist
   for (const [teamMember, _] of teamMembers) {
     const existingTeamMember = await db.teamMember.findFirst({

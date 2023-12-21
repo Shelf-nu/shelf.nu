@@ -11,6 +11,10 @@ export const canExportAssets = (
   return tierLimit?.canExportAssets;
 };
 
+/** Important:
+ * For this to work properly it needs to receive the tierLimit of the organization owner not the current user
+ * This is because the owner is the one that has the premium package attached to their account
+ */
 export const canImportAssets = (
   tierLimit: { canImportAssets: boolean } | null | undefined
 ) => {

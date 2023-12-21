@@ -15,7 +15,7 @@ import {
   getFilteredAndPaginatedCustomFields,
 } from "~/modules/custom-field";
 import { requireOrganisationId } from "~/modules/organization/context.server";
-import { getUserTierLimit } from "~/modules/tier";
+import { getOrganizationTierLimit } from "~/modules/tier";
 
 import {
   getCurrentSearchParams,
@@ -35,8 +35,10 @@ export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -51,7 +53,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       search,
     });
 
-  const tierLimit = await getUserTierLimit(userId);
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
 
   const totalPages = Math.ceil(totalCustomFields / perPageParam);
 
