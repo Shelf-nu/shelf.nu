@@ -46,9 +46,10 @@ export const registerBookingWorkers = () => {
             custodian:
               `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
               (booking.custodianTeamMember?.name as string),
-            from: booking.from.toISOString(),
-            to: booking.to.toISOString(),
+            from: booking.from,
+            to: booking.to,
             bookingId: booking.id,
+            hints: data.hints,
           }),
         }).catch((err) => {
           console.error(`failed to send checkoutReminder email`, err);
@@ -98,11 +99,13 @@ export const registerBookingWorkers = () => {
         booking.to &&
         booking.status === BookingStatus.ONGOING
       ) {
-        await sendCheckinReminder(booking, booking._count.assets).catch(
-          (err) => {
-            console.error(`failed to send checkin reminder email`, err);
-          }
-        );
+        await sendCheckinReminder(
+          booking,
+          booking._count.assets,
+          data.hints
+        ).catch((err) => {
+          console.error(`failed to send checkin reminder email`, err);
+        });
       }
       //schedule the next job
       if (booking.to) {

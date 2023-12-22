@@ -1,7 +1,9 @@
 import type { Booking, TeamMember, User } from "@prisma/client";
 import { SERVER_URL } from "~/utils";
+import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { sendEmail } from "~/utils/mail.server";
+import type { ClientHint } from "./types";
 
 /**
  * THis is the base content of the bookings related emails.
@@ -15,23 +17,28 @@ export const baseBookingEmailContent = ({
   bookingId,
   assetsCount,
   emailContent,
+  hints,
 }: {
   bookingName: string;
   assetsCount: number;
   custodian: string;
-  from: string;
-  to: string;
+  from: Date;
+  to: Date;
   bookingId: string;
   emailContent: string;
-}) => `Howdy,
+  hints: ClientHint;
+}) => {
+  const fromDate = getDateTimeFormatFromHints(hints).format(from);
+  const toDate = getDateTimeFormatFromHints(hints).format(to);
+  return `Howdy,
 
 ${emailContent}
 
 ${bookingName} | ${assetsCount} assets
 
 Custodian: ${custodian}
-From: ${from}
-To: ${to}
+From: ${fromDate}
+To: ${toDate}
 
 To view the booking, follow the link below:
 ${SERVER_URL}/booking/${bookingId}
@@ -39,6 +46,7 @@ ${SERVER_URL}/booking/${bookingId}
 Thanks,
 The Shelf Team
 `;
+};
 
 /**
  * This is the content of the email sent to the custodian when a booking is reserved.
@@ -50,15 +58,18 @@ export const assetReservedEmailContent = ({
   to,
   bookingId,
   assetsCount,
+  hints,
 }: {
   bookingName: string;
   assetsCount: number;
   custodian: string;
-  from: string;
-  to: string;
+  from: Date;
+  to: Date;
   bookingId: string;
+  hints: ClientHint;
 }) =>
   baseBookingEmailContent({
+    hints,
     bookingName,
     custodian,
     from,
@@ -78,15 +89,18 @@ export const checkoutReminderEmailContent = ({
   to,
   bookingId,
   assetsCount,
+  hints,
 }: {
   bookingName: string;
   assetsCount: number;
   custodian: string;
-  from: string;
-  to: string;
+  from: Date;
+  to: Date;
   bookingId: string;
+  hints: ClientHint;
 }) =>
   baseBookingEmailContent({
+    hints,
     bookingName,
     custodian,
     from,
@@ -110,15 +124,18 @@ export const checkinReminderEmailContent = ({
   to,
   bookingId,
   assetsCount,
+  hints,
 }: {
   bookingName: string;
   assetsCount: number;
   custodian: string;
-  from: string;
-  to: string;
+  from: Date;
+  to: Date;
   bookingId: string;
+  hints: ClientHint;
 }) =>
   baseBookingEmailContent({
+    hints,
     bookingName,
     custodian,
     from,
@@ -136,19 +153,21 @@ export const sendCheckinReminder = async (
     custodianTeamMember: TeamMember | null;
     custodianUser: User | null;
   },
-  assetCount: number
+  assetCount: number,
+  hints: ClientHint
 ) => {
   await sendEmail({
     to: booking.custodianUser!.email,
     subject: `Checkin reminder - shelf.nu`,
     text: checkinReminderEmailContent({
+      hints,
       bookingName: booking.name,
       assetsCount: assetCount,
       custodian:
         `${booking.custodianUser!.firstName} ${booking.custodianUser
           ?.lastName}` || (booking.custodianTeamMember?.name as string),
-      from: booking.from!.toISOString(),
-      to: booking.to!.toISOString(),
+      from: booking.from!,
+      to: booking.to!,
       bookingId: booking.id,
     }),
   });

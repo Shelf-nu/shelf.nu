@@ -34,7 +34,7 @@ import {
   getRequiredParam,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getHints } from "~/utils/client-hints";
+import { getClientHint, getHints } from "~/utils/client-hints";
 import {
   setCookie,
   updateCookieWithPerPage,
@@ -177,14 +177,17 @@ export async function action({ request, params }: ActionFunctionArgs) {
       const to = DateTime.fromFormat(endDate, fmt, {
         zone: hints.timeZone,
       }).toJSDate();
-      var booking = await upsertBooking({
-        custodianTeamMemberId: custodian,
-        organizationId,
-        id,
-        name,
-        from,
-        to,
-      });
+      var booking = await upsertBooking(
+        {
+          custodianTeamMemberId: custodian,
+          organizationId,
+          id,
+          name,
+          from,
+          to,
+        },
+        getClientHint(request)
+      );
 
       sendNotification({
         title: "Booking saved",
@@ -203,7 +206,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       );
     case "reserve":
-      await upsertBooking({ id, status: BookingStatus.RESERVED });
+      await upsertBooking(
+        { id, status: BookingStatus.RESERVED },
+        getClientHint(request)
+      );
       sendNotification({
         title: "Booking reserved",
         message: "Your booking has been reserved successfully",
@@ -254,7 +260,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
       );
     case "checkOut":
       // @TODO here we have to make sure assets are updated to checked-out
-      var booking = await upsertBooking({ id, status: BookingStatus.ONGOING });
+      var booking = await upsertBooking(
+        { id, status: BookingStatus.ONGOING },
+        getClientHint(request)
+      );
       sendNotification({
         title: "Booking checked-out",
         message: "Your booking has been checked-out successfully",
@@ -272,10 +281,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
       );
     case "checkIn":
       // TODO - status of assets should be updated to available
-      var booking = await upsertBooking({
-        id,
-        status: BookingStatus.COMPLETE,
-      });
+      var booking = await upsertBooking(
+        {
+          id,
+          status: BookingStatus.COMPLETE,
+        },
+        getClientHint(request)
+      );
       sendNotification({
         title: "Booking checked-in",
         message: "Your booking has been checked-in successfully",
@@ -292,7 +304,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       );
     case "archive":
-      await upsertBooking({ id, status: BookingStatus.ARCHIVED });
+      await upsertBooking(
+        { id, status: BookingStatus.ARCHIVED },
+        getClientHint(request)
+      );
       sendNotification({
         title: "Booking archived",
         message: "Your booking has been archived successfully",

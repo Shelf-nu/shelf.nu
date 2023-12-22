@@ -8,6 +8,12 @@ export type BookingWithIncludes = Prisma.BookingGetPayload<{
   };
 }>;
 
+export interface ClientHint {
+  timeZone: string;
+  locale: string;
+}
+
 export interface SchedulerData {
   id: string;
+  hints: ClientHint;
 }

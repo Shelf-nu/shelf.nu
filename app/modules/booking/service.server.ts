@@ -16,7 +16,7 @@ import {
   assetReservedEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import type { SchedulerData } from "./types";
+import type { ClientHint, SchedulerData } from "./types";
 
 const cancelSheduler = async (b?: Booking | null) => {
   if (b?.activeSchedulerReference) {
@@ -75,7 +75,8 @@ export const upsertBooking = async (
       | "custodianTeamMemberId"
       | "custodianUserId"
     > & { assetIds: Asset["id"][] }
-  >
+  >,
+  hints: ClientHint
 ) => {
   const {
     assetIds,
@@ -185,7 +186,7 @@ export const upsertBooking = async (
       when.setHours(when.getHours() - 1); //1hour before send checkout reminder
       promises.push(
         scheduleNextBookingJob({
-          data: { id: res.id },
+          data: { id: res.id, hints },
           key: schedulerKeys.checkoutReminder,
           when,
         })
@@ -206,8 +207,9 @@ export const upsertBooking = async (
             custodian:
               `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
               (res.custodianTeamMember?.name as string),
-            from: res.from?.toISOString() as string,
-            to: res.to?.toISOString() as string,
+            from: res.from!,
+            to: res.to!,
+            hints,
             bookingId: res.id,
           });
 
@@ -226,7 +228,7 @@ export const upsertBooking = async (
           const { hours } = calcTimeDifference(res.to, new Date());
           if (hours < 1) {
             //booking checkout time has already passed, so scheduler has skipped the notification, so we send here
-            promises.push(sendCheckinReminder(res, res.assets.length));
+            promises.push(sendCheckinReminder(res, res.assets.length, hints));
           }
         }
       }
@@ -256,7 +258,7 @@ export const upsertBooking = async (
     const when = new Date(res.from);
     when.setHours(when.getHours() - 1); //1hour before send checkout reminder
     await scheduleNextBookingJob({
-      data: { id: res.id },
+      data: { id: res.id, hints },
       key: schedulerKeys.checkoutReminder,
       when,
     });
