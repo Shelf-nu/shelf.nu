@@ -122,6 +122,16 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { category } = item;
   const { bookindId } = useParams();
   const isChecked = item?.bookings?.some((b) => b.id === bookindId) ?? false;
+  const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
+
+  const isCompleted = useMemo(
+    () => booking.status === BookingStatus.COMPLETE,
+    [booking.status]
+  );
+  const isArchived = useMemo(
+    () => booking.status === BookingStatus.ARCHIVED,
+    [booking.status]
+  );
 
   return (
     <>
@@ -174,7 +184,9 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
       </Td>
       {/* If asset status is different than available, we need to show a label */}
       <Td>
-        <AvailabilityLabel asset={item} isChecked={isChecked} />
+        {!isCompleted && !isArchived ? (
+          <AvailabilityLabel asset={item} isChecked={isChecked} />
+        ) : null}
       </Td>
       <Td className="hidden md:table-cell">
         {category ? (

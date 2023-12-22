@@ -32,9 +32,7 @@ export function AssetStatusBadge({
 }) {
   // If the asset is not available to book, it is unavailable
   // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil
-  if (!availableToBook) {
-    return <Badge color="#B42318">Unavailable</Badge>;
-  }
+  // @TODO - we should add the little badge when assets are unavailable to book
   return (
     <Badge color={assetStatusColorMap(status)}>
       {userFriendlyAssetStatus(status)}

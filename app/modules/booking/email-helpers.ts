@@ -28,8 +28,14 @@ export const baseBookingEmailContent = ({
   emailContent: string;
   hints: ClientHint;
 }) => {
-  const fromDate = getDateTimeFormatFromHints(hints).format(from);
-  const toDate = getDateTimeFormatFromHints(hints).format(to);
+  const fromDate = getDateTimeFormatFromHints(hints, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(from);
+  const toDate = getDateTimeFormatFromHints(hints, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(to);
   return `Howdy,
 
 ${emailContent}
