@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Invite, InviteStatuses } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/settings.team";
 import { tw } from "~/utils";
 import { TeamUsersActionsDropdown } from "./users-actions-dropdown";
@@ -14,7 +14,18 @@ export const UsersTable = () => {
     <div className="mb-14 flex flex-col gap-6 xl:flex-row xl:gap-16">
       <div className="xl:w-1/4">
         <div className="text-text-sm font-medium text-gray-700">Users</div>
-        <p className="text-sm text-gray-600">User linked to your workspace.</p>
+        <p className="text-sm text-gray-600">
+          Users by default have a mail registered in shelf and can get
+          reminders, log in or perform other actions. Read more about our{" "}
+          <Link
+            to="https://www.shelf.nu/knowledge-base/user-roles-and-their-permissions"
+            target="_blank"
+            className="underline"
+          >
+            permissions here
+          </Link>
+          .
+        </p>
       </div>
       <div className="flex flex-1 flex-col gap-2">
         <div
