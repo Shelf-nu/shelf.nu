@@ -7,11 +7,15 @@ import {
   AssetStatus,
 } from "@prisma/client";
 import { db } from "~/database";
+import { calcTimeDifference } from "~/utils/date-fns";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
-import { assetReservedEmailContent } from "./email-helpers";
+import {
+  assetReservedEmailContent,
+  sendCheckinReminder,
+} from "./email-helpers";
 import type { SchedulerData } from "./types";
 
 const cancelSheduler = async (b?: Booking | null) => {
@@ -153,10 +157,6 @@ export const upsertBooking = async (
       }
       //cancel any active schedulers
       await cancelSheduler(oldBooking);
-    } else if (booking.status === BookingStatus.ONGOING) {
-      //booking is ongoing, make asset checked out
-      //no need to worry about overdue as the previous state is always ongoing
-      newAssetStatus = AssetStatus.CHECKED_OUT;
     }
 
     //update
@@ -165,6 +165,16 @@ export const upsertBooking = async (
       data,
       include: { ...commonInclude, assets: true },
     });
+
+    if (
+      booking.status === BookingStatus.ONGOING ||
+      (res.status === BookingStatus.ONGOING && booking.assetIds?.length)
+    ) {
+      //booking status is updated to ongoing or assets added to ongoing booking, make asset checked out
+      //no need to worry about overdue as the previous state is always ongoing
+      newAssetStatus = AssetStatus.CHECKED_OUT;
+    }
+
     const promises = [];
     if (newAssetStatus) {
       promises.push(updateBookinAssetStates(res, newAssetStatus));
@@ -182,36 +192,43 @@ export const upsertBooking = async (
       );
     }
     /** Handle email notification when booking status changes */
-    if (
-      data.status &&
-      (data.status === BookingStatus.RESERVED ||
-        data.status === BookingStatus.COMPLETE)
-    ) {
+    if (data.status) {
       const email = res.custodianUser?.email;
       if (email) {
-        let subject = `Booking reserved`;
-        let text = assetReservedEmailContent({
-          bookingName: res.name,
-          assetsCount: res.assets.length,
-          custodian:
-            `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
-            (res.custodianTeamMember?.name as string),
-          from: res.from?.toISOString() as string,
-          to: res.to?.toISOString() as string,
-          bookingId: res.id,
-        });
+        if (
+          data.status === BookingStatus.RESERVED ||
+          data.status === BookingStatus.COMPLETE
+        ) {
+          let subject = `Booking reserved`;
+          let text = assetReservedEmailContent({
+            bookingName: res.name,
+            assetsCount: res.assets.length,
+            custodian:
+              `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
+              (res.custodianTeamMember?.name as string),
+            from: res.from?.toISOString() as string,
+            to: res.to?.toISOString() as string,
+            bookingId: res.id,
+          });
 
-        if (data.status === BookingStatus.COMPLETE) {
-          subject = `Booking complete`;
-          text = `Your checkin complete for booking ${res.name}`;
+          if (data.status === BookingStatus.COMPLETE) {
+            subject = `Booking complete`;
+            text = `Your checkin complete for booking ${res.name}`;
+          }
+          promises.push(
+            sendEmail({
+              to: email,
+              subject,
+              text,
+            })
+          );
+        } else if (data.status === BookingStatus.ONGOING && res.to) {
+          const { hours } = calcTimeDifference(res.to, new Date());
+          if (hours < 1) {
+            //booking checkout time has already passed, so scheduler has skipped the notification, so we send here
+            promises.push(sendCheckinReminder(res, res.assets.length));
+          }
         }
-        promises.push(
-          sendEmail({
-            to: email,
-            subject,
-            text,
-          })
-        );
       }
     }
 

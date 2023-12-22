@@ -1,5 +1,7 @@
+import type { Booking, TeamMember, User } from "@prisma/client";
 import { SERVER_URL } from "~/utils";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
+import { sendEmail } from "~/utils/mail.server";
 
 /**
  * THis is the base content of the bookings related emails.
@@ -128,3 +130,26 @@ export const checkinReminderEmailContent = ({
       new Date()
     )} minutes.`,
   });
+
+export const sendCheckinReminder = async (
+  booking: Booking & {
+    custodianTeamMember: TeamMember | null;
+    custodianUser: User | null;
+  },
+  assetCount: number
+) => {
+  await sendEmail({
+    to: booking.custodianUser!.email,
+    subject: `Checkin reminder - shelf.nu`,
+    text: checkinReminderEmailContent({
+      bookingName: booking.name,
+      assetsCount: assetCount,
+      custodian:
+        `${booking.custodianUser!.firstName} ${booking.custodianUser
+          ?.lastName}` || (booking.custodianTeamMember?.name as string),
+      from: booking.from!.toISOString(),
+      to: booking.to!.toISOString(),
+      bookingId: booking.id,
+    }),
+  });
+};

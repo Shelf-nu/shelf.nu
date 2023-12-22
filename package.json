@@ -29,7 +29,8 @@
     "lint:fix": "npm run lint -- --fix",
     "format-code": "npm run prettier:fix & npm run lint:fix",
     "stripe:webhook": "stripe listen --forward-to localhost:3000/api/stripe-webhook",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "precommit": "npm run db:generate-type && npm run lint:fix && npm run format && npm run typecheck"
   },
   "dependencies": {
     "@markdoc/markdoc": "^0.2.2",
