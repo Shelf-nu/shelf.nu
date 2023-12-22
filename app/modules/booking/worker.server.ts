@@ -5,8 +5,8 @@ import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
 import {
-  checkinReminderEmailContent,
   checkoutReminderEmailContent,
+  sendCheckinReminder,
 } from "./email-helpers";
 import { scheduleNextBookingJob } from "./service.server";
 import type { SchedulerData } from "./types";
@@ -46,9 +46,10 @@ export const registerBookingWorkers = () => {
             custodian:
               `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
               (booking.custodianTeamMember?.name as string),
-            from: booking.from.toISOString(),
-            to: booking.to.toISOString(),
+            from: booking.from,
+            to: booking.to,
             bookingId: booking.id,
+            hints: data.hints,
           }),
         }).catch((err) => {
           console.error(`failed to send checkoutReminder email`, err);
@@ -98,20 +99,11 @@ export const registerBookingWorkers = () => {
         booking.to &&
         booking.status === BookingStatus.ONGOING
       ) {
-        await sendEmail({
-          to: email,
-          subject: `Checkin reminder - shelf.nu`,
-          text: checkinReminderEmailContent({
-            bookingName: booking.name,
-            assetsCount: booking._count.assets, // @TODO for some reason this returns 0. Works on checkout reminder but not here
-            custodian:
-              `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
-              (booking.custodianTeamMember?.name as string),
-            from: booking.from.toISOString(),
-            to: booking.to.toISOString(),
-            bookingId: booking.id,
-          }),
-        }).catch((err) => {
+        await sendCheckinReminder(
+          booking,
+          booking._count.assets,
+          data.hints
+        ).catch((err) => {
           console.error(`failed to send checkin reminder email`, err);
         });
       }

@@ -212,6 +212,9 @@ export async function getAssets({
       message: "booking dates are needed to hide unavailable assets",
     });
   }
+  if (bookingFrom && bookingTo && where.asset) {
+    where.asset.availableToBook = true;
+  }
 
   if (tagsIds && tagsIds.length > 0 && where.asset) {
     where.asset.tags = {

@@ -7,6 +7,7 @@ import {
   requireOrganisationId,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
+import { getClientHint } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 
 /**
@@ -19,11 +20,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
 
-  const booking = await upsertBooking({
-    organizationId,
-    name: "Draft booking",
-    creatorId: authSession.userId,
-  });
+  const booking = await upsertBooking(
+    {
+      organizationId,
+      name: "Draft booking",
+      creatorId: authSession.userId,
+    },
+    getClientHint(request)
+  );
 
   return redirect(`/bookings/${booking.id}`, {
     headers: [
