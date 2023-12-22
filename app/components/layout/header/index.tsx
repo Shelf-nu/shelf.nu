@@ -26,7 +26,7 @@ export default function Header({
 
   return header ? (
     <header className="-mx-4 bg-white">
-      <div className="mb-4">
+      <div>
         <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:py-3">
           <Breadcrumbs />
           <div className="hidden shrink-0 gap-3 md:flex">{children}</div>

@@ -49,11 +49,12 @@ export async function requireOrganisationId(
    * In this case what we do is we set the current organization to the first one in the list
    */
   const userOrganizations = await getUserOrganizations({ userId });
-  const userOrganizationIds = userOrganizations.map((org) => org.id);
-  const personalOrganization = userOrganizations.find(
+  const organizations = userOrganizations.map((uo) => uo.organization);
+  const userOrganizationIds = organizations.map((org) => org.id);
+  const personalOrganization = organizations.find(
     (org) => org.type === "PERSONAL"
   );
-  const currentOrganization = userOrganizations.find(
+  const currentOrganization = organizations.find(
     (org) => org.id === organizationId
   );
 
@@ -88,8 +89,8 @@ export async function requireOrganisationId(
 
   return {
     organizationId,
-    organizations: userOrganizations,
+    organizations,
+    userOrganizations,
     currentOrganization,
-    personalOrganization,
   };
 }

@@ -38,6 +38,7 @@ declare global {
       SMTP_HOST: string;
       SMTP_USER: string;
       MAINTENANCE_MODE: string;
+      DATABASE_URL: string;
     }
   }
 }
@@ -79,6 +80,7 @@ export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
 export const SMTP_PWD = getEnv("SMTP_PWD");
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_USER = getEnv("SMTP_USER");
+export const DATABASE_URL = getEnv("DATABASE_URL");
 
 /**
  * Shared envs
