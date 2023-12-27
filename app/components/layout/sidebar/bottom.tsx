@@ -18,7 +18,7 @@ interface Props {
   isSidebarMinimized: boolean;
 }
 
-export default function SidebarBottom({ user, isSidebarMinimized }: Props) {
+export default function SidebarBottom({ user }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   return (
@@ -26,26 +26,22 @@ export default function SidebarBottom({ user, isSidebarMinimized }: Props) {
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger
           onClick={() => setDropdownOpen((prev) => !prev)}
-          className="outline-none focus-visible:border-0"
+          className="w-full outline-none focus-visible:border-0"
         >
           <div
-            className={`flex items-center justify-between gap-x-5 rounded-lg border-[1px] border-gray-200 p-2 hover:bg-gray-100 ${
-              isSidebarMinimized && "w-[57px]"
-            }`}
+            className={`flex w-full items-center justify-between gap-x-3 rounded border-[1px] border-gray-200 p-2 hover:bg-gray-100`}
           >
-            <div className="flex gap-3">
-              <ProfilePicture width="w-10" height="h-10" />
-              <div className="user-credentials flex-1 text-left text-[14px] transition-all duration-200 ease-linear">
-                <div className="line-clamp-1 block text-ellipsis font-semibold">
-                  {user.username}
-                </div>
-                <p
-                  className="line-clamp-1 block text-ellipsis"
-                  data-test-id="userEmail"
-                >
-                  {user.email}
-                </p>
+            <ProfilePicture width="w-8" height="h-8" />
+            <div className="user-credentials flex-1 text-left text-[14px] transition-all duration-200 ease-linear">
+              <div className="line-clamp-1 block text-ellipsis font-semibold">
+                {user.username}
               </div>
+              <p
+                className="line-clamp-1 block text-ellipsis"
+                data-test-id="userEmail"
+              >
+                {user.email}
+              </p>
             </div>
 
             <i
@@ -60,7 +56,7 @@ export default function SidebarBottom({ user, isSidebarMinimized }: Props) {
 
         <DropdownMenuContent
           align="end"
-          className="order ml-[16px] w-[260px] rounded-md bg-white p-0 text-right"
+          className="order ml-[16px] w-[280px] rounded-md bg-white p-0 text-right"
         >
           <DropdownMenuItem className="border-b-[1px] border-gray-200 px-4 py-3">
             <Button
