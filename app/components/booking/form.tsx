@@ -18,7 +18,7 @@ import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
-import { ControlledActionButton } from "../subscription/premium-feature-button";
+import { ControlledActionButton } from "../subscription/controlled-action-button";
 
 type FormData = {
   id?: string;
@@ -95,7 +95,7 @@ export function BookingForm({
               {/* @ts-ignore */}
               {routeIsNewBooking ? null : <ActionsDropdown booking={booking} />}
 
-              {!isReserved && !isOngoing && !isCompleted && !isOverdue ? (
+              {isDraft ? (
                 <Button
                   type="submit"
                   disabled={disabled}

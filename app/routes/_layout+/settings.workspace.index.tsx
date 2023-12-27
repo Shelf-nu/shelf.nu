@@ -9,7 +9,7 @@ import { ListItem } from "~/components/list/list-item";
 import { Badge } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import { UserBadge } from "~/components/shared/user-badge";
-import { ControlledActionButton } from "~/components/subscription/premium-feature-button";
+import { ControlledActionButton } from "~/components/subscription/controlled-action-button";
 import { Table, Td, Th } from "~/components/table";
 import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
 import { db } from "~/database";

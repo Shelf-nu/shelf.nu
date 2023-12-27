@@ -12,7 +12,7 @@ import { ChevronRight } from "../icons";
 import { List } from "../list";
 import { Badge, Button } from "../shared";
 import TextualDivider from "../shared/textual-divider";
-import { ControlledActionButton } from "../subscription/premium-feature-button";
+import { ControlledActionButton } from "../subscription/controlled-action-button";
 import { Td, Th } from "../table";
 
 export function BookingAssetsColumn() {
@@ -45,7 +45,7 @@ export function BookingAssetsColumn() {
       <div className=" w-full">
         <TextualDivider text="Assets" className="mb-8 lg:hidden" />
         <div className="mb-3 flex gap-4 lg:hidden">
-          <ControlledActionButton
+          {/* <ControlledActionButton
             canUseFeature={
               !!booking.from && !!booking.to && !isCompleted && !isArchived
             }
@@ -62,7 +62,7 @@ export function BookingAssetsColumn() {
               className: "whitespace-nowrap",
             }}
             skipCta={true}
-          />
+          /> */}
         </div>
         <div className="flex flex-col">
           {/* THis is a fake table header */}

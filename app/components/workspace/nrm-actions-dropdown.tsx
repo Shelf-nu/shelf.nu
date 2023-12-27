@@ -12,7 +12,7 @@ import {
 import type { loader } from "~/routes/_layout+/settings.team";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { DeleteMember } from "./delete-member";
-import { ControlledActionButton } from "../subscription/premium-feature-button";
+import { ControlledActionButton } from "../subscription/controlled-action-button";
 
 export function TeamMembersActionsDropdown({
   teamMember,

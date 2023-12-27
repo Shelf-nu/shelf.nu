@@ -1,4 +1,4 @@
-import { ControlledActionButton } from "../subscription/premium-feature-button";
+import { ControlledActionButton } from "../subscription/controlled-action-button";
 
 export const ImportButton = ({
   canImportAssets,

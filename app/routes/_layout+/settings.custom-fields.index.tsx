@@ -7,7 +7,7 @@ import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared";
-import { ControlledActionButton } from "~/components/subscription/premium-feature-button";
+import { ControlledActionButton } from "~/components/subscription/controlled-action-button";
 import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";
 import {
