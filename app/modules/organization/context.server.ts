@@ -52,14 +52,18 @@ export async function requireOrganisationId(
   try {
     const organizationId = await getSelectedOrganizationIdCookie(request);
 
-    /** There could be a case when you get removed from an organization while browsing it.
-     * In this case what we do is we set the current organization to the first one in the list
-     */
-    const userOrganizations = await getUserOrganizations({ userId });
-    const userOrganizationIds = userOrganizations.map((org) => org.id);
-    const personalOrganization = userOrganizations.find(
-      (org) => org.type === "PERSONAL"
-    );
+
+  /** There could be a case when you get removed from an organization while browsing it.
+   * In this case what we do is we set the current organization to the first one in the list
+   */
+  const userOrganizations = await getUserOrganizations({ userId });
+  const userOrganizationIds = userOrganizations.map((org) => org.id);
+  const personalOrganization = userOrganizations.find(
+    (org) => org.type === "PERSONAL"
+  );
+  const currentOrganization = userOrganizations.find(
+    (org) => org.id === organizationId
+  );
 
     if (!personalOrganization) {
       throw new ShelfStackError({
@@ -90,7 +94,12 @@ export async function requireOrganisationId(
       });
     }
 
-    return { organizationId, organizations: userOrganizations };
+    return {
+      organizationId,
+      organizations: userOrganizations,
+      currentOrganization,
+      personalOrganization,
+    }
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });

@@ -36,11 +36,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const teamMembers = await db.teamMember.findMany({
     where: {
       deletedAt: null,
-      organizations: {
-        some: {
-          id: organizationId,
-        },
-      },
+      organizationId,
     },
     include: {
       user: true,

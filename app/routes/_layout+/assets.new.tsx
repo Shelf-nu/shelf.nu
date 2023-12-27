@@ -22,6 +22,7 @@ import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, error, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
@@ -119,9 +120,7 @@ export async function action({ request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -137,7 +136,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
 
-  const asset = await createAsset({
+  const rsp = await createAsset({
     organizationId,
     title,
     description,
@@ -149,6 +148,21 @@ export async function action({ request }: LoaderFunctionArgs) {
     valuation,
     customFieldsValues,
   });
+
+  if (rsp.error) {
+    return json(
+      {
+        errors: {
+          title: rsp.error,
+        },
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
+  const { asset } = rsp;
 
   // Not sure how to handle this failing as the asset is already created
   await updateAssetMainImage({
@@ -174,9 +188,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   }
 
   return redirect(`/assets`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+    headers: [setCookie(await commitAuthSession(request, { authSession }))],
   });
 }
 

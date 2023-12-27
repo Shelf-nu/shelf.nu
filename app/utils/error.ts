@@ -88,3 +88,22 @@ export function makeShelfError(cause: unknown) {
     message: "Sorry, something went wrong.",
   });
 }
+
+export function handleUniqueConstraintError(cause: any, modelName: string) {
+  if (cause?.code && cause.code === "P2002") {
+    return {
+      item: null,
+      error: {
+        message: `${modelName} name is already taken. Please choose a different name.`,
+      },
+    };
+  } else {
+    throw new ShelfStackError({
+      message: `Error creating ${modelName}: ${cause}`,
+      cause,
+      metadata: {
+        modelName,
+      },
+    });
+  }
+}

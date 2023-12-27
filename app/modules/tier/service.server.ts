@@ -1,5 +1,5 @@
-import type { Organization, User } from "@prisma/client";
 import { json } from "@remix-run/node";
+import type { Organization, OrganizationType, User } from "@prisma/client";
 import { db } from "~/database";
 import { error } from "~/utils";
 import { ShelfStackError, makeShelfError } from "~/utils/error";
@@ -10,6 +10,7 @@ import {
   canExportAssets,
   canImportAssets,
 } from "~/utils/subscription";
+import { countAcviteCustomFields } from "../custom-field";
 export async function getUserTierLimit(id: User["id"]) {
   try {
     const { tier } = await db.user.findUniqueOrThrow({
@@ -28,43 +29,47 @@ export async function getUserTierLimit(id: User["id"]) {
 }
 
 export async function assertUserCanImportAssets({
-  userId,
   organizationId,
+  organizations,
 }: {
-  userId: User["id"];
   organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
 }) {
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      tier: {
-        include: { tierLimit: true },
-      },
-      organizations: {
-        select: {
-          id: true,
-          type: true,
-        },
-      },
-    },
+  /* Check the tier limit */
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
   });
-  const currentOrg = user?.organizations.find((o) => o.id === organizationId);
-  //to have a team org you need subscription hence we only assert for personal org for now
-  if (currentOrg?.type !== "TEAM" && !canImportAssets(user?.tier?.tierLimit)) {
+
+  if (!canImportAssets(tierLimit)) {
     throw new Error("Your user cannot import assets");
   }
-  return { user };
 }
 
 export async function assertUserCanExportAssets({
-  userId,
+  organizationId,
+  organizations,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
 }) {
-  /** Get the tier limit and check if they can export */
-  const tierLimit = await getUserTierLimit(userId);
+  /* Check the tier limit */
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
 
   if (!canExportAssets(tierLimit)) {
     throw new Error("Your user cannot export assets");
@@ -72,17 +77,29 @@ export async function assertUserCanExportAssets({
 }
 
 export const assertUserCanCreateMoreCustomFields = async ({
-  userId,
+  organizationId,
+  organizations,
 }: {
-  userId: User["id"];
+  organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
 }) => {
-  /** Get the tier limit and check if they can export */
-  const tierLimit = await getUserTierLimit(userId);
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+  const totalActiveCustomFields = await countAcviteCustomFields({
+    organizationId,
+  });
+
   const canCreateMore = canCreateMoreCustomFields({
     tierLimit,
-    totalCustomFields: await db.customField.count({
-      where: { userId },
-    }),
+    totalCustomFields: totalActiveCustomFields,
   });
 
   if (!canCreateMore) {
@@ -171,3 +188,31 @@ export const assertUserCanCreateMoreOrganizations = async (userId: string) => {
   }
   return true;
 };
+
+/**
+ * @returns The tier limit of the organization's owner
+ * This is needed as the tier is based on the organization rather than the current user
+ */
+export async function getOrganizationTierLimit({
+  organizationId,
+  organizations,
+}: {
+  organizationId?: string;
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
+}) {
+  /** Find the current organization as we need the owner */
+  const currentOrganization = organizations.find(
+    (org) => org.id === organizationId
+  );
+  /** We get the owner ID so we can check if the organization has permissions for importing */
+  const ownerId = currentOrganization?.userId as string;
+
+  /** Get the tier limit and check if they can export */
+  return await getUserTierLimit(ownerId);
+}

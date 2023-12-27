@@ -28,11 +28,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (typeof signedUrl !== "string")
     return json({ error: signedUrl, asset: null });
 
-  const asset = await updateAsset({
+  const rsp = await updateAsset({
     id: assetId,
     mainImage: signedUrl,
     mainImageExpiration: oneDayFromNow(),
     userId,
   });
+  // @ts-ignore
+  // @TODO fix this. MIght need to modify how handling the error works
+  const { asset } = rsp;
   return json({ asset, error: "" });
 };

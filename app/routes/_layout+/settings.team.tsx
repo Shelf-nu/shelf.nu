@@ -110,11 +110,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         db.teamMember.findMany({
           where: {
             deletedAt: null,
-            organizations: {
-              some: {
-                id: organizationId,
-              },
-            },
+            organizationId,
             userId: null,
             receivedInvites: {
               none: {

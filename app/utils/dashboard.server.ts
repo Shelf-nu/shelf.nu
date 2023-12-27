@@ -1,7 +1,9 @@
 // import type { Asset } from "@prisma/client";
 
 import type { Custody, Prisma } from "@prisma/client";
+import { db } from "~/database";
 import type { TeamMemberWithUser } from "~/modules/team-member/types";
+import { defaultUserCategories } from "~/modules/user";
 
 type Asset = Prisma.AssetGetPayload<{
   include: {
@@ -342,4 +344,65 @@ export async function groupAssetsByCategory({ assets }: { assets: Asset[] }) {
   const top6Categories = chartData.slice(0, 6);
 
   return top6Categories;
+}
+
+export async function checklistOptions({
+  assets,
+  organizationId,
+}: {
+  assets: Asset[];
+  organizationId: string;
+}) {
+  const [
+    categoriesCount,
+    tagsCount,
+    teamMembersCount,
+    custodiesCount,
+    customFieldsCount,
+  ] = await db.$transaction([
+    /** Get the categories */
+    db.category.count({
+      where: {
+        organizationId,
+        name: {
+          notIn: defaultUserCategories.map((uc) => uc.name),
+        },
+      },
+    }),
+
+    db.tag.count({
+      where: {
+        organizationId,
+      },
+    }),
+
+    db.teamMember.count({
+      where: {
+        organizationId,
+      },
+    }),
+
+    db.teamMember.count({
+      where: {
+        organizationId,
+        custodies: {
+          some: {},
+        },
+      },
+    }),
+    db.customField.count({
+      where: {
+        organizationId,
+      },
+    }),
+  ]);
+
+  return {
+    hasAssets: assets.length > 0,
+    hasCategories: categoriesCount > 0,
+    hasTags: tagsCount > 0,
+    hasTeamMembers: teamMembersCount > 0,
+    hasCustodies: custodiesCount > 0,
+    hasCustomFields: customFieldsCount > 0,
+  };
 }

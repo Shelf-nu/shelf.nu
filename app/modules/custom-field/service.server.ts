@@ -7,6 +7,7 @@ import {
 import { db } from "~/database";
 import { badRequest } from "~/utils";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
+import { handleUniqueConstraintError } from "~/utils/error";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -20,26 +21,31 @@ export async function createCustomField({
   userId,
   options = [],
 }: CustomFieldDraftPayload) {
-  return db.customField.create({
-    data: {
-      name,
-      helpText,
-      type,
-      required,
-      active,
-      options,
-      organization: {
-        connect: {
-          id: organizationId,
+  try {
+    const customField = await db.customField.create({
+      data: {
+        name,
+        helpText,
+        type,
+        required,
+        active,
+        options,
+        organization: {
+          connect: {
+            id: organizationId,
+          },
+        },
+        createdBy: {
+          connect: {
+            id: userId,
+          },
         },
       },
-      createdBy: {
-        connect: {
-          id: userId,
-        },
-      },
-    },
-  });
+    });
+    return { customField, error: null };
+  } catch (cause) {
+    return handleUniqueConstraintError(cause, "Custom field");
+  }
 }
 
 export async function getFilteredAndPaginatedCustomFields({
@@ -113,22 +119,27 @@ export async function updateCustomField(payload: {
   active?: CustomField["active"];
   options?: CustomField["options"];
 }) {
-  const { id, name, helpText, required, active, options } = payload;
-  //dont ever update type
-  //updating type would require changing all custom field values to that type
-  //which might fail when changing to incompatible type hence need a careful definition
-  const data = {
-    name,
-    helpText,
-    required,
-    active,
-    options,
-  };
+  try {
+    const { id, name, helpText, required, active, options } = payload;
+    //dont ever update type
+    //updating type would require changing all custom field values to that type
+    //which might fail when changing to incompatible type hence need a careful definition
+    const data = {
+      name,
+      helpText,
+      required,
+      active,
+      options,
+    };
 
-  return await db.customField.update({
-    where: { id },
-    data: data,
-  });
+    const customField = await db.customField.update({
+      where: { id },
+      data: data,
+    });
+    return { customField, error: null };
+  } catch (cause) {
+    return handleUniqueConstraintError(cause, "Custom field");
+  }
 }
 
 export async function upsertCustomField(
@@ -139,13 +150,18 @@ export async function upsertCustomField(
   for (const def of definitions) {
     let existingCustomField = await db.customField.findFirst({
       where: {
-        name: def.name,
+        name: {
+          equals: def.name,
+          mode: "insensitive",
+        },
         organizationId: def.organizationId,
       },
     });
 
     if (!existingCustomField) {
-      const newCustomField = await createCustomField(def);
+      // @TODO not sure how to handle this case
+      // @ts-ignore
+      const { customField: newCustomField } = await createCustomField(def);
       customFields[def.name] = newCustomField;
     } else {
       if (existingCustomField.type !== def.type) {
@@ -162,10 +178,15 @@ export async function upsertCustomField(
           const options = (existingCustomField?.options || []).concat(
             Array.from(new Set(newOptions))
           );
-          existingCustomField = await updateCustomField({
+          // @ts-ignore
+          const rsp: {
+            customField: CustomField;
+            error: null;
+          } = await updateCustomField({
             id: existingCustomField.id,
             options,
           });
+          existingCustomField = rsp.customField;
         }
       }
       customFields[def.name] = existingCustomField;
@@ -221,5 +242,15 @@ export async function getActiveCustomFields({
       organizationId,
       active: true,
     },
+  });
+}
+
+export async function countAcviteCustomFields({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  return await db.customField.count({
+    where: { organizationId, active: true },
   });
 }

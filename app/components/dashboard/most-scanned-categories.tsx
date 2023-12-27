@@ -33,7 +33,7 @@ export default function MostScannedCategories() {
         <Table className=" border border-gray-200">
           <tbody>
             {mostScannedCategories.map((category, i) => (
-              <Tr key={category.name + i}>
+              <Tr key={category.name + i} className="h-[73px]">
                 {/* @TODO resolve this issue
             @ts-ignore */}
                 <Row item={category} />

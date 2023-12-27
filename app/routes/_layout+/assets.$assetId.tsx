@@ -40,6 +40,7 @@ import {
   getRequiredParam,
   tw,
   userFriendlyAssetStatus,
+  isLink,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
@@ -337,24 +338,39 @@ export default function AssetDetailsPage() {
               />
               <Card>
                 <ul className="item-information">
-                  {customFieldsValues.map((field, index) => (
-                    <li
-                      className={tw(
-                        "flex justify-between",
-                        index === customFieldsValues.length - 1 ? "" : "mb-4 "
-                      )}
-                      key={field.id}
-                    >
-                      <span className="text-[12px] font-medium text-gray-600">
-                        {field.customField.name}
-                      </span>
-                      <div className="max-w-[250px] text-end">
-                        {getCustomFieldDisplayValue(
-                          field.value as unknown as ShelfAssetCustomFieldValueType["value"]
+                  {customFieldsValues.map((field, index) => {
+                    const customFieldDisplayValue = getCustomFieldDisplayValue(
+                      field.value as unknown as ShelfAssetCustomFieldValueType["value"]
+                    );
+                    return (
+                      <li
+                        className={tw(
+                          "flex justify-between",
+                          index === customFieldsValues.length - 1 ? "" : "mb-4 "
                         )}
-                      </div>
-                    </li>
-                  ))}
+                        key={field.id}
+                      >
+                        <span className="text-[12px] font-medium text-gray-600">
+                          {field.customField.name}
+                        </span>
+                        <div className="max-w-[250px] text-end">
+                          {isLink(customFieldDisplayValue) ? (
+                            <Button
+                              role="link"
+                              variant="link"
+                              className="text-gray text-end font-normal underline hover:text-gray-600"
+                              target="_blank"
+                              to={`${customFieldDisplayValue}?ref=shelf-webapp`}
+                            >
+                              {customFieldDisplayValue}
+                            </Button>
+                          ) : (
+                            customFieldDisplayValue
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               </Card>
             </>

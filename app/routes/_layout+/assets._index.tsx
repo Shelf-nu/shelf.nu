@@ -1,10 +1,4 @@
-import type {
-  Category,
-  Asset,
-  Tag,
-  Custody,
-  Organization,
-} from "@prisma/client";
+import type { Category, Asset, Tag, Custody } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
@@ -34,6 +28,7 @@ import { db } from "~/database";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
+import { getOrganizationTierLimit } from "~/modules/tier";
 import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
@@ -77,7 +72,8 @@ export interface IndexResponse {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId, organizations, currentOrganization } =
+    await requireOrganisationId(authSession, request);
 
   const { userId } = authSession;
 
@@ -100,6 +96,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
               id: true,
               name: true,
               type: true,
+              owner: {
+                select: {
+                  tier: {
+                    include: { tierLimit: true },
+                  },
+                },
+              },
             },
           },
         },
@@ -107,12 +110,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
-  const organizations = user?.userOrganizations.map(
-    (userOrganization) => userOrganization.organization
-  ) as Organization[];
-  const currentOrganization = organizations.find(
-    (org) => org.id === organizationId
-  );
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
 
   const {
     search,
@@ -174,8 +175,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       next,
       prev,
       modelName,
-      canExportAssets: canExportAssets(user?.tier?.tierLimit),
-      canImportAssets: canImportAssets(user?.tier?.tierLimit),
+      canExportAssets: canExportAssets(tierLimit),
+      canImportAssets: canImportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
         title: "Search your asset database",

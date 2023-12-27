@@ -129,7 +129,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAuthSession(request);
 
-  const title = "User Settings";
+  const title = "Account Details";
 
   return json({ title });
 }
@@ -137,6 +137,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
+
+export const handle = {
+  breadcrumb: () => "Account Details",
+};
 
 export default function UserPage() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);

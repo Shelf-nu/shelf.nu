@@ -10,9 +10,12 @@ import { Badge } from "~/components/shared";
 import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
 import { Td, Th } from "~/components/table";
 import { requireAuthSession } from "~/modules/auth";
-import { getFilteredAndPaginatedCustomFields } from "~/modules/custom-field";
+import {
+  countAcviteCustomFields,
+  getFilteredAndPaginatedCustomFields,
+} from "~/modules/custom-field";
 import { requireOrganisationId } from "~/modules/organization/context.server";
-import { getUserTierLimit } from "~/modules/tier";
+import { getOrganizationTierLimit } from "~/modules/tier";
 
 import {
   getCurrentSearchParams,
@@ -32,8 +35,10 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -48,7 +53,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       search,
     });
 
-  const tierLimit = await getUserTierLimit(userId);
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
 
   const totalPages = Math.ceil(totalCustomFields / perPageParam);
 
@@ -59,6 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     singular: "custom fields",
     plural: "custom Fields",
   };
+
   return json(
     {
       header,
@@ -73,7 +82,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       modelName,
       canCreateMoreCustomFields: canCreateMoreCustomFields({
         tierLimit,
-        totalCustomFields,
+        totalCustomFields: await countAcviteCustomFields({ organizationId }),
       }),
     },
     {
@@ -95,7 +104,7 @@ export default function CustomFieldsIndexPage() {
           buttonContent={{
             title: "New Custom Field",
             message:
-              "You are not able to create more custom fields within your current plan.",
+              "You are not able to create more active custom fields within your current plan.",
           }}
           buttonProps={{
             to: "new",
