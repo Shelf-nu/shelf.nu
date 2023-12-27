@@ -180,6 +180,35 @@ dialog {
   display: none;
 }
 
+/*removing arrows from valuation input field (type = "number")*/
+.valuation-input::-webkit-outer-spin-button,
+.valuation-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+.valuation-input {
+  -moz-appearance: textfield;
+}
 .react-tags {
   @apply bg-white;
+}
+
+.fill-tremor-content-emphasis {
+  @apply text-[24px] font-medium text-gray-900;
+}
+
+.onboarding-checklist .completed {
+  @apply border-2 border-primary-600 bg-primary-50 rounded;
+}
+.onboarding-checklist .completed p {
+  @apply text-primary-700;
+}
+.onboarding-checklist .completed h6 {
+  @apply text-primary-800;
+}
+
+.onboarding-checklist .completed i {
+  @apply block;
 }

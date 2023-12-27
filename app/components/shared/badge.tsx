@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { tw } from "~/utils";
 
 export const Badge = ({
@@ -6,7 +7,7 @@ export const Badge = ({
   noBg = false,
   withDot = true,
 }: {
-  children: string;
+  children: string | ReactNode;
   color: string;
   noBg?: boolean;
   withDot?: boolean;

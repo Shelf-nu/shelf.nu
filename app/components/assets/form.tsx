@@ -1,5 +1,11 @@
 import type { Asset, Qr } from "@prisma/client";
-import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  Link,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import type { Tag } from "react-tag-autocomplete";
 import { useZorm } from "react-zorm";
@@ -32,6 +38,10 @@ export const NewAssetFormSchema = z.object({
   currentLocationId: z.string().optional(),
   qrId: z.string().optional(),
   tags: z.string().optional(),
+  valuation: z
+    .string()
+    .optional()
+    .transform((val) => (val ? +val : null)),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -40,6 +50,7 @@ interface Props {
   category?: Asset["categoryId"];
   location?: Asset["locationId"];
   description?: Asset["description"];
+  valuation?: Asset["valuation"];
   qrId?: Qr["id"] | null;
   tags?: Tag[];
 }
@@ -48,6 +59,7 @@ export const AssetForm = ({
   title,
   category,
   description,
+  valuation,
   qrId,
   tags,
 }: Props) => {
@@ -78,6 +90,15 @@ export const AssetForm = ({
   const [, validateFile] = useAtom(validateFileAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
+  const { currency } = useLoaderData<typeof loader>();
+  const actionData = useActionData<{
+    errors?: {
+      title?: {
+        message: string;
+      };
+    };
+  }>();
+
   return (
     <Form
       ref={zo.ref}
@@ -98,7 +119,9 @@ export const AssetForm = ({
           hideLabel
           name={zo.fields.title()}
           disabled={disabled}
-          error={zo.errors.title()?.message}
+          error={
+            actionData?.errors?.title?.message || zo.errors.title()?.message
+          }
           autoFocus
           onChange={updateDynamicTitle}
           className="w-full"
@@ -183,7 +206,7 @@ export const AssetForm = ({
             </Link>
           </p>
         }
-        className="pt-[10px]"
+        className="border-b-0 py-[10px]"
         required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
       >
         <DynamicSelect
@@ -216,6 +239,38 @@ export const AssetForm = ({
             </div>
           )}
         />
+      </FormRow>
+
+      <FormRow
+        rowLabel={"Value"}
+        subHeading={
+          <p>
+            Specify the value of assets to get an idea of the total value of
+            your inventory.
+          </p>
+        }
+        className="border-b-0 py-[10px]"
+        required={zodFieldIsRequired(FormSchema.shape.valuation)}
+      >
+        <div className="relative w-full">
+          <Input
+            type="number"
+            label="value"
+            inputClassName="pl-[70px] valuation-input"
+            hideLabel
+            name={zo.fields.valuation()}
+            disabled={disabled}
+            error={zo.errors.valuation()?.message}
+            step="any"
+            min={0}
+            className="w-full"
+            defaultValue={valuation || ""}
+            required={zodFieldIsRequired(FormSchema.shape.valuation)}
+          />
+          <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
+            {currency}
+          </span>
+        </div>
       </FormRow>
 
       <div>

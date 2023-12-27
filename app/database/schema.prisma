@@ -71,6 +71,7 @@ model Asset {
   mainImage           String?
   mainImageExpiration DateTime?
   status              AssetStatus @default(AVAILABLE)
+  valuation           Float?      @map("value") // Field to store the monetary value of an asset
 
   // Datetime
   createdAt DateTime @default(now())
@@ -93,6 +94,8 @@ model Asset {
   tags            Tag[]
   customFields    AssetCustomFieldValue[]
   assetSearchView AssetSearchView?
+
+  //@@unique([title, organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 view AssetSearchView {
@@ -129,6 +132,8 @@ model Category {
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String
+
+  //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 model Tag {
@@ -147,6 +152,8 @@ model Tag {
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+ //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 model Note {
@@ -260,6 +267,8 @@ model Location {
   organizationId String
 
   assets Asset[]
+
+ // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 // Master data for roles
@@ -282,14 +291,15 @@ model TeamMember {
   id   String @id @unique @default(cuid())
   name String
 
-  organizations   Organization[]
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
   custodies       Custody[]
   receivedInvites Invite[]
   user            User?          @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId          String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 }
 
@@ -312,14 +322,18 @@ model Organization {
   name String           @default("Personal")
   type OrganizationType @default(PERSONAL)
 
-  owner  User   @relation(fields: [userId], references: [id], onUpdate: Cascade)
-  userId String
+  owner    User     @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  userId   String
+  currency Currency @default(USD)
+
+  members TeamMember[]
+  assets  Asset[]
 
   image   Image?  @relation("orgImage", fields: [imageId], references: [id])
   imageId String? @unique
 
-  members           TeamMember[]
-  assets            Asset[]
+  // members           TeamMember[]
+  // assets            Asset[]
   locations         Location[]
   categories        Category[]
   tags              Tag[]
@@ -330,7 +344,7 @@ model Organization {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   customFields CustomField[]
-  images        Image[] @relation("owner")
+  images       Image[]       @relation("owner")
 }
 
 model UserOrganization {
@@ -411,6 +425,8 @@ model CustomField {
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
   assetCustomFieldsValues AssetCustomFieldValue[]
+
+  //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 enum CustomFieldType {
@@ -437,6 +453,29 @@ model AssetCustomFieldValue {
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+enum Currency {
+  USD // United States Dollar
+  EUR // Euro
+  GBP // British Pound Sterling
+  JPY // Japanese Yen
+  AUD // Australian Dollar
+  CAD // Canadian Dollar
+  CHF // Swiss Franc
+  CNY // Chinese Yuan
+  INR // Indian Rupee
+  ZAR // South African Rand
+  BRL // Brazilian Real
+  MXN // Mexican Peso
+  SGD // Singapore Dollar
+  NZD // New Zealand Dollar
+  SEK // Swedish Krona
+  NOK // Norwegian Krone
+  KRW // South Korean Won
+  RUB // Russian Ruble
+  HKD // Hong Kong Dollar
+  SAR // Saudi Riyal
 }
 
 enum InviteStatuses {
@@ -466,6 +505,21 @@ model Invite {
 
   // Datetime
   expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Announcement {
+  id String @id @default(cuid())
+
+  name    String
+  content String
+
+  link      String?
+  linkText  String?
+  published Boolean @default(false)
+
+  // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

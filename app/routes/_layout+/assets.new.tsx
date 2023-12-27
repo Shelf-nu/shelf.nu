@@ -16,11 +16,13 @@ import {
 } from "~/modules/asset";
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
+import { getOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
@@ -44,7 +46,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     organizationId,
     request,
   });
-
+  const { userId } = authSession;
+  const organization = await getOrganization({ id: organizationId });
   /**
    * We need to check if the QR code passed in the URL belongs to the current org
    * This is relevant whenever the user is trying to link a new asset with an existing QR code
@@ -66,6 +69,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalTags: tags.length,
     locations,
     totalLocations,
+    locations,
+    currency: organization?.currency,
     customFields,
   });
 }
@@ -117,14 +122,13 @@ export async function action({ request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
 
-  const { title, description, category, qrId, newLocationId } = result.data;
+  const { title, description, category, qrId, newLocationId, valuation } =
+    result.data;
 
   const customFieldsValues = extractCustomFieldValuesFromResults({
     result,
@@ -134,7 +138,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
 
-  const asset = await createAsset({
+  const rsp = await createAsset({
     organizationId,
     title,
     description,
@@ -143,8 +147,24 @@ export async function action({ request }: LoaderFunctionArgs) {
     locationId: newLocationId,
     qrId,
     tags,
+    valuation,
     customFieldsValues,
   });
+
+  if (rsp.error) {
+    return json(
+      {
+        errors: {
+          title: rsp.error,
+        },
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
+  const { asset } = rsp;
 
   // Not sure how to handle this failing as the asset is already created
   await updateAssetMainImage({
@@ -170,9 +190,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   }
 
   return redirect(`/assets`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+    headers: [setCookie(await commitAuthSession(request, { authSession }))],
   });
 }
 

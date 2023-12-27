@@ -19,7 +19,7 @@ export async function createTeamMember({
   return db.teamMember.create({
     data: {
       name,
-      organizations: {
+      organization: {
         connect: {
           id: organizationId,
         },
@@ -46,13 +46,18 @@ export async function createTeamMemberIfNotExists({
       .map((asset) => [asset.custodian, ""])
   );
 
+  // Handle the case where there are no teamMembers
+  if (teamMembers.has(undefined)) {
+    return {};
+  }
+
   // now we loop through the categories and check if they exist
   for (const [teamMember, _] of teamMembers) {
     const existingTeamMember = await db.teamMember.findFirst({
       where: {
         deletedAt: null,
         name: teamMember,
-        organizations: { some: { id: organizationId } },
+        organizationId,
       },
     });
 
@@ -94,7 +99,7 @@ export async function getTeamMembers({
   /** Default value of where. Takes the assetss belonging to current user */
   let where: Prisma.TeamMemberWhereInput = {
     deletedAt: null,
-    organizations: { some: { id: organizationId } },
+    organizationId,
   };
 
   /** If the search string exists, add it to the where object */

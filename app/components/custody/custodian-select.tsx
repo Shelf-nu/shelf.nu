@@ -23,10 +23,9 @@ export default function CustodianSelect() {
             className="w-[352px]"
             position="popper"
             align="start"
-            ref={(ref) => {
-              if (!ref) return;
-              ref.ontouchstart = (e) => e.preventDefault();
-            }}
+            ref={(ref) =>
+              ref?.addEventListener("touchend", (e) => e.preventDefault())
+            }
           >
             {teamMembers.length > 0 ? (
               <div className=" max-h-[320px] overflow-auto">

@@ -47,6 +47,7 @@ export const OrganizationSelect = () => {
                       imageId={org.imageId}
                       alt="img"
                       className={tw("h-6 w-6 rounded-[2px] object-cover")}
+                      updatedAt={org.updatedAt}
                     />
                   )}
 

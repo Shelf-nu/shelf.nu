@@ -80,7 +80,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     );
   }
 
-  const { name } = result.data;
+  const { name, currency } = result.data;
   const formDataFile = await unstable_parseMultipartFormData(
     request,
     unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
@@ -94,6 +94,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     name,
     image: file || null,
     userId: authSession.userId,
+    currency,
   });
 
   sendNotification({
@@ -119,7 +120,10 @@ export default function WorkspaceEditPage() {
     <>
       <Header title={hasName ? name : organization.name} />
       <div className=" items-top flex justify-between">
-        <WorkspaceForm name={organization.name || name} />
+        <WorkspaceForm
+          name={organization.name || name}
+          currency={organization.currency}
+        />
       </div>
     </>
   );

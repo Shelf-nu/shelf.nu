@@ -2,8 +2,9 @@ import type { ChangeEvent } from "react";
 import { useRef, useState } from "react";
 import { useFetcher } from "@remix-run/react";
 import type { action } from "~/routes/_layout+/assets.import";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing, tw } from "~/utils";
 import Input from "../forms/input";
+import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared";
 import {
   AlertDialog,
@@ -18,33 +19,15 @@ import {
 
 export const ImportBackup = () => (
   <>
-    <h3>Import from backup</h3>
+    <h3>Import backup from different workspace</h3>
     <p>
-      This option allows you to import assets that have been exported from
-      shelf. It can be used to restore a backup or move assets from one account
-      to another.
+      Currently this feature is provided as a service to shelf.nu users. If you
+      are interested{" "}
+      <CrispButton className={tw()} variant="link" title="Get in touch">
+        get in touch
+      </CrispButton>{" "}
+      with us and we will migrate your data for you.
     </p>
-    <br />
-    <p>This feature comes with some important limitations:</p>
-    <ul className="list-inside list-disc">
-      <li>Assets will be imported with all their relationships</li>
-      <li>Assets images will NOT be imported</li>
-      <li>
-        Assets will not be merged with existing ones. A asset with a new ID will
-        be created for each row in your CSV export
-      </li>
-      <li>
-        If you have modified the exported file, there is the possibility of the
-        import failing due to broken data
-      </li>
-      <li>
-        A new QR code will be created for all the imported assets. If you want
-        to use an existing physical code, you will need to re-link it to a new
-        asset manually
-      </li>
-    </ul>
-
-    <FileForm intent={"backup"} />
   </>
 );
 
@@ -109,7 +92,7 @@ export const ImportContent = () => (
   </>
 );
 
-const FileForm = ({ intent }: { intent: string }) => {
+export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const [agreed, setAgreed] = useState<"I AGREE" | "">("");
   const formRef = useRef<HTMLFormElement>(null);
   const fetcher = useFetcher<typeof action>();
@@ -136,6 +119,7 @@ const FileForm = ({ intent }: { intent: string }) => {
       method="post"
       ref={formRef}
       encType="multipart/form-data"
+      action={url ? url : undefined}
     >
       <Input
         type="file"

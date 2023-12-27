@@ -16,23 +16,21 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
-import {
-  createAssetsFromBackupImport,
-  createAssetsFromContentImport,
-} from "~/modules/asset";
+import { createAssetsFromContentImport } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanImportAssets } from "~/modules/tier";
-import { csvDataFromRequest } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import {
-  extractCSVDataFromBackupImport,
-  extractCSVDataFromContentImport,
-} from "~/utils/import.server";
+import { csvDataFromRequest } from "~/utils/csv.server";
+import { ShelfStackError } from "~/utils/error";
+import { extractCSVDataFromContentImport } from "~/utils/import.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
   const { userId } = authSession;
 
   const error = {
@@ -43,7 +41,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   };
 
   try {
-    await assertUserCanImportAssets({ userId, organizationId });
+    await assertUserCanImportAssets({ organizationId, organizations });
     const intent = (await request.clone().formData()).get("intent") as
       | "backup"
       | "content";
@@ -54,13 +52,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     switch (intent) {
       case "backup":
-        const backupData = extractCSVDataFromBackupImport(csvData);
-        await createAssetsFromBackupImport({
-          data: backupData,
-          userId,
-          organizationId,
+        throw new ShelfStackError({
+          message: "This feature is not available for you",
         });
-        return json({ success: true, error }, { status: 200 });
       case "content":
         const contentData = extractCSVDataFromContentImport(csvData);
         await createAssetsFromContentImport({
@@ -90,9 +84,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
-  await assertUserCanImportAssets({ userId, organizationId });
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
+  await assertUserCanImportAssets({ organizationId, organizations });
 
   return json({
     header: {

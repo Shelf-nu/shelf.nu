@@ -58,3 +58,22 @@ export class ShelfStackError extends Error {
 export function isShelfStackError(cause: unknown): cause is ShelfStackError {
   return cause instanceof ShelfStackError;
 }
+
+export function handleUniqueConstraintError(cause: any, modelName: string) {
+  if (cause?.code && cause.code === "P2002") {
+    return {
+      item: null,
+      error: {
+        message: `${modelName} name is already taken. Please choose a different name.`,
+      },
+    };
+  } else {
+    throw new ShelfStackError({
+      message: `Error creating ${modelName}: ${cause}`,
+      cause,
+      metadata: {
+        modelName,
+      },
+    });
+  }
+}

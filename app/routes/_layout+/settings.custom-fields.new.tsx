@@ -15,17 +15,20 @@ import { createCustomField } from "~/modules/custom-field";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 
-import { assertIsPost } from "~/utils";
-
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Custom Field";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const authSession = await requireAuthSession(request);
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
 
-  await assertUserCanCreateMoreCustomFields({ userId });
+  await assertUserCanCreateMoreCustomFields({ organizations, organizationId });
 
   const header = {
     title,
@@ -46,9 +49,14 @@ export const handle = {
 
 export async function action({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  assertIsPost(request);
-  await assertUserCanCreateMoreCustomFields({ userId: authSession.userId });
+  const { organizationId, organizations } = await requireOrganisationId(
+    authSession,
+    request
+  );
+  await assertUserCanCreateMoreCustomFields({
+    organizations,
+    organizationId,
+  });
 
   const formData = await request.formData();
   const result = await NewCustomFieldFormSchema.safeParseAsync(
@@ -71,7 +79,7 @@ export async function action({ request }: LoaderFunctionArgs) {
 
   const { name, helpText, required, type, active, options } = result.data;
 
-  await createCustomField({
+  const rsp = await createCustomField({
     name,
     helpText,
     required,
@@ -81,6 +89,18 @@ export async function action({ request }: LoaderFunctionArgs) {
     userId: authSession.userId,
     options,
   });
+
+  if (rsp.error) {
+    return json(
+      {
+        errors: { name: rsp.error },
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
 
   sendNotification({
     title: "Custom Field created",

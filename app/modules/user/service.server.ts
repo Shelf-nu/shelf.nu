@@ -478,7 +478,7 @@ export async function revokeAccessToOrganization({
    * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
    */
   const teamMember = await db.teamMember.findFirst({
-    where: { userId, organizations: { some: { id: organizationId } } },
+    where: { userId, organizationId },
   });
 
   const user = await db.user.update({

@@ -5,19 +5,23 @@ import { useAtom } from "jotai";
 import {
   AssetsIcon,
   CategoriesIcon,
+  GraphIcon,
   LocationMarkerIcon,
-  QuestionsIcon,
   SettingsIcon,
   SwitchIcon,
   TagsIcon,
 } from "~/components/icons/library";
-import { CrispButton } from "~/components/marketing/crisp";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
 
 const menuItemsTop = [
+  {
+    icon: <GraphIcon />,
+    to: "dashboard",
+    label: "Dashboard",
+  },
   {
     icon: <AssetsIcon />,
     to: "assets",
@@ -42,7 +46,7 @@ const menuItemsTop = [
 const menuItemsBottom = [
   {
     icon: <SettingsIcon />,
-    to: "settings",
+    to: "settings/account",
     label: "Settings",
     end: true,
   },
@@ -64,7 +68,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     isActive ? "active bg-primary-50 text-primary-600" : ""
                   )
                 }
-                to={"/admin-dashboard"}
+                to={"/admin-dashboard/users"}
                 onClick={toggleMobileNav}
                 title={"Admin dashboard"}
               >
@@ -112,25 +116,6 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
             </motion.div>
           ) : null}
           <ul className="menu mb-6">
-            <li key={"support"}>
-              <CrispButton
-                className={tw(
-                  "my-1 flex items-center justify-start gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600"
-                )}
-                variant="link"
-                width="full"
-                title="Questions/Feedback"
-              >
-                <span className="flex items-center justify-start gap-3">
-                  <i className="icon text-gray-500">
-                    <QuestionsIcon />
-                  </i>
-                  <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                    Questions/Feedback
-                  </span>
-                </span>
-              </CrispButton>
-            </li>
             {menuItemsBottom.map((item) => (
               <li key={item.label}>
                 <NavLink

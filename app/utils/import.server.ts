@@ -26,7 +26,12 @@ export function getUniqueValuesFromArrayOfObjects({
 
 /** Takes the CSV data from a `content` import and parses it into an object that we can then use to create the entries */
 export function extractCSVDataFromContentImport(data: string[][]) {
-  const keys = data[0] as string[];
+  /**
+   * The first row of the CSV contains the keys for the data
+   * We need to trim the keys to remove any whitespace and special characters and Non-printable characters as it already causes issues with in the past
+   * Non-printable character: The non-printable character you encountered at the beginning of the title property key ('\ufeff') is known as the Unicode BOM (Byte Order Mark).
+   */
+  const keys = data[0].map((key) => key.trim()); // Trim the keys
   const values = data.slice(1) as string[][];
   return values.map((entry) =>
     Object.fromEntries(

@@ -23,10 +23,12 @@ import {
 
 import { requireAuthSession, commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
+import { getOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
@@ -37,6 +39,9 @@ import { ShelfStackError } from "~/utils/error";
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
+
+  const organization = await getOrganization({ id: organizationId });
+  const { userId } = authSession;
 
   const {
     categories,
@@ -71,6 +76,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     totalTags: tags.length,
     locations,
     totalLocations,
+    currency: organization?.currency,
     customFields,
   });
 }
@@ -121,9 +127,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -134,13 +138,19 @@ export async function action({ request, params }: ActionFunctionArgs) {
     userId: authSession.userId,
   });
 
-  const { title, description, category, newLocationId, currentLocationId } =
-    result.data;
+  const {
+    title,
+    description,
+    category,
+    newLocationId,
+    currentLocationId,
+    valuation,
+  } = result.data;
 
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
 
-  await updateAsset({
+  const rsp = await updateAsset({
     id,
     title,
     description,
@@ -150,7 +160,22 @@ export async function action({ request, params }: ActionFunctionArgs) {
     currentLocationId,
     userId: authSession.userId,
     customFieldsValues,
+    valuation,
   });
+
+  if (rsp.error) {
+    return json(
+      {
+        errors: {
+          title: rsp.error,
+        },
+      },
+      {
+        status: 400,
+        headers: [setCookie(await commitAuthSession(request, { authSession }))],
+      }
+    );
+  }
 
   sendNotification({
     title: "Asset updated",
@@ -160,9 +185,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   });
 
   return redirect(`/assets/${id}`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+    headers: [setCookie(await commitAuthSession(request, { authSession }))],
   });
 }
 
@@ -184,6 +207,7 @@ export default function AssetEditPage() {
           category={asset.categoryId}
           location={asset.locationId}
           description={asset.description}
+          valuation={asset.valuation}
           tags={tags}
         />
       </div>

@@ -4,6 +4,7 @@ import {
   type ActionFunctionArgs,
 } from "@remix-run/node";
 import { Form, Link, useLoaderData } from "@remix-run/react";
+import { FileForm } from "~/components/assets/import-content";
 import { Button } from "~/components/shared";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database";
@@ -66,6 +67,30 @@ export default function OrgPage() {
           </li>
         ))}
       </ol>
+      <div>
+        <div className="flex gap-8">
+          <div className="max-w-[500px]">
+            <h3>Export assets backup</h3>
+            <Button
+              type="submit"
+              to={`/api/admin/export-org-assets/${
+                organization.id
+              }/assets-${new Date().toISOString().slice(0, 10)}.csv`}
+              download={true}
+              reloadDocument={true}
+            >
+              Export assets backup
+            </Button>
+          </div>
+          <div className="max-w-[500px]">
+            <h3>Import assets backup</h3>
+            <FileForm
+              intent="backup"
+              url={`/api/admin/import-org-assets/${organization.id}`}
+            />
+          </div>
+        </div>
+      </div>
       <div className="mt-10">
         <div className="flex justify-between">
           <div className="flex items-end gap-3">
@@ -87,7 +112,13 @@ export default function OrgPage() {
                 name="userId"
                 value={organization.owner.id}
               />
-              <Button type="submit" to={""} variant="secondary">
+              <Button
+                type="submit"
+                to={""}
+                variant="secondary"
+                name="intent"
+                value="createOrphans"
+              >
                 Generate Orphaned QR codes
               </Button>
             </Form>
