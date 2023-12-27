@@ -25,6 +25,8 @@ export default function CustodianSelect(
         id: defaultCustodianId,
         name: teamMembers.find((member) => member.id === defaultCustodianId)
           ?.name,
+        userId: teamMembers.find((member) => member.id === defaultCustodianId)
+          ?.userId,
       })
     : undefined;
 
@@ -48,7 +50,11 @@ export default function CustodianSelect(
                 {teamMembers.map((member) => (
                   <SelectItem
                     key={member.id}
-                    value={JSON.stringify({ id: member.id, name: member.name })}
+                    value={JSON.stringify({
+                      id: member.id,
+                      name: member.name,
+                      userId: member?.userId,
+                    })}
                   >
                     {member.user ? (
                       <div className="flex items-center gap-3 py-3.5">

@@ -27,6 +27,7 @@ import {
   requireOrganisationId,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
+import { getUserByID } from "~/modules/user";
 import {
   generatePageMeta,
   getCurrentSearchParams,
@@ -51,6 +52,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
   const { organizationId } = await requireOrganisationId(authSession, request);
   const bookingId = getRequiredParam(params, "bookingId");
+  const user = await getUserByID(authSession.userId);
 
   const teamMembers = await db.teamMember.findMany({
     where: {
@@ -66,6 +68,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     orderBy: {
       userId: "asc",
     },
+  });
+
+  /** We create a teamMember entry to represent the org owner.
+   * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
+   * assigning custody to users, not NRM.
+   */
+  teamMembers.push({
+    id: "owner",
+    name: "owner",
+    user: user,
+    userId: user?.id as string,
+    organizationId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
   });
 
   const booking = await getBooking({ id: bookingId });
@@ -166,7 +183,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         );
       }
 
-      const { name, custodian } = result.data;
+      const { name, custodianUserId } = result.data;
       const hints = getHints(request);
       const startDate = formData.get("startDate")!.toString();
       const endDate = formData.get("endDate")!.toString();
@@ -179,7 +196,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }).toJSDate();
       var booking = await upsertBooking(
         {
-          custodianTeamMemberId: custodian,
+          custodianUserId,
           organizationId,
           id,
           name,

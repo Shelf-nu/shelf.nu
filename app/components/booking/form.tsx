@@ -37,14 +37,15 @@ export const NewBookingFormSchema = z
       message: "Start date must be in the future",
     }),
     endDate: z.coerce.date(),
-    custodian: z.coerce
+    custodianUserId: z.coerce
       .string()
 
       .transform((data) => {
         if (data === "") {
           throw new Error("Custodian is required");
         }
-        return JSON.parse(data).id;
+        /** We get the userId because custody in a booking can be assigned only to users(for now), not to NRM */
+        return JSON.parse(data).userId;
       }),
   })
   .refine((data) => data.endDate > data.startDate, {
@@ -238,9 +239,9 @@ export function BookingForm({
                     disabled={inputFieldIsDisabled}
                   />
 
-                  {zo.errors.custodian()?.message ? (
+                  {zo.errors.custodianUserId()?.message ? (
                     <div className="text-sm text-error-500">
-                      {zo.errors.custodian()?.message}
+                      {zo.errors.custodianUserId()?.message}
                     </div>
                   ) : null}
                   <p className="mt-2 text-[14px] text-gray-600">
