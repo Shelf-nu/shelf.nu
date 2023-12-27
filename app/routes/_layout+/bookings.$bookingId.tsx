@@ -183,7 +183,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         );
       }
 
-      const { name, custodianUserId } = result.data;
+      const { name, custodian } = result.data;
       const hints = getHints(request);
       const startDate = formData.get("startDate")!.toString();
       const endDate = formData.get("endDate")!.toString();
@@ -196,7 +196,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       }).toJSDate();
       var booking = await upsertBooking(
         {
-          custodianUserId,
+          custodianUserId: custodian,
           organizationId,
           id,
           name,
@@ -375,8 +375,8 @@ export default function BookingEditPage() {
               ? dateForDateTimeInputValue(new Date(booking.to))
               : undefined
           }
-          custodianId={
-            booking.custodianTeamMemberId ||
+          custodianUserId={
+            booking.custodianUserId ||
             teamMembers.find(
               (member) => member.user?.id === booking.custodianUserId
             )?.id

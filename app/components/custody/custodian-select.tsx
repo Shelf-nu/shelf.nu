@@ -13,22 +13,43 @@ import { Button } from "../shared";
 export default function CustodianSelect(
   {
     defaultCustodianId,
+    defaultTeamMemberId,
     disabled,
-  }: { defaultCustodianId?: string; disabled?: boolean } = {
+    showEmail,
+  }: {
+    defaultCustodianId?: string;
+    defaultTeamMemberId?: string;
+    disabled?: boolean;
+    showEmail?: boolean;
+  } = {
     defaultCustodianId: "",
     disabled: false,
+    showEmail: false,
   }
 ) {
   const { teamMembers } = useLoaderData<typeof loader>();
-  const defaultValue = defaultCustodianId
-    ? JSON.stringify({
-        id: defaultCustodianId,
-        name: teamMembers.find((member) => member.id === defaultCustodianId)
-          ?.name,
-        userId: teamMembers.find((member) => member.id === defaultCustodianId)
-          ?.userId,
-      })
-    : undefined;
+
+  let defaultValue = undefined;
+
+  if (defaultCustodianId) {
+    // In the case of custodian id passed, we set that to id and find the rest in the teamMembers array
+    defaultValue = JSON.stringify({
+      id: defaultCustodianId,
+      name: teamMembers.find((member) => member.id === defaultCustodianId)
+        ?.name,
+      userId: teamMembers.find((member) => member.id === defaultCustodianId)
+        ?.userId,
+    });
+  } else if (defaultTeamMemberId) {
+    // In the case of team member id passed, we set that to id and find the rest in the teamMembers array
+    defaultValue = JSON.stringify({
+      id: teamMembers.find((member) => member.userId === defaultTeamMemberId)
+        ?.id,
+      name: teamMembers.find((member) => member.userId === defaultTeamMemberId)
+        ?.name,
+      userId: defaultTeamMemberId,
+    });
+  }
 
   return (
     <div className="relative w-full">
@@ -57,7 +78,7 @@ export default function CustodianSelect(
                     })}
                   >
                     {member.user ? (
-                      <div className="flex items-center gap-3 py-3.5">
+                      <div className="flex items-center gap-3 truncate py-3.5 pr-1">
                         <img
                           src={
                             member.user.profilePicture ||
@@ -66,9 +87,14 @@ export default function CustodianSelect(
                           className={"w-[20px] rounded-[4px]"}
                           alt={`${member.user.firstName} ${member.user.lastName}'s profile`}
                         />
-                        <span className=" flex-1 font-medium text-gray-900">
+                        <span className=" flex-1 whitespace-nowrap font-medium text-gray-900">
                           {member.user.firstName} {member.user.lastName}
                         </span>
+                        {showEmail ? (
+                          <span className="truncate text-xs text-gray-500">
+                            {member.user.email}
+                          </span>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="flex items-center gap-3 py-3.5">

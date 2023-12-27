@@ -100,8 +100,6 @@ export const AssetForm = ({
     };
   }>();
 
-  console.log(FormSchema);
-
   return (
     <Form
       ref={zo.ref}

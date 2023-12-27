@@ -25,7 +25,7 @@ type FormData = {
   name?: string;
   startDate?: string;
   endDate?: string;
-  custodianId?: string; // This holds the ID of the custodian
+  custodianUserId?: string; // This holds the ID of the user attached to custodian
 };
 
 //z.coerce.date() is used to convert the string to a date object.
@@ -37,7 +37,7 @@ export const NewBookingFormSchema = z
       message: "Start date must be in the future",
     }),
     endDate: z.coerce.date(),
-    custodianUserId: z.coerce
+    custodian: z.coerce
       .string()
 
       .transform((data) => {
@@ -58,7 +58,7 @@ export function BookingForm({
   name,
   startDate,
   endDate,
-  custodianId,
+  custodianUserId,
 }: FormData) {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewBookingFormSchema);
@@ -235,13 +235,14 @@ export function BookingForm({
                     <span className="required-input-label">Custodian</span>
                   </label>
                   <CustodianSelect
-                    defaultCustodianId={custodianId}
+                    defaultTeamMemberId={custodianUserId}
                     disabled={inputFieldIsDisabled}
+                    showEmail
                   />
 
-                  {zo.errors.custodianUserId()?.message ? (
+                  {zo.errors.custodian()?.message ? (
                     <div className="text-sm text-error-500">
-                      {zo.errors.custodianUserId()?.message}
+                      {zo.errors.custodian()?.message}
                     </div>
                   ) : null}
                   <p className="mt-2 text-[14px] text-gray-600">
