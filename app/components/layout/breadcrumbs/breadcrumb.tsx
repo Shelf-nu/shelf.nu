@@ -15,11 +15,20 @@ export function Breadcrumb({
    * This takes care of showing the correct title in asset show page*/
   if (typeof breadcrumb === "string" && breadcrumb === "single") {
     if (match?.data?.location) {
-      breadcrumb = match?.data?.location?.name || "Not found";
+      breadcrumb =
+        <span className="single-crumb">{match?.data?.location?.name}</span> ||
+        "Not found";
     } else if (match?.data?.organization) {
-      breadcrumb = match?.data?.organization?.name || "Not found";
+      breadcrumb =
+        (
+          <span className="single-crumb">
+            {match?.data?.organization?.name}
+          </span>
+        ) || "Not found";
     } else {
-      breadcrumb = match?.data?.asset?.title || "Not found";
+      breadcrumb =
+        <span className="single-crumb">{match?.data?.asset?.title}</span> ||
+        "Not found";
     }
   }
 

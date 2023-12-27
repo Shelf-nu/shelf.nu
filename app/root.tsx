@@ -7,6 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
+  Link,
   Links,
   LiveReload,
   Meta,
@@ -18,6 +19,7 @@ import {
 
 import { ErrorBoundryComponent } from "./components/errors";
 
+import { HomeIcon } from "./components/icons";
 import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
@@ -31,6 +33,14 @@ export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
 }
+
+export const handle = {
+  breadcrumb: () => (
+    <Link to="/" title="Home" id="homeCrumb">
+      <HomeIcon className="inline" />
+    </Link>
+  ),
+};
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: styles },
