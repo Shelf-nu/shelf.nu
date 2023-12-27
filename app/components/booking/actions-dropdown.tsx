@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { BookingStatus } from "@prisma/client";
 
+import { useSubmit } from "@remix-run/react";
 import { ChevronRight } from "~/components/icons";
 import {
   DropdownMenu,
@@ -24,6 +25,9 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
     () => booking.status === BookingStatus.COMPLETE,
     [booking.status]
   );
+
+  const submit = useSubmit();
+
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger
@@ -44,17 +48,32 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
           align="end"
           className="order w-[180px] rounded-md bg-white p-1.5 text-right "
         >
-          {/* @TODO - this needs to be a controlled input */}
           {isCompleted ? (
-            <Button
-              variant="link"
-              className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
-              width="full"
-              name="intent"
-              value="archive"
-            >
-              Archive
-            </Button>
+            <DropdownMenuItem asChild>
+              <Button
+                variant="link"
+                className="justify-start text-gray-700 hover:cursor-pointer hover:text-gray-700"
+                width="full"
+                name="intent"
+                value="archive"
+                as="span"
+                /**
+                 * Here we have to deal with a interesting case that is in a way a conflict between how react works and web platform
+                 * So this button within the react code, is inside a form that is in the parent component, however because its a radix dropdown, it gets rendered within a portal
+                 * So the button is actually rendered outside the form, and when you click on it, it does not submit the form
+                 * So we have to manually submit the data here.
+                 *
+                 * Keep in mind that even though its rendered in the DOM within a portal, react will still detect it as being inside the form, so there could be some hydration errors
+                 */
+                onClick={() => {
+                  const formData = new FormData();
+                  formData.append("intent", "archive");
+                  submit(formData, { method: "post" });
+                }}
+              >
+                Archive
+              </Button>
+            </DropdownMenuItem>
           ) : null}
           <DeleteBooking booking={booking} />
         </DropdownMenuContent>
