@@ -1,6 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/assets._index";
-import { ControlledActionButton } from "../subscription/controlled-action-button";
+import { ControlledActionButton } from "../shared/controlled-action-button";
 
 export const ExportButton = ({
   canExportAssets,

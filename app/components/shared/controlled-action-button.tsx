@@ -1,12 +1,8 @@
 import { tw } from "~/utils";
+import type { ButtonProps } from ".";
+import { Button } from ".";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 import type { ButtonVariant } from "../layout/header/types";
-import type { ButtonProps } from "../shared";
-import { Button } from "../shared";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "../shared/hover-card";
 
 export const ControlledActionButton = ({
   canUseFeature,

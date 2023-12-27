@@ -18,7 +18,7 @@ import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
-import { ControlledActionButton } from "../subscription/controlled-action-button";
+import { ControlledActionButton } from "../shared/controlled-action-button";
 
 type FormData = {
   id?: string;

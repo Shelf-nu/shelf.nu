@@ -11,8 +11,8 @@ import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { ChevronRight } from "../icons";
 import { List } from "../list";
 import { Badge, Button } from "../shared";
+import { ControlledActionButton } from "../shared/controlled-action-button";
 import TextualDivider from "../shared/textual-divider";
-import { ControlledActionButton } from "../subscription/controlled-action-button";
 import { Td, Th } from "../table";
 
 export function BookingAssetsColumn() {
