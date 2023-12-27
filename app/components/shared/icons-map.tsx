@@ -68,6 +68,7 @@ export type Icon =
   | "copy"
   | "sign";
 
+
 type IconsMap = {
   [key in Icon]: JSX.Element;
 };
