@@ -47,7 +47,7 @@ From: ${fromDate}
 To: ${toDate}
 
 To view the booking, follow the link below:
-${SERVER_URL}/booking/${bookingId}
+${SERVER_URL}/bookings/${bookingId}
 
 Thanks,
 The Shelf Team
@@ -116,7 +116,7 @@ export const checkoutReminderEmailContent = ({
     emailContent: `Your booking is due for checkout in ${getTimeRemainingMessage(
       new Date(from),
       new Date()
-    )} minutes.`,
+    )}.`,
   });
 
 /**
@@ -164,7 +164,7 @@ export const sendCheckinReminder = async (
 ) => {
   await sendEmail({
     to: booking.custodianUser!.email,
-    subject: `Checkin reminder - shelf.nu`,
+    subject: `Checkin reminder (${booking.name}) - shelf.nu`,
     text: checkinReminderEmailContent({
       hints,
       bookingName: booking.name,
@@ -178,3 +178,69 @@ export const sendCheckinReminder = async (
     }),
   });
 };
+
+/**
+ * Booking is overdue
+ *
+ * This email gets sent when a booking is overdue
+ */
+export const overdueBookingEmailContent = ({
+  bookingName,
+  custodian,
+  from,
+  to,
+  bookingId,
+  assetsCount,
+  hints,
+}: {
+  bookingName: string;
+  assetsCount: number;
+  custodian: string;
+  from: Date;
+  to: Date;
+  bookingId: string;
+  hints: ClientHint;
+}) =>
+  baseBookingEmailContent({
+    hints,
+    bookingName,
+    custodian,
+    from,
+    to,
+    bookingId,
+    assetsCount,
+    emailContent: `You have passed the deadline for checking in your booking "${bookingName}".`,
+  });
+
+/**
+ * Booking is completed
+ *
+ * This email gets sent when a booking is checked-in
+ */
+export const completedBookingEmailContent = ({
+  bookingName,
+  custodian,
+  from,
+  to,
+  bookingId,
+  assetsCount,
+  hints,
+}: {
+  bookingName: string;
+  assetsCount: number;
+  custodian: string;
+  from: Date;
+  to: Date;
+  bookingId: string;
+  hints: ClientHint;
+}) =>
+  baseBookingEmailContent({
+    hints,
+    bookingName,
+    custodian,
+    from,
+    to,
+    bookingId,
+    assetsCount,
+    emailContent: `Your booking has been completed: "${bookingName}".`,
+  });

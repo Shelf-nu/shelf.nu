@@ -86,11 +86,11 @@ export function BookingForm({
   return (
     <div
       id="bookingFormWrapper"
-      className="relative mt-5 lg:flex lg:items-start lg:gap-4"
+      className="mt-5 lg:flex lg:items-start lg:gap-4"
     >
       <div>
         <Form ref={zo.ref} method="post">
-          <div className="absolute mt-[-70px] flex w-full justify-end text-right">
+          <div className="absolute right-4 top-3 flex w-full justify-end text-right">
             <div className=" flex gap-2">
               {/* We only render the actions when we are not on the .new route */}
               {/* @ts-ignore */}

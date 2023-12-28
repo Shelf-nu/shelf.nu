@@ -87,6 +87,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const booking = await getBooking({ id: bookingId });
 
+  // @TODO we have a bug here. That always throws an error for some reason
   if (!booking) {
     throw new ShelfStackError({ message: "Booking not found", status: 404 });
   }
@@ -258,6 +259,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
     case "removeAsset":
       const assetId = formData.get("assetId");
+      // @ts-ignore @TODO we need to fix this. Not sure how
       var booking = await removeAssets({ id, assetIds: [assetId as string] });
       sendNotification({
         title: "Asset removed",
@@ -352,14 +354,16 @@ export default function BookingEditPage() {
 
   return (
     <>
-      <Header title={hasName ? name : booking.name} />
-      <div>
-        <Badge color={bookingStatusColorMap[booking.status]}>
-          <span className="block lowercase first-letter:uppercase">
-            {booking.status}
-          </span>
-        </Badge>
-      </div>
+      <Header
+        title={hasName ? name : booking.name}
+        subHeading={
+          <Badge color={bookingStatusColorMap[booking.status]}>
+            <span className="block lowercase first-letter:uppercase">
+              {booking.status}
+            </span>
+          </Badge>
+        }
+      />
 
       <div>
         <BookingForm

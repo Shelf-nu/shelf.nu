@@ -14,6 +14,7 @@ import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
 import {
   assetReservedEmailContent,
+  completedBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
@@ -164,7 +165,13 @@ export const upsertBooking = async (
     const res = await db.booking.update({
       where: { id },
       data,
-      include: { ...commonInclude, assets: true },
+      include: {
+        ...commonInclude,
+        assets: true,
+        _count: {
+          select: { assets: true },
+        },
+      },
     });
 
     if (
@@ -200,7 +207,7 @@ export const upsertBooking = async (
           data.status === BookingStatus.RESERVED ||
           data.status === BookingStatus.COMPLETE
         ) {
-          let subject = `Booking reserved`;
+          let subject = `Booking reserved (${res.name}) - shelf.nu`;
           let text = assetReservedEmailContent({
             bookingName: res.name,
             assetsCount: res.assets.length,
@@ -214,8 +221,18 @@ export const upsertBooking = async (
           });
 
           if (data.status === BookingStatus.COMPLETE) {
-            subject = `Booking complete`;
-            text = `Your checkin complete for booking ${res.name}`;
+            subject = `Booking completed (${res.name}) - shelf.nu`;
+            text = completedBookingEmailContent({
+              bookingName: res.name,
+              assetsCount: res._count.assets,
+              custodian:
+                `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
+                (res.custodianTeamMember?.name as string),
+              from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
+              to: booking.to as Date,
+              bookingId: res.id,
+              hints: hints,
+            });
           }
           promises.push(
             sendEmail({

@@ -6,6 +6,7 @@ import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
 import {
   checkoutReminderEmailContent,
+  overdueBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
 import { scheduleNextBookingJob } from "./service.server";
@@ -39,7 +40,7 @@ export const registerBookingWorkers = () => {
       if (email && booking.from && booking.to) {
         await sendEmail({
           to: email,
-          subject: `Checkout reminder - shelf.nu`,
+          subject: `Checkout reminder (${booking.name}) - shelf.nu`,
           text: checkoutReminderEmailContent({
             bookingName: booking.name,
             assetsCount: booking._count.assets,
@@ -137,7 +138,7 @@ export const registerBookingWorkers = () => {
       //schedule the next job
       if (booking.to) {
         const when = new Date(booking.to);
-        when.setHours(when.getHours() + 1);
+        when.setHours(when.getHours());
         await scheduleNextBookingJob({
           data,
           when,
@@ -157,6 +158,9 @@ export const registerBookingWorkers = () => {
           custodianTeamMember: true,
           custodianUser: true,
           organization: true,
+          _count: {
+            select: { assets: true },
+          },
         },
       });
       if (!booking) {
@@ -175,8 +179,18 @@ export const registerBookingWorkers = () => {
       if (email) {
         await sendEmail({
           to: email,
-          subject: `overdue reminder`,
-          text: `you have passed the deadline for checkin out your booking ${booking.name} of ${booking.organization.name}`,
+          subject: `Overdue booking (${booking.name}) - shelf.nu`,
+          text: overdueBookingEmailContent({
+            bookingName: booking.name,
+            assetsCount: booking._count.assets,
+            custodian:
+              `${booking.custodianUser?.firstName} ${booking.custodianUser?.lastName}` ||
+              (booking.custodianTeamMember?.name as string),
+            from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
+            to: booking.to as Date,
+            bookingId: booking.id,
+            hints: data.hints,
+          }),
         }).catch((err) => {
           console.error(`failed to send overdue reminder email`, err);
         });
