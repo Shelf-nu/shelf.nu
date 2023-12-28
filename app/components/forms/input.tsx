@@ -70,7 +70,7 @@ const Input = forwardRef(function Input(
   );
 
   const addonClasses = tw(
-    "pointer-events-none flex items-center rounded-l-[8px] border-y border-l border-gray-300 bg-white px-[14px] text-gray-600"
+    "pointer-events-none flex items-center rounded-l-[4px] border-y border-l border-gray-300 bg-white px-[14px] text-gray-600"
   );
 
   const inputClasses = tw(
@@ -81,9 +81,9 @@ const Input = forwardRef(function Input(
     /** Add or remove classes depending on weather we use an icon or addOn */
     icon || addOn
       ? icon
-        ? "rounded-[8px] pl-[42px]"
-        : "rounded-l-none rounded-r-[8px]"
-      : "rounded-[8px]",
+        ? "rounded-[4px] pl-[42px]"
+        : "rounded-l-none rounded-r-[4px]"
+      : "rounded-[4px]",
     hasAttachedButton ? tw("rounded-r-none") : undefined,
     inputClassName
   );

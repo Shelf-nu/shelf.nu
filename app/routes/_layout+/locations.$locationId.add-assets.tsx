@@ -51,7 +51,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   };
   return json({
     showModal: true,
-    items: assets,
+    items: [...assets, ...assets, ...assets],
     categories,
     tags,
     search,
@@ -118,7 +118,7 @@ export default function AddAssetsToLocation() {
   const { location } = useLoaderData<typeof loader>();
 
   return (
-    <div>
+    <div className="rounded">
       <header className="mb-5">
         <h2>Move assets to ‘{location?.name}’ location</h2>
         <p>

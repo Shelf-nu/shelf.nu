@@ -79,9 +79,9 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
         <DropdownMenuContent
           asChild
           align="end"
-          className="order actions-dropdown static w-screen rounded-b-none rounded-t-lg bg-white p-0 text-right md:static md:w-[180px] md:rounded-lg"
+          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]"
         >
-          <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-lg bg-white p-0 text-right md:static md:w-[180px] md:rounded-lg">
+          <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem className="border-b p-4 md:mb-0 md:p-0">
               {!assetIsAvailable ? (
                 <Button
