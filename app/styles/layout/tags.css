@@ -1,6 +1,6 @@
 .react-tags {
   cursor: text;
-  @apply relative w-full self-start rounded-[8px] border border-gray-300 px-[14px] py-2 text-[16px];
+  @apply relative w-full self-start rounded border border-gray-300 px-[14px] py-2 text-[16px];
 }
 
 .react-tags.is-active {
@@ -114,10 +114,10 @@
   overflow-y: auto;
   background: #ffffff;
   border: 1px solid #afb8c1;
-  border-radius: 6px;
+  border-radius: 4px;
   box-shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -4px,
-    rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+    rgba(0, 0, 0, 0.05) 0 4px 4px -2px;
 }
 
 .react-tags__listbox-option {

@@ -20,7 +20,7 @@ export const Pagination = () => {
 
   return (
     <div className="flex items-center justify-center gap-3 px-6 pb-4 pt-3">
-      <div className="inline-flex items-center rounded-lg border border-gray-300 shadow-[0px_1px_2px_0px_rgba(16,24,40,0.05)]">
+      <div className="inline-flex items-center rounded border border-gray-300 shadow-[0px_1px_2px_0px_rgba(16,24,40,0.05)]">
         <Button
           variant="secondary"
           size="sm"

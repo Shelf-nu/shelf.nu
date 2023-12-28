@@ -269,8 +269,8 @@ export default function WorkspacePage() {
   );
 
   return organization ? (
-    <div>
-      <div className="my-6 flex justify-between border-b pb-5">
+    <div className="mb-2.5 flex flex-col justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-8">
+      <div className="mb-6 flex justify-between border-b pb-5">
         <div>
           <h3 className="text-text-lg font-semibold">
             {isPersonalOrg ? "Team" : `${organization.name}'s team`}

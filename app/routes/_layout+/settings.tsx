@@ -57,12 +57,10 @@ export default function SettingsPage() {
 
   return (
     <>
-      {shouldHideHeader ? null : <Header />}
+      {shouldHideHeader ? null : <Header hidePageDescription />}
+      <HorizontalTabs items={items} />
       <div>
-        {shouldHideHeader ? null : <HorizontalTabs items={items} />}
-        <div>
-          <Outlet />
-        </div>
+        <Outlet />
       </div>
     </>
   );
