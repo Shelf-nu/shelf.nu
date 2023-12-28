@@ -226,16 +226,11 @@ export default function AssetDetailsPage() {
     <>
       <Header
         subHeading={
-
           <div className="flex gap-2">
             <AssetStatusBadge
               status={asset.status}
               availableToBook={asset.availableToBook}
             />
-          <div className="flex gap-2">
-            <Badge color={assetIsAvailable ? "#12B76A" : "#2E90FA"}>
-              {userFriendlyAssetStatus(asset.status)}
-            </Badge>
             {location ? (
               <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700">
                 {location.name}
