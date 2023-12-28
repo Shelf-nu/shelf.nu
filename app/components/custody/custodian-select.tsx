@@ -71,11 +71,11 @@ export default function CustodianSelect(
                 {teamMembers.map((member) => (
                   <SelectItem
                     key={member.id}
-                    value={JSON.stringify({
+                    value={`${JSON.stringify({
                       id: member.id,
                       name: member.name,
                       userId: member?.userId,
-                    })}
+                    })}`}
                   >
                     {member.user ? (
                       <div className="flex items-center gap-3 truncate py-3.5 pr-1">

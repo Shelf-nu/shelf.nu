@@ -51,7 +51,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Edit",
+  breadcrumb: () => <span>Edit</span>,
 };
 
 export async function action({ request, params }: ActionFunctionArgs) {

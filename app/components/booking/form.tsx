@@ -90,7 +90,7 @@ export function BookingForm({
     >
       <div>
         <Form ref={zo.ref} method="post">
-          <div className="absolute right-4 top-3 flex w-full justify-end text-right">
+          <div className="absolute right-4 top-3 flex w-fit justify-end text-right">
             <div className=" flex gap-2">
               {/* We only render the actions when we are not on the .new route */}
               {/* @ts-ignore */}
