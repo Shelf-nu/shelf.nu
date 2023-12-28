@@ -4,7 +4,7 @@ import type { HorizontalTabsProps } from "./types";
 export default function HorizontalTabs({ items }: HorizontalTabsProps) {
   return (
     // eslint-disable-next-line tailwindcss/enforces-negative-arbitrary-values
-    <div className="horizontal-menu -mx-[1rem] mb-5 flex w-full overflow-scroll border-b border-b-gray-200 bg-white pl-4">
+    <div className="horizontal-menu -mx-4 mb-5 flex overflow-scroll border-b border-b-gray-200 bg-white pl-4 ">
       {items.map((item, index) => (
         <NavLink
           to={item.to}

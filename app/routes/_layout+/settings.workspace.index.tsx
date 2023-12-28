@@ -155,7 +155,7 @@ export default function WorkspacePage() {
                       image:
                         org.type === "PERSONAL"
                           ? user?.profilePicture || "/images/default_pfp.jpg"
-                          : org?.imageId || "/images/default_pfp.jpg",
+                          : org?.imageId || undefined,
                       _count: org._count,
                       type: org.type,
                       owner: org.owner,
@@ -178,7 +178,7 @@ const OrganizationRow = ({
   item,
 }: {
   item: Pick<Organization, "id" | "name" | "type" | "updatedAt"> & {
-    image: string; // We dont pick that one as sometimes we send an id sometimes we send a placeholder
+    image?: string; // We dont pick that one as sometimes we send an id sometimes we send a placeholder
     _count: {
       assets: number | null;
       members: number | null;
