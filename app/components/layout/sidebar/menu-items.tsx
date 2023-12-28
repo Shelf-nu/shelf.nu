@@ -101,7 +101,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 onClick={toggleMobileNav}
                 title={item.label}
               >
-                <i className="icon text-gray-500">{item.icon}</i>
+                <i className="icon pl-[2px] text-gray-500">{item.icon}</i>
                 <span className="text whitespace-nowrap transition duration-200 ease-linear">
                   {item.label}
                 </span>
@@ -136,7 +136,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   onClick={toggleMobileNav}
                   title={item.label}
                 >
-                  <i className="icon text-gray-500">{item.icon}</i>
+                  <i className="icon pl-[2px] text-gray-500">{item.icon}</i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
                     {item.label}
                   </span>
@@ -159,7 +159,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     "crisp-btn mt-1 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600"
                   )}
                 >
-                  <i className="icon text-gray-500">
+                  <i className="icon pl-[2px] text-gray-500">
                     <SwitchIcon />
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">

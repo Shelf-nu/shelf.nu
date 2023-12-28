@@ -224,22 +224,18 @@ export default function AssetDetailsPage() {
 
   return (
     <>
-      <AssetImage
-        asset={{
-          assetId: asset.id,
-          mainImage: asset.mainImage,
-          mainImageExpiration: asset.mainImageExpiration,
-          alt: asset.title,
-        }}
-        className="mx-auto mb-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
-      />
       <Header
         subHeading={
-          <div className="mt-3 flex gap-2">
+
+          <div className="flex gap-2">
             <AssetStatusBadge
               status={asset.status}
               availableToBook={asset.availableToBook}
             />
+          <div className="flex gap-2">
+            <Badge color={assetIsAvailable ? "#12B76A" : "#2E90FA"}>
+              {userFriendlyAssetStatus(asset.status)}
+            </Badge>
             {location ? (
               <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700">
                 {location.name}
@@ -259,6 +255,15 @@ export default function AssetDetailsPage() {
         <ActionsDopdown asset={asset} />
       </Header>
 
+      <AssetImage
+        asset={{
+          assetId: asset.id,
+          mainImage: asset.mainImage,
+          mainImageExpiration: asset.mainImageExpiration,
+          alt: asset.title,
+        }}
+        className="mx-auto mb-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
+      />
       <ContextualModal />
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">

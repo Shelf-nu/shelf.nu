@@ -41,7 +41,7 @@ export const List = ({
   return (
     <div
       className={tw(
-        "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded-[12px]",
+        "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded",
         className
       )}
     >
