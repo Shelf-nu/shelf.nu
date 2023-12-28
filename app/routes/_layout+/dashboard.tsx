@@ -16,6 +16,8 @@ import LocationRatioChart from "~/components/dashboard/location-ratio-chart";
 import MostScannedAssets from "~/components/dashboard/most-scanned-assets";
 import MostScannedCategories from "~/components/dashboard/most-scanned-categories";
 import NewestAssets from "~/components/dashboard/newest-assets";
+import { ErrorBoundryComponent } from "~/components/errors";
+import Header from "~/components/layout/header";
 import { db } from "~/database";
 
 import { requireAuthSession } from "~/modules/auth";
@@ -153,10 +155,11 @@ export default function DashboardPage() {
 
   return (
     <div>
+      <Header />
       {completedAllChecks || skipOnboardingChecklist ? (
         <div className="pb-8">
           <AnnouncementBar />
-          <div className="w-full">
+          <div className="mt-4 w-full">
             <AssetsForEachMonth />
           </div>
           <div className="pb-4 xl:flex xl:gap-4">

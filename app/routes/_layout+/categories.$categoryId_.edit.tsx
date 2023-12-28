@@ -109,7 +109,7 @@ export default function EditCategory() {
     <>
       <Form
         method="post"
-        className="block rounded-[12px] border border-gray-200 bg-white px-6 py-5"
+        className="block rounded border border-gray-200 bg-white px-6 py-5"
         ref={zo.ref}
       >
         <div className=" lg:flex lg:items-end lg:justify-between lg:gap-3">

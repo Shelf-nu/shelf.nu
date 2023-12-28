@@ -1,5 +1,5 @@
 import { useLoaderData } from "@remix-run/react";
-import { AreaChart, Card, Title } from "@tremor/react";
+import { AreaChart, Title } from "@tremor/react";
 import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import FallbackLoading from "./fallback-loading";
@@ -9,7 +9,7 @@ export default function AssetsForEachMonth() {
   const { totalAssetsAtEndOfEachMonth, totalAssets } =
     useLoaderData<typeof loader>();
   return (
-    <Card className="mb-10 py-4 lg:p-6">
+    <div className="mb-10 rounded border py-4 lg:p-6">
       <ClientOnly fallback={<FallbackLoading className="h-[368px]" />}>
         {() => (
           <>
@@ -49,6 +49,6 @@ export default function AssetsForEachMonth() {
           </>
         )}
       </ClientOnly>
-    </Card>
+    </div>
   );
 }

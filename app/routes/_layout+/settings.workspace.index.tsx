@@ -109,7 +109,7 @@ export default function WorkspacePage() {
   return (
     <div>
       <div className="w-full">
-        <div className="mb-2.5 flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
+        <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
           <h2 className=" text-lg text-gray-900">Workspaces</h2>
           <PremiumFeatureButton
             canUseFeature={canCreateMoreOrganizations}
@@ -129,7 +129,7 @@ export default function WorkspacePage() {
             }}
           />
         </div>
-        <div className="flex-1 overflow-x-auto rounded-[12px] border bg-white">
+        <div className="flex-1 overflow-x-auto rounded border bg-white">
           <Table>
             <ListHeader
               children={
@@ -156,7 +156,7 @@ export default function WorkspacePage() {
                       image:
                         org.type === "PERSONAL"
                           ? user?.profilePicture || "/images/default_pfp.jpg"
-                          : org?.imageId || "/images/default_pfp.jpg",
+                          : org?.imageId || undefined,
                       _count: org._count,
                       type: org.type,
                       owner: org.owner,
@@ -179,7 +179,7 @@ const OrganizationRow = ({
   item,
 }: {
   item: Pick<Organization, "id" | "name" | "type" | "updatedAt"> & {
-    image: string; // We dont pick that one as sometimes we send an id sometimes we send a placeholder
+    image?: string; // We dont pick that one as sometimes we send an id sometimes we send a placeholder
     _count: {
       assets: number | null;
       members: number | null;

@@ -18,9 +18,8 @@ import {
 } from "@remix-run/react";
 
 // import { ErrorBoundryComponent } from "./components/errors";
-
 import { ErrorContent } from "./components/errors";
-import { HomeIcon } from "./components/icons/library";
+import { HomeIcon } from "./components/icons";
 import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
@@ -37,7 +36,7 @@ export interface RootData {
 
 export const handle = {
   breadcrumb: () => (
-    <Link to="/" title="Home">
+    <Link to="/" title="Home" id="homeCrumb">
       <HomeIcon className="inline" />
     </Link>
   ),

@@ -16,7 +16,7 @@ export const InfoTooltip = ({ content }: { content: ReactNode }) => (
         </i>
       </TooltipTrigger>
       <TooltipContent side="bottom">
-        <div className="max-w-[260px] text-left sm:max-w-[320px]">
+        <div className="max-w-[260px] rounded text-left sm:max-w-[320px]">
           {content}
         </div>
       </TooltipContent>
