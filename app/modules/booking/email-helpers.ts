@@ -244,3 +244,36 @@ export const completedBookingEmailContent = ({
     assetsCount,
     emailContent: `Your booking has been completed: "${bookingName}".`,
   });
+
+/**
+ * Booking is deleted
+ *
+ * This email gets sent when a booking is checked-in
+ */
+export const deletedBookingEmailContent = ({
+  bookingName,
+  custodian,
+  from,
+  to,
+  bookingId,
+  assetsCount,
+  hints,
+}: {
+  bookingName: string;
+  assetsCount: number;
+  custodian: string;
+  from: Date;
+  to: Date;
+  bookingId: string;
+  hints: ClientHint;
+}) =>
+  baseBookingEmailContent({
+    hints,
+    bookingName,
+    custodian,
+    from,
+    to,
+    bookingId,
+    assetsCount,
+    emailContent: `Your booking has been deleted: "${bookingName}".`,
+  });

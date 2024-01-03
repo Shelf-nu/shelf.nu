@@ -244,7 +244,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       );
     case "delete":
-      await deleteBooking({ id });
+      await deleteBooking({ id }, getClientHint(request));
       sendNotification({
         title: "Booking deleted",
         message: "Your booking has been deleted successfully",

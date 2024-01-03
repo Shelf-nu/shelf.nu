@@ -15,6 +15,7 @@ import { schedulerKeys } from "./constants";
 import {
   assetReservedEmailContent,
   completedBookingEmailContent,
+  deletedBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
@@ -409,7 +410,10 @@ export const removeAssets = async (
   });
 };
 
-export const deleteBooking = async (booking: Pick<Booking, "id">) => {
+export const deleteBooking = async (
+  booking: Pick<Booking, "id">,
+  hints: ClientHint
+) => {
   const { id } = booking;
   const activeBooking = await db.booking.findFirst({
     where: {
@@ -419,13 +423,41 @@ export const deleteBooking = async (booking: Pick<Booking, "id">) => {
   });
   const b = await db.booking.delete({
     where: { id },
-    include: { ...commonInclude, assets: true },
+    include: {
+      ...commonInclude,
+      assets: true,
+      _count: { select: { assets: true } },
+    },
   });
+
+  const email = b.custodianUser?.email;
+  if (email) {
+    const subject = `Booking deleted (${b.name}) - shelf.nu`;
+    const text = deletedBookingEmailContent({
+      bookingName: b.name,
+      assetsCount: b._count.assets,
+      custodian:
+        `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+        (b.custodianTeamMember?.name as string),
+      from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
+      to: b.to as Date,
+      bookingId: b.id,
+      hints: hints,
+    });
+
+    await sendEmail({
+      to: email,
+      subject,
+      text,
+    });
+  }
+
   /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
   if (activeBooking) {
     await updateBookinAssetStates(b, AssetStatus.AVAILABLE);
   }
   await cancelSheduler(b);
+
   return b;
 };
 

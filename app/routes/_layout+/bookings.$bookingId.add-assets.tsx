@@ -24,7 +24,7 @@ import { requireAuthSession } from "~/modules/auth";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertIsPost, getRequiredParam, tw } from "~/utils";
-import { getClientHint, getHints } from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
 import { ShelfStackError } from "~/utils/error";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
