@@ -14,6 +14,7 @@ import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
 import {
   assetReservedEmailContent,
+  cancelledBookingEmailContent,
   completedBookingEmailContent,
   deletedBookingEmailContent,
   sendCheckinReminder,
@@ -206,7 +207,8 @@ export const upsertBooking = async (
       if (email) {
         if (
           data.status === BookingStatus.RESERVED ||
-          data.status === BookingStatus.COMPLETE
+          data.status === BookingStatus.COMPLETE ||
+          data.status === BookingStatus.CANCELLED
         ) {
           let subject = `Booking reserved (${res.name}) - shelf.nu`;
           let text = assetReservedEmailContent({
@@ -235,6 +237,22 @@ export const upsertBooking = async (
               hints: hints,
             });
           }
+
+          if (data.status === BookingStatus.CANCELLED) {
+            subject = `Booking cancelled (${res.name}) - shelf.nu`;
+            text = cancelledBookingEmailContent({
+              bookingName: res.name,
+              assetsCount: res._count.assets,
+              custodian:
+                `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
+                (res.custodianTeamMember?.name as string),
+              from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
+              to: booking.to as Date,
+              bookingId: res.id,
+              hints: hints,
+            });
+          }
+
           promises.push(
             sendEmail({
               to: email,
