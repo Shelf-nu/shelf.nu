@@ -66,7 +66,7 @@ export function BookingAssetsColumn() {
         </div>
         <div className="flex flex-col">
           {/* THis is a fake table header */}
-          <div className="flex justify-between border border-b-0 bg-white p-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t-[12px] md:px-6">
+          <div className="-mx-4 flex justify-between border border-b-0 bg-white p-4 text-left font-normal text-gray-600 md:mx-0 md:rounded md:px-6">
             <div>
               <div className=" text-md font-semibold text-gray-900">Assets</div>
               <div>{booking.assets.length} items</div>
@@ -95,10 +95,10 @@ export function BookingAssetsColumn() {
             hideFirstHeaderColumn={true}
             headerChildren={
               <>
-                <Th className="hidden md:table-cell">Name</Th>
-                <Th className="hidden md:table-cell"> </Th>
-                <Th className="hidden md:table-cell">Category</Th>
-                <Th className="hidden md:table-cell"> </Th>
+                <Th>Name</Th>
+                <Th> </Th>
+                <Th>Category</Th>
+                <Th> </Th>
               </>
             }
             customEmptyStateContent={{
@@ -167,19 +167,8 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
                   />
                 </div>
               </div>
-              <div className="block md:hidden">
-                {category ? (
-                  <Badge color={category.color} withDot={false}>
-                    {category.name}
-                  </Badge>
-                ) : null}
-              </div>
             </div>
           </div>
-
-          <button className="block md:hidden">
-            <ChevronRight />
-          </button>
         </div>
       </Td>
       {/* If asset status is different than available, we need to show a label */}
@@ -188,14 +177,14 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
           <AvailabilityLabel asset={item} isChecked={isChecked} />
         ) : null}
       </Td>
-      <Td className="hidden md:table-cell">
+      <Td className="">
         {category ? (
           <Badge color={category.color} withDot={false}>
             {category.name}
           </Badge>
         ) : null}
       </Td>
-      <Td className="hidden pr-4 text-right md:table-cell">
+      <Td className="pr-4 text-right">
         <AssetRowActionsDropdown asset={item} />
       </Td>
     </>

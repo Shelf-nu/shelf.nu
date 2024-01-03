@@ -86,11 +86,11 @@ export function BookingForm({
   return (
     <div
       id="bookingFormWrapper"
-      className="mt-5 lg:flex lg:items-start lg:gap-4"
+      className="md:mt-5 xl:flex xl:items-start xl:gap-4"
     >
       <div>
         <Form ref={zo.ref} method="post">
-          <div className="absolute right-4 top-3 flex w-fit justify-end text-right">
+          <div className=" -mx-4 mb-5 flex w-screen items-center justify-between border-b border-gray-200 bg-white px-4 py-2 md:absolute md:right-4 md:top-3 md:m-0 md:w-fit md:justify-end md:border-0 md:bg-transparent md:p-0">
             <div className=" flex gap-2">
               {/* We only render the actions when we are not on the .new route */}
               {/* @ts-ignore */}
@@ -156,7 +156,7 @@ export function BookingForm({
             </div>
           </div>
           <div className="">
-            <div className="mb-8 w-full lg:mb-0 lg:w-[328px]">
+            <div className="mb-8 w-full xl:mb-0 xl:w-[328px]">
               <div className="flex w-full flex-col gap-3">
                 {id ? (
                   <input type="hidden" name="id" defaultValue={id} />
