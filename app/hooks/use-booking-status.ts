@@ -45,6 +45,11 @@ export function useBookingStatus(booking: BookingSubset) {
     [booking.status]
   );
 
+  const isCancelled = useMemo(
+    () => booking.status === BookingStatus.CANCELLED,
+    [booking.status]
+  );
+
   return {
     hasAssets,
     hasUnavailableAssets,
@@ -54,5 +59,6 @@ export function useBookingStatus(booking: BookingSubset) {
     isCompleted,
     isArchived,
     isOverdue,
+    isCancelled,
   };
 }

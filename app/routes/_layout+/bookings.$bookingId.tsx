@@ -167,7 +167,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   switch (intent) {
     case "save":
-      const result = await NewBookingFormSchema.safeParseAsync(
+      const result = await NewBookingFormSchema().safeParseAsync(
         parseFormAny(formData)
       );
 

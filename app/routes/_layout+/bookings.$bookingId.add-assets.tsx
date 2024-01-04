@@ -1,11 +1,17 @@
-import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import {
+  BookingStatus,
+  type Asset,
+  type Booking,
+  type Category,
+  type Custody,
+} from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css";
@@ -23,7 +29,7 @@ import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
 import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost, getRequiredParam, tw } from "~/utils";
+import { SERVER_URL, assertIsPost, getRequiredParam, tw } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfStackError } from "~/utils/error";
 
@@ -245,12 +251,34 @@ export function AvailabilityLabel({
    */
 
   if (asset.status === "CHECKED_OUT") {
+    /** We get the current active booking that the asset is checked out to so we can use its name in the tooltip contnet
+     * NOTE: This will currently not work as we are returning only overlapping bookings with the query. I leave to code and we can solve it by modifying the DB queries: https://github.com/Shelf-nu/shelf.nu/pull/555#issuecomment-1877050925
+     */
+    const currentBooking = asset?.bookings?.find(
+      (b) =>
+        b.status === BookingStatus.ONGOING || b.status === BookingStatus.OVERDUE
+    );
+
     return (
       <AvailabilityBadge
         badgeText={"Checked out"}
         tooltipTitle={"Asset is currently checked out"}
         tooltipContent={
-          "This asset is currently checked out. Once it gets returned you will be able to check it out again"
+          currentBooking ? (
+            <span>
+              This asset is currently checked out as part of another booking ( -{" "}
+              <Link
+                to={`${SERVER_URL}/bookings/
+                ${currentBooking.id}`}
+                target="_blank"
+              >
+                {currentBooking?.name}
+              </Link>
+              ) and should be available for your selected date range period
+            </span>
+          ) : (
+            "This asset is currently checked out as part of another booking and should be available for your selected date range period"
+          )
         }
       />
     );
@@ -266,7 +294,7 @@ export function AvailabilityBadge({
 }: {
   badgeText: string;
   tooltipTitle: string;
-  tooltipContent: string;
+  tooltipContent: string | JSX.Element;
 }) {
   return (
     <TooltipProvider delayDuration={100}>

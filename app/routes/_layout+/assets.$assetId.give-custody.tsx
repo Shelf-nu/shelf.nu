@@ -29,7 +29,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       custody: true,
     },
   });
-
   /** If the asset already has a custody, this page should not be visible */
   if (asset && asset.custody) {
     return redirect(`/assets/${assetId}`);

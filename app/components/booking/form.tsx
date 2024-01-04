@@ -29,29 +29,74 @@ type FormData = {
 };
 
 //z.coerce.date() is used to convert the string to a date object.
-export const NewBookingFormSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string().min(2, "Name is required"),
-    startDate: z.coerce.date().refine((data) => data > new Date(), {
-      message: "Start date must be in the future",
-    }),
-    endDate: z.coerce.date(),
-    custodian: z.coerce
-      .string()
+// export const NewBookingFormSchema = z
+//   .object({
+//     id: z.string().min(1),
+//     name: z.string().min(2, "Name is required"),
+//     startDate: z.coerce.date().refine((data) => data > new Date(), {
+//       message: "Start date must be in the future",
+//     }),
+//     endDate: z.coerce.date(),
+//     custodian: z.coerce
+//       .string()
 
-      .transform((data) => {
-        if (data === "") {
-          throw new Error("Custodian is required");
-        }
-        /** We get the userId because custody in a booking can be assigned only to users(for now), not to NRM */
-        return JSON.parse(data).userId;
-      }),
-  })
-  .refine((data) => data.endDate > data.startDate, {
-    message: "End date cannot be earlier than start date.",
-    path: ["endDate"],
-  });
+//       .transform((val, ctx) => {
+//         if (!val && val === "") {
+//           ctx.addIssue({
+//             code: z.ZodIssueCode.custom,
+//             message: "Please select a custodian",
+//           });
+//           return z.NEVER;
+//         }
+//         /** We get the userId because custody in a booking can be assigned only to users(for now), not to NRM */
+//         return JSON.parse(val).userId;
+//       }),
+//   })
+//   .refine((data) => data.endDate > data.startDate, {
+//     message: "End date cannot be earlier than start date.",
+//     path: ["endDate"],
+//   });
+
+/**
+ * Important note is that the fields are only valudated when they are not disabled
+ */
+export const NewBookingFormSchema = (inputFieldIsDisabled = false) =>
+  z
+    .object({
+      id: inputFieldIsDisabled ? z.string().optional() : z.string().min(1),
+      name: inputFieldIsDisabled
+        ? z.string().optional()
+        : z.string().min(2, "Name is required"),
+      startDate: inputFieldIsDisabled
+        ? z.coerce.date().optional()
+        : z.coerce.date().refine((data) => data > new Date(), {
+            message: "Start date must be in the future",
+          }),
+      endDate: inputFieldIsDisabled
+        ? z.coerce.date().optional()
+        : z.coerce.date(),
+      custodian: inputFieldIsDisabled
+        ? z.string().optional()
+        : z.string().transform((val, ctx) => {
+            if (!val && val === "") {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Please select a custodian",
+              });
+              return z.NEVER;
+            }
+            return JSON.parse(val).userId;
+          }),
+    })
+    .refine(
+      (data) =>
+        inputFieldIsDisabled ||
+        (data.endDate && data.startDate && data.endDate > data.startDate),
+      {
+        message: "End date cannot be earlier than start date.",
+        path: ["endDate"],
+      }
+    );
 
 export function BookingForm({
   id,
@@ -61,7 +106,7 @@ export function BookingForm({
   custodianUserId,
 }: FormData) {
   const navigation = useNavigation();
-  const zo = useZorm("NewQuestionWizardScreen", NewBookingFormSchema);
+
   const routeIsNewBooking = useLocation().pathname.includes("new");
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
@@ -76,13 +121,22 @@ export function BookingForm({
     isCompleted,
     isArchived,
     isOverdue,
+    isCancelled,
   } = useBookingStatus(booking);
 
   const disabled = isFormProcessing(navigation.state) || isArchived;
 
   const inputFieldIsDisabled =
-    disabled || isReserved || isOngoing || isCompleted || isOverdue;
-
+    disabled ||
+    isReserved ||
+    isOngoing ||
+    isCompleted ||
+    isOverdue ||
+    isCancelled;
+  const zo = useZorm(
+    "NewQuestionWizardScreen",
+    NewBookingFormSchema(inputFieldIsDisabled)
+  );
   return (
     <div
       id="bookingFormWrapper"
