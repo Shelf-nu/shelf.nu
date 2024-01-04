@@ -154,7 +154,7 @@ export const upsertBooking = async (
         oldBooking &&
         [BookingStatus.ONGOING, BookingStatus.OVERDUE].includes(
           oldBooking.status as any
-        )
+        ) // Check if the booking was ongoing or overdue
       ) {
         //booking has ended, make asset available
         newAssetStatus = AssetStatus.AVAILABLE;
@@ -239,7 +239,7 @@ export const upsertBooking = async (
           }
 
           if (data.status === BookingStatus.CANCELLED) {
-            subject = `Booking cancelled (${res.name}) - shelf.nu`;
+            subject = `Booking canceled (${res.name}) - shelf.nu`;
             text = cancelledBookingEmailContent({
               bookingName: res.name,
               assetsCount: res._count.assets,

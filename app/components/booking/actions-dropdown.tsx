@@ -19,7 +19,8 @@ interface Props {
 }
 
 export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
-  const { isCompleted, isOngoing, isReserved } = useBookingStatus(booking);
+  const { isCompleted, isOngoing, isReserved, isOverdue } =
+    useBookingStatus(booking);
 
   const submit = useSubmit();
 
@@ -43,7 +44,7 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
           align="end"
           className="order w-[180px] rounded-md bg-white p-1.5 text-right "
         >
-          {isOngoing || isReserved ? (
+          {isOngoing || isReserved || isOverdue ? (
             <DropdownMenuItem asChild>
               <Button
                 variant="link"
