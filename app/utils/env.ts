@@ -38,6 +38,7 @@ declare global {
       SMTP_HOST: string;
       SMTP_USER: string;
       MAINTENANCE_MODE: string;
+      GEOCODE_API_KEY: string;
     }
   }
 }
@@ -105,6 +106,11 @@ export const MICROSOFT_CLARITY_ID = getEnv("MICROSOFT_CLARITY_ID", {
 });
 export const FORMBRICKS_ENV_ID = getEnv("FORMBRICKS_ENV_ID", {
   isSecret: false,
+  isRequired: false,
+});
+
+export const GEOCODE_API_KEY = getEnv("GEOCODE_API_KEY", {
+  isSecret: true,
   isRequired: false,
 });
 
