@@ -28,35 +28,6 @@ type FormData = {
   custodianUserId?: string; // This holds the ID of the user attached to custodian
 };
 
-//z.coerce.date() is used to convert the string to a date object.
-// export const NewBookingFormSchema = z
-//   .object({
-//     id: z.string().min(1),
-//     name: z.string().min(2, "Name is required"),
-//     startDate: z.coerce.date().refine((data) => data > new Date(), {
-//       message: "Start date must be in the future",
-//     }),
-//     endDate: z.coerce.date(),
-//     custodian: z.coerce
-//       .string()
-
-//       .transform((val, ctx) => {
-//         if (!val && val === "") {
-//           ctx.addIssue({
-//             code: z.ZodIssueCode.custom,
-//             message: "Please select a custodian",
-//           });
-//           return z.NEVER;
-//         }
-//         /** We get the userId because custody in a booking can be assigned only to users(for now), not to NRM */
-//         return JSON.parse(val).userId;
-//       }),
-//   })
-//   .refine((data) => data.endDate > data.startDate, {
-//     message: "End date cannot be earlier than start date.",
-//     path: ["endDate"],
-//   });
-
 /**
  * Important note is that the fields are only valudated when they are not disabled
  */

@@ -29,6 +29,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
+import { organizationRolesMap } from "./settings.team.invite-user";
 
 type ActionIntent = "delete" | "revoke" | "resend" | "invite";
 export interface TeamMembersWithUserOrInvite {
@@ -36,13 +37,13 @@ export interface TeamMembersWithUserOrInvite {
   img: string;
   email: string;
   status: InviteStatuses;
-  role: "Administrator" | "Owner";
+  role: "Administrator" | "Owner" | "Self service";
   userId: string | null;
 }
 
 type InviteWithTeamMember = Pick<
   Invite,
-  "id" | "teamMemberId" | "inviteeEmail" | "status"
+  "id" | "teamMemberId" | "inviteeEmail" | "status" | "roles"
 > & {
   inviteeTeamMember: {
     name: string;
@@ -94,6 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
               name: true,
             },
           },
+          roles: true,
         },
       }),
       /** Get the teamMembers */
@@ -140,6 +142,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       img: um.user.profilePicture || "/images/default_pfp.jpg",
       email: um.user.email,
       status: "ACCEPTED",
+      // @TODO this needs to be managed properly
       role: um.user.id === organization.userId ? "Owner" : "Administrator",
       userId: um.user.id,
     }));
@@ -151,7 +154,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       img: "/images/default_pfp.jpg",
       email: invite.inviteeEmail,
       status: invite.status,
-      role: "Administrator",
+      // @ts-ignore @TODO fix this
+      role: organizationRolesMap[invite?.roles[0]],
       userId: null,
     });
   }
