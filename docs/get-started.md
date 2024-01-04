@@ -269,3 +269,8 @@ Shelf hosted version has some premium features that are locked behind different 
 ```
 ENABLE_PREMIUM_FEATURES="true"
 ```
+
+## Geocoding
+
+The locations module allows the users to put an address in a free text field for their "location". For geocoding we use [https://geocode.maps.co/](https://geocode.maps.co/) which is a free api for up to 1 000 000 requests per month.
+If you want to use it you need to provide an env variable called `GEOCODE_API_KEY` with your api key. If you would like to use a different api, you can find the code for requesting the location details in `app/utils/geolocate.server.ts`.
