@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
+import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER, SMTP_FROM } from ".";
 
 export const sendEmail = async ({
   to,
@@ -40,7 +40,7 @@ export const sendEmail = async ({
 
   // send mail with defined transport object
   await transporter.sendMail({
-    from: '"Shelf.nu" <no-reply@shelf.nu>', // sender address
+    from: SMTP_FROM || '"Shelf.nu" <no-reply@shelf.nu>', // sender address
     to, // list of receivers
     subject, // Subject line
     text, // plain text body

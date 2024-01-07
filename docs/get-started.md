@@ -49,6 +49,7 @@ MAPTILER_TOKEN="someToken"
 SMTP_HOST="smtp.yourhost.com"
 SMTP_USER="you@example.com"
 SMTP_PWD="yourSMTPpassword"
+SMTP_FROM="Shelf <noreply@example.com>"
 ```
 
 - This step only applies if you've opted out of having the CLI install dependencies for you:

@@ -37,6 +37,7 @@ declare global {
       SMTP_PWD: string;
       SMTP_HOST: string;
       SMTP_USER: string;
+      SMTP_FROM: string;
       MAINTENANCE_MODE: string;
       GEOCODE_API_KEY: string;
     }
@@ -80,6 +81,7 @@ export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
 export const SMTP_PWD = getEnv("SMTP_PWD");
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_USER = getEnv("SMTP_USER");
+export const SMTP_FROM = getEnv("SMTP_FROM");
 
 /**
  * Shared envs
