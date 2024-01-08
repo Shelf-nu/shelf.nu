@@ -138,8 +138,7 @@ export function getDateTimeFormat(
   };
 
   options = {
-    ...defaultOptions,
-    ...options,
+    ...(options || defaultOptions),
     timeZone: options?.timeZone ?? getHints(request).timeZone,
   };
   return new Intl.DateTimeFormat(locale, options);
