@@ -32,12 +32,13 @@ import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { organizationRolesMap } from "./settings.team.invite-user";
 
 type ActionIntent = "delete" | "revoke" | "resend" | "invite";
+export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
 export interface TeamMembersWithUserOrInvite {
   name: string;
   img: string;
   email: string;
   status: InviteStatuses;
-  role: "Administrator" | "Owner" | "Self service";
+  role: UserFriendlyRoles;
   userId: string | null;
 }
 
@@ -71,6 +72,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
         select: {
           user: true,
+          roles: true,
         },
       }),
       /** Get the invites */
@@ -142,8 +144,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       img: um.user.profilePicture || "/images/default_pfp.jpg",
       email: um.user.email,
       status: "ACCEPTED",
-      // @TODO this needs to be managed properly
-      role: um.user.id === organization.userId ? "Owner" : "Administrator",
+      role: organizationRolesMap[um.roles[0]],
       userId: um.user.id,
     }));
 
@@ -154,7 +155,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       img: "/images/default_pfp.jpg",
       email: invite.inviteeEmail,
       status: invite.status,
-      // @ts-ignore @TODO fix this
       role: organizationRolesMap[invite?.roles[0]],
       userId: null,
     });

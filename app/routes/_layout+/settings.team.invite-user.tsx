@@ -31,6 +31,7 @@ import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing, tw, validEmail } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import type { UserFriendlyRoles } from "./settings.team";
 
 const InviteUserFormSchema = z.object({
   email: z
@@ -113,12 +114,11 @@ export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
-export const organizationRolesMap = Object.fromEntries(
-  [OrganizationRoles.ADMIN, OrganizationRoles.SELF_SERVICE].map((role) => [
-    role,
-    role.split("_").join(" "),
-  ])
-);
+export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
+  [OrganizationRoles.ADMIN]: "Administrator",
+  [OrganizationRoles.OWNER]: "Owner",
+  [OrganizationRoles.SELF_SERVICE]: "Self service",
+};
 
 export default function InviteUser() {
   const organization = useCurrentOrganization();
