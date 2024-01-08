@@ -1,13 +1,15 @@
 import type { Invite, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
+import { invitationTemplateString } from "~/components/emails/invite-template";
 import { db } from "~/database";
 import { INVITE_TOKEN_SECRET } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
-import { generateRandomCode, inviteEmailText } from "./helpers";
+import { generateRandomCode } from "./helpers";
+import logoImg from "../../../public/images/logo-full-color(x2).png"
 import { createTeamMember } from "../team-member";
 import { createUserOrAttachOrg } from "../user";
 
@@ -157,7 +159,13 @@ export async function createInvite({
   await sendEmail({
     to: inviteeEmail,
     subject: `You have been invited to ${invite.organization.name}`,
-    text: inviteEmailText({ invite, token }),
+    text: "",
+    html: invitationTemplateString({ token, invite }),
+    attachments: [{
+      filename: 'logo-full-color(x2).png',
+      content: Buffer.from(logoImg, "base64"),
+      cid: 'shelf-logo'
+    }]
   });
 
   return invite;
