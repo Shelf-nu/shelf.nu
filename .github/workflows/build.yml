@@ -3,7 +3,8 @@ name: 🐳 Create and publish a Docker image
 on:
   push:
     branches:
-      - mainline
+      - main
+      - dev
 
 permissions:
   actions: write
@@ -17,7 +18,7 @@ env:
 jobs:
   build:
     name: 🐳 Build
-    if: ${{ github.ref == 'refs/heads/mainline' }}
+    if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
     runs-on: ubuntu-latest
     steps:
       - name: 🛑 Cancel Previous Runs
@@ -52,8 +53,10 @@ jobs:
           labels: |
             maintainer=thundersquared
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'mainline') }}
-            type=raw,value={{sha}},enable=${{ github.ref_type != 'tag' }}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value={{github.ref}}-{{sha}},enable=${{ github.ref_type != 'tag' }}
+            type=ref,event=branch
+            type=ref,event=tag
 
       - name: 🛠 Build and push Docker image
         uses: docker/build-push-action@v5
