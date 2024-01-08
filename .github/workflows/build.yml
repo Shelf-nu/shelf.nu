@@ -54,7 +54,7 @@ jobs:
             maintainer=thundersquared
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-            type=raw,value={{github.ref}}-{{sha}},enable=${{ github.ref_type != 'tag' }}
+            type=ref,enable=${{ github.ref_type != 'tag' }},suffix={{sha}},event=branch
             type=ref,event=branch
             type=ref,event=tag
 
