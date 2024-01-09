@@ -1,9 +1,11 @@
 name: 🚀 Deploy
+
 on:
   push:
     branches:
       - main
       - dev
+
 permissions:
   actions: write
   contents: read

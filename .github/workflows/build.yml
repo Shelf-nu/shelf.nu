@@ -50,8 +50,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          labels: |
-            maintainer=thundersquared
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
             type=ref,enable=${{ github.ref_type != 'tag' }},suffix=-{{sha}},event=branch
