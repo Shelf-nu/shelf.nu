@@ -175,6 +175,7 @@ export const getUserOrganizations = async ({ userId }: { userId: string }) => {
           imageId: true,
           userId: true,
           updatedAt: true,
+          currency: true,
         },
       },
     },

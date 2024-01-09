@@ -49,6 +49,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             },
             select: {
               organization: true,
+              roles: true,
             },
           },
         },
@@ -83,6 +84,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       user,
       organizations,
       currentOrganizationId: organizationId,
+      currentOrganizationUserRoles: user?.userOrganizations.find(
+        (userOrg) => userOrg.organization.id === organizationId
+      )?.roles,
       subscription,
       enablePremium: ENABLE_PREMIUM_FEATURES,
       hideSupportBanner: cookie.hideSupportBanner,

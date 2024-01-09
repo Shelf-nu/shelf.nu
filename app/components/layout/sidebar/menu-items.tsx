@@ -2,65 +2,22 @@ import type { FetcherWithComponents } from "@remix-run/react";
 import { NavLink, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { useAtom } from "jotai";
-import {
-  AssetsIcon,
-  CalendarIcon,
-  CategoriesIcon,
-  GraphIcon,
-  LocationMarkerIcon,
-  SettingsIcon,
-  SwitchIcon,
-  TagsIcon,
-} from "~/components/icons/library";
+import { SwitchIcon } from "~/components/icons/library";
+import { useMenuItems } from "~/hooks";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
 
-const menuItemsTop = [
-  {
-    icon: <GraphIcon />,
-    to: "dashboard",
-    label: "Dashboard",
-  },
-  {
-    icon: <AssetsIcon />,
-    to: "assets",
-    label: "Assets",
-  },
-  {
-    icon: <CategoriesIcon />,
-    to: "categories",
-    label: "Categories",
-  },
-  {
-    icon: <TagsIcon />,
-    to: "tags",
-    label: "Tags",
-  },
-  {
-    icon: <LocationMarkerIcon />,
-    to: "locations",
-    label: "Locations",
-  },
-  {
-    icon: <CalendarIcon />,
-    to: "bookings",
-    label: "Bookings",
-  },
-];
-const menuItemsBottom = [
-  {
-    icon: <SettingsIcon />,
-    to: "settings/account",
-    label: "Settings",
-    end: true,
-  },
-];
-
 const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
-  const { isAdmin, minimizedSidebar } = useLoaderData<typeof loader>();
+  const { isAdmin, minimizedSidebar, currentOrganizationUserRoles } =
+    useLoaderData<typeof loader>();
+
+  const { menuItemsTop, menuItemsBottom } = useMenuItems(
+    currentOrganizationUserRoles
+  );
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-full flex-col justify-between">

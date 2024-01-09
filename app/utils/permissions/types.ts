@@ -19,6 +19,7 @@ export enum PermissionEntity {
   customField = "customField",
   workspace = "workspace",
   teamMember = "teamMember",
+  dashboard = "dashboard",
 }
 
 export interface PermissionCheckProps {

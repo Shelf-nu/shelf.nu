@@ -20,6 +20,7 @@ const Role2PermisionMap: {
     [PermissionEntity.tag]: [PermissionAction.read],
     [PermissionEntity.teamMember]: [PermissionAction.read],
     [PermissionEntity.workspace]: [PermissionAction.read],
+    [PermissionEntity.dashboard]: [],
   },
 };
 
@@ -36,7 +37,7 @@ export const hasPermission = async ({
     });
     if (!userOrg) {
       throw new ShelfStackError({
-        message: `user doesnt belong to organization`,
+        message: `User doesn't belong to organization`,
         status: 403,
         metadata: { userId, organizationId },
       });
@@ -63,7 +64,7 @@ export const validatePermission = async (props: PermissionCheckProps) => {
   const res = await hasPermission(props);
   if (!res) {
     throw new ShelfStackError({
-      message: `user is not authorised to ${props.action} the ${props.entity}`,
+      message: `You are not authorised to ${props.action} the ${props.entity}`,
     });
   }
 };
