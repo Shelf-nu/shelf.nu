@@ -31,11 +31,8 @@ export function StatusFilter() {
         defaultValue={status ? status : "ALL"}
         onValueChange={handleValueChange}
       >
-        <SelectTrigger
-          className="max-w-fit px-3.5 py-3"
-          placeholder={`Filter by asset status`}
-        >
-          <SelectValue />
+        <SelectTrigger className="max-w-fit px-3.5 py-3">
+          <SelectValue placeholder={`Filter by asset status`} />
         </SelectTrigger>
         <SelectContent
           position="popper"
