@@ -85,14 +85,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const notes = asset.notes.map((note) => ({
     ...note,
-    dateDisplay: getDateTimeFormat(request).format(note.createdAt),
+    dateDisplay: getDateTimeFormat(request, {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(note.createdAt),
     content: parseMarkdownToReact(note.content),
   }));
 
   let custody = null;
   if (asset.custody) {
     const date = new Date(asset.custody.createdAt);
-    const dateDisplay = getDateTimeFormat(request).format(date);
+    const dateDisplay = getDateTimeFormat(request, {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(date);
 
     custody = {
       ...asset.custody,
