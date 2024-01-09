@@ -24,13 +24,14 @@ import { Button } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import { db } from "~/database";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing, tw, validEmail } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import type { UserFriendlyRoles } from "./settings.team";
 
 const InviteUserFormSchema = z.object({
@@ -45,8 +46,11 @@ const InviteUserFormSchema = z.object({
 });
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.teamMember,
+    PermissionAction.create
+  );
   await assertUserCanInviteUsersToWorkspace({ organizationId });
   return json({
     showModal: true,
@@ -54,8 +58,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.teamMember,
+    PermissionAction.create
+  );
   const { userId } = authSession;
   const formData = await request.formData();
   const result = await InviteUserFormSchema.safeParseAsync(

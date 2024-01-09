@@ -14,13 +14,16 @@ const Role2PermisionMap: {
       PermissionAction.create,
       PermissionAction.read,
     ],
-    [PermissionEntity.category]: [PermissionAction.read],
-    [PermissionEntity.customField]: [PermissionAction.read],
-    [PermissionEntity.location]: [PermissionAction.read],
-    [PermissionEntity.tag]: [PermissionAction.read],
-    [PermissionEntity.teamMember]: [PermissionAction.read],
-    [PermissionEntity.workspace]: [PermissionAction.read],
+    [PermissionEntity.qr]: [],
+    [PermissionEntity.category]: [],
+    [PermissionEntity.customField]: [],
+    [PermissionEntity.location]: [],
+    [PermissionEntity.tag]: [],
+    [PermissionEntity.teamMember]: [],
+    [PermissionEntity.workspace]: [],
     [PermissionEntity.dashboard]: [],
+    [PermissionEntity.generalSettings]: [],
+    [PermissionEntity.subscription]: [],
   },
 };
 
@@ -64,7 +67,10 @@ export const validatePermission = async (props: PermissionCheckProps) => {
   const res = await hasPermission(props);
   if (!res) {
     throw new ShelfStackError({
-      message: `You are not authorised to ${props.action} the ${props.entity}`,
+      title: "Unauthorized",
+      // message: `You are not authorised to ${props.action} the ${props.entity}`,
+      message: `You are not authorised to access this view.`,
+      status: 403,
     });
   }
 };

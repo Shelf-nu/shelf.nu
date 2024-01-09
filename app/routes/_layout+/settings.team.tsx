@@ -29,6 +29,8 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { organizationRolesMap } from "./settings.team.invite-user";
 
 type ActionIntent = "delete" | "revoke" | "resend" | "invite";
@@ -52,7 +54,12 @@ type InviteWithTeamMember = Pick<
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.teamMember,
+    PermissionAction.read
+  );
+
   const { organizationId } = await requireOrganisationId(authSession, request);
   const [organization, userMembers, invites, teamMembers] =
     await db.$transaction([

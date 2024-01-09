@@ -3,7 +3,7 @@ import { NavLink, useLoaderData } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { useAtom } from "jotai";
 import { SwitchIcon } from "~/components/icons/library";
-import { useMenuItems } from "~/hooks";
+import { useMainMenuItems } from "~/hooks/use-main-menu-items";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
@@ -11,12 +11,9 @@ import { ChatWithAnExpert } from "./chat-with-an-expert";
 
 const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
-  const { isAdmin, minimizedSidebar, currentOrganizationUserRoles } =
-    useLoaderData<typeof loader>();
+  const { isAdmin, minimizedSidebar } = useLoaderData<typeof loader>();
 
-  const { menuItemsTop, menuItemsBottom } = useMenuItems(
-    currentOrganizationUserRoles
-  );
+  const { menuItemsTop, menuItemsBottom } = useMainMenuItems();
 
   return (
     <div className="flex h-full flex-col">

@@ -12,6 +12,7 @@ export enum PermissionAction {
 }
 export enum PermissionEntity {
   asset = "asset",
+  qr = "qr",
   booking = "booking",
   tag = "tag",
   category = "category",
@@ -20,6 +21,8 @@ export enum PermissionEntity {
   workspace = "workspace",
   teamMember = "teamMember",
   dashboard = "dashboard",
+  generalSettings = "generalSettings",
+  subscription = "subscription",
 }
 
 export interface PermissionCheckProps {

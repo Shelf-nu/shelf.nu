@@ -9,12 +9,10 @@ import { List } from "~/components/list";
 import { Badge } from "~/components/shared";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { Td, Th } from "~/components/table";
-import { requireAuthSession } from "~/modules/auth";
 import {
   countAcviteCustomFields,
   getFilteredAndPaginatedCustomFields,
 } from "~/modules/custom-field";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { getOrganizationTierLimit } from "~/modules/tier";
 
 import {
@@ -25,6 +23,8 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -34,11 +34,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId, organizations } = await requireOrganisationId(
-    authSession,
-    request
+  const { organizationId, organizations } = await requirePermision(
+    request,
+    PermissionEntity.customField,
+    PermissionAction.read
   );
+
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
