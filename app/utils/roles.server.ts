@@ -49,9 +49,11 @@ export async function requirePermision(
     organizations,
     currentOrganization,
   } = await requireOrganisationId(authSession, request);
+
   const roles = userOrganizations.find(
     (o) => o.organization.id === organizationId
   )?.roles;
+
   await validatePermission({
     roles,
     action,
@@ -59,5 +61,6 @@ export async function requirePermision(
     organizationId,
     userId: authSession.userId,
   });
+
   return { authSession, organizations, organizationId, currentOrganization };
 }

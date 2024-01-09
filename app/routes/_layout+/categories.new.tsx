@@ -13,13 +13,14 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { createCategory } from "~/modules/category";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost, getRandomColor, isFormProcessing } from "~/utils";
+import { getRandomColor, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const NewCategoryFormSchema = z.object({
@@ -31,7 +32,11 @@ export const NewCategoryFormSchema = z.object({
 const title = "New category";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.category,
+    PermissionAction.create
+  );
 
   const colorFromServer = getRandomColor();
 
@@ -47,9 +52,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  assertIsPost(request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.category,
+    PermissionAction.create
+  );
   const formData = await request.formData();
   const result = await NewCategoryFormSchema.safeParseAsync(
     parseFormAny(formData)

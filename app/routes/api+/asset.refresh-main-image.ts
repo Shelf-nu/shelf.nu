@@ -1,12 +1,17 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { updateAsset } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
-import { assertIsPost, oneDayFromNow } from "~/utils";
+import { oneDayFromNow } from "~/utils";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { createSignedUrl } from "~/utils/storage.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  assertIsPost(request);
-  const { userId } = await requireAuthSession(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
+  const { userId } = authSession;
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
   const mainImage = formData.get("mainImage") as string;
