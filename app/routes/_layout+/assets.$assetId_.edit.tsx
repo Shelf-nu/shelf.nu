@@ -21,10 +21,9 @@ import {
   updateAssetMainImage,
 } from "~/modules/asset";
 
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
 import { getOrganization } from "~/modules/organization";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";

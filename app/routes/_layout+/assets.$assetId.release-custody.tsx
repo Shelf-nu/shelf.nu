@@ -5,7 +5,6 @@ import { UserXIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import { createNote } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
 import { releaseCustody } from "~/modules/custody";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";

@@ -10,12 +10,9 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { getBookings } from "~/modules/booking";
-import {
-  requireOrganisationId,
-  setSelectedOrganizationIdCookie,
-} from "~/modules/organization/context.server";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
   generatePageMeta,
   getCurrentSearchParams,
@@ -28,11 +25,16 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { AvailabilityBadge } from "./bookings.$bookingId.add-assets";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.booking,
+    PermissionAction.read
+  );
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, status } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);

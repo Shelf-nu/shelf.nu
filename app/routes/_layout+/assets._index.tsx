@@ -26,6 +26,7 @@ import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
@@ -220,20 +221,26 @@ export default function AssetIndexPage() {
     clearTagFilters();
   };
 
+  const isSelfService = useUserIsSelfService();
+
   return (
     <>
       <Header>
-        <ExportButton canExportAssets={canExportAssets} />
-        <ImportButton canImportAssets={canImportAssets} />
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new asset`}
-          icon="asset"
-          data-test-id="createNewAsset"
-        >
-          New Asset
-        </Button>
+        {!isSelfService ? (
+          <>
+            <ExportButton canExportAssets={canExportAssets} />
+            <ImportButton canImportAssets={canImportAssets} />
+            <Button
+              to="new"
+              role="link"
+              aria-label={`new asset`}
+              icon="asset"
+              data-test-id="createNewAsset"
+            >
+              New Asset
+            </Button>
+          </>
+        ) : null}
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         <Filters>

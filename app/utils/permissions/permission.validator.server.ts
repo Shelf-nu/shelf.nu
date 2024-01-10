@@ -54,6 +54,7 @@ export const hasPermission = async ({
     //owner and admin can do anything for now
     return true;
   }
+
   const validRoles = roles.filter((role) => {
     const entityPermMap = Role2PermisionMap[role];
     if (!entityPermMap) return false;
