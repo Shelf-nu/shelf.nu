@@ -9,7 +9,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { generateRandomCode } from "./helpers";
-import logoImg from "../../../public/images/logo-full-color(x2).png"
+import logoImg from "../../../public/images/logo-full-color(x2).png";
 import { createTeamMember } from "../team-member";
 import { createUserOrAttachOrg } from "../user";
 
@@ -156,16 +156,19 @@ export async function createInvite({
   const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
     expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
   }); //keep only needed data in token to maintain the size
+
   await sendEmail({
     to: inviteeEmail,
     subject: `You have been invited to ${invite.organization.name}`,
     text: "",
     html: invitationTemplateString({ token, invite }),
-    attachments: [{
-      filename: 'logo-full-color(x2).png',
-      content: Buffer.from(logoImg, "base64"),
-      cid: 'shelf-logo'
-    }]
+    attachments: [
+      {
+        filename: "logo-full-color(x2).png",
+        path: `${process.env.SERVER_URL}${logoImg}`,
+        cid: "shelf-logo",
+      },
+    ],
   });
 
   return invite;
