@@ -473,7 +473,7 @@ export default function AssetDetailsPage() {
         <div className="w-full lg:ml-6">
           {isSelfService ? (
             <div className="flex h-full flex-col justify-center">
-              <div className="text-center flex flex-col justify-center  items-center">
+              <div className="flex flex-col items-center justify-center  text-center">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   width={56}
