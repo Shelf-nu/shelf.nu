@@ -27,9 +27,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
 
   try {
+    const name = formData.get("name") as string;
     const teamMember = await db.teamMember.create({
       data: {
-        name: formData.get("name") as string,
+        name: name.trim(),
         organizationId,
       },
     });
