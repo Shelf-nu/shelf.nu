@@ -1,12 +1,8 @@
-import type { ChangeEvent } from "react";
-import { atom, useAtom } from "jotai";
-import { useHydrateAtoms } from "jotai/utils";
+import { useState, type ChangeEvent, useEffect } from "react";
 import { getRandomColor } from "~/utils";
 import Input from "./input";
 
 import { Button } from "../shared/button";
-
-const colorAtom = atom("");
 
 export const ColorInput = ({
   colorFromServer,
@@ -15,9 +11,11 @@ export const ColorInput = ({
   colorFromServer: string;
   [key: string]: any;
 }) => {
-  /** This is needed so the color can be hydrated. the Initial value is generated in the categories.new loader */
-  useHydrateAtoms([[colorAtom, colorFromServer]]);
-  const [color, setColor] = useAtom(colorAtom);
+  const [color, setColor] = useState<string>("");
+
+  useEffect(() => {
+    setColor(() => `${colorFromServer}`);
+  }, [colorFromServer]);
 
   const handleColorChange = (e: ChangeEvent<HTMLInputElement>) => {
     setColor(() => `${e.target.value}`);
