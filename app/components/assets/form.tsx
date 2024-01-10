@@ -29,8 +29,12 @@ import { Spinner } from "../shared/spinner";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
 
 export const NewAssetFormSchema = z.object({
-  title: z.string().min(2, "Title is required"),
-  description: z.string(),
+  title: z
+    .string()
+    .min(2, "Title is required")
+    .transform((val) => val.trim()), // We trim to avoid white spaces at start and end
+
+  description: z.string().transform((val) => val.trim()),
   category: z.string(),
   newLocationId: z.string().optional(),
   /** This holds the value of the current location. We need it for comparison reasons on the server.
