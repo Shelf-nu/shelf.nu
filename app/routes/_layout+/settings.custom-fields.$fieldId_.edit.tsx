@@ -170,7 +170,11 @@ export default function CustomFieldEditPage() {
 
   return (
     <>
-      <Header title={hasName ? name : customField.name} />
+      <Header
+        hideBreadcrumbs
+        title={hasName ? name : customField.name}
+        classNames="-mt-5"
+      />
       <div className=" items-top flex justify-between">
         <CustomFieldForm
           isEdit
