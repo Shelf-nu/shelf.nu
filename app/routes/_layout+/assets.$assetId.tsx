@@ -162,7 +162,6 @@ export default function AssetDetailsPage() {
    */
   const location = asset?.location as SerializeFrom<Location>;
   usePosition();
-
   return (
     <>
       <Header
