@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, Outlet, useLocation } from "@remix-run/react";
+import { Link, Outlet } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useMatchesData } from "~/hooks";
@@ -38,15 +38,6 @@ export default function SettingsPage() {
     { to: "team", content: "Team" },
   ];
 
-  /**
-   * We check the location because based on our design,
-   * the view /new should not inherit from the parent layouts
-   * */
-  const location = useLocation();
-  const shouldHideHeader =
-    location.pathname === "/settings/custom-fields/new" ||
-    /^\/settings\/workspace\/\w+$/.test(location.pathname);
-
   const enablePremium = useMatchesData<{ enablePremium: boolean }>(
     "routes/_layout+/_layout"
   )?.enablePremium;
@@ -57,7 +48,7 @@ export default function SettingsPage() {
 
   return (
     <>
-      {shouldHideHeader ? null : <Header hidePageDescription />}
+      <Header hidePageDescription />
       <HorizontalTabs items={items} />
       <div>
         <Outlet />
