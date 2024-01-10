@@ -1,8 +1,8 @@
 import type { Invite, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
-import { invitationTemplateString } from "~/components/emails/invite-template";
 import { db } from "~/database";
+import { invitationTemplateString } from "~/emails/invite-template";
 import { INVITE_TOKEN_SECRET } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

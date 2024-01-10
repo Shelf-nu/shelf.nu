@@ -10,7 +10,6 @@ import {
   render,
 } from "@react-email/components";
 import tailwindConfig from "tailwind.config";
-// import logoUrl from "~/../static/logo-full-color(x2).png";
 import type { InviteWithInviterAndOrg } from "~/modules/invite/types";
 import { SERVER_URL } from "~/utils/env";
 
