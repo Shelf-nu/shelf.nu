@@ -118,7 +118,11 @@ export default function WorkspaceEditPage() {
 
   return (
     <>
-      <Header title={hasName ? name : organization.name} />
+      <Header
+        title={hasName ? name : organization.name}
+        hideBreadcrumbs
+        classNames="-mt-5"
+      />
       <div className=" items-top flex justify-between">
         <WorkspaceForm
           name={organization.name || name}
