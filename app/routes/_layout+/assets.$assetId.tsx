@@ -248,15 +248,19 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        <Button
-          to="qr"
-          variant="secondary"
-          icon="barcode"
-          onlyIconOnMobile={true}
-        >
-          View QR code
-        </Button>
-        {!isSelfService ? <ActionsDopdown asset={asset} /> : null}
+        {!isSelfService ? (
+          <>
+            <Button
+              to="qr"
+              variant="secondary"
+              icon="barcode"
+              onlyIconOnMobile={true}
+            >
+              View QR code
+            </Button>
+            <ActionsDopdown asset={asset} />
+          </>
+        ) : null}
       </Header>
 
       <AssetImage

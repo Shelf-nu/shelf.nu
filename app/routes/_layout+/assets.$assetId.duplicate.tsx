@@ -15,9 +15,8 @@ import { Button } from "~/components/shared";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
 import { duplicateAsset } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/custom-modal.css";
-import { assertIsPost, isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
@@ -25,7 +24,11 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.create
+  );
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({ where: { id: assetId } });
   if (!asset) {
@@ -48,12 +51,10 @@ const DuplicateAssetSchema = z.object({
 });
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  assertIsPost(request);
-
   const { authSession, organizationId } = await requirePermision(
     request,
     PermissionEntity.asset,
-    PermissionAction.update
+    PermissionAction.create
   );
 
   const { userId } = authSession;

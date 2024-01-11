@@ -18,9 +18,11 @@ type SizeKeys = "cable" | "small" | "medium" | "large";
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { authSession, organizationId } = await requirePermision(
     request,
-    PermissionEntity.asset,
-    PermissionAction.update
+    PermissionEntity.qr,
+    PermissionAction.read
   );
+
+  // Here we are reading the
   const { userId } = authSession;
 
   const { assetId } = params as { assetId: string };
