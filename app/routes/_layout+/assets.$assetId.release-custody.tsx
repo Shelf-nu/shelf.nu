@@ -70,7 +70,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     /** Once the asset is updated, we create the note */
     await createNote({
-      content: `**${user.firstName} ${user.lastName}** has released **${custodianName}'s** custody over **${asset.title}**`,
+      content: `**${user.firstName?.trim()} ${
+        user.lastName
+      }** has released **${custodianName?.trim()}'s** custody over **${asset.title?.trim()}**`,
       type: "UPDATE",
       userId: asset.userId,
       assetId: asset.id,
