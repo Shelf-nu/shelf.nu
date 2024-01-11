@@ -65,6 +65,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     PermissionEntity.asset,
     PermissionAction.read
   );
+
   const { userId } = authSession;
   const locale = getLocale(request);
   const id = getRequiredParam(params, "assetId");

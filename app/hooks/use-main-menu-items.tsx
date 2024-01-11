@@ -40,7 +40,7 @@ export function useMainMenuItems() {
     {
       icon: <CalendarIcon />,
       to: "bookings",
-      label: "Bookings",
+      label: "Bookings (beta)",
     },
   ];
   const menuItemsBottom = [

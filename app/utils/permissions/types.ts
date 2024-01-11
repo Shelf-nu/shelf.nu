@@ -6,7 +6,7 @@ export enum PermissionAction {
   update = "update",
   delete = "delete",
   checkout = "checkout",
-  checking = "checkin",
+  checkin = "checkin",
   export = "export",
   import = "import",
 }
