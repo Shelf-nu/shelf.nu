@@ -103,9 +103,15 @@ export const upsertBooking = async (
       connect: { id: custodianUserId },
     };
     //to change custodian
-    data.custodianTeamMember = {
-      disconnect: true,
-    };
+    // We check if ID is passed,
+    // because in the case when we are creating a new booking but passing custodianUserId,
+    // there is nothing to disconnect
+    // So we only disconnect when id is passed which tells us we are editing an existing booking
+    if (id) {
+      data.custodianTeamMember = {
+        disconnect: true,
+      };
+    }
   } else if (custodianTeamMemberId) {
     const custodianUser = await db.teamMember.findUnique({
       where: {
@@ -136,6 +142,7 @@ export const upsertBooking = async (
     }
   }
 
+  /** Editing */
   if (id) {
     let newAssetStatus;
     const isTerminalState = [

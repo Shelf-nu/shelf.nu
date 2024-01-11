@@ -9,6 +9,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingStatus } from "~/hooks/use-booking-status";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
 import { isFormProcessing } from "~/utils/form";
 import { ActionsDropdown } from "./actions-dropdown";
@@ -108,6 +109,9 @@ export function BookingForm({
     "NewQuestionWizardScreen",
     NewBookingFormSchema(inputFieldIsDisabled)
   );
+
+  const isSelfService = useUserIsSelfService();
+
   return (
     <div
       id="bookingFormWrapper"
@@ -118,8 +122,12 @@ export function BookingForm({
           <div className=" -mx-4 mb-5 flex w-screen items-center justify-between border-b border-gray-200 bg-white px-4 py-2 md:absolute md:right-4 md:top-3 md:m-0 md:w-fit md:justify-end md:border-0 md:bg-transparent md:p-0">
             <div className=" flex gap-2">
               {/* We only render the actions when we are not on the .new route */}
-              {/* @ts-ignore */}
-              {routeIsNewBooking ? null : <ActionsDropdown booking={booking} />}
+              {routeIsNewBooking ||
+              (isDraft && isSelfService) || // When the booking is draft, there are no actions available for selfService so we don't render it
+              (isCompleted && isSelfService) ? null : ( // When the booking is Completed, there are no actions available for selfService so we don't render it
+                // @ts-ignore
+                <ActionsDropdown booking={booking} />
+              )}
 
               {isDraft ? (
                 <Button
@@ -156,7 +164,7 @@ export function BookingForm({
               ) : null}
 
               {/* When booking is reserved, we show the check-out button */}
-              {isReserved ? (
+              {isReserved && !isSelfService ? (
                 <ControlledActionButton
                   canUseFeature={!disabled && !hasUnavailableAssets}
                   buttonContent={{
@@ -173,7 +181,7 @@ export function BookingForm({
                 />
               ) : null}
 
-              {isOngoing || isOverdue ? (
+              {(isOngoing || isOverdue) && !isSelfService ? (
                 <Button type="submit" name="intent" value="checkIn">
                   Check-in
                 </Button>
@@ -262,6 +270,11 @@ export function BookingForm({
                   <CustodianSelect
                     defaultTeamMemberId={custodianUserId}
                     disabled={inputFieldIsDisabled}
+                    className={
+                      isSelfService
+                        ? "pointer-events-none cursor-not-allowed"
+                        : ""
+                    }
                     showEmail
                   />
 

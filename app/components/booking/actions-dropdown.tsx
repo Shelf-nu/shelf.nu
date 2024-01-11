@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import { useBookingStatus } from "~/hooks/use-booking-status";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
 import { tw } from "~/utils";
 import { DeleteBooking } from "./delete-booking";
@@ -23,6 +24,7 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
     useBookingStatus(booking);
 
   const submit = useSubmit();
+  const isSelfService = useUserIsSelfService();
 
   return (
     <DropdownMenu modal={false}>
@@ -71,7 +73,7 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
               </Button>
             </DropdownMenuItem>
           ) : null}
-          {isCompleted ? (
+          {isCompleted && !isSelfService ? (
             <DropdownMenuItem asChild>
               <Button
                 variant="link"
@@ -98,7 +100,7 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
               </Button>
             </DropdownMenuItem>
           ) : null}
-          <DeleteBooking booking={booking} />
+          {!isSelfService ? <DeleteBooking booking={booking} /> : null}
         </DropdownMenuContent>
       </DropdownMenuPortal>
     </DropdownMenu>

@@ -62,5 +62,11 @@ export async function requirePermision(
     userId: authSession.userId,
   });
 
-  return { authSession, organizations, organizationId, currentOrganization };
+  return {
+    authSession,
+    organizations,
+    organizationId,
+    currentOrganization,
+    role: roles ? roles[0] : undefined,
+  };
 }

@@ -1,14 +1,14 @@
+import { OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
 
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { upsertBooking } from "~/modules/booking";
-import {
-  requireOrganisationId,
-  setSelectedOrganizationIdCookie,
-} from "~/modules/organization/context.server";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getClientHint } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 /**
  * In the case of bookings, when the user clicks "new", we automatically create the booking.
@@ -17,14 +17,22 @@ import { setCookie } from "~/utils/cookies.server";
  * This way all actions are available and its way easier to manage so in a way this works kind of like a resource route.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId, role } = await requirePermision(
+    request,
+    PermissionEntity.booking,
+    PermissionAction.create
+  );
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
   const booking = await upsertBooking(
     {
       organizationId,
       name: "Draft booking",
       creatorId: authSession.userId,
+      // If the user is self service, we already set them as the custodian as that is the only possible option
+      ...(isSelfService && {
+        custodianUserId: authSession.userId,
+      }),
     },
     getClientHint(request)
   );

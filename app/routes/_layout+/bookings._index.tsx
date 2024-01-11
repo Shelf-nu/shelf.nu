@@ -1,4 +1,8 @@
-import type { Prisma, BookingStatus } from "@prisma/client";
+import {
+  type Prisma,
+  type BookingStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
@@ -30,11 +34,12 @@ import { requirePermision } from "~/utils/roles.server";
 import { AvailabilityBadge } from "./bookings.$bookingId.add-assets";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+  const { authSession, organizationId, role } = await requirePermision(
     request,
     PermissionEntity.booking,
     PermissionAction.read
   );
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search, status } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -50,6 +55,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(status && {
       // If status is in the params, we filter based on it
       statuses: [status],
+    }),
+    ...(isSelfService && {
+      // If the user is self service, we only show bookings that belong to that user)
+      custodianUserId: authSession?.userId,
     }),
   });
 
@@ -116,6 +125,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function BookingsIndexPage() {
   const navigate = useNavigate();
+
   return (
     <>
       <Header>

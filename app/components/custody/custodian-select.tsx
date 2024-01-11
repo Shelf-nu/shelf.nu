@@ -1,5 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/assets.$assetId.give-custody";
+import { tw } from "~/utils";
 import {
   Select,
   SelectTrigger,
@@ -16,15 +17,18 @@ export default function CustodianSelect(
     defaultTeamMemberId,
     disabled,
     showEmail,
+    className,
   }: {
     defaultCustodianId?: string;
     defaultTeamMemberId?: string;
     disabled?: boolean;
     showEmail?: boolean;
+    className?: string;
   } = {
     defaultCustodianId: "",
     disabled: false,
     showEmail: false,
+    className: "",
   }
 ) {
   const { teamMembers } = useLoaderData<typeof loader>();
@@ -54,7 +58,9 @@ export default function CustodianSelect(
   return (
     <div className="relative w-full">
       <Select name="custodian" defaultValue={defaultValue} disabled={disabled}>
-        <SelectTrigger className={disabled ? "cursor-not-allowed" : ""}>
+        <SelectTrigger
+          className={tw(disabled ? "cursor-not-allowed" : "", className)}
+        >
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>
         <div>

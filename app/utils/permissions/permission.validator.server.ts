@@ -13,6 +13,7 @@ const Role2PermisionMap: {
     [PermissionEntity.booking]: [
       PermissionAction.create,
       PermissionAction.read,
+      PermissionAction.update,
     ],
     [PermissionEntity.qr]: [],
     [PermissionEntity.category]: [],

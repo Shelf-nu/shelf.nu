@@ -1,4 +1,4 @@
-import { BookingStatus } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -16,17 +16,14 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { db } from "~/database";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import {
   deleteBooking,
   getBooking,
   removeAssets,
   upsertBooking,
 } from "~/modules/booking";
-import {
-  requireOrganisationId,
-  setSelectedOrganizationIdCookie,
-} from "~/modules/organization/context.server";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user";
 import {
   generatePageMeta,
@@ -49,8 +46,13 @@ import { requirePermision } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings._index";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId, role } = await requirePermision(
+    request,
+    PermissionEntity.booking,
+    PermissionAction.read
+  );
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
   const bookingId = getRequiredParam(params, "bookingId");
   const user = await getUserByID(authSession.userId);
 
@@ -87,9 +89,16 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const booking = await getBooking({ id: bookingId });
 
-  // @TODO we have a bug here. That always throws an error for some reason
   if (!booking) {
     throw new ShelfStackError({ message: "Booking not found", status: 404 });
+  }
+
+  /** For self service users, we only allow them to read their own bookings */
+  if (isSelfService && booking.custodianUserId !== authSession.userId) {
+    throw new ShelfStackError({
+      message: "You are not authorized to view this booking",
+      status: 403,
+    });
   }
 
   const searchParams = getCurrentSearchParams(request);
@@ -153,8 +162,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     reserve: PermissionAction.create,
     save: PermissionAction.update,
     removeAsset: PermissionAction.update,
-    checkOut: PermissionAction.update,
-    checkIn: PermissionAction.update,
+    checkOut: PermissionAction.checkout,
+    checkIn: PermissionAction.checkin,
     archive: PermissionAction.update,
     cancel: PermissionAction.update,
   };

@@ -39,7 +39,6 @@ export default function SettingsPage() {
     { to: "team", content: "Team" },
   ];
 
-
   const userIsSelfService = useUserIsSelfService();
   /** If user is self service, remove the extra items */
   if (userIsSelfService) {

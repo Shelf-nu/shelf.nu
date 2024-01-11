@@ -26,18 +26,21 @@ import {
 } from "~/components/shared/tooltip";
 import { Td } from "~/components/table";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { SERVER_URL, assertIsPost, getRequiredParam, tw } from "~/utils";
+import { SERVER_URL, getRequiredParam, tw } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.booking,
+    PermissionAction.update
+  );
   const id = getRequiredParam(params, "bookingId");
   const {
     search,
@@ -82,8 +85,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  assertIsPost(request);
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.booking,
+    PermissionAction.update
+  );
+
   const bookingId = getRequiredParam(params, "bookingId");
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
