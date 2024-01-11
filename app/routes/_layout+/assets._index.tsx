@@ -5,6 +5,7 @@ import { useLoaderData, useNavigate } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ExportButton } from "~/components/assets/export-button";
 import { ImportButton } from "~/components/assets/import-button";
 import { ChevronRight } from "~/components/icons";
@@ -25,15 +26,16 @@ import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
-import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { canExportAssets, canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -71,9 +73,12 @@ export interface IndexResponse {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId, organizations, currentOrganization } =
-    await requireOrganisationId(authSession, request);
+  const { authSession, organizationId, organizations, currentOrganization } =
+    await requirePermision(
+      request,
+      PermissionEntity.asset,
+      PermissionAction.read
+    );
 
   const { userId } = authSession;
 
@@ -129,7 +134,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cookie,
   } = await getPaginatedAndFilterableAssets({
     request,
-    userId,
     organizationId,
   });
 
@@ -217,20 +221,26 @@ export default function AssetIndexPage() {
     clearTagFilters();
   };
 
+  const isSelfService = useUserIsSelfService();
+
   return (
     <>
       <Header>
-        <ExportButton canExportAssets={canExportAssets} />
-        <ImportButton canImportAssets={canImportAssets} />
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new asset`}
-          icon="asset"
-          data-test-id="createNewAsset"
-        >
-          New Asset
-        </Button>
+        {!isSelfService ? (
+          <>
+            <ExportButton canExportAssets={canExportAssets} />
+            <ImportButton canImportAssets={canImportAssets} />
+            <Button
+              to="new"
+              role="link"
+              aria-label={`new asset`}
+              icon="asset"
+              data-test-id="createNewAsset"
+            >
+              New Asset
+            </Button>
+          </>
+        ) : null}
       </Header>
       <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
         <Filters>
@@ -312,11 +322,10 @@ const ListAssetContent = ({
                 {item.title}
               </span>
               <div>
-                <Badge
-                  color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-                >
-                  {userFriendlyAssetStatus(item.status)}
-                </Badge>
+                <AssetStatusBadge
+                  status={item.status}
+                  availableToBook={item.availableToBook}
+                />
               </div>
             </div>
           </div>

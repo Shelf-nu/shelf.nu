@@ -1,10 +1,15 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
-import { requireAuthSession } from "~/modules/auth";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.read
+  );
 
   return null;
 }

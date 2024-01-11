@@ -16,6 +16,7 @@ import {
   SelectItem,
   SelectLabel,
   SelectValue,
+  SelectTrigger,
 } from "~/components/forms";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons";
@@ -23,13 +24,15 @@ import { Button } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import { db } from "~/database";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing, tw, validEmail } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
+import type { UserFriendlyRoles } from "./settings.team";
 
 const InviteUserFormSchema = z.object({
   email: z
@@ -39,11 +42,15 @@ const InviteUserFormSchema = z.object({
       message: "Please enter a valid email",
     })),
   teamMemberId: z.string().optional(),
+  role: z.nativeEnum(OrganizationRoles),
 });
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.teamMember,
+    PermissionAction.create
+  );
   await assertUserCanInviteUsersToWorkspace({ organizationId });
   return json({
     showModal: true,
@@ -51,8 +58,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.teamMember,
+    PermissionAction.create
+  );
   const { userId } = authSession;
   const formData = await request.formData();
   const result = await InviteUserFormSchema.safeParseAsync(
@@ -68,7 +78,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 
-  const { email, teamMemberId } = result.data;
+  const { email, teamMemberId, role } = result.data;
 
   let teamMemberName = email.split("@")[0];
   if (teamMemberId) {
@@ -84,7 +94,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     organizationId,
     inviteeEmail: email,
     inviterId: userId,
-    roles: [OrganizationRoles.ADMIN],
+    roles: [role],
     teamMemberName,
     teamMemberId,
     userId,
@@ -111,6 +121,12 @@ export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
+export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
+  [OrganizationRoles.ADMIN]: "Administrator",
+  [OrganizationRoles.OWNER]: "Owner",
+  [OrganizationRoles.SELF_SERVICE]: "Self service",
+};
+
 export default function InviteUser() {
   const organization = useCurrentOrganization();
   const zo = useZorm("NewQuestionWizardScreen", InviteUserFormSchema);
@@ -120,7 +136,6 @@ export default function InviteUser() {
   const teamMemberId = searchParams.get("teamMemberId");
 
   const actionData = useActionData<typeof action>();
-
   return organization ? (
     <>
       <div className="modal-content-wrapper">
@@ -175,33 +190,29 @@ export default function InviteUser() {
           <SelectGroup>
             <SelectLabel className="pl-0">Role</SelectLabel>
             <Select name="role" defaultValue={OrganizationRoles.ADMIN}>
-              <div
-                className="flex h-10 w-full items-center justify-between rounded-md border border-gray-300 bg-transparent px-3.5 py-3 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2  disabled:opacity-50"
-                title="More roles coming soon"
-              >
+              <SelectTrigger>
                 <SelectValue />
-              </div>
+              </SelectTrigger>
               <SelectContent
                 position="popper"
                 className="w-full min-w-[300px]"
                 align="start"
               >
                 <div className=" max-h-[320px] overflow-auto">
-                  <SelectItem
-                    value={OrganizationRoles.ADMIN}
-                    key={OrganizationRoles.ADMIN}
-                    className="p-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className=" ml-[1px] text-sm text-gray-900">
-                        Administrator
+                  {Object.entries(organizationRolesMap).map(([k, v]) => (
+                    <SelectItem value={k} key={k} className="p-2">
+                      <div className="flex items-center gap-2">
+                        <div className=" ml-[1px] block text-sm lowercase text-gray-900 first-letter:uppercase">
+                          {v}
+                        </div>
                       </div>
-                    </div>
-                  </SelectItem>
+                    </SelectItem>
+                  ))}
                 </div>
               </SelectContent>
             </Select>
           </SelectGroup>
+
           <div className="pt-1.5">
             <Input
               name={zo.fields.email()}

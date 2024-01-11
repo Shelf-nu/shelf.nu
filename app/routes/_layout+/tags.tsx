@@ -6,6 +6,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
+import { ErrorBoundryComponent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
@@ -14,8 +15,6 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import { DeleteTag } from "~/components/tag/delete-tag";
 
-import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { deleteTag, getTags } from "~/modules/tag";
 import {
   assertIsDelete,
@@ -26,10 +25,15 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.tag,
+    PermissionAction.read
+  );
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -77,8 +81,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ request }: ActionFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.tag,
+    PermissionAction.delete
+  );
   const { userId } = authSession;
 
   assertIsDelete(request);
@@ -99,6 +106,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export const handle = {
   breadcrumb: () => <Link to="/tags">Tags</Link>,
 };
+export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function CategoriesPage() {
   return (

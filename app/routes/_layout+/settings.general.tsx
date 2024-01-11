@@ -31,13 +31,14 @@ import { Button } from "~/components/shared";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { updateOrganization } from "~/modules/organization";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost, isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { MAX_SIZE } from "./settings.workspace.new";
 
@@ -49,8 +50,11 @@ const EditWorkspaceFormSchema = z.object({
 });
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.generalSettings,
+    PermissionAction.read
+  );
   const { userId } = authSession;
 
   const user = await db.user.findUnique({
@@ -120,8 +124,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export async function action({ request }: ActionFunctionArgs) {
-  assertIsPost(request);
-  const authSession = await requireAuthSession(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.generalSettings,
+    PermissionAction.update
+  );
 
   const clonedRequest = request.clone();
   const formData = await clonedRequest.formData();

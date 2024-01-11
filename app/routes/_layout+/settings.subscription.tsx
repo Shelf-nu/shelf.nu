@@ -19,10 +19,11 @@ import { Prices } from "~/components/subscription/prices";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import { db } from "~/database";
 
-import { requireAuthSession } from "~/modules/auth";
 import { getUserByID } from "~/modules/user";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getDomainUrl,
@@ -35,7 +36,13 @@ import {
 } from "~/utils/stripe.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.subscription,
+    PermissionAction.read
+  );
+
+  const { userId } = authSession;
   const user = await getUserByID(userId);
 
   if (!user) throw new Error("User not found");
@@ -80,7 +87,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { userId, email } = await requireAuthSession(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.subscription,
+    PermissionAction.update
+  );
+
+  const { userId, email } = authSession;
   const formData = await request.formData();
   const priceId = formData.get("priceId") as Stripe.Price["id"];
 

@@ -1,6 +1,6 @@
 export function EmptyState({ text }: { text: string }) {
   return (
-    <div className="flex h-full min-h-[200px] w-full flex-col items-center justify-center">
+    <div className="flex h-full min-h-[200px] w-full flex-col items-center justify-center px-4">
       <img
         src="/images/empty-state.svg"
         alt="Empty state"

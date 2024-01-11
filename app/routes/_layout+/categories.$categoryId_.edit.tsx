@@ -13,12 +13,14 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { getCategory, updateCategory } from "~/modules/category";
-import { assertIsPost, isFormProcessing, getRequiredParam } from "~/utils";
+import { isFormProcessing, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateCategoryFormSchema = z.object({
@@ -30,7 +32,11 @@ export const UpdateCategoryFormSchema = z.object({
 const title = "Edit category";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.category,
+    PermissionAction.update
+  );
 
   const id = getRequiredParam(params, "categoryId");
   const category = await getCategory({ id });
@@ -49,8 +55,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ request, params }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  assertIsPost(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.category,
+    PermissionAction.update
+  );
   const formData = await request.formData();
   const result = await UpdateCategoryFormSchema.safeParseAsync(
     parseFormAny(formData)
@@ -73,6 +82,7 @@ export async function action({ request, params }: LoaderFunctionArgs) {
     ...result.data,
     id,
   });
+
   // Handle response error when creating. Mostly due to duplicate name
   if (rsp?.error) {
     return json(

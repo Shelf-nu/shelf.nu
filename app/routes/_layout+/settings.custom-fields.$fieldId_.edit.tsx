@@ -14,22 +14,27 @@ import {
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import {
   countAcviteCustomFields,
   getCustomField,
   updateCustomField,
 } from "~/modules/custom-field";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { getOrganizationTierLimit } from "~/modules/tier";
-import { assertIsPost, getRequiredParam } from "~/utils";
+import { getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.customField,
+    PermissionAction.update
+  );
+
   const id = getRequiredParam(params, "fieldId");
 
   const { customField } = await getCustomField({ organizationId, id });
@@ -52,15 +57,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Edit",
+  breadcrumb: () => <span>Edit</span>,
 };
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  assertIsPost(request);
-  const authSession = await requireAuthSession(request);
-  const { organizationId, organizations } = await requireOrganisationId(
-    authSession,
-    request
+  const { authSession, organizationId, organizations } = await requirePermision(
+    request,
+    PermissionEntity.customField,
+    PermissionAction.update
   );
 
   const id = getRequiredParam(params, "fieldId");

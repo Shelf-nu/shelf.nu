@@ -7,13 +7,17 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import { useZorm } from "react-zorm";
+import { z } from "zod";
 import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
+import { Switch } from "~/components/forms/switch";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
@@ -27,31 +31,41 @@ import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks";
-import { deleteAsset, getAsset } from "~/modules/asset";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import {
+  deleteAsset,
+  getAsset,
+  updateAssetBookingAvailability,
+} from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
-import {
-  assertIsDelete,
-  getRequiredParam,
-  tw,
-  userFriendlyAssetStatus,
-  isLink,
-} from "~/utils";
+import { getRequiredParam, tw, isLink, isFormProcessing } from "~/utils";
+
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
+import { setCookie } from "~/utils/cookies.server";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 
+export const AvailabilityForBookingFormSchema = z.object({
+  availableToBook: z.string().transform((val) => val === "on"),
+});
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.read
+  );
+
   const { userId } = authSession;
   const locale = getLocale(request);
   const id = getRequiredParam(params, "assetId");
@@ -109,32 +123,80 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     locale,
   });
 }
+
 export async function action({ request, params }: ActionFunctionArgs) {
-  assertIsDelete(request);
-  const id = getRequiredParam(params, "assetId");
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
   const formData = await request.formData();
-  const mainImageUrl = formData.get("mainImage") as string;
+  const intent = formData.get("intent") as "delete" | "toggle";
+  const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
+    delete: PermissionAction.delete,
+    toggle: PermissionAction.update,
+  };
 
-  await deleteAsset({ organizationId, id });
-  await deleteAssetImage({
-    url: mainImageUrl,
-    bucketName: "assets",
-  });
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    intent2ActionMap[intent]
+  );
+  const id = getRequiredParam(params, "assetId");
+  switch (intent) {
+    case "delete":
+      const mainImageUrl = formData.get("mainImage") as string;
 
-  sendNotification({
-    title: "Asset deleted",
-    message: "Your asset has been deleted successfully",
-    icon: { name: "trash", variant: "error" },
-    senderId: authSession.userId,
-  });
+      await deleteAsset({ organizationId, id });
+      await deleteAssetImage({
+        url: mainImageUrl,
+        bucketName: "assets",
+      });
 
-  return redirect(`/assets`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+      sendNotification({
+        title: "Asset deleted",
+        message: "Your asset has been deleted successfully",
+        icon: { name: "trash", variant: "error" },
+        senderId: authSession.userId,
+      });
+
+      return redirect(`/assets`, {
+        headers: {
+          "Set-Cookie": await commitAuthSession(request, { authSession }),
+        },
+      });
+    case "toggle":
+      const availableToBook = formData.get("availableToBook") === "on";
+      const rsp = await updateAssetBookingAvailability(id, availableToBook);
+      if (rsp.error) {
+        return json(
+          {
+            errors: {
+              title: rsp.error,
+            },
+          },
+          {
+            status: 400,
+            headers: [
+              setCookie(await commitAuthSession(request, { authSession })),
+            ],
+          }
+        );
+      }
+
+      sendNotification({
+        title: "Asset availability status updated successfully",
+        message: "Your asset's availability for booking has been updated",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+
+      return json(
+        { success: true },
+        {
+          headers: {
+            "Set-Cookie": await commitAuthSession(request, { authSession }),
+          },
+        }
+      );
+    default:
+      return null;
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -162,14 +224,22 @@ export default function AssetDetailsPage() {
    */
   const location = asset?.location as SerializeFrom<Location>;
   usePosition();
+  const fetcher = useFetcher();
+  const zo = useZorm(
+    "NewQuestionWizardScreen",
+    AvailabilityForBookingFormSchema
+  );
+  const isSelfService = useUserIsSelfService();
+
   return (
     <>
       <Header
         subHeading={
           <div className="flex gap-2">
-            <Badge color={assetIsAvailable ? "#12B76A" : "#2E90FA"}>
-              {userFriendlyAssetStatus(asset.status)}
-            </Badge>
+            <AssetStatusBadge
+              status={asset.status}
+              availableToBook={asset.availableToBook}
+            />
             {location ? (
               <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700">
                 {location.name}
@@ -178,15 +248,19 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        <Button
-          to="qr"
-          variant="secondary"
-          icon="barcode"
-          onlyIconOnMobile={true}
-        >
-          View QR code
-        </Button>
-        <ActionsDopdown asset={asset} />
+        {!isSelfService ? (
+          <>
+            <Button
+              to="qr"
+              variant="secondary"
+              icon="barcode"
+              onlyIconOnMobile={true}
+            >
+              View QR code
+            </Button>
+            <ActionsDopdown asset={asset} />
+          </>
+        ) : null}
       </Header>
 
       <AssetImage
@@ -218,9 +292,41 @@ export default function AssetDetailsPage() {
               <p className=" text-gray-600">{asset.description}</p>
             </Card>
           ) : null}
+          {!isSelfService ? (
+            <Card>
+              <fetcher.Form
+                ref={zo.ref}
+                method="post"
+                onChange={(e) => fetcher.submit(e.currentTarget)}
+              >
+                <div className="flex justify-between gap-3">
+                  <div>
+                    <p className="text-[14px] font-medium text-gray-700">
+                      Available for bookings
+                    </p>
+                    <p className="text-[12px] text-gray-600">
+                      Asset is available for being used in bookings
+                    </p>
+                  </div>
+                  <Switch
+                    name={zo.fields.availableToBook()}
+                    disabled={isSelfService || isFormProcessing(fetcher.state)} // Disable for self service users
+                    defaultChecked={asset.availableToBook}
+                    required
+                    title={
+                      isSelfService
+                        ? "You do not have the permissions to change availablility"
+                        : "Toggle availability"
+                    }
+                  />
+                  <input type="hidden" value="toggle" name="intent" />
+                </div>
+              </fetcher.Form>
+            </Card>
+          ) : null}
 
           {/* We simply check if the asset is available and we can assume that if it't not, there is a custodian assigned */}
-          {!assetIsAvailable && asset?.custody?.createdAt ? (
+          {!isSelfService && !assetIsAvailable && asset?.custody?.createdAt ? (
             <Card>
               <div className="flex items-center gap-3">
                 <img
@@ -366,13 +472,54 @@ export default function AssetDetailsPage() {
               </Card>
             </>
           ) : null}
-
-          <ScanDetails />
+          {!isSelfService ? <ScanDetails /> : null}
         </div>
 
         <div className="w-full lg:ml-6">
-          <TextualDivider text="Notes" className="mb-8 lg:hidden" />
-          <Notes />
+          {isSelfService ? (
+            <div className="flex h-full flex-col justify-center">
+              <div className="flex flex-col items-center justify-center  text-center">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width={56}
+                  height={56}
+                  fill="none"
+                >
+                  <rect
+                    width={48}
+                    height={48}
+                    x={4}
+                    y={4}
+                    fill="#FDEAD7"
+                    rx={24}
+                  />
+                  <rect
+                    width={48}
+                    height={48}
+                    x={4}
+                    y={4}
+                    stroke="#FEF6EE"
+                    strokeWidth={8}
+                    rx={24}
+                  />
+                  <path
+                    stroke="#EF6820"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="m26 31-3.075 3.114c-.43.434-.644.651-.828.667a.5.5 0 0 1-.421-.173c-.12-.14-.12-.446-.12-1.056v-1.56c0-.548-.449-.944-.99-1.024v0a3 3 0 0 1-2.534-2.533C18 28.219 18 27.96 18 27.445V22.8c0-1.68 0-2.52.327-3.162a3 3 0 0 1 1.311-1.311C20.28 18 21.12 18 22.8 18h7.4c1.68 0 2.52 0 3.162.327a3 3 0 0 1 1.311 1.311C35 20.28 35 21.12 35 22.8V27m0 11-2.176-1.513c-.306-.213-.46-.32-.626-.395a2.002 2.002 0 0 0-.462-.145c-.18-.033-.367-.033-.74-.033H29.2c-1.12 0-1.68 0-2.108-.218a2 2 0 0 1-.874-.874C26 34.394 26 33.834 26 32.714V30.2c0-1.12 0-1.68.218-2.108a2 2 0 0 1 .874-.874C27.52 27 28.08 27 29.2 27h5.6c1.12 0 1.68 0 2.108.218a2 2 0 0 1 .874.874C38 28.52 38 29.08 38 30.2v2.714c0 .932 0 1.398-.152 1.766a2 2 0 0 1-1.083 1.082c-.367.152-.833.152-1.765.152V38Z"
+                  />
+                </svg>
+                <h5>Insufficient permissions</h5>
+                <p>You are not allowed to view asset notes</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <TextualDivider text="Notes" className="mb-8 lg:hidden" />
+              <Notes />
+            </>
+          )}
         </div>
       </div>
       <ContextualSidebar />
