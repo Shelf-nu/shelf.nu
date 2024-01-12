@@ -94,6 +94,7 @@ export function BookingForm({
     isArchived,
     isOverdue,
     isCancelled,
+    hasCheckedOutAssets,
   } = useBookingStatus(booking);
 
   const disabled = isFormProcessing(navigation.state) || isArchived;
@@ -166,7 +167,9 @@ export function BookingForm({
               {/* When booking is reserved, we show the check-out button */}
               {isReserved && !isSelfService ? (
                 <ControlledActionButton
-                  canUseFeature={!disabled && !hasUnavailableAssets}
+                  canUseFeature={
+                    !disabled && !hasUnavailableAssets && !hasCheckedOutAssets
+                  }
                   buttonContent={{
                     title: "Check-out",
                     message:

@@ -365,7 +365,7 @@ export async function getBookings({
     };
   } else {
     where.status = {
-      notIn: [BookingStatus.ARCHIVED], // By default we dont show archived bookings
+      notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED], // By default we dont show archived & cancelled bookings
     };
   }
 
