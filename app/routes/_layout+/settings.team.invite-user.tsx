@@ -123,7 +123,6 @@ export function links() {
 
 export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
-  [OrganizationRoles.OWNER]: "Owner",
   [OrganizationRoles.SELF_SERVICE]: "Self service",
 };
 

@@ -220,3 +220,7 @@ dialog {
 .mobile-styling-only .lg\:hidden {
   display: block;
 }
+
+.preview-only-custodian-select svg {
+  display: none;
+}

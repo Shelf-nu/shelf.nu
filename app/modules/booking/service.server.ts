@@ -321,6 +321,7 @@ export async function getBookings({
   bookingTo,
   excludeBookingIds,
   bookingFrom,
+  userId,
 }: {
   organizationId: Organization["id"];
 
@@ -339,12 +340,38 @@ export async function getBookings({
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
+  userId: Booking["creatorId"];
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
   /** Default value of where. Takes the assetss belonging to current org */
   let where: Prisma.BookingWhereInput = { organizationId };
+
+  /** The idea is that only the creator of a draft booking can see it
+   * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
+   */
+  where.AND = [
+    {
+      OR: [
+        {
+          status: {
+            not: "DRAFT",
+          },
+        },
+        {
+          AND: [
+            {
+              status: "DRAFT",
+            },
+            {
+              creatorId: userId,
+            },
+          ],
+        },
+      ],
+    },
+  ];
 
   /** If the search string exists, add it to the where object */
   if (search?.trim()?.length) {
