@@ -13,9 +13,7 @@ export function useBookingStatus(booking: BookingSubset) {
   const hasAssets = useMemo(() => booking.assets?.length > 0, [booking.assets]);
 
   const hasUnavailableAssets = useMemo(
-    () =>
-      booking.assets?.some((asset) => !asset.availableToBook) || // Assets are marked as unavailable
-      booking.assets?.some((asset) => asset.status === AssetStatus.CHECKED_OUT), // Assets are still checked out from another booking
+    () => booking.assets?.some((asset) => !asset.availableToBook),
     [booking.assets]
   );
 
@@ -50,6 +48,13 @@ export function useBookingStatus(booking: BookingSubset) {
     [booking.status]
   );
 
+  const hasCheckedOutAssets = useMemo(
+    () =>
+      booking.assets?.some((asset) => asset.status === AssetStatus.CHECKED_OUT), // Assets are still checked out from another booking
+
+    [booking.assets]
+  );
+
   return {
     hasAssets,
     hasUnavailableAssets,
@@ -60,5 +65,6 @@ export function useBookingStatus(booking: BookingSubset) {
     isArchived,
     isOverdue,
     isCancelled,
+    hasCheckedOutAssets,
   };
 }

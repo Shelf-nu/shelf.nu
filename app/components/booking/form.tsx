@@ -94,6 +94,7 @@ export function BookingForm({
     isArchived,
     isOverdue,
     isCancelled,
+    hasCheckedOutAssets,
   } = useBookingStatus(booking);
 
   const disabled = isFormProcessing(navigation.state) || isArchived;
@@ -123,7 +124,7 @@ export function BookingForm({
             <div className=" flex gap-2">
               {/* We only render the actions when we are not on the .new route */}
               {routeIsNewBooking ||
-              (isDraft && isSelfService) || // When the booking is draft, there are no actions available for selfService so we don't render it
+              // (isDraft && isSelfService) || // When the booking is draft, there are no actions available for selfService so we don't render it
               (isCompleted && isSelfService) ? null : ( // When the booking is Completed, there are no actions available for selfService so we don't render it
                 // @ts-ignore
                 <ActionsDropdown booking={booking} />
@@ -166,7 +167,9 @@ export function BookingForm({
               {/* When booking is reserved, we show the check-out button */}
               {isReserved && !isSelfService ? (
                 <ControlledActionButton
-                  canUseFeature={!disabled && !hasUnavailableAssets}
+                  canUseFeature={
+                    !disabled && !hasUnavailableAssets && !hasCheckedOutAssets
+                  }
                   buttonContent={{
                     title: "Check-out",
                     message:
@@ -272,7 +275,7 @@ export function BookingForm({
                     disabled={inputFieldIsDisabled}
                     className={
                       isSelfService
-                        ? "pointer-events-none cursor-not-allowed"
+                        ? "preview-only-custodian-select pointer-events-none cursor-not-allowed bg-gray-50"
                         : ""
                     }
                     showEmail

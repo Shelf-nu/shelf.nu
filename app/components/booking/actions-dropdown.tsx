@@ -20,7 +20,7 @@ interface Props {
 }
 
 export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
-  const { isCompleted, isOngoing, isReserved, isOverdue } =
+  const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
     useBookingStatus(booking);
 
   const submit = useSubmit();
@@ -100,7 +100,9 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
               </Button>
             </DropdownMenuItem>
           ) : null}
-          {!isSelfService ? <DeleteBooking booking={booking} /> : null}
+          {(isSelfService && isDraft) || !isSelfService ? (
+            <DeleteBooking booking={booking} />
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenuPortal>
     </DropdownMenu>

@@ -270,7 +270,9 @@ export default function AssetIndexPage() {
             <>
               <Th className="hidden md:table-cell">Category</Th>
               <Th className="hidden md:table-cell">Tags</Th>
-              <Th className="hidden md:table-cell">Custodian</Th>
+              {!isSelfService ? (
+                <Th className="hidden md:table-cell">Custodian</Th>
+              ) : null}
               <Th className="hidden md:table-cell">Location</Th>
             </>
           }
@@ -300,6 +302,8 @@ const ListAssetContent = ({
   };
 }) => {
   const { category, tags, custody, location } = item;
+  const isSelfService = useUserIsSelfService();
+
   return (
     <>
       {/* Item */}
@@ -355,25 +359,27 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      <Td className="hidden md:table-cell">
-        {custody ? (
-          <GrayBadge>
-            <>
-              {custody.custodian?.user ? (
-                <img
-                  src={
-                    custody.custodian?.user?.profilePicture ||
-                    "/images/default_pfp.jpg"
-                  }
-                  className="mr-1 h-4 w-4 rounded-full"
-                  alt=""
-                />
-              ) : null}
-              <span className="mt-[1px]">{custody.custodian.name}</span>
-            </>
-          </GrayBadge>
-        ) : null}
-      </Td>
+      {!isSelfService ? (
+        <Td className="hidden md:table-cell">
+          {custody ? (
+            <GrayBadge>
+              <>
+                {custody.custodian?.user ? (
+                  <img
+                    src={
+                      custody.custodian?.user?.profilePicture ||
+                      "/images/default_pfp.jpg"
+                    }
+                    className="mr-1 h-4 w-4 rounded-full"
+                    alt=""
+                  />
+                ) : null}
+                <span className="mt-[1px]">{custody.custodian.name}</span>
+              </>
+            </GrayBadge>
+          ) : null}
+        </Td>
+      ) : null}
 
       {/* Location */}
       <Td className="hidden md:table-cell">

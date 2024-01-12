@@ -52,6 +52,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     page,
     perPage,
     search,
+    userId: authSession?.userId,
     ...(status && {
       // If status is in the params, we filter based on it
       statuses: [status],
