@@ -23,6 +23,7 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
     <Html>
       <Head>
         <title>Invitation to join Shelf as an Administrator</title>
+        <meta name="x-apple-disable-message-reformatting" />
       </Head>
       <Tailwind config={tailwindConfig}>
         <Section className="p-14">
