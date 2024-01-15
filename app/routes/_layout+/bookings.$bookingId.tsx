@@ -167,7 +167,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     archive: PermissionAction.update,
     cancel: PermissionAction.update,
   };
-  const { authSession, organizationId } = await requirePermision(
+  const { authSession, organizationId, role } = await requirePermision(
     request,
     PermissionEntity.booking,
     intent2ActionMap[intent]
@@ -255,6 +255,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       );
     case "delete":
+      const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+      if (isSelfService) {
+        /**
+         * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
+         * They have delete permissions but shouldnt be able to delete other people's bookings
+         * Practically they should not be able to even view/access another booking but this is just an extra security measure
+         */
+        const b = await getBooking({ id });
+        if (
+          b?.creatorId !== authSession.userId &&
+          b?.custodianUserId !== authSession.userId
+        ) {
+          throw new ShelfStackError({
+            message: "You are not authorized to delete this booking",
+            status: 403,
+          });
+        }
+      }
+
       await deleteBooking({ id }, getClientHint(request));
       sendNotification({
         title: "Booking deleted",
