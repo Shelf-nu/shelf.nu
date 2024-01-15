@@ -121,12 +121,13 @@ export function BookingAssetsColumn() {
 
 const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { category } = item;
-  const { bookindId } = useParams();
-  const isChecked = item?.bookings?.some((b) => b.id === bookindId) ?? false;
+  // const { bookindId } = useParams();
+  // const isChecked = item?.bookings?.some((b) => b.id === bookindId) ?? false;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const isSelfService = useUserIsSelfService();
   const { isOngoing, isCompleted, isArchived, isOverdue } =
     useBookingStatus(booking);
+  console.log("asset", item);
 
   return (
     <>
@@ -169,7 +170,7 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
       {/* If asset status is different than available, we need to show a label */}
       <Td>
         {!isCompleted && !isArchived ? (
-          <AvailabilityLabel asset={item} isChecked={isChecked} />
+          <AvailabilityLabel asset={item} />
         ) : null}
       </Td>
       <Td className="">

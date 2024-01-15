@@ -534,6 +534,11 @@ export const getBooking = async (booking: Pick<Booking, "id">) => {
         include: {
           category: true,
           custody: true,
+          bookings: {
+            select: {
+              id: true,
+            },
+          },
         },
       },
     },
