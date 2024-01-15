@@ -182,7 +182,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
       </Td>
 
       <Td className="text-right">
-        <AvailabilityLabel asset={item} isChecked={isChecked} />
+        <AvailabilityLabel asset={item} />
       </Td>
 
       <Td>
@@ -200,13 +200,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
  *
  * Each reason has its own tooltip and label
  */
-export function AvailabilityLabel({
-  asset,
-  isChecked,
-}: {
-  asset: AssetWithBooking;
-  isChecked: boolean;
-}) {
+export function AvailabilityLabel({ asset }: { asset: AssetWithBooking }) {
   /**
    * Marked as not allowed for booking
    */
@@ -241,7 +235,7 @@ export function AvailabilityLabel({
   /**
    * Is booked for period
    */
-  if (asset.bookings?.length > 0 && !isChecked) {
+  if (asset.bookings?.length > 0) {
     return (
       <AvailabilityBadge
         badgeText={"Already booked"}

@@ -2,13 +2,14 @@ import { useMemo } from "react";
 
 import { BookingStatus } from "@prisma/client";
 import { useLoaderData, useParams } from "@remix-run/react";
+import { useBookingStatus } from "~/hooks/use-booking-status";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import { AvailabilityLabel } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
-import { ChevronRight } from "../icons";
 import { List } from "../list";
 import { Badge, Button } from "../shared";
 import { ControlledActionButton } from "../shared/controlled-action-button";
@@ -120,18 +121,13 @@ export function BookingAssetsColumn() {
 
 const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { category } = item;
-  const { bookindId } = useParams();
-  const isChecked = item?.bookings?.some((b) => b.id === bookindId) ?? false;
+  // const { bookindId } = useParams();
+  // const isChecked = item?.bookings?.some((b) => b.id === bookindId) ?? false;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
-
-  const isCompleted = useMemo(
-    () => booking.status === BookingStatus.COMPLETE,
-    [booking.status]
-  );
-  const isArchived = useMemo(
-    () => booking.status === BookingStatus.ARCHIVED,
-    [booking.status]
-  );
+  const isSelfService = useUserIsSelfService();
+  const { isOngoing, isCompleted, isArchived, isOverdue } =
+    useBookingStatus(booking);
+  console.log("asset", item);
 
   return (
     <>
@@ -174,7 +170,7 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
       {/* If asset status is different than available, we need to show a label */}
       <Td>
         {!isCompleted && !isArchived ? (
-          <AvailabilityLabel asset={item} isChecked={isChecked} />
+          <AvailabilityLabel asset={item} />
         ) : null}
       </Td>
       <Td className="">
@@ -185,7 +181,10 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
         ) : null}
       </Td>
       <Td className="pr-4 text-right">
-        <AssetRowActionsDropdown asset={item} />
+        {/* Self Service can only remove assets if the booking is not started already */}
+        {isSelfService && (isOngoing || isOverdue) ? null : (
+          <AssetRowActionsDropdown asset={item} />
+        )}
       </Td>
     </>
   );

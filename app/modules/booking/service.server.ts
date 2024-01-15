@@ -450,16 +450,26 @@ export const removeAssets = async (
   booking: Pick<Booking, "id"> & { assetIds: Asset["id"][] }
 ) => {
   const { assetIds, id } = booking;
-
-  return db.booking.update({
+  const b = await db.booking.update({
+    // First, disconnect the assets from the booking
     where: { id },
-    include: commonInclude,
     data: {
       assets: {
         disconnect: assetIds.map((id) => ({ id })),
       },
     },
   });
+  /** When removing an asset from a booking we need to make sure to set their status back to available
+   * This is needed because the user is allowed to remove an asset from a booking that is ongoing, which means the asset status will be CHECKED_OUT
+   * So we need to set it back to AVAILABLE
+   * Because prisma doesnt support transactional execution of nested queries, we need to do them in 2 steps, because if the disconnect runs first,
+   * the updateMany will not find the assets in the booking anymore and wont update them
+   */
+  await db.asset.updateMany({
+    where: { id: { in: assetIds } },
+    data: { status: AssetStatus.AVAILABLE },
+  });
+  return b;
 };
 
 export const deleteBooking = async (
@@ -524,6 +534,11 @@ export const getBooking = async (booking: Pick<Booking, "id">) => {
         include: {
           category: true,
           custody: true,
+          bookings: {
+            select: {
+              id: true,
+            },
+          },
         },
       },
     },
