@@ -1,3 +1,4 @@
+import type { TierLimit } from "@prisma/client";
 import { ENABLE_PREMIUM_FEATURES } from "./env";
 
 /** Utilities for checking weather the user can perform certain premium actions. */
@@ -48,6 +49,17 @@ export const canCreateMoreOrganizations = ({
   if (!tierLimit?.maxOrganizations) return false;
 
   return totalOrganizations < tierLimit?.maxOrganizations;
+};
+
+export const canUseBookings = ({
+  tierLimit,
+}: {
+  tierLimit: TierLimit | null | undefined;
+}) => {
+  if (!premiumIsEnabled()) return true;
+  if (tierLimit?.id !== "tier_2") return false;
+
+  return true;
 };
 
 export const premiumIsEnabled = () => ENABLE_PREMIUM_FEATURES;

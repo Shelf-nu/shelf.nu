@@ -24,6 +24,7 @@ import {
   getStripeCustomer,
   stripe,
 } from "~/utils/stripe.server";
+import { canUseBookings } from "~/utils/subscription";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -50,6 +51,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             select: {
               organization: true,
               roles: true,
+            },
+          },
+          tier: {
+            select: {
+              tierLimit: true,
             },
           },
         },
@@ -92,6 +98,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       hideSupportBanner: cookie.hideSupportBanner,
       minimizedSidebar: cookie.minimizedSidebar,
       isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
+      canUseBookings: user?.tier?.tierLimit
+        ? canUseBookings({ tierLimit: user.tier.tierLimit })
+        : false,
     },
     {
       headers: [

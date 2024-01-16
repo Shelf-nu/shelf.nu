@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { BookingStatus } from "@prisma/client";
-import { useLoaderData, useParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
@@ -121,13 +121,10 @@ export function BookingAssetsColumn() {
 
 const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { category } = item;
-  // const { bookindId } = useParams();
-  // const isChecked = item?.bookings?.some((b) => b.id === bookindId) ?? false;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const isSelfService = useUserIsSelfService();
   const { isOngoing, isCompleted, isArchived, isOverdue } =
     useBookingStatus(booking);
-  console.log("asset", item);
 
   return (
     <>

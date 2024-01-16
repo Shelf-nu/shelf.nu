@@ -1,4 +1,10 @@
-import type { Category, Asset, Tag, Custody } from "@prisma/client";
+import {
+  type Category,
+  type Asset,
+  type Tag,
+  type Custody,
+  OrganizationRoles,
+} from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
@@ -73,12 +79,17 @@ export interface IndexResponse {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId, organizations, currentOrganization } =
-    await requirePermision(
-      request,
-      PermissionEntity.asset,
-      PermissionAction.read
-    );
+  const {
+    authSession,
+    organizationId,
+    organizations,
+    currentOrganization,
+    role,
+  } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.read
+  );
 
   const { userId } = authSession;
 
@@ -120,7 +131,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     organizations,
   });
 
-  const {
+  let {
     search,
     totalAssets,
     perPage,
@@ -147,6 +158,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       message: `No assets found`,
       status: 404,
     });
+  }
+
+  if (role === OrganizationRoles.SELF_SERVICE) {
+    /**
+     * For self service users we dont return the assets that are not available to book
+     */
+    assets = assets.filter((a) => a.availableToBook);
   }
 
   const header: HeaderData = {
