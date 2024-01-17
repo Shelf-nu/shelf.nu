@@ -67,6 +67,28 @@ export async function requireOrganisationId(
     });
   }
 
+  /**
+   * If for some reason there is no currentOrganization, we handle it by setting it to the personalOrganization
+   */
+  if (!currentOrganization) {
+    if (isGet(request)) {
+      throw redirect(getCurrentPath(request), {
+        headers: [
+          setCookie(
+            await setSelectedOrganizationIdCookie(personalOrganization.id)
+          ),
+        ],
+      });
+    }
+
+    // Other methods should throw an error (mostly for actions)
+    throw new ShelfStackError({
+      cause: null,
+      message: "You do not have access to this organization",
+      status: 401,
+    });
+  }
+
   // If the user is not part of the organization or the organizationId is not set (should not happen but just in case)
   if (!organizationId || !userOrganizationIds.includes(organizationId)) {
     if (isGet(request)) {

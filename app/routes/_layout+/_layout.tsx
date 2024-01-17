@@ -80,10 +80,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   /** There could be a case when you get removed from an organization while browsing it.
    * In this case what we do is we set the current organization to the first one in the list
    */
-  const { organizationId, organizations } = await requireOrganisationId(
-    authSession,
-    request
-  );
+  const { organizationId, organizations, currentOrganization } =
+    await requireOrganisationId(authSession, request);
 
   return json(
     {
@@ -98,9 +96,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       hideSupportBanner: cookie.hideSupportBanner,
       minimizedSidebar: cookie.minimizedSidebar,
       isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
-      canUseBookings: user?.tier?.tierLimit
-        ? canUseBookings({ tierLimit: user.tier.tierLimit })
-        : false,
+      canUseBookings: canUseBookings(currentOrganization),
     },
     {
       headers: [

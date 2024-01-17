@@ -1,5 +1,5 @@
 import type { FetcherWithComponents } from "@remix-run/react";
-import { NavLink, useLoaderData } from "@remix-run/react";
+import { NavLink, useLoaderData, useLocation } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { useAtom } from "jotai";
 import { SwitchIcon } from "~/components/icons/library";
@@ -15,6 +15,9 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const { isAdmin, minimizedSidebar, canUseBookings } =
     useLoaderData<typeof loader>();
   const { menuItemsTop, menuItemsBottom } = useMainMenuItems();
+  const location = useLocation();
+  /** We need to do this becasue of a special way we handle the bookings link that doesnt allow us to use NavLink currently */
+  const isBookingsRoute = location.pathname.includes("/bookings");
 
   return (
     <div className="flex h-full flex-col">
@@ -65,8 +68,9 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                         </span>
                       </span>
                     ),
-                    message: "Bookings is a premium feature.",
-                    ctaText: "Upgrading to a paid plan",
+                    message:
+                      "Bookings is a premium feature only available for Team workspaces. ",
+                    ctaText: "upgrading to a team plan",
                   }}
                   buttonProps={{
                     to: item.to,
@@ -76,10 +80,11 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     className: tw(
                       "my-1 flex items-center gap-3 rounded-md border-0 bg-transparent px-3 text-left text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
                       canUseBookings
-                        ? "justify-start py-2.5 focus:ring-0"
-                        : "py-0 text-gray-500 hover:text-gray-500"
-                      // @TODO active needs to be handled still
-                      // isActive ? "active bg-primary-50 text-primary-600" : ""
+                        ? "justify-start focus:ring-0"
+                        : "my-0 text-gray-500 hover:bg-gray-50 hover:text-gray-500",
+                      isBookingsRoute
+                        ? "active bg-primary-50 text-primary-600"
+                        : ""
                     ),
                   }}
                 />
