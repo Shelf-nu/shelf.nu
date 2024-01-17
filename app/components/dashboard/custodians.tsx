@@ -78,7 +78,7 @@ function Row({
                     ? custodian?.user?.profilePicture
                     : "/images/default_pfp.jpg"
                 }
-                className={"h-10 w-10 rounded-[4px]"}
+                className={"size-10 rounded-[4px]"}
                 alt={`${custodian.name}'s profile`}
               />
               <div>

@@ -116,7 +116,7 @@ export default function DuplicateAsset() {
         </div>
 
         <div className="flex items-center gap-3 rounded-md border p-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center">
+          <div className="flex size-12 shrink-0 items-center justify-center">
             <AssetImage
               asset={{
                 assetId: asset.id,
@@ -124,7 +124,7 @@ export default function DuplicateAsset() {
                 mainImageExpiration: asset.mainImageExpiration,
                 alt: asset.title,
               }}
-              className="h-full w-full rounded-[4px] border object-cover"
+              className="size-full rounded-[4px] border object-cover"
             />
           </div>
           <div className="min-w-[130px]">

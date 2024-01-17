@@ -112,7 +112,7 @@ export default function AssetCustomFields({
                 ) : (
                   <span>Pick a date</span>
                 )}
-                <CalendarIcon className="ml-3 h-5 w-5" />
+                <CalendarIcon className="ml-3 size-5" />
               </div>
             </Button>
           </PopoverTrigger>

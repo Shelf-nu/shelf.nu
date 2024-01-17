@@ -109,7 +109,7 @@ export default function AssetsImport() {
   return (
     <div className="h-full">
       <Header />
-      <div className="flex h-full w-full flex-col items-center">
+      <div className="flex size-full flex-col items-center">
         <div className="h-[180px] w-full"></div>
         <Tabs defaultValue="content" className="w-1/2">
           <TabsList>
