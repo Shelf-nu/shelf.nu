@@ -63,20 +63,16 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
               The Shelf team
             </Text>
             <Text className="text-[14px] text-gray-700">
-              This email was sent to{" "}
+              This is an automatic email sent from{" "}
+              <Link className="text-primary-700" href="https://www.shelf.nu/">
+                shelf.nu
+              </Link>{" "}
+              to{" "}
               <Link
                 className="text-primary-700"
                 href={`mailto:${invite.inviteeEmail}`}
               >
                 {invite.inviteeEmail}
-              </Link>
-              . If you'd rather not receive this kind of email, you can{" "}
-              <Link className="text-primary-700" href="#">
-                unsubscribe
-              </Link>{" "}
-              or{" "}
-              <Link className="text-primary-700" href="#">
-                manage your email preferences
               </Link>
               .
             </Text>
