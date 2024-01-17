@@ -8,7 +8,7 @@ import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
-import { generateRandomCode } from "./helpers";
+import { generateRandomCode, inviteEmailText } from "./helpers";
 import logoImg from "../../../public/images/logo-full-color(x2).png";
 import { createTeamMember } from "../team-member";
 import { createUserOrAttachOrg } from "../user";
@@ -160,7 +160,7 @@ export async function createInvite({
   await sendEmail({
     to: inviteeEmail,
     subject: `You have been invited to ${invite.organization.name}`,
-    text: "",
+    text: inviteEmailText({ invite, token }),
     html: invitationTemplateString({ token, invite }),
     attachments: [
       {
