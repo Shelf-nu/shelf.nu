@@ -94,7 +94,7 @@ export default function SidebarBottom({ user }: Props) {
             className="px-4 py-3"
             onSelect={(e) => e.preventDefault()}
           >
-            <Form action="/logout" method="post">
+            <Form action="/logout" method="post" className="w-full">
               <Button
                 icon="logout"
                 role="link"
