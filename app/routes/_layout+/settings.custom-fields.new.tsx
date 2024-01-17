@@ -121,7 +121,11 @@ export default function NewCustomFieldPage() {
 
   return (
     <>
-      <Header title={title ? title : "Untitled custom field"} />
+      <Header
+        hideBreadcrumbs
+        title={title ? title : "Untitled custom field"}
+        classNames="-mt-5"
+      />
       <div>
         <CustomFieldForm />
       </div>
