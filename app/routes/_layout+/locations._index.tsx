@@ -112,12 +112,12 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
     <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center">
+          <div className="flex size-12 items-center justify-center">
             <Image
               imageId={item.imageId}
               alt="img"
               className={tw(
-                "h-full w-full rounded-[4px] border object-cover",
+                "size-full rounded-[4px] border object-cover",
                 item.description ? "rounded-b-none border-b-0" : ""
               )}
               updatedAt={item.image?.updatedAt}

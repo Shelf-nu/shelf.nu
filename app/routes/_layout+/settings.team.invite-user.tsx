@@ -124,7 +124,7 @@ export default function InviteUser() {
   return organization ? (
     <>
       <div className="modal-content-wrapper">
-        <div className="mb-4 inline-flex h-8 w-8 items-center  justify-center rounded-full bg-primary-100 p-2 text-primary-600">
+        <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
           <UserIcon color="#ef6820" />
         </div>
         <div className="mb-5">
@@ -159,7 +159,7 @@ export default function InviteUser() {
                       <Image
                         imageId={organization.imageId}
                         alt="img"
-                        className={tw("h-6 w-6 rounded-[2px] object-cover")}
+                        className={tw("size-6 rounded-[2px] object-cover")}
                       />
 
                       <div className=" ml-[1px] text-sm text-gray-900">

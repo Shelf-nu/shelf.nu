@@ -47,7 +47,7 @@ export const Toaster = () => {
           <div
             className={tw(
               variants[icon.variant],
-              " flex h-10 w-10 items-center justify-center rounded-full border-[6px] ",
+              " flex size-10 items-center justify-center rounded-full border-[6px] ",
               icon.className
             )}
           >

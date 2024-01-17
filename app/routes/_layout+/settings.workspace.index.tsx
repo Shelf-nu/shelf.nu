@@ -198,18 +198,18 @@ const OrganizationRow = ({
       <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center">
+            <div className="flex size-12 items-center justify-center">
               {isPersonalOrg(item) ? (
                 <img
                   src={item?.image || "/images/default_pfp.jpg"}
                   alt={`${item.name}`}
-                  className="h-12 w-12 rounded-[4px] object-cover"
+                  className="size-12 rounded-[4px] object-cover"
                 />
               ) : (
                 <Image
                   imageId={item?.image}
                   alt={`${item.name}`}
-                  className={tw("h-12 w-12 rounded-[4px] object-cover")}
+                  className={tw("size-12 rounded-[4px] object-cover")}
                   updatedAt={item?.updatedAt}
                 />
               )}
