@@ -207,7 +207,7 @@ export function BookingForm({
                   <FormRow
                     rowLabel={"Name"}
                     className="mobile-styling-only border-b-0 p-0"
-                    //@TODO required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
+                    required
                   >
                     <Input
                       label="Name"

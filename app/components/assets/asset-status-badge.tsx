@@ -39,7 +39,6 @@ export function AssetStatusBadge({
 }) {
   // If the asset is not available to book, it is unavailable
   // We handle this on front-end as syncing status with the flag is very complex on backend and error prone so this is the lesser evil
-  // @TODO - we should add the little badge when assets are unavailable to book
   return (
     <div className="flex items-center gap-[6px]">
       <Badge color={assetStatusColorMap(status)}>
