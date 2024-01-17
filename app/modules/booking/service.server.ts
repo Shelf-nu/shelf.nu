@@ -537,6 +537,7 @@ export const getBooking = async (booking: Pick<Booking, "id">) => {
           bookings: {
             select: {
               id: true,
+              status: true,
             },
           },
         },

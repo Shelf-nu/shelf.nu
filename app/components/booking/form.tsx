@@ -95,6 +95,7 @@ export function BookingForm({
     isOverdue,
     isCancelled,
     hasCheckedOutAssets,
+    hasAlreadyBookedAssets,
   } = useBookingStatus(booking);
 
   const disabled = isFormProcessing(navigation.state) || isArchived;
@@ -146,12 +147,17 @@ export function BookingForm({
               {isDraft ? (
                 <ControlledActionButton
                   canUseFeature={
-                    !disabled && hasAssets && !hasUnavailableAssets
+                    !disabled &&
+                    hasAssets &&
+                    !hasUnavailableAssets &&
+                    !hasAlreadyBookedAssets
                   }
                   buttonContent={{
                     title: "Reserve",
                     message: hasUnavailableAssets
                       ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
+                      : hasAlreadyBookedAssets
+                      ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
                       : "You need to add assets to your booking before you can reserve it",
                   }}
                   buttonProps={{

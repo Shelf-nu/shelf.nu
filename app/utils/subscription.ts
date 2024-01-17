@@ -1,3 +1,4 @@
+import { OrganizationType, type Organization } from "@prisma/client";
 import { ENABLE_PREMIUM_FEATURES } from "./env";
 
 /** Utilities for checking weather the user can perform certain premium actions. */
@@ -48,6 +49,15 @@ export const canCreateMoreOrganizations = ({
   if (!tierLimit?.maxOrganizations) return false;
 
   return totalOrganizations < tierLimit?.maxOrganizations;
+};
+
+export const canUseBookings = (
+  currentOrganization: Pick<Organization, "type">
+) => {
+  if (!premiumIsEnabled()) return true;
+  if (currentOrganization.type !== OrganizationType.TEAM) return false;
+
+  return true;
 };
 
 export const premiumIsEnabled = () => ENABLE_PREMIUM_FEATURES;

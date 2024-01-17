@@ -11,7 +11,7 @@ import type {
   LoaderFunctionArgs,
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData, useParams } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css";
@@ -201,6 +201,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
  * Each reason has its own tooltip and label
  */
 export function AvailabilityLabel({ asset }: { asset: AssetWithBooking }) {
+  const { bookingId } = useParams();
   /**
    * Marked as not allowed for booking
    */
@@ -235,7 +236,14 @@ export function AvailabilityLabel({ asset }: { asset: AssetWithBooking }) {
   /**
    * Is booked for period
    */
-  if (asset.bookings?.length > 0) {
+  if (
+    asset.bookings?.length > 0 &&
+    asset.bookings.some(
+      (b) =>
+        b.id !== bookingId &&
+        ["RESERVED", "ONGOING", "OVERDUE"].includes(b.status)
+    ) // We don't want to show the badge if the asset is already part of the current booking
+  ) {
     return (
       <AvailabilityBadge
         badgeText={"Already booked"}

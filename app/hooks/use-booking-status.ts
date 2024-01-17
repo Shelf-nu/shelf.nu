@@ -1,11 +1,14 @@
 import { useMemo } from "react";
+import type { Booking } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 
 type BookingSubset = {
+  id: Booking["id"];
   status: BookingStatus;
   assets: {
     status: AssetStatus;
     availableToBook: boolean;
+    bookings?: { id: Booking["id"]; status: BookingStatus }[];
   }[];
 };
 
@@ -55,6 +58,27 @@ export function useBookingStatus(booking: BookingSubset) {
     [booking.assets]
   );
 
+  const hasAlreadyBookedAssets = useMemo(
+    () =>
+      /** Here we need to check the other bookings belonging to the each asset.
+       * If any of the assets has a booking where the id is not the same as the current booking id,
+       * then we know that the asset is already booked by another booking.
+       * Extra note: the booking needs to have a status different than reserved, ongoing or overdue
+       */
+
+      booking.assets.some(
+        (asset) =>
+          asset.bookings &&
+          asset?.bookings.length > 0 &&
+          asset?.bookings.some(
+            (b) =>
+              b.id !== booking.id &&
+              ["RESERVED", "ONGOING", "OVERDUE"].includes(b.status)
+          )
+      ), // Assets are still checked out from another booking
+    [booking.assets, booking.id]
+  );
+
   return {
     hasAssets,
     hasUnavailableAssets,
@@ -66,5 +90,6 @@ export function useBookingStatus(booking: BookingSubset) {
     isOverdue,
     isCancelled,
     hasCheckedOutAssets,
+    hasAlreadyBookedAssets,
   };
 }
