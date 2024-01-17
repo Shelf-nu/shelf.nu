@@ -2,14 +2,12 @@ import type { Invite, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import { db } from "~/database";
-import { invitationTemplateString } from "~/emails/invite-template";
 import { INVITE_TOKEN_SECRET } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { generateRandomCode, inviteEmailText } from "./helpers";
-import logoImg from "../../../public/images/logo-full-color(x2).png";
 import { createTeamMember } from "../team-member";
 import { createUserOrAttachOrg } from "../user";
 
@@ -156,19 +154,10 @@ export async function createInvite({
   const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
     expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
   }); //keep only needed data in token to maintain the size
-
   await sendEmail({
     to: inviteeEmail,
     subject: `You have been invited to ${invite.organization.name}`,
     text: inviteEmailText({ invite, token }),
-    html: invitationTemplateString({ token, invite }),
-    attachments: [
-      {
-        filename: "logo-full-color(x2).png",
-        path: `${process.env.SERVER_URL}${logoImg}`,
-        cid: "shelf-logo",
-      },
-    ],
   });
 
   return invite;
