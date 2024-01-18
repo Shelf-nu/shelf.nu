@@ -43,6 +43,7 @@ export default function CustodianSelect() {
                       id: member.id,
                       name: member.name,
                       userId: member.userId,
+                      email: member.user?.email,
                     })}
                   >
                     {member.user ? (

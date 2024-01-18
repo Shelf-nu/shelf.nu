@@ -29,7 +29,8 @@ interface Props {
 }
 
 const ConditionalActionsDropdown = ({ asset }: Props) => {
-  const assetIsAvailable = asset.status === "AVAILABLE";
+  // @ts-ignore
+  const assetIsAvailable = asset.status === "AVAILABLE" && !asset.custody;
   let [searchParams] = useSearchParams();
   const refIsQrScan = searchParams.get("ref") === "qr";
   const defaultOpen = window.innerWidth <= 640 && refIsQrScan;

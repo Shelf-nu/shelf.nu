@@ -14,12 +14,17 @@ import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { db } from "~/database";
 import { createNote } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
+import {
+  assetCustodyAssignedEmailText,
+  assetCustodyAssignedWithTemplateEmailText,
+} from "~/modules/invite/helpers";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { sendEmail } from "~/utils/mail.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
@@ -95,25 +100,33 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       { status: 400 }
     );
 
-  const templateId = JSON.parse(template as string).id;
+  let templateId = null,
+    templateObj = null;
 
-  const templateObj = await db.template.findUnique({
-    where: { id: templateId as string },
-  });
+  if (addTemplateEnabled) {
+    templateId = JSON.parse(template as string).id;
 
-  if (!templateObj)
-    throw new ShelfStackError({
-      message:
-        "Template not found. Please refresh and if the issue persists contact support.",
+    templateObj = await db.template.findUnique({
+      where: { id: templateId as string },
     });
+
+    if (!templateObj)
+      throw new ShelfStackError({
+        message:
+          "Template not found. Please refresh and if the issue persists contact support.",
+      });
+  }
 
   /** We send the data from the form as a json string, so we can easily have both the name and id
    * ID is used to connect the asset to the custodian
    * Name is used to create the note
    */
-  const { id: custodianId, name: custodianName } = JSON.parse(
-    custodian as string
-  );
+  const {
+    id: custodianId,
+    name: custodianName,
+    email: custodianEmail,
+    userId: custodianUserId,
+  } = JSON.parse(custodian as string);
 
   let asset = null;
 
@@ -133,7 +146,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     asset = await db.asset.update({
       where: { id: assetId },
       data: {
-        status: templateObj.signatureRequired
+        status: templateObj!.signatureRequired
           ? AssetStatus.AVAILABLE
           : AssetStatus.IN_CUSTODY,
         custody: {
@@ -181,10 +194,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 
   // If the template was specified, and signature was required
-  if (addTemplateEnabled && templateObj.signatureRequired) {
+  if (addTemplateEnabled && templateObj!.signatureRequired) {
     /** We create the note */
     await createNote({
-      content: `**${user.firstName} ${user.lastName}** has given **${custodianName}** custody over **${asset.title}**. **${custodianName}** needs to sign the **${templateObj.name}** template before receiving custody.`,
+      content: `**${user.firstName} ${
+        user.lastName
+      }** has given **${custodianName}** custody over **${
+        asset.title
+      }**. **${custodianName}** needs to sign the **${
+        templateObj!.name
+      }** template before receiving custody.`,
       type: "UPDATE",
       userId: userId,
       assetId: asset.id,
@@ -196,6 +215,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         "This asset will stay available until the custodian signs the PDF template. After that, the asset will be unavailable until custody is manually released.",
       icon: { name: "success", variant: "success" },
       senderId: userId,
+    });
+
+    sendEmail({
+      to: custodianEmail,
+      subject: `You have been assigned custody over ${asset.title}.`,
+      text: assetCustodyAssignedWithTemplateEmailText({
+        assetName: asset.title,
+        assignerName: user.firstName + " " + user.lastName,
+        assetId: asset.id,
+        templateId: templateObj!.id,
+        assigneeId: custodianUserId,
+      }),
     });
   } else {
     // If the template was not specified
@@ -212,6 +243,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         "Remember, this asset will be unavailable until custody is manually released.",
       icon: { name: "success", variant: "success" },
       senderId: userId,
+    });
+
+    sendEmail({
+      to: custodianEmail,
+      subject: `You have been assigned custody over ${asset.title}`,
+      text: assetCustodyAssignedEmailText({
+        assetName: asset.title,
+        assignerName: user.firstName + " " + user.lastName,
+        assetId: asset.id,
+      }),
     });
   }
 

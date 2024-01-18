@@ -317,6 +317,9 @@ model Custody {
   templateId     String?   @unique
   templateSigned Boolean?  @default(false)
 
+  signatureText  String?
+  signatureImage String?
+
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
