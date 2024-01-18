@@ -1,5 +1,4 @@
 import nodemailer from "nodemailer";
-import type { Attachment } from "nodemailer/lib/mailer";
 import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
 
 export const sendEmail = async ({
@@ -7,7 +6,6 @@ export const sendEmail = async ({
   subject,
   text,
   html,
-  attachments,
 }: {
   /** Email address of recipient */
   to: string;
@@ -20,9 +18,6 @@ export const sendEmail = async ({
 
   /** HTML content of email */
   html?: string;
-
-  /** attachments to be embeded email */
-  attachments?: Attachment[];
 }) => {
   // Generate test SMTP service account from ethereal.email
 
@@ -45,12 +40,11 @@ export const sendEmail = async ({
 
   // send mail with defined transport object
   await transporter.sendMail({
-    from: `"Shelf" <${SMTP_USER}>`, // sender address
+    from: `"Shelf" <no-reply@shelf.nu>`, // sender address
     to, // list of receivers
     subject, // Subject line
     text, // plain text body
     html: html || "", // html body
-    attachments: attachments || [], // attachments
   });
 
   // Message sent: <b658f8ca-6296-ccf4-8306-87d57a0b4321@example.com>

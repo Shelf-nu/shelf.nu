@@ -51,7 +51,7 @@ export default function VerifyEmailPage() {
   return (
     <div className="flex min-h-full flex-col items-center justify-center">
       <div className="mx-auto mb-3 text-center">
-        <GreenCheckMarkIcon className="h-14 w-14" />
+        <GreenCheckMarkIcon className="size-14" />
       </div>
       <p className="mb-3 text-center">{email}</p>
 

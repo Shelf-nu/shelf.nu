@@ -43,7 +43,7 @@ function OptionBuilder({ options, onAdd, onRemove, disabled }: Props) {
           >
             <span>{op}</span>
             <div className="cursor-pointer" onClick={() => onRemove(i)}>
-              <CrossCircledIcon className="h-6 w-6" />{" "}
+              <CrossCircledIcon className="size-6" />{" "}
             </div>
           </div>
         ))}

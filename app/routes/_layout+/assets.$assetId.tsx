@@ -332,7 +332,7 @@ export default function AssetDetailsPage() {
                 <img
                   src="/images/default_pfp.jpg"
                   alt="custodian"
-                  className="h-10 w-10 rounded"
+                  className="size-10 rounded"
                 />
                 <div>
                   <p className="">

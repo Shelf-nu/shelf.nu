@@ -14,11 +14,11 @@ export const MapPlaceholder = ({
       alt="No scanned location"
       className="w-full rounded-none"
     />
-    <div className="absolute top-0 z-10 flex h-full w-full flex-col items-center justify-center px-[15px] text-center md:px-[45px]">
+    <div className="absolute top-0 z-10 flex size-full flex-col items-center justify-center px-[15px] text-center md:px-[45px]">
       <div
         className={tw(
           "border-error-50 bg-error-100 text-error-600",
-          " flex h-14 w-14 items-center justify-center rounded-full"
+          " flex size-14 items-center justify-center rounded-full"
         )}
       >
         <MapIcon />

@@ -35,7 +35,7 @@ export const DeleteTag = ({ tag }: { tag: Pick<Tag, "name" | "id"> }) => {
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
+          <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
             <TrashIcon />
           </span>
           <AlertDialogTitle>Delete {tag.name}</AlertDialogTitle>
