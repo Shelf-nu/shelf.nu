@@ -92,6 +92,7 @@ export const buildCsvDataFromAssets = ({
         case "organization":
         case "valuation":
         case "customFields":
+        case "qrCodes":
           toExport.push(
             JSON.stringify(value, (_key, value) => {
               /** Custom replacer function.

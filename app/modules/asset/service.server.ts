@@ -858,6 +858,7 @@ export const fetchAssetsForExport = async ({
           customField: true,
         },
       },
+      qrCodes: true,
     },
   });
 
