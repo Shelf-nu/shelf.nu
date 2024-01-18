@@ -17,9 +17,9 @@ export default function PasswordInput(props: InputProps) {
         onClick={togglePasswordVisibility}
       >
         {showPassword ? (
-          <EyeOffIcon className="h-full w-full" />
+          <EyeOffIcon className="size-full" />
         ) : (
-          <EyeIcon className="h-full w-full" />
+          <EyeIcon className="size-full" />
         )}
       </span>
     </div>

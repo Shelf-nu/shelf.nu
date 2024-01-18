@@ -181,7 +181,7 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
       {/* overlay on mobile */}
       <div
         className={tw(
-          "fixed right-0 top-0 z-50 h-screen w-screen cursor-pointer bg-[#344054]/50 transition duration-300 ease-in-out md:hidden",
+          "size-screen fixed right-0 top-0 z-50 cursor-pointer bg-[#344054]/50 transition duration-300 ease-in-out md:hidden",
           open ? "visible" : "invisible opacity-0"
         )}
       ></div>

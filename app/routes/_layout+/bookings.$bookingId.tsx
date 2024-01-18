@@ -308,7 +308,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       );
     case "checkOut":
-      // @TODO here we have to make sure assets are updated to checked-out
       var booking = await upsertBooking(
         { id, status: BookingStatus.ONGOING },
         getClientHint(request)
@@ -329,7 +328,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       );
     case "checkIn":
-      // TODO - status of assets should be updated to available
       var booking = await upsertBooking(
         {
           id,

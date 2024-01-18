@@ -39,7 +39,7 @@ export default function LocationRatioChart() {
               alignItems="end"
             >
               <ClientOnly
-                fallback={<FallbackLoading className="h-[150px] w-[150px]" />}
+                fallback={<FallbackLoading className="size-[150px]" />}
               >
                 {() => (
                   <ProgressCircle

@@ -81,7 +81,7 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
         <div className="relative">
           <video ref={videoRef} width="100%" height="720px" autoPlay={true} />
           <button
-            className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-red-500  text-white"
+            className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-full bg-red-500 text-white"
             onClick={onClose}
             title="Close Scanner"
           >

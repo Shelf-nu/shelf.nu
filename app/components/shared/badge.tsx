@@ -31,7 +31,7 @@ export const Badge = ({
         style={{
           backgroundColor: color,
         }}
-        className="h-1.5 w-1.5 rounded-full"
+        className="size-1.5 rounded-full"
       />
     ) : null}
 

@@ -207,7 +207,7 @@ export function BookingForm({
                   <FormRow
                     rowLabel={"Name"}
                     className="mobile-styling-only border-b-0 p-0"
-                    //@TODO required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
+                    required={true}
                   >
                     <Input
                       label="Name"
@@ -220,7 +220,7 @@ export function BookingForm({
                       className="mobile-styling-only w-full p-0"
                       defaultValue={name || undefined}
                       placeholder="Booking"
-                      // @TODO required={zodFieldIsRequired(NewBookingFormSchema.shape.name)}
+                      required
                     />
                   </FormRow>
                 </Card>
@@ -228,9 +228,7 @@ export function BookingForm({
                   <FormRow
                     rowLabel={"Start Date"}
                     className="mobile-styling-only border-b-0 pb-[10px]"
-                    // @TODO required={zodFieldIsRequired(
-                    //   NewBookingFormSchema.shape.startDate
-                    // )}
+                    required
                   >
                     <Input
                       label="Start Date"
@@ -242,15 +240,13 @@ export function BookingForm({
                       className="w-full"
                       defaultValue={startDate}
                       placeholder="Booking"
-                      // required={zodFieldIsRequired(
-                      //   NewBookingFormSchema.shape.startDate
-                      // )}
+                      required
                     />
                   </FormRow>
                   <FormRow
                     rowLabel={"End Date"}
                     className="mobile-styling-only mb-2.5 border-b-0 p-0"
-                    // required={zodFieldIsRequired(NewBookingFormSchema.shape.endDate)}
+                    required
                   >
                     <Input
                       label="End Date"
@@ -262,9 +258,7 @@ export function BookingForm({
                       className="w-full"
                       defaultValue={endDate}
                       placeholder="Booking"
-                      // required={zodFieldIsRequired(
-                      //   NewBookingFormSchema.shape.endDate
-                      // )}
+                      required
                     />
                   </FormRow>
                   <p className="text-[14px] text-gray-600">
