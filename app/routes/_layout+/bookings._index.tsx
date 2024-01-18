@@ -193,7 +193,6 @@ const ListAssetContent = ({
     displayTo?: string[];
   };
 }) => {
-  // @TODO - here we miss some cases
   const hasUnavaiableAssets = item.assets.some(
     (asset) => !asset.availableToBook || asset.custody !== null
   );

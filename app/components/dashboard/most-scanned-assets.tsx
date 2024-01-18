@@ -36,9 +36,16 @@ export default function MostScannedAssets() {
           <tbody>
             {mostScannedAssets.map((asset) => (
               <Tr key={asset.id}>
-                {/* @TODO resolve this issue
-            @ts-ignore */}
-                <Row item={asset} />
+                <Row
+                  item={{
+                    ...asset,
+                    mainImageExpiration: asset.mainImageExpiration
+                      ? new Date(asset.mainImageExpiration)
+                      : null,
+                    createdAt: new Date(asset.createdAt), // Convert createdAt to Date object
+                    updatedAt: new Date(asset.updatedAt), // Convert updatedAt to Date object
+                  }}
+                />
               </Tr>
             ))}
             {mostScannedAssets.length < 5 &&

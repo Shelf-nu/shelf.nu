@@ -1,5 +1,4 @@
 import { useLoaderData } from "@remix-run/react";
-import type { TeamMemberWithUser } from "~/modules/team-member/types";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
 import { InfoTooltip } from "../shared/info-tooltip";
@@ -33,10 +32,6 @@ export default function CustodiansList() {
           <tbody>
             {custodiansData.map((cd) => (
               <Tr key={cd.id} className="h-[72px]">
-                {/**
-                 * @TODO this needs to be resolved. Its because of the createdAt & updatedAt fields.
-                 * We need a global solution for this as it happens everywhere
-                 *  @ts-ignore */}
                 <Row custodian={cd.custodian} count={cd.count} />
               </Tr>
             ))}
@@ -63,7 +58,12 @@ function Row({
   custodian,
   count,
 }: {
-  custodian: TeamMemberWithUser;
+  custodian: {
+    name: string;
+    user?: {
+      profilePicture?: string | null;
+    } | null;
+  };
   count: number;
 }) {
   return (

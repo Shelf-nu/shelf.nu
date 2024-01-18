@@ -1,4 +1,4 @@
-import type { Asset, Category } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
@@ -34,9 +34,16 @@ export default function NewestAssets() {
           <tbody>
             {newAssets.map((asset) => (
               <Tr key={asset.id}>
-                {/* @TODO resolve this issue
-            @ts-ignore */}
-                <Row item={asset} />
+                <Row
+                  item={{
+                    ...asset,
+                    mainImageExpiration: asset.mainImageExpiration
+                      ? new Date(asset.mainImageExpiration)
+                      : null,
+                    createdAt: new Date(asset.createdAt), // Convert createdAt to Date object
+                    updatedAt: new Date(asset.updatedAt), // Convert updatedAt to Date object
+                  }}
+                />
               </Tr>
             ))}
             {newAssets.length < 5 &&
@@ -62,7 +69,10 @@ const Row = ({
   item,
 }: {
   item: Asset & {
-    category?: Category;
+    category?: {
+      color: string;
+      name: string;
+    } | null;
   };
 }) => {
   const { category } = item;

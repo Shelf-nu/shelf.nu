@@ -279,7 +279,7 @@ export async function getAssets({
                       status: true,
                       id: true,
                       name: true,
-                    }, //@TODO more needed?
+                    },
                   },
                 }
               : {}),
