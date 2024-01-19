@@ -139,7 +139,7 @@ export default function BookingsIndexPage() {
           New booking
         </Button>
       </Header>
-      <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
+      <div className="mt-2 flex flex-1 flex-col md:mx-0 md:mt-8 md:gap-2">
         <Filters className="mb-2">
           <StatusFilter />
         </Filters>
