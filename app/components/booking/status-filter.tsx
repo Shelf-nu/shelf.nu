@@ -25,13 +25,13 @@ export function StatusFilter() {
   }
 
   return (
-    <div>
+    <div className="w-full md:w-auto">
       <Select
         name={`status`}
         defaultValue={status ? status : "ALL"}
         onValueChange={handleValueChange}
       >
-        <SelectTrigger className="max-w-fit px-3.5 py-3">
+        <SelectTrigger className="mt-2 px-3.5 py-3 md:mt-0 md:max-w-fit">
           <SelectValue placeholder={`Filter by asset status`} />
         </SelectTrigger>
         <SelectContent
