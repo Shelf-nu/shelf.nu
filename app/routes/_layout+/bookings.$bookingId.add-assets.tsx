@@ -201,7 +201,6 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
  * Each reason has its own tooltip and label
  */
 export function AvailabilityLabel({ asset }: { asset: AssetWithBooking }) {
-  const { bookingId } = useParams();
   /**
    * Marked as not allowed for booking
    */
