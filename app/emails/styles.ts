@@ -13,6 +13,6 @@ export const styles = {
     fontWeight: "700",
     color: "white",
     padding: "10px 18px",
-    borderRadius: "4px"
+    borderRadius: "4px",
   },
 };
