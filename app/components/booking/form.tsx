@@ -124,9 +124,7 @@ export function BookingForm({
           <div className=" -mx-4 mb-5 flex w-screen items-center justify-between border-b border-gray-200 bg-white px-4 py-2 md:absolute md:right-4 md:top-3 md:m-0 md:w-fit md:justify-end md:border-0 md:bg-transparent md:p-0">
             <div className=" flex gap-2">
               {/* We only render the actions when we are not on the .new route */}
-              {routeIsNewBooking ||
-              // (isDraft && isSelfService) || // When the booking is draft, there are no actions available for selfService so we don't render it
-              (isCompleted && isSelfService) ? null : ( // When the booking is Completed, there are no actions available for selfService so we don't render it
+              {routeIsNewBooking || (isCompleted && isSelfService) ? null : ( // When the booking is Completed, there are no actions available for selfService so we don't render it
                 // @ts-ignore
                 <ActionsDropdown booking={booking} />
               )}

@@ -64,19 +64,15 @@ export function useBookingStatus(booking: BookingSubset) {
        * If any of the assets has a booking where the id is not the same as the current booking id,
        * then we know that the asset is already booked by another booking.
        * Extra note: the booking needs to have a status different than reserved, ongoing or overdue
+       * Important not here is that the asset.bookings have to be queried/filtered based on the same date range as the current booking
+       * Check the query for more info
+       *
        */
 
       booking.assets.some(
-        (asset) =>
-          asset.bookings &&
-          asset?.bookings.length > 0 &&
-          asset?.bookings.some(
-            (b) =>
-              b.id !== booking.id &&
-              ["RESERVED", "ONGOING", "OVERDUE"].includes(b.status)
-          )
+        (asset) => asset.bookings && asset?.bookings.length > 0
       ), // Assets are still checked out from another booking
-    [booking.assets, booking.id]
+    [booking.assets]
   );
 
   return {
