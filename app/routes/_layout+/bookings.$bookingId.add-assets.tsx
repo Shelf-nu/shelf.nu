@@ -201,7 +201,6 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
  * Each reason has its own tooltip and label
  */
 export function AvailabilityLabel({ asset }: { asset: AssetWithBooking }) {
-  const { bookingId } = useParams();
   /**
    * Marked as not allowed for booking
    */
@@ -236,14 +235,8 @@ export function AvailabilityLabel({ asset }: { asset: AssetWithBooking }) {
   /**
    * Is booked for period
    */
-  if (
-    asset.bookings?.length > 0 &&
-    asset.bookings.some(
-      (b) =>
-        b.id !== bookingId &&
-        ["RESERVED", "ONGOING", "OVERDUE"].includes(b.status)
-    ) // We don't want to show the badge if the asset is already part of the current booking
-  ) {
+  // Important not here is that the asset.bookings have to be queried/filtered based on the same date range as the current booking
+  if (asset.bookings?.length > 0) {
     return (
       <AvailabilityBadge
         badgeText={"Already booked"}

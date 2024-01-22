@@ -526,21 +526,19 @@ export const deleteBooking = async (
 export const getBooking = async (booking: Pick<Booking, "id">) => {
   const { id } = booking;
 
+  /**
+   * On the booking page, we need some data related to the assets added, so we know what actions are possible
+   *
+   * For reserving a booking, we need to make sure that the assets in the booking dont have any other bookings that overlap with the current booking
+   * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
+   */
+
   return db.booking.findFirst({
     where: { id },
     include: {
       ...commonInclude,
       assets: {
-        include: {
-          category: true,
-          custody: true,
-          bookings: {
-            select: {
-              id: true,
-              status: true,
-            },
-          },
-        },
+        select: { id: true },
       },
     },
   });
