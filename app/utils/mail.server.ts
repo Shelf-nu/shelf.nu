@@ -1,11 +1,14 @@
 import nodemailer from "nodemailer";
+import type { Attachment } from "nodemailer/lib/mailer";
 import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
+import logoImg from "../../public/images/logo-full-color(x2).png";
 
 export const sendEmail = async ({
   to,
   subject,
   text,
   html,
+  attachments,
 }: {
   /** Email address of recipient */
   to: string;
@@ -18,6 +21,8 @@ export const sendEmail = async ({
 
   /** HTML content of email */
   html?: string;
+
+  attachments?: Attachment[];
 }) => {
   // Generate test SMTP service account from ethereal.email
 
@@ -45,6 +50,14 @@ export const sendEmail = async ({
     subject, // Subject line
     text, // plain text body
     html: html || "", // html body
+    attachments: [
+      {
+        filename: "logo-full-color(x2).png",
+        path: `${process.env.SERVER_URL}${logoImg}`,
+        cid: "shelf-logo",
+      },
+      ...(attachments || []),
+    ],
   });
 
   // Message sent: <b658f8ca-6296-ccf4-8306-87d57a0b4321@example.com>
