@@ -2,17 +2,17 @@ export const styles = {
   button: {
     marginBottom: "6px",
     display: "inline-flex",
-    maxWidth: "36rem",
+    maxWidth: "170px",
     alignItems: "center",
     justifyContent: "center",
     gap: "2",
-    borderRadius: "border",
-    border: "rgb(243 135 68)",
-    backgroundColor: "rgb(239 104 32)",
-    padding: "4px",
+    border: "1px solid #EF6820",
+    backgroundColor: "#EF6820",
     textAlign: "center",
     fontSize: "14px",
-    fontWeight: "semibold",
+    fontWeight: "700",
     color: "white",
+    padding: "10px 18px",
+    borderRadius: "4px"
   },
 };

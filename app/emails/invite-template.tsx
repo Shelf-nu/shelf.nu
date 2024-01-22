@@ -24,17 +24,17 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
         <title>Invitation to join Shelf as an Administrator</title>
       </Head>
 
-      <Section style={{ padding: "14px" }}>
+      <Section style={{ padding: "56px" }}>
         <Img
           src="cid:shelf-logo"
           alt="Shelf's logo"
           width="100"
           height="32"
-          style={{ marginBottom: "1.5rem" }}
+          style={{ marginBottom: "24px" }}
         />
         <div style={{ paddingTop: "8px" }}>
           <Text
-            style={{ marginBottom: "6px", fontSize: "16px", color: "#4B5563" }}
+            style={{ marginBottom: "24px", fontSize: "16px", color: "#344054" }}
           >
             Howdy,
             <br />
@@ -49,35 +49,32 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
             Accept the invite
           </Button>
           <Text
-            style={{ marginBottom: "6px", fontSize: "16px", color: "#4B5563" }}
+            style={{ marginBottom: "24px", fontSize: "16px", color: "#344054" }}
           >
             Once you’re done setting up your account, you'll be able to access
             the workspace and start exploring features like Asset Explorer,
             Location Tracking, Collaboration, Custom fields and more. If you
             have any questions or need assistance, please don't hesitate to
             contact our support team at{" "}
-            <Link
-              style={{ color: "primary-700" }}
-              href="mailto:support@shelf.nu"
-            >
+            <Link style={{ color: "#EF6820" }} href="mailto:support@shelf.nu">
               support@shelf.nu
             </Link>
             .
           </Text>
           <Text
-            style={{ marginBottom: "8px", fontSize: "16px", color: "#4B5563" }}
+            style={{ marginBottom: "32px", fontSize: "16px", color: "#344054" }}
           >
             Thanks, <br />
             The Shelf team
           </Text>
-          <Text style={{ fontSize: "14px", color: "#4B5563" }}>
+          <Text style={{ fontSize: "14px", color: "#344054" }}>
             This is an automatic email sent from{" "}
-            <Link style={{ color: "primary-700" }} href="https://www.shelf.nu/">
+            <Link style={{ color: "#EF6820" }} href="https://www.shelf.nu/">
               shelf.nu
             </Link>{" "}
             to{" "}
             <Link
-              style={{ color: "primary-700" }}
+              style={{ color: "#EF6820" }}
               href={`mailto:${invite.inviteeEmail}`}
             >
               {invite.inviteeEmail}
