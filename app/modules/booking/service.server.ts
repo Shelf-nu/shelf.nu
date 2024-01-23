@@ -48,11 +48,11 @@ export const scheduleNextBookingJob = async ({
   });
 };
 
-const updateBookinAssetStates = (
-  booking: Booking & { assets: Asset[] },
+const updateBookinAssetStates = async (
+  booking: Booking & { assets: Pick<Asset, "id">[] },
   status: AssetStatus
 ) =>
-  db.asset.updateMany({
+  await db.asset.updateMany({
     where: {
       status: { not: status },
       id: { in: booking.assets.map((a) => a.id) },
@@ -498,6 +498,13 @@ export const deleteBooking = async (
       id,
       status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
     },
+    include: {
+      assets: {
+        select: {
+          id: true,
+        },
+      },
+    },
   });
   const b = await db.booking.delete({
     where: { id },
@@ -538,7 +545,7 @@ export const deleteBooking = async (
 
   /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
   if (activeBooking) {
-    await updateBookinAssetStates(b, AssetStatus.AVAILABLE);
+    await updateBookinAssetStates(activeBooking, AssetStatus.AVAILABLE);
   }
   await cancelSheduler(b);
 
@@ -548,21 +555,19 @@ export const deleteBooking = async (
 export const getBooking = async (booking: Pick<Booking, "id">) => {
   const { id } = booking;
 
+  /**
+   * On the booking page, we need some data related to the assets added, so we know what actions are possible
+   *
+   * For reserving a booking, we need to make sure that the assets in the booking dont have any other bookings that overlap with the current booking
+   * Moreover we just query certain statuses as they are the only ones that matter for an asset being considered unavailable
+   */
+
   return db.booking.findFirst({
     where: { id },
     include: {
       ...commonInclude,
       assets: {
-        include: {
-          category: true,
-          custody: true,
-          bookings: {
-            select: {
-              id: true,
-              status: true,
-            },
-          },
-        },
+        select: { id: true },
       },
     },
   });
