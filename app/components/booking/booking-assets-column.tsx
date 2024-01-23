@@ -1,13 +1,13 @@
 import { useMemo } from "react";
 
-import { BookingStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
-import { AvailabilityLabel } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
+import { AvailabilityLabel } from "./availability-label";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { List } from "../list";
@@ -126,6 +126,15 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { isOngoing, isCompleted, isArchived, isOverdue } =
     useBookingStatus(booking);
 
+  /** Weather the asset is checked out in a booking different than the current one */
+  const isCheckedOut = useMemo(
+    () =>
+      (item.status === AssetStatus.CHECKED_OUT &&
+        !item.bookings.some((b) => b.id === booking.id)) ??
+      false,
+    [item.status, item.bookings, booking.id]
+  );
+
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -167,7 +176,7 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
       {/* If asset status is different than available, we need to show a label */}
       <Td>
         {!isCompleted && !isArchived ? (
-          <AvailabilityLabel asset={item} />
+          <AvailabilityLabel asset={item} isCheckedOut={isCheckedOut} />
         ) : null}
       </Td>
       <Td className="">

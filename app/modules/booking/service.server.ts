@@ -47,11 +47,11 @@ export const scheduleNextBookingJob = async ({
   });
 };
 
-const updateBookinAssetStates = (
-  booking: Booking & { assets: Asset[] },
+const updateBookinAssetStates = async (
+  booking: Booking & { assets: Pick<Asset, "id">[] },
   status: AssetStatus
 ) =>
-  db.asset.updateMany({
+  await db.asset.updateMany({
     where: {
       status: { not: status },
       id: { in: booking.assets.map((a) => a.id) },
@@ -482,6 +482,13 @@ export const deleteBooking = async (
       id,
       status: { in: [BookingStatus.OVERDUE, BookingStatus.ONGOING] },
     },
+    include: {
+      assets: {
+        select: {
+          id: true,
+        },
+      },
+    },
   });
   const b = await db.booking.delete({
     where: { id },
@@ -516,7 +523,7 @@ export const deleteBooking = async (
 
   /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
   if (activeBooking) {
-    await updateBookinAssetStates(b, AssetStatus.AVAILABLE);
+    await updateBookinAssetStates(activeBooking, AssetStatus.AVAILABLE);
   }
   await cancelSheduler(b);
 
