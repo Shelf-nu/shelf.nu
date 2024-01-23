@@ -107,7 +107,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       custody: true,
       bookings: {
         where: {
-          id: { not: booking.id },
+          // id: { not: booking.id },
           ...(booking.from && booking.to
             ? {
                 status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },

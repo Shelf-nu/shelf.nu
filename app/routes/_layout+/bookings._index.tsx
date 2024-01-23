@@ -6,6 +6,7 @@ import {
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
+import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { StatusFilter } from "~/components/booking/status-filter";
 
 import { ChevronRight } from "~/components/icons";
@@ -31,7 +32,6 @@ import {
 } from "~/utils/cookies.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
-import { AvailabilityBadge } from "./bookings.$bookingId.add-assets";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const { authSession, organizationId, role } = await requirePermision(
@@ -271,7 +271,9 @@ const ListAssetContent = ({
             img={
               item?.custodianUser?.profilePicture || "/images/default_pfp.jpg"
             }
-            name={`${item?.custodianUser.firstName} ${item?.custodianUser.lastName}`}
+            name={`${item?.custodianUser?.firstName || ""} ${
+              item?.custodianUser?.lastName || ""
+            }`}
           />
         ) : item?.custodianTeamMember ? (
           <CustodianColumn name={item.custodianTeamMember.name} />
