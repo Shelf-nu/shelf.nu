@@ -17,6 +17,7 @@ export interface ButtonProps {
   attachToInput?: boolean;
   onlyIconOnMobile?: boolean;
   title?: string;
+  prefetch?: "none" | "intent" | "render" | "viewport";
   [key: string]: any;
 }
 
@@ -95,7 +96,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       <>
         <Component
           className={finalStyles}
-          prefetch={props.to ? "intent" : "none"}
+          prefetch={props.to ? (props.prefetch ? "intent" : "none") : "none"}
           {...props}
           title={title}
           ref={ref}

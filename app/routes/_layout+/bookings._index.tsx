@@ -135,6 +135,7 @@ export default function BookingsIndexPage() {
           role="link"
           aria-label={`new booking`}
           data-test-id="createNewBooking"
+          prefetch="none"
         >
           New booking
         </Button>
