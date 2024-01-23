@@ -15,4 +15,11 @@ export const styles = {
     padding: "10px 18px",
     borderRadius: "4px",
   },
+  h1: {
+    fontSize: "20px", color: "#101828", fontWeight: "600"
+  },
+  h2: {
+    fontSize: "16px", color: "#101828", fontWeight: "600"
+  },
+  p: { fontSize: "16px", color: "#344054" }
 };

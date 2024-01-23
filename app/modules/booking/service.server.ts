@@ -7,6 +7,7 @@ import {
   AssetStatus,
 } from "@prisma/client";
 import { db } from "~/database";
+import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
@@ -217,32 +218,32 @@ export const upsertBooking = async (
           data.status === BookingStatus.COMPLETE ||
           data.status === BookingStatus.CANCELLED
         ) {
+          const custodian = `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
+            (res.custodianTeamMember?.name as string);
           let subject = `Booking reserved (${res.name}) - shelf.nu`;
           let text = assetReservedEmailContent({
             bookingName: res.name,
             assetsCount: res.assets.length,
-            custodian:
-              `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
-              (res.custodianTeamMember?.name as string),
+            custodian: custodian,
             from: res.from!,
             to: res.to!,
             hints,
             bookingId: res.id,
           });
+          let html = bookingUpdatesTemplateString({ booking: res, heading: `Booking confirmation for ${custodian}`, assetCount: res.assets.length })
 
           if (data.status === BookingStatus.COMPLETE) {
             subject = `Booking completed (${res.name}) - shelf.nu`;
             text = completedBookingEmailContent({
               bookingName: res.name,
               assetsCount: res._count.assets,
-              custodian:
-                `${res.custodianUser?.firstName} ${res.custodianUser?.lastName}` ||
-                (res.custodianTeamMember?.name as string),
+              custodian: custodian,
               from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
               to: booking.to as Date,
               bookingId: res.id,
               hints: hints,
             });
+            html = bookingUpdatesTemplateString({ booking: res, heading: `Your booking has been completed: "${res.name}".`, assetCount: res._count.assets })
           }
 
           if (data.status === BookingStatus.CANCELLED) {
@@ -258,6 +259,7 @@ export const upsertBooking = async (
               bookingId: res.id,
               hints: hints,
             });
+            html = bookingUpdatesTemplateString({ booking: res, heading: `Your booking has been cancelled: "${res.name}".`, assetCount: res._count.assets })
           }
 
           promises.push(
@@ -265,6 +267,7 @@ export const upsertBooking = async (
               to: email,
               subject,
               text,
+              html
             })
           );
         } else if (data.status === BookingStatus.ONGOING && res.to) {
@@ -506,11 +509,13 @@ export const deleteBooking = async (
       bookingId: b.id,
       hints: hints,
     });
+    const html = bookingUpdatesTemplateString({ booking: b, heading: `Your booking has been deleted: "${b.name}".`, assetCount: b._count.assets })
 
     await sendEmail({
       to: email,
       subject,
       text,
+      html
     });
   }
 

@@ -4,6 +4,7 @@ import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { sendEmail } from "~/utils/mail.server";
 import type { ClientHint } from "./types";
+import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 
 /**
  * THis is the base content of the bookings related emails.
@@ -176,6 +177,13 @@ export const sendCheckinReminder = async (
       to: booking.to!,
       bookingId: booking.id,
     }),
+    html: bookingUpdatesTemplateString({
+      booking, heading: `Your booking is due for checkin in ${getTimeRemainingMessage(
+        new Date(booking.to!),
+        new Date()
+      )} minutes.`,
+      assetCount
+    })
   });
 };
 

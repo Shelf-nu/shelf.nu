@@ -33,9 +33,7 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
           style={{ marginBottom: "24px" }}
         />
         <div style={{ paddingTop: "8px" }}>
-          <Text
-            style={{ marginBottom: "24px", fontSize: "16px", color: "#344054" }}
-          >
+          <Text style={{ marginBottom: "24px", ...styles.p }}>
             Howdy,
             <br />
             {invite.inviter.firstName} {invite.inviter.lastName} invites you to
@@ -48,9 +46,7 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
           >
             Accept the invite
           </Button>
-          <Text
-            style={{ marginBottom: "24px", fontSize: "16px", color: "#344054" }}
-          >
+          <Text style={{ ...styles.p, marginBottom: "24px" }}>
             Once you’re done setting up your account, you'll be able to access
             the workspace and start exploring features like Asset Explorer,
             Location Tracking, Collaboration, Custom fields and more. If you
@@ -61,9 +57,7 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
             </Link>
             .
           </Text>
-          <Text
-            style={{ marginBottom: "32px", fontSize: "16px", color: "#344054" }}
-          >
+          <Text style={{ marginBottom: "32px", ...styles.p }}>
             Thanks, <br />
             The Shelf team
           </Text>

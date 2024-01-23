@@ -11,6 +11,8 @@ import {
 } from "./email-helpers";
 import { scheduleNextBookingJob } from "./service.server";
 import type { SchedulerData } from "./types";
+import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import { getTimeRemainingMessage } from "~/utils/date-fns";
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
 
@@ -52,6 +54,12 @@ export const registerBookingWorkers = () => {
             bookingId: booking.id,
             hints: data.hints,
           }),
+          html: bookingUpdatesTemplateString({
+            booking, heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
+              new Date(booking.from),
+              new Date()
+            )}.`, assetCount: booking._count.assets
+          })
         }).catch((err) => {
           console.error(`failed to send checkoutReminder email`, err);
         });
