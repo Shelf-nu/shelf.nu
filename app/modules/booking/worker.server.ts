@@ -1,6 +1,8 @@
 /* eslint-disable no-console */
 import { BookingStatus } from "@prisma/client";
 import { db } from "~/database";
+import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
@@ -11,8 +13,6 @@ import {
 } from "./email-helpers";
 import { scheduleNextBookingJob } from "./service.server";
 import type { SchedulerData } from "./types";
-import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
-import { getTimeRemainingMessage } from "~/utils/date-fns";
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
 
@@ -55,11 +55,13 @@ export const registerBookingWorkers = () => {
             hints: data.hints,
           }),
           html: bookingUpdatesTemplateString({
-            booking, heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
+            booking,
+            heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
               new Date(booking.from),
               new Date()
-            )}.`, assetCount: booking._count.assets
-          })
+            )}.`,
+            assetCount: booking._count.assets,
+          }),
         }).catch((err) => {
           console.error(`failed to send checkoutReminder email`, err);
         });

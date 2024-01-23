@@ -16,10 +16,14 @@ export const styles = {
     borderRadius: "4px",
   },
   h1: {
-    fontSize: "20px", color: "#101828", fontWeight: "600"
+    fontSize: "20px",
+    color: "#101828",
+    fontWeight: "600",
   },
   h2: {
-    fontSize: "16px", color: "#101828", fontWeight: "600"
+    fontSize: "16px",
+    color: "#101828",
+    fontWeight: "600",
   },
-  p: { fontSize: "16px", color: "#344054" }
+  p: { fontSize: "16px", color: "#344054" },
 };
