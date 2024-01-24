@@ -413,7 +413,6 @@ export default function AssetDetailsPage() {
                   <div className="max-w-[250px]">
                     <Tag key={asset.valuation} className="mb-2 ml-2">
                       <>
-                        {asset.organization.currency}{" "}
                         {asset.valuation.toLocaleString(locale, {
                           style: "currency",
                           currency: asset.organization.currency,
