@@ -1,4 +1,3 @@
-import type { Category } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
@@ -34,8 +33,6 @@ export default function MostScannedCategories() {
           <tbody>
             {mostScannedCategories.map((category, i) => (
               <Tr key={category.name + i} className="h-[73px]">
-                {/* @TODO resolve this issue
-            @ts-ignore */}
                 <Row item={category} />
               </Tr>
             ))}
@@ -61,7 +58,8 @@ export default function MostScannedCategories() {
 const Row = ({
   item,
 }: {
-  item: Category & {
+  item: {
+    name: string;
     scanCount?: number;
     assetCount?: number;
   };

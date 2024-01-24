@@ -21,14 +21,21 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { getOrganization, updateOrganization } from "~/modules/organization";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { MAX_SIZE } from "./settings.workspace.new";
 
-export async function loader({ params }: LoaderFunctionArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
+  await requirePermision(
+    request,
+    PermissionEntity.workspace,
+    PermissionAction.update
+  );
   const id = getRequiredParam(params, "workspaceId");
 
   const organization = await getOrganization({ id });
@@ -51,12 +58,16 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Edit",
+  breadcrumb: () => <span>Edit</span>,
 };
 
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
-  const authSession = await requireAuthSession(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.workspace,
+    PermissionAction.update
+  );
 
   const id = getRequiredParam(params, "workspaceId");
   const clonedRequest = request.clone();

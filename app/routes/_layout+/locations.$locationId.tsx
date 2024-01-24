@@ -24,12 +24,10 @@ import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { deleteLocation, getLocation } from "~/modules/location";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import assetCss from "~/styles/asset.css";
 import {
-  assertIsDelete,
   generatePageMeta,
   geolocate,
   getCurrentSearchParams,
@@ -41,10 +39,15 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.read
+  );
   const id = getRequiredParam(params, "locationId");
 
   const searchParams = getCurrentSearchParams(request);
@@ -115,9 +118,12 @@ export const links: LinksFunction = () => [
 ];
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  assertIsDelete(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.read
+  );
   const id = getRequiredParam(params, "locationId");
-  const authSession = await requireAuthSession(request);
 
   await deleteLocation({ id });
 

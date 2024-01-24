@@ -34,7 +34,7 @@ export default function Header({
       <div>
         {!hideBreadcrumbs && (
           <>
-            <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:py-3">
+            <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:min-h-[67px] md:py-3">
               <Breadcrumbs />
               {children && (
                 <div className="hidden shrink-0 gap-3 md:flex">{children}</div>

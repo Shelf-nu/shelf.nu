@@ -12,15 +12,17 @@ import {
   createLocationChangeNote,
   getPaginatedAndFilterableAssets,
 } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost } from "~/utils";
+
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.update
+  );
   const locationId = params.locationId as string;
   const location = await db.location.findUnique({
     where: {
@@ -41,7 +43,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     totalPages,
   } = await getPaginatedAndFilterableAssets({
     request,
-    userId,
     organizationId,
   });
 
@@ -67,8 +68,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  assertIsPost(request);
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.update
+  );
   const { locationId } = params;
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;

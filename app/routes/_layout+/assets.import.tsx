@@ -17,19 +17,21 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { createAssetsFromContentImport } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { commitAuthSession } from "~/modules/auth";
 import { assertUserCanImportAssets } from "~/modules/tier";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfStackError } from "~/utils/error";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId, organizations } = await requireOrganisationId(
-    authSession,
-    request
+  const { authSession, organizationId, organizations } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.import
   );
   const { userId } = authSession;
 
@@ -77,16 +79,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         },
       },
-      { status: 400 }
+      {
+        status: 400,
+        headers: [
+          setCookie(
+            await commitAuthSession(request, {
+              authSession,
+              flashErrorMessage: null,
+            })
+          ),
+        ],
+      }
     );
   }
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId, organizations } = await requireOrganisationId(
-    authSession,
-    request
+  const { organizationId, organizations } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.import
   );
   await assertUserCanImportAssets({ organizationId, organizations });
 

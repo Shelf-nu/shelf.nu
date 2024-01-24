@@ -24,6 +24,7 @@ import {
   getStripeCustomer,
   stripe,
 } from "~/utils/stripe.server";
+import { canUseBookings } from "~/utils/subscription";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -49,6 +50,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             },
             select: {
               organization: true,
+              roles: true,
+            },
+          },
+          tier: {
+            select: {
+              tierLimit: true,
             },
           },
         },
@@ -73,21 +80,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   /** There could be a case when you get removed from an organization while browsing it.
    * In this case what we do is we set the current organization to the first one in the list
    */
-  const { organizationId, organizations } = await requireOrganisationId(
-    authSession,
-    request
-  );
+  const { organizationId, organizations, currentOrganization } =
+    await requireOrganisationId(authSession, request);
 
   return json(
     {
       user,
       organizations,
       currentOrganizationId: organizationId,
+      currentOrganizationUserRoles: user?.userOrganizations.find(
+        (userOrg) => userOrg.organization.id === organizationId
+      )?.roles,
       subscription,
       enablePremium: ENABLE_PREMIUM_FEATURES,
       hideSupportBanner: cookie.hideSupportBanner,
       minimizedSidebar: cookie.minimizedSidebar,
       isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
+      canUseBookings: canUseBookings(currentOrganization),
     },
     {
       headers: [

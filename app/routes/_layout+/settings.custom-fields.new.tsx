@@ -10,22 +10,23 @@ import {
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { createCustomField } from "~/modules/custom-field";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 const title = "New Custom Field";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId, organizations } = await requireOrganisationId(
-    authSession,
-    request
+  const { organizationId, organizations } = await requirePermision(
+    request,
+    PermissionEntity.customField,
+    PermissionAction.create
   );
 
   await assertUserCanCreateMoreCustomFields({ organizations, organizationId });
@@ -48,10 +49,10 @@ export const handle = {
 };
 
 export async function action({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId, organizations } = await requireOrganisationId(
-    authSession,
-    request
+  const { authSession, organizationId, organizations } = await requirePermision(
+    request,
+    PermissionEntity.customField,
+    PermissionAction.create
   );
   await assertUserCanCreateMoreCustomFields({
     organizations,

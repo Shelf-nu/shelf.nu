@@ -111,7 +111,9 @@ const UserRow = ({
         </div>
       </div>
     </Td>
-    <Td className=" text-gray-600">{role}</Td>
+    <Td className=" text-gray-600 ">
+      <span className="block lowercase first-letter:uppercase">{role}</span>
+    </Td>
     <Td className="!pr-10">
       <InviteStatusBadge status={invite?.status || status} />
     </Td>

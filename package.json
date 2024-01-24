@@ -33,7 +33,8 @@
     "lint:fix": "npm run lint -- --fix",
     "format-code": "npm run prettier:fix & npm run lint:fix",
     "stripe:webhook": "stripe listen --forward-to localhost:3000/api/stripe-webhook",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "precommit": "npm run db:generate-type && npm run lint:fix && npm run format && npm run typecheck"
   },
   "dependencies": {
     "@markdoc/markdoc": "^0.2.2",
@@ -70,9 +71,11 @@
     "jotai": "^2.2.1",
     "jsonwebtoken": "^9.0.2",
     "jszip": "^3.10.1",
+    "luxon": "^3.4.4",
     "mapbox-gl": "^2.15.0",
     "maplibre-gl": "^3.1.0",
     "nodemailer": "^6.9.3",
+    "pg-boss": "^9.0.3",
     "qrcode-generator": "^1.4.4",
     "react": "^18.2.0",
     "react-day-picker": "^8.8.2",
@@ -106,6 +109,7 @@
     "@testing-library/user-event": "^14.4.3",
     "@types/dom-to-image": "^2.6.4",
     "@types/jsonwebtoken": "^9.0.3",
+    "@types/luxon": "^3.3.7",
     "@types/nodemailer": "^6.4.8",
     "@types/react": "^18.2.14",
     "@types/react-dom": "^18.2.6",

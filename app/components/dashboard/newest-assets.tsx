@@ -1,9 +1,9 @@
-import type { Asset, Category } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { userFriendlyAssetStatus } from "~/utils";
 import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image";
+import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { Badge } from "../shared";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Td, Table, Tr } from "../table";
@@ -34,9 +34,16 @@ export default function NewestAssets() {
           <tbody>
             {newAssets.map((asset) => (
               <Tr key={asset.id}>
-                {/* @TODO resolve this issue
-            @ts-ignore */}
-                <Row item={asset} />
+                <Row
+                  item={{
+                    ...asset,
+                    mainImageExpiration: asset.mainImageExpiration
+                      ? new Date(asset.mainImageExpiration)
+                      : null,
+                    createdAt: new Date(asset.createdAt), // Convert createdAt to Date object
+                    updatedAt: new Date(asset.updatedAt), // Convert updatedAt to Date object
+                  }}
+                />
               </Tr>
             ))}
             {newAssets.length < 5 &&
@@ -62,7 +69,10 @@ const Row = ({
   item,
 }: {
   item: Asset & {
-    category?: Category;
+    category?: {
+      color: string;
+      name: string;
+    } | null;
   };
 }) => {
   const { category } = item;
@@ -88,11 +98,10 @@ const Row = ({
                 {item.title}
               </span>
               <div>
-                <Badge
-                  color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-                >
-                  {userFriendlyAssetStatus(item.status)}
-                </Badge>
+                <AssetStatusBadge
+                  status={item.status}
+                  availableToBook={item.availableToBook}
+                />
               </div>
             </div>
           </div>

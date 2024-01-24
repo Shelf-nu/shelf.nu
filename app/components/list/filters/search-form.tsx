@@ -25,7 +25,7 @@ export const SearchForm = () => {
 
   return (
     <div className="flex w-full md:w-auto">
-      <div className="relative">
+      <div className="relative flex-1">
         <Input
           type="text"
           name="s"

@@ -49,11 +49,12 @@ export async function requireOrganisationId(
    * In this case what we do is we set the current organization to the first one in the list
    */
   const userOrganizations = await getUserOrganizations({ userId });
-  const userOrganizationIds = userOrganizations.map((org) => org.id);
-  const personalOrganization = userOrganizations.find(
+  const organizations = userOrganizations.map((uo) => uo.organization);
+  const userOrganizationIds = organizations.map((org) => org.id);
+  const personalOrganization = organizations.find(
     (org) => org.type === "PERSONAL"
   );
-  const currentOrganization = userOrganizations.find(
+  const currentOrganization = organizations.find(
     (org) => org.id === organizationId
   );
 
@@ -63,6 +64,28 @@ export async function requireOrganisationId(
       message:
         "You do not have a personal organization. This should not happen. Please contact support.",
       status: 500,
+    });
+  }
+
+  /**
+   * If for some reason there is no currentOrganization, we handle it by setting it to the personalOrganization
+   */
+  if (!currentOrganization) {
+    if (isGet(request)) {
+      throw redirect(getCurrentPath(request), {
+        headers: [
+          setCookie(
+            await setSelectedOrganizationIdCookie(personalOrganization.id)
+          ),
+        ],
+      });
+    }
+
+    // Other methods should throw an error (mostly for actions)
+    throw new ShelfStackError({
+      cause: null,
+      message: "You do not have access to this organization",
+      status: 401,
     });
   }
 
@@ -88,8 +111,8 @@ export async function requireOrganisationId(
 
   return {
     organizationId,
-    organizations: userOrganizations,
+    organizations,
+    userOrganizations,
     currentOrganization,
-    personalOrganization,
   };
 }

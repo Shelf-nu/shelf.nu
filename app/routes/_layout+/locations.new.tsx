@@ -17,17 +17,21 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
 
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { createLocation } from "~/modules/location";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 const title = "New Location";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.create
+  );
 
   const header = {
     title,
@@ -47,9 +51,11 @@ export const handle = {
 export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
 export async function action({ request }: ActionFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  assertIsPost(request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.create
+  );
 
   /** Here we need to clone the request as we need 2 different streams:
    * 1. Access form data for creating asset
