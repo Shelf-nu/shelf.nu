@@ -121,7 +121,7 @@ export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
-export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
+const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
   [OrganizationRoles.SELF_SERVICE]: "Self service",
 };
