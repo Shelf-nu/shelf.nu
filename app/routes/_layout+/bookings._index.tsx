@@ -135,6 +135,7 @@ export default function BookingsIndexPage() {
           role="link"
           aria-label={`new booking`}
           data-test-id="createNewBooking"
+          prefetch="none"
         >
           New booking
         </Button>
@@ -153,6 +154,7 @@ export default function BookingsIndexPage() {
               <Th className="hidden md:table-cell">From</Th>
               <Th className="hidden md:table-cell">To</Th>
               <Th className="hidden md:table-cell">Custodian</Th>
+              <Th className="hidden md:table-cell">Created by</Th>
             </>
           }
         />
@@ -181,6 +183,14 @@ const ListAssetContent = ({
           id: true;
           availableToBook: true;
           custody: true;
+        };
+      };
+      creator: {
+        select: {
+          id: true;
+          firstName: true;
+          lastName: true;
+          profilePicture: true;
         };
       };
       from: true;
@@ -267,7 +277,7 @@ const ListAssetContent = ({
       {/* Custodian */}
       <Td className="hidden md:table-cell">
         {item?.custodianUser ? (
-          <CustodianColumn
+          <UserBadge
             img={
               item?.custodianUser?.profilePicture || "/images/default_pfp.jpg"
             }
@@ -276,14 +286,24 @@ const ListAssetContent = ({
             }`}
           />
         ) : item?.custodianTeamMember ? (
-          <CustodianColumn name={item.custodianTeamMember.name} />
+          <UserBadge name={item.custodianTeamMember.name} />
         ) : null}
+      </Td>
+
+      {/* Created by */}
+      <Td className="hidden md:table-cell">
+        <UserBadge
+          img={item?.creator?.profilePicture || "/images/default_pfp.jpg"}
+          name={`${item?.creator?.firstName || ""} ${
+            item?.creator?.lastName || ""
+          }`}
+        />
       </Td>
     </>
   );
 };
 
-function CustodianColumn({ img, name }: { img?: string; name: string }) {
+function UserBadge({ img, name }: { img?: string; name: string }) {
   return (
     <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
       <img

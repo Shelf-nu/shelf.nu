@@ -21,7 +21,7 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
   return (
     <Html>
       <Head>
-        <title>Invitation to join Shelf as an Administrator</title>
+        <title>Invitation to join Shelf</title>
       </Head>
 
       <Section style={{ padding: "56px" }}>
@@ -37,7 +37,7 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
             Howdy,
             <br />
             {invite.inviter.firstName} {invite.inviter.lastName} invites you to
-            join Shelf as an Administrator for {invite.organization.name}
+            join Shelf as a member of {invite.organization.name}
             ’s workspace. Click the link to accept the invite:
           </Text>
           <Button
