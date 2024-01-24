@@ -485,6 +485,7 @@ enum Currency {
   RUB // Russian Ruble
   HKD // Hong Kong Dollar
   SAR // Saudi Riyal
+  AED // United Arab Emirates Dirham
 }
 
 enum InviteStatuses {
