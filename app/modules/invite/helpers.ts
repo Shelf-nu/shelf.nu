@@ -20,7 +20,7 @@ export const inviteEmailText = ({
   token: string;
 }) => `Howdy,
 
-${invite.inviter.firstName} ${invite.inviter.lastName} invites you to join Shelf as an Administrator for ${invite.organization.name}’s workspace.
+${invite.inviter.firstName} ${invite.inviter.lastName} invites you to join Shelf as a member of ${invite.organization.name}’s workspace.
 
 Click the link to accept the invite:
 ${SERVER_URL}/accept-invite/${invite.id}?token=${token}

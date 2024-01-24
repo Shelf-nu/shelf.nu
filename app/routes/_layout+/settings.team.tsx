@@ -31,10 +31,14 @@ import { sendEmail } from "~/utils/mail.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
-import { organizationRolesMap } from "./settings.team.invite-user";
 
 type ActionIntent = "delete" | "revoke" | "resend" | "invite";
 export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
+const organizationRolesMap: Record<string, UserFriendlyRoles> = {
+  [OrganizationRoles.ADMIN]: "Administrator",
+  [OrganizationRoles.OWNER]: "Owner",
+  [OrganizationRoles.SELF_SERVICE]: "Self service",
+};
 export interface TeamMembersWithUserOrInvite {
   name: string;
   img: string;
