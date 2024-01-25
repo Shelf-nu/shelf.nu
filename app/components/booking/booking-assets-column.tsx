@@ -4,8 +4,8 @@ import { AssetStatus, BookingStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
-import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
 import { AssetImage } from "../assets/asset-image";
@@ -45,26 +45,7 @@ export function BookingAssetsColumn() {
     <div className="flex-1">
       <div className=" w-full">
         <TextualDivider text="Assets" className="mb-8 lg:hidden" />
-        <div className="mb-3 flex gap-4 lg:hidden">
-          {/* <ControlledActionButton
-            canUseFeature={
-              !!booking.from && !!booking.to && !isCompleted && !isArchived
-            }
-            buttonContent={{
-              title: "Manage Assets",
-              message: isCompleted
-                ? "Booking is completed. You cannot change the assets anymore"
-                : "You need to select a start and end date and save your booking before you can add assets to your booking",
-            }}
-            buttonProps={{
-              as: "button",
-              to: manageAssetsUrl,
-              icon: "plus",
-              className: "whitespace-nowrap",
-            }}
-            skipCta={true}
-          /> */}
-        </div>
+        <div className="mb-3 flex gap-4 lg:hidden"></div>
         <div className="flex flex-col">
           {/* THis is a fake table header */}
           <div className="-mx-4 flex justify-between border border-b-0 bg-white p-4 text-left font-normal text-gray-600 md:mx-0 md:rounded md:px-6">
@@ -104,7 +85,7 @@ export function BookingAssetsColumn() {
             }
             customEmptyStateContent={{
               title: "Start by defining a booking period",
-              text: "Assets added to your booking will show up here. You must select a Start and End date in order to be able to add assets to your booking.",
+              text: "Assets added to your booking will show up here. You must select a Start and End date and Save your booking in order to be able to add assets.",
               newButtonRoute: manageAssetsUrl,
               newButtonContent: "Manage Assets",
               buttonProps: {

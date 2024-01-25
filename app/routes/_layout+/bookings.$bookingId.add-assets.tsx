@@ -113,7 +113,7 @@ export default function AddAssetsToNewBooking() {
   return (
     <div>
       <header className="mb-5">
-        <h2>Move assets to ‘{booking?.name}’ booking</h2>
+        <h2>Add assets to ‘{booking?.name}’ booking</h2>
         <p>Fill up the booking with the assets of your choice</p>
       </header>
       {/**

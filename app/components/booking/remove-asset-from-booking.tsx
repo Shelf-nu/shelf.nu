@@ -13,7 +13,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useBookingStatus } from "~/hooks/use-booking-status";
-import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
+import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import { tw } from "~/utils";
 import { TrashIcon } from "../icons";
 
