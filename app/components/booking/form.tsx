@@ -10,25 +10,16 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import type { BookingWithCustodians } from "~/routes/_layout+/bookings._index";
-import { isFormProcessing } from "~/utils/form";
+import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
+import { isFormProcessing } from "~/utils";
+import type { BookingFormData } from ".";
 import { ActionsDropdown } from "./actions-dropdown";
-import { BookingAssetsColumn } from "./booking-assets-column";
 import CustodianSelect from "../custody/custodian-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
-import { Button } from "../shared/button";
+import { Button } from "../shared";
 import { Card } from "../shared/card";
 import { ControlledActionButton } from "../shared/controlled-action-button";
-
-type FormData = {
-  id?: string;
-  name?: string;
-  startDate?: string;
-  endDate?: string;
-  custodianUserId?: string; // This holds the ID of the user attached to custodian
-};
-
 /**
  * Important note is that the fields are only valudated when they are not disabled
  */
@@ -76,12 +67,13 @@ export function BookingForm({
   startDate,
   endDate,
   custodianUserId,
-}: FormData) {
+  isModal = false,
+}: BookingFormData) {
   const navigation = useNavigation();
 
   const routeIsNewBooking = useLocation().pathname.includes("new");
 
-  const [, updateName] = useAtom(updateDynamicTitleAtom);
+  // const [, updateName] = useAtom(updateDynamicTitleAtom);
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
 
   const {
@@ -113,14 +105,13 @@ export function BookingForm({
   );
 
   const isSelfService = useUserIsSelfService();
+  const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   return (
-    <div
-      id="bookingFormWrapper"
-      className="md:mt-5 xl:flex xl:items-start xl:gap-4"
-    >
-      <div>
-        <Form ref={zo.ref} method="post">
+    <div>
+      <Form ref={zo.ref} method="post">
+        {/* Render the actions on top only when the form is not in a modal */}
+        {!isModal ? (
           <div className=" -mx-4 mb-5 flex w-screen items-center justify-between border-b border-gray-200 bg-white px-4 py-2 md:absolute md:right-4 md:top-3 md:m-0 md:w-fit md:justify-end md:border-0 md:bg-transparent md:p-0">
             <div className=" flex gap-2">
               {/* We only render the actions when we are not on the .new route */}
@@ -195,108 +186,109 @@ export function BookingForm({
               ) : null}
             </div>
           </div>
-          <div className="">
-            <div className="mb-8 w-full xl:mb-0 xl:w-[328px]">
-              <div className="flex w-full flex-col gap-3">
-                {id ? (
-                  <input type="hidden" name="id" defaultValue={id} />
-                ) : null}
-                <Card className="m-0">
-                  <FormRow
-                    rowLabel={"Name"}
-                    className="mobile-styling-only border-b-0 p-0"
-                    required={true}
-                  >
-                    <Input
-                      label="Name"
-                      hideLabel
-                      name={zo.fields.name()}
-                      disabled={inputFieldIsDisabled}
-                      error={zo.errors.name()?.message}
-                      autoFocus
-                      onChange={updateName}
-                      className="mobile-styling-only w-full p-0"
-                      defaultValue={name || undefined}
-                      placeholder="Booking"
-                      required
-                    />
-                  </FormRow>
-                </Card>
-                <Card className="m-0 pt-0">
-                  <FormRow
-                    rowLabel={"Start Date"}
-                    className="mobile-styling-only border-b-0 pb-[10px]"
-                    required
-                  >
-                    <Input
-                      label="Start Date"
-                      type="datetime-local"
-                      hideLabel
-                      name={zo.fields.startDate()}
-                      disabled={inputFieldIsDisabled}
-                      error={zo.errors.startDate()?.message}
-                      className="w-full"
-                      defaultValue={startDate}
-                      placeholder="Booking"
-                      required
-                    />
-                  </FormRow>
-                  <FormRow
-                    rowLabel={"End Date"}
-                    className="mobile-styling-only mb-2.5 border-b-0 p-0"
-                    required
-                  >
-                    <Input
-                      label="End Date"
-                      type="datetime-local"
-                      hideLabel
-                      name={zo.fields.endDate()}
-                      disabled={inputFieldIsDisabled}
-                      error={zo.errors.endDate()?.message}
-                      className="w-full"
-                      defaultValue={endDate}
-                      placeholder="Booking"
-                      required
-                    />
-                  </FormRow>
-                  <p className="text-[14px] text-gray-600">
-                    Within this period the assets in this booking will be in
-                    custody and unavailable for other bookings.
-                  </p>
-                </Card>
-                <Card className="m-0">
-                  <label className="mb-2.5 block font-medium text-gray-700">
-                    <span className="required-input-label">Custodian</span>
-                  </label>
-                  <CustodianSelect
-                    defaultTeamMemberId={custodianUserId}
-                    disabled={inputFieldIsDisabled}
-                    className={
-                      isSelfService
-                        ? "preview-only-custodian-select pointer-events-none cursor-not-allowed bg-gray-50"
-                        : ""
-                    }
-                    showEmail
-                  />
+        ) : null}
 
-                  {zo.errors.custodian()?.message ? (
-                    <div className="text-sm text-error-500">
-                      {zo.errors.custodian()?.message}
-                    </div>
-                  ) : null}
-                  <p className="mt-2 text-[14px] text-gray-600">
-                    The person that will be in custody of or responsible for the
-                    assets during the duration of the booking period.
-                  </p>
-                </Card>
-              </div>
+        <div className="">
+          <div className="mb-8 w-full xl:mb-0 xl:w-[328px]">
+            <div className="flex w-full flex-col gap-3">
+              {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
+              <Card className="m-0">
+                <FormRow
+                  rowLabel={"Name"}
+                  className="mobile-styling-only border-b-0 p-0"
+                  required={true}
+                >
+                  <Input
+                    label="Name"
+                    hideLabel
+                    name={zo.fields.name()}
+                    disabled={inputFieldIsDisabled}
+                    error={zo.errors.name()?.message}
+                    autoFocus
+                    onChange={updateName}
+                    className="mobile-styling-only w-full p-0"
+                    defaultValue={name || undefined}
+                    placeholder="Booking"
+                    required
+                  />
+                </FormRow>
+              </Card>
+              <Card className="m-0 pt-0">
+                <FormRow
+                  rowLabel={"Start Date"}
+                  className="mobile-styling-only border-b-0 pb-[10px]"
+                  required
+                >
+                  <Input
+                    label="Start Date"
+                    type="datetime-local"
+                    hideLabel
+                    name={zo.fields.startDate()}
+                    disabled={inputFieldIsDisabled}
+                    error={zo.errors.startDate()?.message}
+                    className="w-full"
+                    defaultValue={startDate}
+                    placeholder="Booking"
+                    required
+                  />
+                </FormRow>
+                <FormRow
+                  rowLabel={"End Date"}
+                  className="mobile-styling-only mb-2.5 border-b-0 p-0"
+                  required
+                >
+                  <Input
+                    label="End Date"
+                    type="datetime-local"
+                    hideLabel
+                    name={zo.fields.endDate()}
+                    disabled={inputFieldIsDisabled}
+                    error={zo.errors.endDate()?.message}
+                    className="w-full"
+                    defaultValue={endDate}
+                    placeholder="Booking"
+                    required
+                  />
+                </FormRow>
+                <p className="text-[14px] text-gray-600">
+                  Within this period the assets in this booking will be in
+                  custody and unavailable for other bookings.
+                </p>
+              </Card>
+              <Card className="m-0">
+                <label className="mb-2.5 block font-medium text-gray-700">
+                  <span className="required-input-label">Custodian</span>
+                </label>
+                <CustodianSelect
+                  defaultTeamMemberId={custodianUserId}
+                  disabled={inputFieldIsDisabled}
+                  className={
+                    isSelfService
+                      ? "preview-only-custodian-select pointer-events-none cursor-not-allowed bg-gray-50"
+                      : ""
+                  }
+                  showEmail
+                />
+
+                {zo.errors.custodian()?.message ? (
+                  <div className="text-sm text-error-500">
+                    {zo.errors.custodian()?.message}
+                  </div>
+                ) : null}
+                <p className="mt-2 text-[14px] text-gray-600">
+                  The person that will be in custody of or responsible for the
+                  assets during the duration of the booking period.
+                </p>
+              </Card>
             </div>
           </div>
-        </Form>
-      </div>
-      <div className="flex-1">
-        <BookingAssetsColumn />
-      </div>
+        </div>
+        {isModal ? (
+          <div>
+            <Button type="submit">Check Asset availability</Button>
+          </div>
+        ) : null}
+      </Form>
     </div>
   );
 }
