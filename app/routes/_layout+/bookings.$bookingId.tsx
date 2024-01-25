@@ -10,7 +10,8 @@ import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { parseFormAny } from "react-zorm";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { BookingForm, NewBookingFormSchema } from "~/components/booking";
+import { BookingPageContent } from "~/components/booking";
+import { NewBookingFormSchema } from "~/components/booking/form";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -43,7 +44,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
-import { bookingStatusColorMap } from "./bookings._index";
+import { bookingStatusColorMap } from "./bookings";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { authSession, organizationId, role } = await requirePermision(
@@ -453,7 +454,7 @@ export default function BookingEditPage() {
       />
 
       <div>
-        <BookingForm
+        <BookingPageContent
           id={booking.id}
           name={booking.name}
           startDate={

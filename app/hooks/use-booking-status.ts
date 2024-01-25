@@ -69,7 +69,7 @@ export function useBookingStatus(booking: BookingSubset) {
        *
        */
 
-      booking.assets.some(
+      booking.assets?.some(
         (asset) => asset.bookings && asset?.bookings.length > 0
       ), // Assets are still checked out from another booking
     [booking.assets]
