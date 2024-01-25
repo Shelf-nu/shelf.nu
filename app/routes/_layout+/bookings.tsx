@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -128,6 +129,18 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   name: "bookings.index",
   breadcrumb: () => <Link to="/bookings">Bookings</Link>,
+};
+
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  nextUrl,
+  defaultShouldRevalidate,
+}) => {
+  /** Dont revalidate on add-assets route */
+  const isAddAssetsRoute = nextUrl.pathname.includes("add-assets");
+  if (isAddAssetsRoute) {
+    return false;
+  }
+  return defaultShouldRevalidate;
 };
 
 type RouteHandleWithName = {

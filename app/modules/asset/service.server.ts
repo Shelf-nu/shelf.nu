@@ -817,10 +817,14 @@ export async function getAllRelatedEntries({
 export const getPaginatedAndFilterableAssets = async ({
   request,
   organizationId,
+  excludeCategoriesQuery = false,
+  excludeTagsQuery = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   extraInclude?: Prisma.AssetInclude;
+  excludeCategoriesQuery?: boolean;
+  excludeTagsQuery?: boolean;
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const {
@@ -838,14 +842,6 @@ export const getPaginatedAndFilterableAssets = async ({
   const { prev, next } = generatePageMeta(request);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-
-  const categories = await getAllCategories({
-    organizationId,
-  });
-
-  const tags = await getAllTags({
-    organizationId,
-  });
 
   const { assets, totalAssets } = await getAssets({
     organizationId,
@@ -868,8 +864,16 @@ export const getPaginatedAndFilterableAssets = async ({
     totalAssets,
     prev,
     next,
-    categories,
-    tags,
+    categories: excludeCategoriesQuery
+      ? []
+      : await getAllCategories({
+          organizationId,
+        }),
+    tags: excludeTagsQuery
+      ? []
+      : await getAllTags({
+          organizationId,
+        }),
     assets,
     totalPages,
     cookie,
