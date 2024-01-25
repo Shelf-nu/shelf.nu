@@ -1,10 +1,15 @@
 import { OrganizationRoles } from "@prisma/client";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LinksFunction,
+  LoaderFunctionArgs,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
 import { parseFormAny } from "react-zorm";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
+import styles from "~/components/booking/styles.new.css";
 import { db } from "~/database";
 
 import { commitAuthSession } from "~/modules/auth";
@@ -169,6 +174,8 @@ export async function action({ request }: ActionFunctionArgs) {
 export const handle = {
   name: "bookings.new",
 };
+
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
   return (
