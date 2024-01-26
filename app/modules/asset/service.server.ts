@@ -752,7 +752,6 @@ export async function duplicateAsset({
       userId,
       categoryId: asset.categoryId,
       locationId: asset.locationId ?? undefined,
-      custodian: asset?.custody?.custodian.id ?? undefined,
       tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
       valuation: asset.valuation,
     });
