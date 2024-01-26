@@ -88,6 +88,7 @@ export function BookingForm({
     isCancelled,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
+    hasAssetsInCustody,
   } = useBookingStatus(booking);
 
   const disabled = isFormProcessing(navigation.state) || isArchived;
@@ -162,12 +163,16 @@ export function BookingForm({
               {isReserved && !isSelfService ? (
                 <ControlledActionButton
                   canUseFeature={
-                    !disabled && !hasUnavailableAssets && !hasCheckedOutAssets
+                    !disabled &&
+                    !hasUnavailableAssets &&
+                    !hasCheckedOutAssets &&
+                    !hasAssetsInCustody
                   }
                   buttonContent={{
                     title: "Check-out",
-                    message:
-                      "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking or have assigned custody. Either check-in the missing assets or remove the assets from this booking",
+                    message: hasAssetsInCustody
+                      ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                      : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
                   }}
                   buttonProps={{
                     type: "submit",

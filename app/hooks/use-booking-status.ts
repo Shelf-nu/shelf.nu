@@ -75,6 +75,12 @@ export function useBookingStatus(booking: BookingSubset) {
     [booking.assets]
   );
 
+  const hasAssetsInCustody = useMemo(
+    () =>
+      booking.assets?.some((asset) => asset.status === AssetStatus.IN_CUSTODY), // Assets are in custody
+    [booking.assets]
+  );
+
   return {
     hasAssets,
     hasUnavailableAssets,
@@ -87,5 +93,6 @@ export function useBookingStatus(booking: BookingSubset) {
     isCancelled,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
+    hasAssetsInCustody,
   };
 }

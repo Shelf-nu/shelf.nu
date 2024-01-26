@@ -1,10 +1,17 @@
-import { AssetStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  Link,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
 import CustodianSelect from "~/components/custody/custodian-select";
 import { UserIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
+import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database";
 import { createNote } from "~/modules/asset";
 import { getUserByID } from "~/modules/user";
@@ -14,6 +21,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
+import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { organizationId } = await requirePermision(
@@ -26,7 +34,21 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const asset = await db.asset.findUnique({
     where: { id: assetId },
     select: {
-      custody: true,
+      custody: {
+        select: {
+          id: true,
+        },
+      },
+      bookings: {
+        where: {
+          status: {
+            in: [BookingStatus.RESERVED],
+          },
+        },
+        select: {
+          id: true,
+        },
+      },
     },
   });
   /** If the asset already has a custody, this page should not be visible */
@@ -51,6 +73,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   return json({
     showModal: true,
     teamMembers,
+    asset,
   });
 };
 
@@ -133,6 +156,8 @@ export function links() {
 }
 
 export default function Custody() {
+  const { asset } = useLoaderData<typeof loader>();
+  const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
   const actionData = useActionData<{ error: string } | null>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -158,6 +183,23 @@ export default function Custody() {
             <div className="-mt-8 mb-8 text-sm text-error-500">
               {actionData.error}
             </div>
+          ) : null}
+
+          {hasBookings ? (
+            <WarningBox className="-mt-4 mb-8">
+              <>
+                Asset is part of an{" "}
+                <Link
+                  to={`/bookings/${(asset as AssetWithBooking).bookings[0].id}`}
+                  className="underline"
+                  target="_blank"
+                >
+                  upcoming booking
+                </Link>
+                . You will not be able to check-out your booking if this asset
+                has custody.
+              </>
+            </WarningBox>
           ) : null}
 
           <div className="flex gap-3">

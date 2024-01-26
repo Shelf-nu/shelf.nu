@@ -26,6 +26,7 @@ import {
   LogoutIcon,
   HelpIcon,
   Profile,
+  UserIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -55,7 +56,8 @@ export type Icon =
   | "logout"
   | "help"
   | "profile"
-  | "send";
+  | "send"
+  | "user";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -88,6 +90,7 @@ export const iconsMap: IconsMap = {
   profile: <Profile />,
   logout: <LogoutIcon />,
   send: <SendIcon />,
+  user: <UserIcon />,
 };
 
 export default iconsMap;
