@@ -1,8 +1,5 @@
-import {
-  type Prisma,
-  type BookingStatus,
-  OrganizationRoles,
-} from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
+import type { BookingStatus, Prisma } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
@@ -240,9 +237,10 @@ const ListAssetContent = ({
     displayTo?: string[];
   };
 }) => {
-  const hasUnavaiableAssets = item.assets.some(
-    (asset) => !asset.availableToBook || asset.custody !== null
-  );
+  const hasUnavaiableAssets =
+    item.assets.some(
+      (asset) => !asset.availableToBook || asset.custody !== null
+    ) && !["COMPLETE", "CANCELLED", "ARCHIVED"].includes(item.status);
   return (
     <>
       {/* Item */}
