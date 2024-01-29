@@ -82,7 +82,9 @@ export const SMTP_PWD = getEnv("SMTP_PWD");
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_USER = getEnv("SMTP_USER");
 export const DATABASE_URL = getEnv("DATABASE_URL");
-export const DIRECT_URL = getEnv("DIRECT_URL");
+export const DIRECT_URL = getEnv("DIRECT_URL", {
+  isRequired: false,
+});
 export const SENTRY_DSN = getEnv("SENTRY_DSN", {
   isRequired: false,
 });
