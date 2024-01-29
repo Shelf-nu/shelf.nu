@@ -21,8 +21,8 @@ processes = []
   script_checks = []
 
   [services.concurrency]
-    hard_limit = 25
-    soft_limit = 20
+    hard_limit = 125
+    soft_limit = 100
     type = "connections"
 
   [[services.ports]]
