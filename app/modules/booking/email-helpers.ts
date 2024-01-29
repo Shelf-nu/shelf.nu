@@ -151,7 +151,7 @@ export const checkinReminderEmailContent = ({
     emailContent: `Your booking is due for checkin in ${getTimeRemainingMessage(
       new Date(to),
       new Date()
-    )} minutes.`,
+    )}.`,
   });
 
 export const sendCheckinReminder = async (
