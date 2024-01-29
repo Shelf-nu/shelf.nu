@@ -21,9 +21,6 @@ jobs:
 
   build:
     name: 🐳 Build
-    env:
-      SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-      SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
     # only build/deploy main branch on pushes
     if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'}}
     runs-on: ubuntu-latest
@@ -68,8 +65,6 @@ jobs:
           tags: registry.fly.io/${{ steps.app_name.outputs.value }}:${{ github.ref_name }}-${{ github.sha }}
           build-args: |
             COMMIT_SHA=${{ github.sha }}
-            SENTRY_ORG=${{ secrets.SENTRY_ORG }}
-            SENTRY_PROJECT=${{ secrets.SENTRY_PROJECT }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,mode=max,dest=/tmp/.buildx-cache-new
 
