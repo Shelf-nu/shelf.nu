@@ -39,7 +39,9 @@ declare global {
       SMTP_USER: string;
       MAINTENANCE_MODE: string;
       DATABASE_URL: string;
+      DIRECT_URL: string;
       GEOCODE_API_KEY: string;
+      SENTRY_DSN: string;
     }
   }
 }
@@ -82,6 +84,8 @@ export const SMTP_PWD = getEnv("SMTP_PWD");
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_USER = getEnv("SMTP_USER");
 export const DATABASE_URL = getEnv("DATABASE_URL");
+export const DIRECT_URL = getEnv("DIRECT_URL");
+export const SENTRY_DSN = getEnv("SENTRY_DSN") || false;
 
 /**
  * Shared envs

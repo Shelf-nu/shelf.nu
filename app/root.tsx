@@ -16,6 +16,7 @@ import {
   ScrollRestoration,
   useLoaderData,
 } from "@remix-run/react";
+import { withSentry } from "@sentry/remix";
 
 import { ErrorBoundryComponent } from "./components/errors";
 
@@ -97,11 +98,13 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
   );
 }
 
-export default function App() {
+function App() {
   const { maintenanceMode } = useLoaderData<typeof loader>();
   return (
     <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
   );
 }
+
+export default withSentry(App);
 
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
