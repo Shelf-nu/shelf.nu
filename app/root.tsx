@@ -16,6 +16,7 @@ import {
   ScrollRestoration,
   useLoaderData,
 } from "@remix-run/react";
+import { withSentry } from "@sentry/remix";
 
 import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
@@ -99,7 +100,7 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
   );
 }
 
-export default function App() {
+function App() {
   const { maintenanceMode } = useLoaderData<typeof loader>();
   const [workspaceSwitching, setWorkspaceSwitching] = useAtom(switchingWorkspaceAtom);
   useEffect(() => {
@@ -109,5 +110,7 @@ export default function App() {
     <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
   );
 }
+
+export default withSentry(App);
 
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
