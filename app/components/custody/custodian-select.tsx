@@ -46,6 +46,7 @@ export default function CustodianSelect(
         ?.name,
       userId: teamMembers.find((member) => member.id === defaultCustodianId)
         ?.userId,
+      email: null,
     });
   } else if (defaultTeamMemberId) {
     // In the case of team member id passed, we set that to id and find the rest in the teamMembers array
@@ -55,6 +56,8 @@ export default function CustodianSelect(
       name: teamMembers.find((member) => member.userId === defaultTeamMemberId)
         ?.name,
       userId: defaultTeamMemberId,
+      email: teamMembers.find((member) => member.userId === defaultTeamMemberId)
+        ?.user?.email,
     });
   }
 

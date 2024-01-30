@@ -118,7 +118,11 @@ export default function TemplateEditPage() {
 
   return (
     <>
-      <Header title={hasName ? name : template.name} />
+      <Header
+        title={hasName ? name : template.name}
+        hideBreadcrumbs
+        classNames="-mt-5"
+      />
       <div className=" items-top flex justify-between">
         <TemplateForm
           isEdit

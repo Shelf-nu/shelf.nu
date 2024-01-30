@@ -126,7 +126,11 @@ export default function AddTemplatePage() {
 
   return (
     <>
-      <Header title={title ? title : "Untitled template"} />
+      <Header
+        hideBreadcrumbs
+        title={title ? title : "Untitled template"}
+        classNames="-mt-5"
+      />
       <div>
         <TemplateForm />
       </div>
