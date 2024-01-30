@@ -12,7 +12,7 @@ import { EmptyState } from "~/components/list/empty-state";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
 import { Badge } from "~/components/shared";
-import { PremiumFeatureButton } from "~/components/subscription/premium-feature-button";
+import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
 import { db } from "~/database";
@@ -206,7 +206,7 @@ export default function TemplatePage() {
               <>
                 <div className="flex w-full items-center justify-between">
                   <h3 className="text-md text-gray-900">PDF Templates</h3>
-                  <PremiumFeatureButton
+                  <ControlledActionButton
                     canUseFeature={canCreateMoreTemplates}
                     buttonContent={{
                       title: "Add template",

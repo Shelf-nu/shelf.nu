@@ -42,7 +42,7 @@ const Calendar = forwardRef<
           caption_label: "text-sm font-medium",
           nav: "space-x-1 flex items-center",
           nav_button: tw(
-            "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100"
+            "size-7 bg-transparent p-0 opacity-50 hover:opacity-100"
           ),
           nav_button_previous: "absolute left-1",
           nav_button_next: "absolute right-1",
@@ -57,7 +57,7 @@ const Calendar = forwardRef<
               ? "[&:has(>.day-range-end)]:rounded-r-md [&:has(>.day-range-start)]:rounded-l-md first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md"
               : "[&:has([aria-selected])]:rounded-md"
           ),
-          day: tw("h-8 w-8 p-0 font-normal aria-selected:opacity-100"),
+          day: tw("size-8 p-0 font-normal aria-selected:opacity-100"),
           day_range_start: "day-range-start",
           day_range_end: "day-range-end",
           day_selected:
@@ -71,8 +71,8 @@ const Calendar = forwardRef<
           ...classNames,
         }}
         components={{
-          IconLeft: () => <ChevronLeftIcon className="h-4 w-4" />,
-          IconRight: () => <ChevronRightIcon className="h-4 w-4" />,
+          IconLeft: () => <ChevronLeftIcon className="size-4" />,
+          IconRight: () => <ChevronRightIcon className="size-4" />,
         }}
         {...props}
       />

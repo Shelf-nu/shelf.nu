@@ -2,6 +2,7 @@ import type { Invite, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import { db } from "~/database";
+import { invitationTemplateString } from "~/emails/invite-template";
 import { INVITE_TOKEN_SECRET } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -159,6 +160,7 @@ export async function createInvite({
     to: inviteeEmail,
     subject: `You have been invited to ${invite.organization.name}`,
     text: inviteEmailText({ invite, token }),
+    html: invitationTemplateString({ invite, token }),
   });
 
   return invite;

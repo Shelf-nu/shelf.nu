@@ -35,10 +35,10 @@ export default function AssetsByStatusChart() {
       <div className="h-full p-8">
         {chartData?.length > 0 ? (
           <div className="flex flex-col items-center gap-4 lg:flex-row lg:justify-between">
-            <ClientOnly fallback={<FallbackLoading className="h-80 w-80" />}>
+            <ClientOnly fallback={<FallbackLoading className="size-80" />}>
               {() => (
                 <DonutChart
-                  className="mt-6 h-[240px] w-[240px] 2xl:h-[320px] 2xl:w-[320px]"
+                  className="mt-6 size-[240px] 2xl:size-[320px]"
                   data={chartData}
                   category="assets"
                   index="status"

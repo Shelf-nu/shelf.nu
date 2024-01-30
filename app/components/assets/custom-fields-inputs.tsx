@@ -112,7 +112,7 @@ export default function AssetCustomFields({
                 ) : (
                   <span>Pick a date</span>
                 )}
-                <CalendarIcon className="ml-3 h-5 w-5" />
+                <CalendarIcon className="ml-3 size-5" />
               </div>
             </Button>
           </PopoverTrigger>
@@ -142,11 +142,8 @@ export default function AssetCustomFields({
             defaultValue={val ? val : field.required ? field.options[0] : ""}
             disabled={disabled}
           >
-            <SelectTrigger
-              className="px-3.5 py-3"
-              placeholder={`Choose ${field.name}`}
-            >
-              <SelectValue />
+            <SelectTrigger className="px-3.5 py-3">
+              <SelectValue placeholder={`Choose ${field.name}`} />
             </SelectTrigger>
             <SelectContent
               position="popper"

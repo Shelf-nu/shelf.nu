@@ -1,27 +1,8 @@
-import { Roles } from "@prisma/client";
-import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
-
-import { json, redirect } from "@remix-run/node";
+import type { LinksFunction } from "@remix-run/node";
 import { Outlet } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import { useCrisp } from "~/components/marketing/crisp";
-import { db } from "~/database";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
-import { ENABLE_PREMIUM_FEATURES } from "~/utils";
-import {
-  initializePerPageCookieOnLayout,
-  setCookie,
-  userPrefs,
-} from "~/utils/cookies.server";
-import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
-
-import {
-  getCustomerActiveSubscription,
-  getStripeCustomer,
-  stripe,
-} from "~/utils/stripe.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 

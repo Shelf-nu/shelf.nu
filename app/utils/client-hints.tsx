@@ -3,6 +3,7 @@
  * are needed by the server, but are only known by the browser.
  */
 import { parseAcceptLanguage } from "intl-parse-accept-language";
+import type { ClientHint } from "~/modules/booking/types";
 import { ShelfStackError } from "./error";
 import { useRequestInfo } from "./request-info";
 
@@ -65,6 +66,11 @@ export function getHints(request?: Request) {
     }
   );
 }
+
+export const getClientHint = (request: Request): ClientHint => ({
+  locale: getLocale(request),
+  timeZone: getHints(request).timeZone,
+});
 
 /**
  * @returns an object with the client hints and their values
@@ -130,6 +136,17 @@ export function getDateTimeFormat(
 ) {
   const locale = getLocale(request);
 
+  const hints: ClientHint = {
+    locale,
+    timeZone: getHints(request).timeZone,
+  };
+  return getDateTimeFormatFromHints(hints, options);
+}
+
+export function getDateTimeFormatFromHints(
+  hints: ClientHint,
+  options?: Intl.DateTimeFormatOptions
+) {
   // change your default options here
   const defaultOptions: Intl.DateTimeFormatOptions = {
     year: "numeric",
@@ -138,11 +155,11 @@ export function getDateTimeFormat(
   };
 
   options = {
-    ...defaultOptions,
+    ...(options?.timeStyle ? {} : defaultOptions),
     ...options,
-    timeZone: options?.timeZone ?? getHints(request).timeZone,
+    timeZone: options?.timeZone ?? hints.timeZone,
   };
-  return new Intl.DateTimeFormat(locale, options);
+  return new Intl.DateTimeFormat(hints.locale, options);
 }
 
 /**

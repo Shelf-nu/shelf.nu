@@ -17,6 +17,7 @@ export interface ButtonProps {
   attachToInput?: boolean;
   onlyIconOnMobile?: boolean;
   title?: string;
+  prefetch?: "none" | "intent" | "render" | "viewport";
   [key: string]: any;
 }
 
@@ -42,7 +43,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
   ) {
     const Component = props?.to ? Link : as;
 
-    const baseButtonClasses = `inline-flex items-center justify-center rounded-lg font-semibold text-center  gap-2  max-w-xl border text-sm box-shadow-xs`;
+    const baseButtonClasses = `inline-flex items-center justify-center rounded font-semibold text-center  gap-2  max-w-xl border text-sm box-shadow-xs`;
 
     const variants = {
       primary: tw(
@@ -95,7 +96,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       <>
         <Component
           className={finalStyles}
-          prefetch={props.to ? "intent" : "none"}
+          prefetch={props.to ? (props.prefetch ? "intent" : "none") : "none"}
           {...props}
           title={title}
           ref={ref}

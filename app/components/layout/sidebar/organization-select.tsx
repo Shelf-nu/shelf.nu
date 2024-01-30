@@ -28,15 +28,11 @@ export const OrganizationSelect = () => {
       }}
     >
       <Select name="organizationId" defaultValue={currentOrganizationId}>
-        <SelectTrigger className="p-3">
+        <SelectTrigger className="w-full p-3">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent
-          position="popper"
-          className="w-full min-w-[300px]"
-          align="start"
-        >
-          <div className=" max-h-[320px] overflow-auto">
+        <SelectContent position="popper" className="w-full" align="start">
+          <div className=" max-h-[320px] w-[253px] overflow-auto">
             {organizations.map((org) => (
               <SelectItem value={org.id} key={org.id} className="p-2">
                 <div className="flex items-center gap-2">
@@ -46,7 +42,7 @@ export const OrganizationSelect = () => {
                     <Image
                       imageId={org.imageId}
                       alt="img"
-                      className={tw("h-6 w-6 rounded-[2px] object-cover")}
+                      className={tw("size-6 rounded-[2px] object-cover")}
                       updatedAt={org.updatedAt}
                     />
                   )}

@@ -3,7 +3,10 @@ node_modules
 /build
 /public/build
 .env
+.env.local
+.env.staging
 .env.production
+.env.staging
 .cache
 
 /prisma/data.db
@@ -30,3 +33,6 @@ desktop-app/portable
 .npmrc
 
 .vscode
+
+# Sentry Config File
+.sentryclirc

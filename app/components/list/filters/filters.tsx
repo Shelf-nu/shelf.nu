@@ -65,7 +65,7 @@ export const Filters = ({
   return (
     <div
       className={tw(
-        "flex items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5",
+        "flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5",
         className
       )}
     >
@@ -77,7 +77,7 @@ export const Filters = ({
           <div className="flex items-center gap-5">
             <SearchForm />
           </div>
-          <div className="flex-1">{children}</div>
+          <div className="flex flex-1 justify-end">{children}</div>
         </div>
       </Form>
     </div>

@@ -12,7 +12,7 @@ import {
 import type { loader } from "~/routes/_layout+/settings.team";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { DeleteMember } from "./delete-member";
-import { PremiumFeatureButton } from "../subscription/premium-feature-button";
+import { ControlledActionButton } from "../shared/controlled-action-button";
 
 export function TeamMembersActionsDropdown({
   teamMember,
@@ -49,8 +49,8 @@ export function TeamMembersActionsDropdown({
         align="end"
         className="order w-[180px] rounded-md bg-white p-[6px] text-right "
       >
-        <DropdownMenuItem className="p-4 text-gray-700 hover:bg-slate-100 hover:text-gray-700">
-          <PremiumFeatureButton
+        <DropdownMenuItem className="p-4 text-gray-700 hover:bg-slate-100 hover:text-gray-800">
+          <ControlledActionButton
             canUseFeature={!isPersonalOrg}
             buttonContent={{
               title: (

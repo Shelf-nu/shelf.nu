@@ -24,7 +24,7 @@ export const TeamMembersTable = () => {
       <div className="flex flex-1 flex-col gap-2">
         <div
           className={tw(
-            "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded-[12px]"
+            "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded"
           )}
         >
           {!hasItems ? (

@@ -166,6 +166,7 @@ export const getUserOrganizations = async ({ userId }: { userId: string }) => {
   const userOrganizations = await db.userOrganization.findMany({
     where: { userId },
     select: {
+      roles: true,
       organization: {
         select: {
           id: true,
@@ -174,10 +175,11 @@ export const getUserOrganizations = async ({ userId }: { userId: string }) => {
           imageId: true,
           userId: true,
           updatedAt: true,
+          currency: true,
         },
       },
     },
   });
 
-  return userOrganizations.map((uo) => uo.organization);
+  return userOrganizations;
 };

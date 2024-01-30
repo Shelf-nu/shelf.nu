@@ -1,43 +1,69 @@
 import { useState } from "react";
-import { AssetStatus, TemplateType } from "@prisma/client";
+import { AssetStatus, BookingStatus, TemplateType } from "@prisma/client";
+
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  Link,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
 import { useAtom } from "jotai";
 import { assignCustodyUser } from "~/atoms/assign-custody-user";
+
 import CustodianSelect from "~/components/custody/custodian-select";
 import TemplateSelect from "~/components/custody/template-select";
 import { Switch } from "~/components/forms/switch";
 import { UserIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
+import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database";
 import { createNote } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
 import {
   assetCustodyAssignedEmailText,
   assetCustodyAssignedWithTemplateEmailText,
 } from "~/modules/invite/helpers";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
+import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
 
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({
     where: { id: assetId },
     select: {
-      custody: true,
+      custody: {
+        select: {
+          id: true,
+        },
+      },
+      bookings: {
+        where: {
+          status: {
+            in: [BookingStatus.RESERVED],
+          },
+        },
+        select: {
+          id: true,
+        },
+      },
     },
   });
-
   /** If the asset already has a custody, this page should not be visible */
   if (asset && asset.custody) {
     return redirect(`/assets/${assetId}`);
@@ -70,11 +96,18 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     showModal: true,
     teamMembers,
     templates,
+    asset,
   });
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { userId } = await requireAuthSession(request);
+  const {
+    authSession: { userId },
+  } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
   const formData = await request.formData();
   const assetId = params.assetId as string;
   const custodian = formData.get("custodian");
@@ -197,13 +230,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (addTemplateEnabled && templateObj!.signatureRequired) {
     /** We create the note */
     await createNote({
-      content: `**${user.firstName} ${
-        user.lastName
-      }** has given **${custodianName}** custody over **${
-        asset.title
-      }**. **${custodianName}** needs to sign the **${
-        templateObj!.name
-      }** template before receiving custody.`,
+      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateObj!.name?.trim()}** template before receiving custody.`,
       type: "UPDATE",
       userId: userId,
       assetId: asset.id,
@@ -268,6 +295,8 @@ export default function Custody() {
     error: string;
     type: "CUSTODIAN" | "TEMPLATE";
   } | null>();
+  const { asset } = useLoaderData<typeof loader>();
+  const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const [assignCustody] = useAtom(assignCustodyUser);
@@ -353,6 +382,23 @@ export default function Custody() {
               )}
             </div>
           )}
+
+          {hasBookings ? (
+            <WarningBox className="-mt-4 mb-8">
+              <>
+                Asset is part of an{" "}
+                <Link
+                  to={`/bookings/${(asset as AssetWithBooking).bookings[0].id}`}
+                  className="underline"
+                  target="_blank"
+                >
+                  upcoming booking
+                </Link>
+                . You will not be able to check-out your booking if this asset
+                has custody.
+              </>
+            </WarningBox>
+          ) : null}
 
           <div className="mt-8 flex gap-3">
             <Button

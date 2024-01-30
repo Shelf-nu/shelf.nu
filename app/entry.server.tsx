@@ -1,10 +1,34 @@
 import { PassThrough } from "stream";
 
 import { createReadableStreamFromReadable } from "@remix-run/node";
-import type { EntryContext } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  EntryContext,
+  LoaderFunctionArgs,
+} from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
+import * as Sentry from "@sentry/remix";
 import isbot from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { registerBookingWorkers } from "./modules/booking";
+import { SENTRY_DSN } from "./utils";
+import * as schedulerService from "./utils/scheduler.server";
+
+export function handleError(
+  error: unknown,
+  { request }: LoaderFunctionArgs | ActionFunctionArgs
+) {
+  if (Sentry) {
+    Sentry.captureRemixServerException(error, "remix.server", request);
+  }
+}
+
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    tracesSampleRate: 1,
+  });
+}
 
 const ABORT_DELAY = 5000;
 
@@ -17,6 +41,11 @@ export default async function handleRequest(
   const callbackName = isbot(request.headers.get("user-agent"))
     ? "onAllReady"
     : "onShellReady";
+
+  // === start: register scheduler and workers ===
+  await schedulerService.init();
+  registerBookingWorkers();
+  // === end: register scheduler and workers ===
 
   return new Promise(async (res, reject) => {
     let didError = false;

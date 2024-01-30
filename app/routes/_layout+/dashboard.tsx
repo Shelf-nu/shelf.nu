@@ -17,11 +17,9 @@ import MostScannedAssets from "~/components/dashboard/most-scanned-assets";
 import MostScannedCategories from "~/components/dashboard/most-scanned-categories";
 import NewestAssets from "~/components/dashboard/newest-assets";
 import { ErrorBoundryComponent } from "~/components/errors";
+import Header from "~/components/layout/header";
 import { db } from "~/database";
 
-import { requireAuthSession } from "~/modules/auth";
-import { getOrganization } from "~/modules/organization";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/skeleton-loading.css";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getLocale } from "~/utils/client-hints";
@@ -36,11 +34,16 @@ import {
   totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId, currentOrganization } = await requirePermision(
+    request,
+    PermissionEntity.dashboard,
+    PermissionAction.read
+  );
+
   /** This should be updated to use select to only get the data we need */
   const assets = await db.asset.findMany({
     where: {
@@ -74,8 +77,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
   });
 
-  const organization = await getOrganization({ id: organizationId });
-
   const announcement = await db.announcement.findFirst({
     where: {
       published: true,
@@ -101,7 +102,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     assets,
     locale: getLocale(request),
-    currency: organization?.currency,
+    currency: currentOrganization?.currency,
     totalValuation,
     newAssets: assets.slice(0, 5),
     totalAssets: assets.length,
@@ -144,10 +145,11 @@ export default function DashboardPage() {
 
   return (
     <div>
+      <Header />
       {completedAllChecks || skipOnboardingChecklist ? (
         <div className="pb-8">
           <AnnouncementBar />
-          <div className="w-full">
+          <div className="mt-4 w-full">
             <AssetsForEachMonth />
           </div>
           <div className="pb-4 xl:flex xl:gap-4">

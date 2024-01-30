@@ -24,7 +24,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import tailwindConfig from "../../../tailwind.config";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const authSession = await requireAuthSession(request);
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
@@ -64,7 +64,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   const assigneeId = new URL(request.url).searchParams.get("assigneeId");
   const assetId = new URL(request.url).searchParams.get("assetId");
-  const templateId = params.templateId;
+  // const templateId = params.templateId;
   const userId = user?.id;
   const { organizationId } = await requireOrganisationId(authSession, request);
 
@@ -97,6 +97,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     });
   }
 
+  // @TODO needs fixing -
   // @ts-ignore
   const custody = asset.custody as Custody;
 

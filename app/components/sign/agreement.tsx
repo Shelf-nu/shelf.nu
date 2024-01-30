@@ -52,6 +52,8 @@ export default function Agreement() {
             penColor="gray"
             canvasProps={{
               className: "sigCanvas",
+              // @TODO NEeds to be fixed @rajdip-b. I dont see anywhere in the docs a placeholder prop
+              // @ts-ignore
               placeholder: "Sign here",
               width: 400,
               height: 400,

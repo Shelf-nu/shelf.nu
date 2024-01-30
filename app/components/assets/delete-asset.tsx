@@ -38,7 +38,7 @@ export const DeleteAsset = ({
     <AlertDialogContent>
       <AlertDialogHeader>
         <div className="mx-auto md:m-0">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
+          <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
             <TrashIcon />
           </span>
         </div>
@@ -58,7 +58,7 @@ export const DeleteAsset = ({
             {asset.mainImage && (
               <input type="hidden" value={asset.mainImage} name="mainImage" />
             )}
-
+            <input type="hidden" value="delete" name="intent" />
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
               type="submit"

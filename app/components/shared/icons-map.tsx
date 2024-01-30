@@ -31,6 +31,7 @@ import {
   Profile,
   CopyIcon,
   SignIcon,
+  UserIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -66,7 +67,8 @@ export type Icon =
   | "profile"
   | "send"
   | "copy"
-  | "sign";
+  | "sign"
+  | "user";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -104,6 +106,7 @@ export const iconsMap: IconsMap = {
   pdf: <PdfIcon />,
   copy: <CopyIcon />,
   sign: <SignIcon />,
+  user: <UserIcon />,
 };
 
 export default iconsMap;

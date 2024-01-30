@@ -16,12 +16,14 @@ import { Table } from "../table";
 export const List = ({
   ItemComponent,
   headerChildren,
+  hideFirstHeaderColumn = false,
   navigate,
   className,
   customEmptyStateContent,
 }: {
   ItemComponent: any;
   headerChildren?: ReactNode;
+  hideFirstHeaderColumn?: boolean;
   /** Function to be passed if the rows of the table should navigate */
   navigate?: (id: string) => void;
   className?: string;
@@ -30,6 +32,7 @@ export const List = ({
     text: string;
     newButtonRoute: string;
     newButtonContent: string;
+    buttonProps?: any;
   };
 }) => {
   const { items } = useLoaderData<IndexResponse>();
@@ -38,7 +41,7 @@ export const List = ({
   return (
     <div
       className={tw(
-        "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded-[12px]",
+        "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded",
         className
       )}
     >
@@ -47,7 +50,10 @@ export const List = ({
       ) : (
         <>
           <Table>
-            <ListHeader children={headerChildren} />
+            <ListHeader
+              children={headerChildren}
+              hideFirstColumn={hideFirstHeaderColumn}
+            />
             <tbody>
               {items.map((item) => (
                 <ListItem item={item} key={item.id} navigate={navigate}>

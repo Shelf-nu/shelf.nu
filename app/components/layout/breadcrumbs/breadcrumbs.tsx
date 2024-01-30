@@ -15,16 +15,14 @@ export function Breadcrumbs() {
   );
 
   return (
-    <div className="mb-5">
-      <div className="breadcrumbs">
-        {breadcrumbs.map((match, index) => (
-          <Breadcrumb
-            key={index}
-            match={match}
-            isLastItem={index === breadcrumbs.length - 1}
-          />
-        ))}
-      </div>
+    <div className="breadcrumbs">
+      {breadcrumbs.map((match, index) => (
+        <Breadcrumb
+          key={index}
+          match={match}
+          isLastItem={index === breadcrumbs.length - 1}
+        />
+      ))}
     </div>
   );
 }

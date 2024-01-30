@@ -161,12 +161,8 @@ export const TemplateForm = ({
             )
           }
         >
-          <SelectTrigger
-            disabled={isEdit}
-            className="px-3.5 py-3"
-            placeholder="Choose a field type"
-          >
-            <SelectValue />
+          <SelectTrigger disabled={isEdit} className="px-3.5 py-3">
+            <SelectValue placeholder="Choose a field type" />
           </SelectTrigger>
           <SelectContent
             position="popper"

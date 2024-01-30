@@ -16,10 +16,11 @@ import {
   ScrollRestoration,
   useLoaderData,
 } from "@remix-run/react";
+import { withSentry } from "@sentry/remix";
 
 import { ErrorBoundryComponent } from "./components/errors";
 
-import { HomeIcon } from "./components/icons/library";
+import { HomeIcon } from "./components/icons";
 import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
@@ -36,7 +37,7 @@ export interface RootData {
 
 export const handle = {
   breadcrumb: () => (
-    <Link to="/" title="Home">
+    <Link to="/" title="Home" id="homeCrumb">
       <HomeIcon className="inline" />
     </Link>
   ),
@@ -97,11 +98,13 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
   );
 }
 
-export default function App() {
+function App() {
   const { maintenanceMode } = useLoaderData<typeof loader>();
   return (
     <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
   );
 }
+
+export default withSentry(App);
 
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
