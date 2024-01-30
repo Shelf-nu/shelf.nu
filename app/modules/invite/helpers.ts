@@ -46,3 +46,89 @@ If you think this is a mistake, please contact the organization’s administrato
 Thanks,
 The Shelf Team
 `;
+
+export const assetCustodyAssignedEmailText = ({
+  assetName,
+  assignerName,
+  assetId,
+}: {
+  assetName: string;
+  assignerName: string;
+  assetId: string;
+}) => `Howdy,
+
+${assignerName} has assigned you as custodian for ${assetName}.
+Please click the link below to view the asset:
+${SERVER_URL}/assets/${assetId}
+
+Thanks,
+The Shelf Team
+`;
+
+export const assetCustodyRevokedEmailText = ({
+  assetName,
+  assignerName,
+  assetId,
+}: {
+  assetName: string;
+  assignerName: string;
+  assetId: string;
+}) => `Howdy,
+
+${assignerName} has revoked your custody for ${assetName}.
+Please click the link below to view the asset:
+${SERVER_URL}/assets/${assetId}
+
+Thanks,
+The Shelf Team
+`;
+
+export const assetCustodySignatureRequiredEmailText = ({
+  assetName,
+  assignerName,
+  assetId,
+  templateId,
+  assigneeId,
+}: {
+  assetName: string;
+  assignerName: string;
+  assetId: string;
+  templateId: string;
+  assigneeId: string;
+}) => `Howdy,
+
+${assignerName} has requested your signature for ${assetName}.
+Please click the link below to view the signing template:
+${SERVER_URL}/sign/${templateId}?assigneeId=${assigneeId}&assetId=${assetId}
+
+To view the asset, please click the link below:
+${SERVER_URL}/assets/${assetId}
+
+Thanks,
+The Shelf Team
+`;
+
+export const assetCustodyAssignedWithTemplateEmailText = ({
+  assetName,
+  assignerName,
+  assetId,
+  templateId,
+  assigneeId,
+}: {
+  assetName: string;
+  assignerName: string;
+  assetId: string;
+  templateId: string;
+  assigneeId: string;
+}) => `Howdy,
+
+${assignerName} has assigned you as custodian for ${assetName}.
+Please click the link below to view the signing template:
+${SERVER_URL}/sign/${templateId}?assigneeId=${assigneeId}&assetId=${assetId}
+
+To view the asset, please click the link below:
+${SERVER_URL}/assets/${assetId}
+
+Thanks,
+The Shelf Team
+`;

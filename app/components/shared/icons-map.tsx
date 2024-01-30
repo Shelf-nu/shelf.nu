@@ -29,7 +29,8 @@ import {
   LogoutIcon,
   HelpIcon,
   Profile,
-
+  CopyIcon,
+  SignIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -63,7 +64,9 @@ export type Icon =
   | "logout"
   | "help"
   | "profile"
-  | "send";
+  | "send"
+  | "copy"
+  | "sign";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -99,6 +102,8 @@ export const iconsMap: IconsMap = {
   star: <StarIcon />,
   deactivate: <DeactivateIcon />,
   pdf: <PdfIcon />,
+  copy: <CopyIcon />,
+  sign: <SignIcon />,
 };
 
 export default iconsMap;

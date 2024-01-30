@@ -1,6 +1,12 @@
-import type { Organization, Template, User } from "@prisma/client";
+import {
+  AssetStatus,
+  type Organization,
+  type Template,
+  type User,
+} from "@prisma/client";
 import { db } from "~/database";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
+import { createNote } from "../asset";
 
 export async function createTemplate({
   name,
@@ -46,16 +52,63 @@ export async function updateTemplate({
   name,
   description,
   signatureRequired,
-}: Pick<Template, "id" | "name" | "description" | "signatureRequired">) {
+  userId,
+}: Pick<Template, "id" | "name" | "description" | "signatureRequired"> & {
+  userId: User["id"];
+}) {
   const data = {
     name,
     description,
     signatureRequired,
   };
-  return db.template.update({
+
+  const updatedTemplate = await db.template.update({
     where: { id },
     data,
   });
+
+  /**
+   * If the signatureRequired is true, we need to search through all the Custodies that
+   * have this tempalate associated with it. We will check if the templateSigned is false.
+   *
+   * If it is false, this could mean a scenario that the custodian has the asset in custody
+   * and wasn't required to sign the template. But since we are setting signatureRequired to true,
+   * we need to set the asset custory to "AVAILABLE" and furthermore, ask the custodian to sign
+   * the template via mailing them.
+   */
+  if (signatureRequired === true) {
+    const custodies = await db.custody.findMany({
+      where: {
+        templateId: id,
+        templateSigned: false,
+      },
+      include: {
+        custodian: true,
+      },
+    });
+
+    for (const custody of custodies) {
+      // Set the asset status to AVAILABLE
+      await db.asset.update({
+        where: {
+          id: custody.assetId,
+        },
+        data: {
+          status: AssetStatus.AVAILABLE,
+        },
+      });
+
+      // Send notifications
+      await createNote({
+        content: `The PDF template **${updatedTemplate.name}** now requires a signature. **${custody.custodian.name}** needs to sign the **${updatedTemplate.name}** template before receiving custody.`,
+        type: "UPDATE",
+        userId,
+        assetId: custody.assetId,
+      });
+    }
+  }
+
+  return updateTemplate;
 }
 
 export async function updateTemplatePDF({

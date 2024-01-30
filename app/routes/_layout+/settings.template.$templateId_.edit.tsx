@@ -86,6 +86,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     name,
     description: description ?? "",
     signatureRequired: signatureRequired ?? false,
+    userId: authSession.userId,
   });
 
   await updateTemplatePDF({

@@ -1,4 +1,4 @@
-import { type Location } from "@prisma/client";
+import type { Location } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -7,13 +7,14 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import ActionsDopdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { Notes } from "~/components/assets/notes";
 import { ErrorBoundryComponent } from "~/components/errors";
+import { SignIcon } from "~/components/icons";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
@@ -24,6 +25,7 @@ import { ScanDetails } from "~/components/location";
 import { Badge } from "~/components/shared";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks";
@@ -150,7 +152,6 @@ export default function AssetDetailsPage() {
     asset?.customFields?.length > 0
       ? asset.customFields.filter((f) => f?.value)
       : [];
-  const assetIsAvailable = asset.status === "AVAILABLE";
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
@@ -171,9 +172,40 @@ export default function AssetDetailsPage() {
       <Header
         subHeading={
           <div className="mt-3 flex gap-2">
-            <Badge color={assetIsAvailable ? "#12B76A" : "#2E90FA"}>
-              {userFriendlyAssetStatus(asset.status)}
-            </Badge>
+            <div className="flex items-center gap-x-1">
+              <Badge
+                color={asset.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
+              >
+                {userFriendlyAssetStatus(asset.status)}
+              </Badge>
+              {asset.custody?.template?.signatureRequired &&
+                !asset.custody.templateSigned && (
+                  <CustomTooltip
+                    content={
+                      <div className="flex flex-col gap-y-2 p-3">
+                        <span className="text-sm text-gray-700">
+                          Awaiting signature to complete custody assignment
+                        </span>
+                        <span className="text-sm text-gray-500">
+                          Asset status will change after signing. To cancel
+                          custody assignment, choose{" "}
+                          <span className="font-semibold text-gray-600">
+                            Release custody
+                          </span>{" "}
+                          action
+                        </span>
+                      </div>
+                    }
+                  >
+                    <Link
+                      className="rounded-full bg-gray-200 p-1"
+                      to={`share-template`}
+                    >
+                      <SignIcon />
+                    </Link>
+                  </CustomTooltip>
+                )}
+            </div>
             {location ? (
               <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700">
                 {location.name}
@@ -214,8 +246,7 @@ export default function AssetDetailsPage() {
             </Card>
           ) : null}
 
-          {/* We simply check if the asset is available and we can assume that if it't not, there is a custodian assigned */}
-          {!assetIsAvailable && asset?.custody?.createdAt ? (
+          {asset.status === "IN_CUSTODY" && asset?.custody?.createdAt ? (
             <Card>
               <div className="flex items-center gap-3">
                 <img

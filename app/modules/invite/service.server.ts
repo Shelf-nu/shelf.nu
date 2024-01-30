@@ -154,6 +154,7 @@ export async function createInvite({
   const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
     expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
   }); //keep only needed data in token to maintain the size
+
   await sendEmail({
     to: inviteeEmail,
     subject: `You have been invited to ${invite.organization.name}`,

@@ -192,6 +192,7 @@ export const TemplateForm = ({
         className="border-b-0 pb-0"
       >
         <Switch
+          name="signatureRequired"
           required={false}
           disabled={disabled}
           defaultChecked={signatureRequired}

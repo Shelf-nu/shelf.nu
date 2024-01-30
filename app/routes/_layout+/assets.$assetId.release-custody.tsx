@@ -7,11 +7,13 @@ import { db } from "~/database";
 import { createNote } from "~/modules/asset";
 import { requireAuthSession } from "~/modules/auth";
 import { releaseCustody } from "~/modules/custody";
+import { assetCustodyRevokedEmailText } from "~/modules/invite/helpers";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { sendEmail } from "~/utils/mail.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await requireAuthSession(request);
@@ -22,6 +24,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         select: {
           id: true,
           name: true,
+          user: {
+            select: {
+              email: true,
+            },
+          },
         },
       },
     },
@@ -56,6 +63,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (!asset.custody) {
     const formData = await request.formData();
     const custodianName = formData.get("custodianName") as string;
+    const custodianEmail = formData.get("custodianEmail") as string;
 
     /** Once the asset is updated, we create the note */
     await createNote({
@@ -69,6 +77,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       message: "This asset is available again.",
       icon: { name: "success", variant: "success" },
       senderId: userId,
+    });
+    sendEmail({
+      to: custodianEmail,
+      subject: `Your custody over ${asset.title} has been revoked`,
+      text: assetCustodyRevokedEmailText({
+        assetName: asset.title,
+        assignerName: user.firstName + " " + user.lastName,
+        assetId: asset.id,
+      }),
     });
   }
 
@@ -103,6 +120,11 @@ export default function Custody() {
               type="hidden"
               name="custodianName"
               value={custody?.custodian.name}
+            />
+            <input
+              type="hidden"
+              name="custodianEmail"
+              value={custody?.custodian.user?.email}
             />
             <Button
               to=".."

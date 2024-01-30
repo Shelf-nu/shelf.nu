@@ -313,6 +313,13 @@ model Custody {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String @unique
 
+  template       Template? @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  templateId     String?   @unique
+  templateSigned Boolean?  @default(false)
+
+  signatureText  String?
+  signatureImage String?
+
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -431,6 +438,8 @@ model Template {
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String
+
+  custodies Custody[]
 }
 
 model CustomField {
