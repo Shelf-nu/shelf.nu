@@ -11,8 +11,15 @@ import * as Sentry from "@sentry/remix";
 import isbot from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { registerBookingWorkers } from "./modules/booking";
-import { SENTRY_DSN } from "./utils";
+import { NODE_ENV, SENTRY_DSN } from "./utils";
 import * as schedulerService from "./utils/scheduler.server";
+
+if (SENTRY_DSN && NODE_ENV === "production") {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    tracesSampleRate: 1,
+  });
+}
 
 export function handleError(
   error: unknown,
@@ -21,13 +28,6 @@ export function handleError(
   if (Sentry) {
     Sentry.captureRemixServerException(error, "remix.server", request);
   }
-}
-
-if (SENTRY_DSN) {
-  Sentry.init({
-    dsn: SENTRY_DSN,
-    tracesSampleRate: 1,
-  });
 }
 
 const ABORT_DELAY = 5000;
