@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import { useEffect, type PropsWithChildren } from "react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -17,6 +17,8 @@ import {
   useLoaderData,
 } from "@remix-run/react";
 
+import { useAtom } from "jotai";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ErrorBoundryComponent } from "./components/errors";
 
 import { HomeIcon } from "./components/icons";
@@ -99,6 +101,10 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
 
 export default function App() {
   const { maintenanceMode } = useLoaderData<typeof loader>();
+  const [workspaceSwitching, setWorkspaceSwitching] = useAtom(switchingWorkspaceAtom);
+  useEffect(() => {
+    setWorkspaceSwitching(false);
+  })
   return (
     <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
   );

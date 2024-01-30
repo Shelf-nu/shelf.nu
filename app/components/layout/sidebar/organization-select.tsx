@@ -1,4 +1,6 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useAtom } from "jotai";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import {
   Select,
   SelectContent,
@@ -18,12 +20,15 @@ export const OrganizationSelect = () => {
     useLoaderData<typeof loader>();
   const fetcher = useFetcher();
 
+  const [workspaceSwitching, setWorkspaceSwitching] = useAtom(switchingWorkspaceAtom);
+
   return (
     <fetcher.Form
       action={"/api/user/change-current-organization"}
       method="POST"
       onChange={(e) => {
         const form = e.currentTarget;
+        setWorkspaceSwitching(true);
         fetcher.submit(form);
       }}
     >
