@@ -11,7 +11,7 @@ import * as Sentry from "@sentry/remix";
 import isbot from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { registerBookingWorkers } from "./modules/booking";
-import { SENTRY_DSN } from "./utils";
+import { NODE_ENV, SENTRY_DSN } from "./utils";
 import * as schedulerService from "./utils/scheduler.server";
 
 if (SENTRY_DSN) {
