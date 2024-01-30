@@ -10,8 +10,9 @@ import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import isbot from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { getAuthSession } from "./modules/auth";
 import { registerBookingWorkers } from "./modules/booking";
-import { SENTRY_DSN } from "./utils";
+import { NODE_ENV, SENTRY_DSN } from "./utils";
 import * as schedulerService from "./utils/scheduler.server";
 
 export function handleError(
@@ -21,13 +22,6 @@ export function handleError(
   if (Sentry) {
     Sentry.captureRemixServerException(error, "remix.server", request);
   }
-}
-
-if (SENTRY_DSN) {
-  Sentry.init({
-    dsn: SENTRY_DSN,
-    tracesSampleRate: 1,
-  });
 }
 
 const ABORT_DELAY = 5000;
@@ -46,6 +40,22 @@ export default async function handleRequest(
   await schedulerService.init();
   registerBookingWorkers();
   // === end: register scheduler and workers ===
+
+  // === Init Sentry
+  const authSession = await getAuthSession(request);
+  if (SENTRY_DSN && NODE_ENV === "production") {
+    Sentry.init({
+      dsn: SENTRY_DSN,
+      tracesSampleRate: 1,
+      environment: NODE_ENV,
+      initialScope: {
+        user: {
+          id: authSession ? authSession.userId : "unknown",
+        },
+      },
+    });
+  }
+  // === END Init Sentry
 
   return new Promise(async (res, reject) => {
     let didError = false;
