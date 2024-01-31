@@ -9,10 +9,10 @@ import {
   Container,
   Heading,
 } from "@react-email/components";
+import type { ClientHint } from "~/modules/booking/types";
+import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
 import { styles } from "./styles";
-import { ClientHint } from "~/modules/booking/types";
-import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 
 interface Props {
   heading: string;

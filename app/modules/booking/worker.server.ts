@@ -61,7 +61,7 @@ export const registerBookingWorkers = () => {
               new Date()
             )}.`,
             assetCount: booking._count.assets,
-            hints: data.hints
+            hints: data.hints,
           }),
         }).catch((err) => {
           console.error(`failed to send checkoutReminder email`, err);
@@ -206,7 +206,7 @@ export const registerBookingWorkers = () => {
             booking,
             heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
             assetCount: booking._count.assets,
-            hints: data.hints
+            hints: data.hints,
           }),
         }).catch((err) => {
           console.error(`failed to send overdue reminder email`, err);
