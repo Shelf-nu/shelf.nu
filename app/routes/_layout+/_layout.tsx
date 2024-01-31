@@ -36,33 +36,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
     ? await db.user.findUnique({
-      where: { email: authSession.email.toLowerCase() },
-      include: {
-        roles: true,
-        organizations: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-            imageId: true,
+        where: { email: authSession.email.toLowerCase() },
+        include: {
+          roles: true,
+          organizations: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              imageId: true,
+            },
+          },
+          userOrganizations: {
+            where: {
+              userId: authSession.userId,
+            },
+            select: {
+              organization: true,
+              roles: true,
+            },
+          },
+          tier: {
+            select: {
+              tierLimit: true,
+            },
           },
         },
-        userOrganizations: {
-          where: {
-            userId: authSession.userId,
-          },
-          select: {
-            organization: true,
-            roles: true,
-          },
-        },
-        tier: {
-          select: {
-            tierLimit: true,
-          },
-        },
-      },
-    })
+      })
     : undefined;
   let subscription = null;
   if (user?.customerId && stripe) {
@@ -118,28 +118,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   useCrisp();
-  const [workspaceSwitching, setWorkspaceSwitching] = useAtom(switchingWorkspaceAtom);
+  const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
-  return (<>
-    {
-      workspaceSwitching ?
-        <div className="flex min-h-screen min-w-[320px] flex-col items-center text-center">
-          <Spinner />
-        </div>
-        :
-        <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
-          <div className="flex flex-col md:flex-row">
-            <Sidebar />
-            <main className=" flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
-              <div className="flex h-full flex-1 flex-col">
+  return (
+    <>
+      <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
+        <div className="flex flex-col md:flex-row">
+          <Sidebar disabled={workspaceSwitching} />
+          <main className=" flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
+            <div className="flex h-full flex-1 flex-col">
+              {workspaceSwitching ? (
+                <div className="flex min-h-screen min-w-[320px] flex-col items-center text-center">
+                  <Spinner />
+                </div>
+              ) : (
                 <Outlet />
-              </div>
-              <Toaster />
-            </main>
-          </div>
+              )}
+            </div>
+            <Toaster />
+          </main>
         </div>
-    }
-  </>);
+      </div>
+    </>
+  );
 }
 
 export const ErrorBoundary = () => (
