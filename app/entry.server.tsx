@@ -14,7 +14,6 @@ import { registerBookingWorkers } from "./modules/booking";
 import { NODE_ENV, SENTRY_DSN } from "./utils";
 import * as schedulerService from "./utils/scheduler.server";
 
-console.log("NODE_ENV", NODE_ENV);
 if (SENTRY_DSN && NODE_ENV === "production") {
   Sentry.init({
     dsn: SENTRY_DSN,
