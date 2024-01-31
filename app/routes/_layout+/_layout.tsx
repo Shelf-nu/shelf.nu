@@ -86,7 +86,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { organizationId, organizations, currentOrganization } =
     await requireOrganisationId(authSession, request);
 
-  // setWorkspaceSwitching();
 
   return json(
     {
@@ -128,8 +127,9 @@ export default function App() {
           <main className=" flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
             <div className="flex h-full flex-1 flex-col">
               {workspaceSwitching ? (
-                <div className="flex min-h-screen min-w-[320px] flex-col items-center text-center">
+                <div className="flex flex-col h-full w-full items-center justify-center text-center">
                   <Spinner />
+                  <p className="mt-2">Switching workspaces...</p>
                 </div>
               ) : (
                 <Outlet />
