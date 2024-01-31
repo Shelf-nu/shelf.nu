@@ -1288,3 +1288,75 @@ export async function updateAssetBookingAvailability(
     return handleUniqueConstraintError(cause, "Asset");
   }
 }
+
+export async function updateAssetsWithBookingCustodians<T extends Asset>(
+  assets: T[]
+) {
+  /** When assets are checked out, we want to make an extra query to get the custodian for those assets. */
+  const checkedOutAssetsIds = assets
+    .filter((a) => a.status === "CHECKED_OUT")
+    .map((a) => a.id);
+
+  if (checkedOutAssetsIds.length > 0) {
+    /** We query agian the assets that are checked-out so we can get the user via the booking*/
+
+    const assetsWithUsers = await db.asset.findMany({
+      where: {
+        id: {
+          in: checkedOutAssetsIds,
+        },
+      },
+      select: {
+        id: true,
+        bookings: {
+          where: {
+            status: {
+              in: ["ONGOING", "OVERDUE"],
+            },
+          },
+          select: {
+            id: true,
+            custodianUser: {
+              select: {
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    /**
+     * We take the first booking of the array and extract the user from it and add it to the asset
+     */
+
+    assets = assets.map((a) => {
+      const assetWithUser = assetsWithUsers.find((awu) => awu.id === a.id);
+      const booking = assetWithUser?.bookings[0];
+      const custodian = booking?.custodianUser;
+
+      if (checkedOutAssetsIds.includes(a.id)) {
+        return {
+          ...a,
+          custody: custodian
+            ? {
+                custodian: {
+                  name: `${custodian?.firstName || ""} ${
+                    custodian?.lastName || ""
+                  }`, // Concatenate firstName and lastName to form the name property with default values
+                  user: {
+                    profilePicture: custodian?.profilePicture || null,
+                  },
+                },
+              }
+            : null,
+        };
+      }
+
+      return a;
+    });
+  }
+  return assets;
+}
