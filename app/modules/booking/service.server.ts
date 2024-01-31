@@ -456,6 +456,14 @@ export async function getBookings({
             availableToBook: true,
           },
         },
+        creator: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            profilePicture: true,
+          },
+        },
       },
       orderBy: { from: "asc" },
     }),
