@@ -81,5 +81,9 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
   );
 }
 
+/*
+ *The HTML content of an email will be accessed by a server file to send email,
+  we cannot import a TSX component in a server file so we are exporting TSX converted to HTML string using render function by react-email.
+ */
 export const invitationTemplateString = ({ token, invite }: Props) =>
   render(<InvitationEmailTemplate token={token} invite={invite} />);

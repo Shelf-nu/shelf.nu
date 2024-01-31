@@ -19,11 +19,13 @@ export const styles = {
     fontSize: "20px",
     color: "#101828",
     fontWeight: "600",
+    marginBottom: "16px"
   },
   h2: {
     fontSize: "16px",
     color: "#101828",
     fontWeight: "600",
+    marginBottom: "16px"
   },
   p: { fontSize: "16px", color: "#344054" },
 };

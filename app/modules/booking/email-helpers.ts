@@ -184,6 +184,7 @@ export const sendCheckinReminder = async (
         new Date()
       )} minutes.`,
       assetCount,
+      hints
     }),
   });
 };

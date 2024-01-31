@@ -235,6 +235,7 @@ export const upsertBooking = async (
             booking: res,
             heading: `Booking confirmation for ${custodian}`,
             assetCount: res.assets.length,
+            hints
           });
 
           if (data.status === BookingStatus.COMPLETE) {
@@ -252,6 +253,7 @@ export const upsertBooking = async (
               booking: res,
               heading: `Your booking has been completed: "${res.name}".`,
               assetCount: res._count.assets,
+              hints
             });
           }
 
@@ -272,6 +274,7 @@ export const upsertBooking = async (
               booking: res,
               heading: `Your booking has been cancelled: "${res.name}".`,
               assetCount: res._count.assets,
+              hints
             });
           }
 
@@ -533,6 +536,8 @@ export const deleteBooking = async (
       booking: b,
       heading: `Your booking has been deleted: "${b.name}".`,
       assetCount: b._count.assets,
+      hints,
+      hideViewButton: true
     });
 
     await sendEmail({
