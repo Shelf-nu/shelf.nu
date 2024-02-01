@@ -117,7 +117,7 @@ const Input = forwardRef(function Input(
       <span
         className={tw(
           `mb-[6px] text-text-sm font-medium text-gray-700`,
-          hideLabel && "lg:hidden",
+          hideLabel && "md:hidden",
           required && "required-input-label"
         )}
       >

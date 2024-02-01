@@ -1,0 +1,4 @@
+/* Styles for bookings.new */
+dialog {
+  @apply w-[480px] max-w-full;
+}

@@ -69,9 +69,15 @@ export function useBookingStatus(booking: BookingSubset) {
        *
        */
 
-      booking.assets.some(
+      booking.assets?.some(
         (asset) => asset.bookings && asset?.bookings.length > 0
       ), // Assets are still checked out from another booking
+    [booking.assets]
+  );
+
+  const hasAssetsInCustody = useMemo(
+    () =>
+      booking.assets?.some((asset) => asset.status === AssetStatus.IN_CUSTODY), // Assets are in custody
     [booking.assets]
   );
 
@@ -87,5 +93,6 @@ export function useBookingStatus(booking: BookingSubset) {
     isCancelled,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
+    hasAssetsInCustody,
   };
 }

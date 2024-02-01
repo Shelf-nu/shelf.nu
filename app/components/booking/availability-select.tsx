@@ -30,34 +30,32 @@ export function AvailabilitySelect() {
   }
 
   return (
-    <div>
-      <Select
-        name="category"
-        defaultValue={defaultValue}
-        onValueChange={handleSelectChange}
-      >
-        <SelectTrigger className="">
-          <SelectValue placeholder="Select category" />
-        </SelectTrigger>
+    <Select
+      name="category"
+      defaultValue={defaultValue}
+      onValueChange={handleSelectChange}
+    >
+      <SelectTrigger className="">
+        <SelectValue placeholder="Select category" />
+      </SelectTrigger>
 
-        <div>
-          <SelectContent
-            className=" w-[350px]"
-            position="popper"
-            align="end"
-            sideOffset={4}
-          >
-            <div className="border-b border-b-gray-300 py-2 ">
-              <SelectItem value={"show"} key={"show"}>
-                <span className="whitespace-nowrap">All assets</span>
-              </SelectItem>
-              <SelectItem value={"hide"} key={"hide"}>
-                <span className="whitespace-nowrap">Hide unavailable</span>
-              </SelectItem>
-            </div>
-          </SelectContent>
-        </div>
-      </Select>
-    </div>
+      <div>
+        <SelectContent
+          className=" w-[350px]"
+          position="popper"
+          align="end"
+          sideOffset={4}
+        >
+          <div className="border-b border-b-gray-300 py-2 ">
+            <SelectItem value={"show"} key={"show"}>
+              <span className="whitespace-nowrap">All assets</span>
+            </SelectItem>
+            <SelectItem value={"hide"} key={"hide"}>
+              <span className="whitespace-nowrap">Hide unavailable</span>
+            </SelectItem>
+          </div>
+        </SelectContent>
+      </div>
+    </Select>
   );
 }

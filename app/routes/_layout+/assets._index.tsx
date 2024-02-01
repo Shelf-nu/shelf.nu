@@ -33,7 +33,10 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset";
+import {
+  getPaginatedAndFilterableAssets,
+  updateAssetsWithBookingCustodians,
+} from "~/modules/asset";
 import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -166,6 +169,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
      */
     assets = assets.filter((a) => a.availableToBook);
   }
+
+  assets = await updateAssetsWithBookingCustodians(assets);
 
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
@@ -321,7 +326,6 @@ const ListAssetContent = ({
 }) => {
   const { category, tags, custody, location } = item;
   const isSelfService = useUserIsSelfService();
-
   return (
     <>
       {/* Item */}

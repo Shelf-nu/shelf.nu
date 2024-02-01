@@ -5,12 +5,14 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
+import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { parseFormAny } from "react-zorm";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { BookingForm, NewBookingFormSchema } from "~/components/booking";
+import { BookingPageContent } from "~/components/booking";
+import { NewBookingFormSchema } from "~/components/booking/form";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -43,7 +45,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
-import { bookingStatusColorMap } from "./bookings._index";
+import { bookingStatusColorMap } from "./bookings";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const { authSession, organizationId, role } = await requirePermision(
@@ -434,6 +436,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 }
 
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  nextUrl,
+  defaultShouldRevalidate,
+}) => {
+  /** Dont revalidate on add-assets route */
+  const isAddAssetsRoute = nextUrl.pathname.includes("add-assets");
+  if (isAddAssetsRoute) {
+    return false;
+  }
+  return defaultShouldRevalidate;
+};
+
 export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
@@ -453,7 +467,7 @@ export default function BookingEditPage() {
       />
 
       <div>
-        <BookingForm
+        <BookingPageContent
           id={booking.id}
           name={booking.name}
           startDate={

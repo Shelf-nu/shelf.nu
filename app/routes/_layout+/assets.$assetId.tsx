@@ -258,7 +258,7 @@ export default function AssetDetailsPage() {
             >
               View QR code
             </Button>
-            <ActionsDopdown asset={asset} />
+            <ActionsDopdown />
           </>
         ) : null}
       </Header>
