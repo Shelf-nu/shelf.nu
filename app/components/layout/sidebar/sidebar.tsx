@@ -18,11 +18,7 @@ import MenuItems from "./menu-items";
 import { OrganizationSelect } from "./organization-select";
 import Overlay from "./overlay";
 
-export default function Sidebar({
-  disabled,
-}: {
-  disabled?: boolean; // used to disable the sidebar when the user is switching workspaces
-}) {
+export default function Sidebar() {
   const { user, minimizedSidebar, currentOrganizationId } =
     useLoaderData<typeof loader>();
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
