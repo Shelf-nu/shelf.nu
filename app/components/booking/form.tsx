@@ -11,7 +11,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing, tw } from "~/utils";
 import type { BookingFormData } from ".";
 import { ActionsDropdown } from "./actions-dropdown";
 import CustodianSelect from "../custody/custodian-select";
@@ -73,7 +73,7 @@ export function BookingForm({
 
   const routeIsNewBooking = useLocation().pathname.includes("new");
 
-  // const [, updateName] = useAtom(updateDynamicTitleAtom);
+  const [, updateName] = useAtom(updateDynamicTitleAtom);
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
 
   const {
@@ -88,6 +88,7 @@ export function BookingForm({
     isCancelled,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
+    hasAssetsInCustody,
   } = useBookingStatus(booking);
 
   const disabled = isFormProcessing(navigation.state) || isArchived;
@@ -105,7 +106,6 @@ export function BookingForm({
   );
 
   const isSelfService = useUserIsSelfService();
-  const [, updateName] = useAtom(updateDynamicTitleAtom);
 
   return (
     <div>
@@ -163,12 +163,16 @@ export function BookingForm({
               {isReserved && !isSelfService ? (
                 <ControlledActionButton
                   canUseFeature={
-                    !disabled && !hasUnavailableAssets && !hasCheckedOutAssets
+                    !disabled &&
+                    !hasUnavailableAssets &&
+                    !hasCheckedOutAssets &&
+                    !hasAssetsInCustody
                   }
                   buttonContent={{
                     title: "Check-out",
-                    message:
-                      "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking or have assigned custody. Either check-in the missing assets or remove the assets from this booking",
+                    message: hasAssetsInCustody
+                      ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                      : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
                   }}
                   buttonProps={{
                     type: "submit",
@@ -188,8 +192,13 @@ export function BookingForm({
           </div>
         ) : null}
 
-        <div className="">
-          <div className="mb-8 w-full xl:mb-0 xl:w-[328px]">
+        <div className="mb-4">
+          <div
+            className={tw(
+              "mb-8 w-full xl:mb-0 ",
+              !isModal ? "xl:w-[328px]" : ""
+            )}
+          >
             <div className="flex w-full flex-col gap-3">
               {id ? <input type="hidden" name="id" defaultValue={id} /> : null}
               <Card className="m-0">
@@ -284,8 +293,8 @@ export function BookingForm({
           </div>
         </div>
         {isModal ? (
-          <div>
-            <Button type="submit">Check Asset availability</Button>
+          <div className="text-right">
+            <Button type="submit">Check Asset Availability</Button>
           </div>
         ) : null}
       </Form>
