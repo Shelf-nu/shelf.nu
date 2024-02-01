@@ -25,7 +25,12 @@ export default function SidebarBottom({ user }: Props) {
   const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
   return (
-    <div className={tw("bottom gap-2", workspaceSwitching ? "pointer-events-none" : "")}>
+    <div
+      className={tw(
+        "bottom gap-2",
+        workspaceSwitching ? "pointer-events-none" : ""
+      )}
+    >
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger
           onClick={() => setDropdownOpen((prev) => !prev)}
