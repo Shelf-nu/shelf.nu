@@ -2,6 +2,7 @@ import type { FetcherWithComponents } from "@remix-run/react";
 import { NavLink, useLoaderData, useLocation } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { useAtom } from "jotai";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { SwitchIcon } from "~/components/icons/library";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { useMainMenuItems } from "~/hooks/use-main-menu-items";
@@ -9,7 +10,6 @@ import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
-import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 
 const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
