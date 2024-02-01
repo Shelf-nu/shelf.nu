@@ -9,6 +9,7 @@ import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 
 const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
@@ -18,6 +19,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const location = useLocation();
   /** We need to do this becasue of a special way we handle the bookings link that doesnt allow us to use NavLink currently */
   const isBookingsRoute = location.pathname.includes("/bookings");
+  const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
   return (
     <div className="flex h-full flex-col">
@@ -29,7 +31,8 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 className={({ isActive }) =>
                   tw(
                     "my-1 flex items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
-                    isActive ? "active bg-primary-50 text-primary-600" : ""
+                    isActive ? "active bg-primary-50 text-primary-600" : "",
+                    workspaceSwitching ? "pointer-events-none" : ""
                   )
                 }
                 to={"/admin-dashboard/users"}
@@ -77,6 +80,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     "data-test-id": `${item.label.toLowerCase()}SidebarMenuItem`,
                     onClick: toggleMobileNav,
                     title: item.label,
+                    disabled: workspaceSwitching,
                     className: tw(
                       "my-1 flex items-center gap-3 rounded border-0 bg-transparent px-3 text-left text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
                       canUseBookings
@@ -95,7 +99,8 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   className={({ isActive }) =>
                     tw(
                       "my-1 flex items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
-                      isActive ? "active bg-primary-50 text-primary-600" : ""
+                      isActive ? "active bg-primary-50 text-primary-600" : "",
+                      workspaceSwitching ? "pointer-events-none" : ""
                     )
                   }
                   to={item.to}
@@ -131,7 +136,8 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   className={({ isActive }) =>
                     tw(
                       "my-1 flex items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
-                      isActive ? "active bg-primary-50 text-primary-600" : ""
+                      isActive ? "active bg-primary-50 text-primary-600" : "",
+                      workspaceSwitching ? "pointer-events-none" : ""
                     )
                   }
                   to={item.to}
@@ -159,7 +165,8 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 <button
                   type="submit"
                   className={tw(
-                    "crisp-btn mt-1 flex w-full items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600"
+                    "crisp-btn mt-1 flex w-full items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                    workspaceSwitching ? "pointer-events-none" : ""
                   )}
                 >
                   <i className="icon pl-[2px] text-gray-500">
