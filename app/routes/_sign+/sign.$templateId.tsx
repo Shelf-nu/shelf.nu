@@ -13,7 +13,6 @@ import AgreementPopup, {
 import { db } from "~/database";
 import { createNote, getAsset } from "~/modules/asset";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { ENABLE_PREMIUM_FEATURES, assertIsPost } from "~/utils";
 import {
   initializePerPageCookieOnLayout,
@@ -22,10 +21,17 @@ import {
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import tailwindConfig from "../../../tailwind.config";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
+  // const authSession = await requireAuthSession(request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.read
+  );
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
     ? await db.user.findUnique({
@@ -66,7 +72,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const assetId = new URL(request.url).searchParams.get("assetId");
   // const templateId = params.templateId;
   const userId = user?.id;
-  const { organizationId } = await requireOrganisationId(authSession, request);
 
   if (!assetId || !assigneeId) {
     throw new ShelfStackError({

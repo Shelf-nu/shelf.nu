@@ -394,7 +394,7 @@ export async function updateProfilePicture({
   /** Update user with new picture */
   return await updateUser({
     id: userId,
-    profilePicture: getPublicFileURL({ filename: profilePicture }),
+    profilePicture: await getPublicFileURL({ filename: profilePicture }),
   });
 }
 

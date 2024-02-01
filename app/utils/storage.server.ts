@@ -12,14 +12,14 @@ import { SUPABASE_URL } from "./env";
 import { ShelfStackError } from "./error";
 import { getFileArrayBuffer } from "./getFileArrayBuffer";
 
-export function getPublicFileURL({
+export async function getPublicFileURL({
   filename,
   bucketName = "profile-pictures",
 }: {
   filename: string;
   bucketName?: string;
 }) {
-  bucketExists(bucketName);
+  await bucketExists(bucketName);
 
   const { data } = getSupabaseAdmin()
     .storage.from(bucketName)

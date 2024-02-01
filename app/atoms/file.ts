@@ -6,7 +6,7 @@ export const fileErrorAtom = atom<string | undefined>(undefined);
 fileErrorAtom.onMount = (setAtom) => {
   setAtom("");
 };
-export const MAX_SIZE = 4_000_000; // 4MB
+export const MAX_SIZE = 8_000_000; // 4MB
 
 /** Validates the file atom */
 export const validateFileAtom = atom(

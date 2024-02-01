@@ -50,7 +50,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   /** Update user with new picture */
   const updatedUser = await updateUser({
     id: userId,
-    profilePicture: getPublicFileURL({ filename: profilePicture }),
+    profilePicture: await getPublicFileURL({ filename: profilePicture }),
   });
 
   return json({ updatedUser });

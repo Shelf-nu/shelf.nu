@@ -30,42 +30,59 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { organizationId } = await requireOrganisationId(authSession, request);
   const { userId } = authSession;
 
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      templates: {
-        where: { organizationId },
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          createdAt: true,
-          updatedAt: true,
-          type: true,
-          isActive: true,
-          isDefault: true,
-          pdfSize: true,
-          pdfUrl: true,
-        },
-      },
-    },
-  });
+  // const user = await db.user.findUnique({
+  //   where: {
+  //     id: userId,
+  //   },
+  //   select: {
+  //     firstName: true,
+  //     tier: {
+  //       include: { tierLimit: true },
+  //     },
+  //     templates: {
+  //       where: { organizationId },
+  //       orderBy: { createdAt: "desc" },
+  //       select: {
+  //         id: true,
+  //         name: true,
+  //         description: true,
+  //         createdAt: true,
+  //         updatedAt: true,
+  //         type: true,
+  //         isActive: true,
+  //         isDefault: true,
+  //         pdfSize: true,
+  //         pdfUrl: true,
+  //       },
+  //     },
+  //   },
+  // });
 
-  if (!user) throw new ShelfStackError({ message: "User not found" });
+  if (!userId) throw new ShelfStackError({ message: "User not found" });
 
   const modelName = {
     singular: "Template",
     plural: "Templates",
   };
 
-  const templates = user.templates;
+  const templates = await db.template.findMany({
+    where: {
+      organizationId,
+    },
+  });
+
+  const userTier = (await db.user.findUnique({
+    where: {
+      id: userId,
+    },
+    select: {
+      tier: {
+        include: {
+          tierLimit: true,
+        },
+      },
+    },
+  }))!.tier;
 
   const defaultTemplates: { [key: string]: TTemplate } = {};
   templates.forEach((template) => {
@@ -74,10 +91,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return json({
     userId,
-    tier: user.tier,
+    tier: userTier,
     modelName,
     canCreateMoreTemplates: canCreateMoreTemplates({
-      tierLimit: user.tier.tierLimit,
+      tierLimit: userTier?.tierLimit,
       totalTemplates: templates.length,
     }),
     items: templates,
