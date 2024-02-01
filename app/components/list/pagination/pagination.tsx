@@ -1,6 +1,10 @@
 import { useMemo } from "react";
 import { useLoaderData } from "@remix-run/react";
-import { ArrowLeftIcon, ArrowRightIcon } from "~/components/icons";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ChevronLeftDoubleIcon,
+} from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils";
@@ -18,9 +22,25 @@ export const Pagination = () => {
     [page, totalPages, perPage, totalItems]
   );
 
+  const firstPage = "?page=1";
+  const lastPage = `?page=${totalPages}`;
+
   return (
     <div className="flex items-center justify-center gap-3 px-6 pb-4 pt-3">
       <div className="inline-flex items-center rounded border border-gray-300 shadow-[0px_1px_2px_0px_rgba(16,24,40,0.05)]">
+        <Button
+          variant="secondary"
+          size="sm"
+          to={firstPage}
+          disabled={prevDisabled}
+          className={tw(
+            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-4 py-3 hover:bg-transparent",
+            prevDisabled && "opacity-50"
+          )}
+        >
+          <ChevronLeftDoubleIcon />
+        </Button>
+
         <Button
           variant="secondary"
           size="sm"
@@ -56,6 +76,19 @@ export const Pagination = () => {
           )}
         >
           <ArrowRightIcon />
+        </Button>
+
+        <Button
+          variant="secondary"
+          size="sm"
+          to={lastPage}
+          disabled={prevDisabled}
+          className={tw(
+            "rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-4 py-3 hover:bg-transparent",
+            prevDisabled && "opacity-50"
+          )}
+        >
+          <ChevronLeftDoubleIcon />
         </Button>
       </div>
       <div className="flex items-center gap-2">
