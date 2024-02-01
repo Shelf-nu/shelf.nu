@@ -931,8 +931,8 @@ export const ArrowLeftIcon = (props: SVGProps<SVGSVGElement>) => (
 
 export const ChevronLeftDoubleIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    width="20"
-    height="20"
+    width={20}
+    height={20}
     viewBox="0 0 20 20"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
@@ -940,7 +940,7 @@ export const ChevronLeftDoubleIcon = (props: SVGProps<SVGSVGElement>) => (
   >
     <path
       d="M15 14.1666L10.8333 9.99998L15 5.83331M9.16667 14.1666L5 9.99998L9.16667 5.83331"
-      stroke="#667085"
+      stroke="currentColor"
       strokeWidth="1.66667"
       strokeLinecap="round"
       strokeLinejoin="round"

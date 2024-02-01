@@ -1,10 +1,6 @@
 import { useMemo } from "react";
 import { useLoaderData } from "@remix-run/react";
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  ChevronLeftDoubleIcon,
-} from "~/components/icons";
+import { ChevronRight, ChevronLeftDoubleIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils";
@@ -34,7 +30,7 @@ export const Pagination = () => {
           to={firstPage}
           disabled={prevDisabled}
           className={tw(
-            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-4 py-3 hover:bg-transparent",
+            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
             prevDisabled && "opacity-50"
           )}
         >
@@ -47,14 +43,14 @@ export const Pagination = () => {
           to={prev}
           disabled={prevDisabled}
           className={tw(
-            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-4 py-3 hover:bg-transparent",
+            "h-9 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
             prevDisabled && "opacity-50"
           )}
         >
-          <ArrowLeftIcon />
+          <ChevronRight />
         </Button>
 
-        <div className="flex items-center gap-2 px-2.5 py-3 leading-none text-gray-400">
+        <div className="flex items-center gap-2 px-2.5 py-[9px] leading-none text-gray-400">
           <span className="text-[14px] font-semibold text-gray-700">
             {(page - 1) * perPage + 1} -{" "}
             {perPage * page > totalItems ? totalItems : perPage * page}
@@ -71,21 +67,21 @@ export const Pagination = () => {
           to={next}
           disabled={nextDisabled}
           className={tw(
-            "rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-4 py-3 hover:bg-transparent",
+            "h-9 w-10 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
             nextDisabled && "opacity-50"
           )}
         >
-          <ArrowRightIcon />
+          <ChevronRight />
         </Button>
 
         <Button
           variant="secondary"
           size="sm"
           to={lastPage}
-          disabled={prevDisabled}
+          disabled={nextDisabled}
           className={tw(
-            "rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-4 py-3 hover:bg-transparent",
-            prevDisabled && "opacity-50"
+            "rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
+            nextDisabled && "opacity-50"
           )}
         >
           <ChevronLeftDoubleIcon />
