@@ -86,7 +86,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { organizationId, organizations, currentOrganization } =
     await requireOrganisationId(authSession, request);
 
-
   return json(
     {
       user,
@@ -123,11 +122,11 @@ export default function App() {
     <>
       <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
         <div className="flex flex-col md:flex-row">
-          <Sidebar disabled={workspaceSwitching} />
+          <Sidebar />
           <main className=" flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
             <div className="flex h-full flex-1 flex-col">
               {workspaceSwitching ? (
-                <div className="flex flex-col h-full w-full items-center justify-center text-center">
+                <div className="flex h-full w-full flex-col items-center justify-center text-center">
                   <Spinner />
                   <p className="mt-2">Switching workspaces...</p>
                 </div>
