@@ -1,5 +1,5 @@
-import type { Booking, TeamMember, User } from "@prisma/client";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import type { BookingForEmail } from "~/emails/types";
 import { SERVER_URL } from "~/utils";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
@@ -10,7 +10,7 @@ import type { ClientHint } from "./types";
  * THis is the base content of the bookings related emails.
  * We always provide some general info so this function standardizes that.
  */
-export const baseBookingEmailContent = ({
+export const baseBookingTextEmailContent = ({
   bookingName,
   custodian,
   from,
@@ -75,7 +75,7 @@ export const assetReservedEmailContent = ({
   bookingId: string;
   hints: ClientHint;
 }) =>
-  baseBookingEmailContent({
+  baseBookingTextEmailContent({
     hints,
     bookingName,
     custodian,
@@ -106,7 +106,7 @@ export const checkoutReminderEmailContent = ({
   bookingId: string;
   hints: ClientHint;
 }) =>
-  baseBookingEmailContent({
+  baseBookingTextEmailContent({
     hints,
     bookingName,
     custodian,
@@ -141,7 +141,7 @@ export const checkinReminderEmailContent = ({
   bookingId: string;
   hints: ClientHint;
 }) =>
-  baseBookingEmailContent({
+  baseBookingTextEmailContent({
     hints,
     bookingName,
     custodian,
@@ -156,10 +156,7 @@ export const checkinReminderEmailContent = ({
   });
 
 export const sendCheckinReminder = async (
-  booking: Booking & {
-    custodianTeamMember: TeamMember | null;
-    custodianUser: User | null;
-  },
+  booking: BookingForEmail,
   assetCount: number,
   hints: ClientHint
 ) => {
@@ -211,7 +208,7 @@ export const overdueBookingEmailContent = ({
   bookingId: string;
   hints: ClientHint;
 }) =>
-  baseBookingEmailContent({
+  baseBookingTextEmailContent({
     hints,
     bookingName,
     custodian,
@@ -244,7 +241,7 @@ export const completedBookingEmailContent = ({
   bookingId: string;
   hints: ClientHint;
 }) =>
-  baseBookingEmailContent({
+  baseBookingTextEmailContent({
     hints,
     bookingName,
     custodian,
@@ -277,7 +274,7 @@ export const deletedBookingEmailContent = ({
   bookingId: string;
   hints: ClientHint;
 }) =>
-  baseBookingEmailContent({
+  baseBookingTextEmailContent({
     hints,
     bookingName,
     custodian,
@@ -310,7 +307,7 @@ export const cancelledBookingEmailContent = ({
   bookingId: string;
   hints: ClientHint;
 }) =>
-  baseBookingEmailContent({
+  baseBookingTextEmailContent({
     hints,
     bookingName,
     custodian,

@@ -22,6 +22,22 @@ import {
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
 
+/** Includes needed for booking to have all data required for emails */
+export const bookingIncludeForEmails = {
+  custodianTeamMember: true,
+  custodianUser: true,
+  organization: {
+    include: {
+      owner: {
+        select: { email: true },
+      },
+    },
+  },
+  _count: {
+    select: { assets: true },
+  },
+};
+
 const cancelSheduler = async (b?: Booking | null) => {
   if (b?.activeSchedulerReference) {
     scheduler.cancel(b.activeSchedulerReference).catch((err) => {
@@ -178,9 +194,7 @@ export const upsertBooking = async (
       include: {
         ...commonInclude,
         assets: true,
-        _count: {
-          select: { assets: true },
-        },
+        ...bookingIncludeForEmails,
       },
     });
 
@@ -521,8 +535,7 @@ export const deleteBooking = async (
     where: { id },
     include: {
       ...commonInclude,
-      assets: true,
-      _count: { select: { assets: true } },
+      ...bookingIncludeForEmails,
     },
   });
 

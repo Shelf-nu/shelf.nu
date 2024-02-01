@@ -13,10 +13,11 @@ import type { ClientHint } from "~/modules/booking/types";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
 import { styles } from "./styles";
+import type { BookingForEmail } from "./types";
 
 interface Props {
   heading: string;
-  booking: any;
+  booking: BookingForEmail;
   assetCount: number;
   hints: ClientHint;
   hideViewButton?: boolean;
@@ -32,11 +33,11 @@ export function BookingUpdatesEmailTemplate({
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
     timeStyle: "short",
-  }).format(booking.from);
+  }).format(booking.from as Date);
   const toDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
     timeStyle: "short",
-  }).format(booking.to);
+  }).format(booking.to as Date);
   return (
     <Html>
       <Head>
@@ -109,20 +110,17 @@ export function BookingUpdatesEmailTemplate({
             {booking.custodianUser!.email}
           </Link>{" "}
           because it is part of the Shelf workspace.
-          {/**
-           * @TODO need to figure out how to have workspace name and owner's email in this component
-           */}
-          {/* <span style={{ color: "#101828", fontWeight: "600" }}>
-            *{organization?.name}*
+          <span style={{ color: "#101828", fontWeight: "600" }}>
+            {booking.organization.name}
           </span>
           . If you think you weren’t supposed to have received this email please{" "}
           <Link
             style={{ color: "#344054", textDecoration: "underline" }}
-            href={`mailto:${booking.custodianUser!.email}`}
+            href={`mailto:${booking.organization.owner.email}`}
           >
             contact the owner
           </Link>{" "}
-          of the workspace. */}
+          of the workspace.
         </Text>
         <Text
           style={{ marginBottom: "32px", fontSize: "14px", color: "#344054" }}

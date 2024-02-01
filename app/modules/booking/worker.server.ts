@@ -11,7 +11,10 @@ import {
   overdueBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import { scheduleNextBookingJob } from "./service.server";
+import {
+  bookingIncludeForEmails,
+  scheduleNextBookingJob,
+} from "./service.server";
 import type { SchedulerData } from "./types";
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
@@ -23,14 +26,7 @@ export const registerBookingWorkers = () => {
     async ({ data }) => {
       const booking = await db.booking.findFirst({
         where: { id: data.id },
-        include: {
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: true,
-          _count: {
-            select: { assets: true },
-          },
-        },
+        include: bookingIncludeForEmails,
       });
       if (!booking) {
         console.warn(
@@ -86,14 +82,7 @@ export const registerBookingWorkers = () => {
     async ({ data }) => {
       const booking = await db.booking.findFirst({
         where: { id: data.id },
-        include: {
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: true,
-          _count: {
-            select: { assets: true },
-          },
-        },
+        include: bookingIncludeForEmails,
       });
       if (!booking) {
         console.warn(
@@ -165,14 +154,7 @@ export const registerBookingWorkers = () => {
     async ({ data }) => {
       const booking = await db.booking.findFirst({
         where: { id: data.id },
-        include: {
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: true,
-          _count: {
-            select: { assets: true },
-          },
-        },
+        include: bookingIncludeForEmails,
       });
       if (!booking) {
         console.warn(
