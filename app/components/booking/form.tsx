@@ -113,7 +113,7 @@ export function BookingForm({
         {/* Render the actions on top only when the form is not in a modal */}
         {!isModal ? (
           <div className=" -mx-4 mb-5 flex w-screen items-center justify-between border-b border-gray-200 bg-white px-4 py-2 md:absolute md:right-4 md:top-3 md:m-0 md:w-fit md:justify-end md:border-0 md:bg-transparent md:p-0">
-            <div className=" flex gap-2">
+            <div className=" flex flex-1 gap-2">
               {/* We only render the actions when we are not on the .new route */}
               {routeIsNewBooking || (isCompleted && isSelfService) ? null : ( // When the booking is Completed, there are no actions available for selfService so we don't render it
                 // @ts-ignore
@@ -127,6 +127,7 @@ export function BookingForm({
                   variant="secondary"
                   name="intent"
                   value="save"
+                  className="grow"
                 >
                   Save
                 </Button>
@@ -154,6 +155,7 @@ export function BookingForm({
                     role: "link",
                     name: "intent",
                     value: "reserve",
+                    className: "grow",
                   }}
                   skipCta={true}
                 />
@@ -178,13 +180,19 @@ export function BookingForm({
                     type: "submit",
                     name: "intent",
                     value: "checkOut",
+                    className: "grow",
                   }}
                   skipCta={true}
                 />
               ) : null}
 
               {(isOngoing || isOverdue) && !isSelfService ? (
-                <Button type="submit" name="intent" value="checkIn">
+                <Button
+                  type="submit"
+                  name="intent"
+                  value="checkIn"
+                  className="grow"
+                >
                   Check-in
                 </Button>
               ) : null}
@@ -192,7 +200,7 @@ export function BookingForm({
           </div>
         ) : null}
 
-        <div className="mb-4">
+        <div className="-mx-4 mb-4 md:mx-0">
           <div
             className={tw(
               "mb-8 w-full xl:mb-0 ",
