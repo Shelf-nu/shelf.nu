@@ -259,6 +259,7 @@ export default function AssetIndexPage() {
               aria-label={`new asset`}
               icon="asset"
               data-test-id="createNewAsset"
+              className="grow"
             >
               New Asset
             </Button>
