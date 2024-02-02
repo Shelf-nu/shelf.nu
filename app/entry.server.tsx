@@ -11,10 +11,10 @@ import * as Sentry from "@sentry/remix";
 import isbot from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { registerBookingWorkers } from "./modules/booking";
-import { NODE_ENV, SENTRY_DSN } from "./utils";
+import { SENTRY_DSN } from "./utils";
 import * as schedulerService from "./utils/scheduler.server";
 
-if (SENTRY_DSN && NODE_ENV === "production") {
+if (SENTRY_DSN) {
   Sentry.init({
     dsn: SENTRY_DSN,
     tracesSampleRate: 1,

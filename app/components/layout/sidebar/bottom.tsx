@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { User } from "@prisma/client";
 import { Form } from "@remix-run/react";
+import { useAtom } from "jotai";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ChevronRight, QuestionsIcon } from "~/components/icons";
 import { CrispButton } from "~/components/marketing/crisp";
 import { Button } from "~/components/shared";
@@ -20,9 +22,15 @@ interface Props {
 
 export default function SidebarBottom({ user }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
   return (
-    <div className="bottom gap-2">
+    <div
+      className={tw(
+        "bottom gap-2",
+        workspaceSwitching ? "pointer-events-none" : ""
+      )}
+    >
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger
           onClick={() => setDropdownOpen((prev) => !prev)}
