@@ -15,6 +15,7 @@ export const ImportButton = ({
       to: `import`,
       variant: "secondary",
       role: "link",
+      className: "grow",
     }}
   />
 );
