@@ -112,7 +112,7 @@ export function BookingForm({
       <Form ref={zo.ref} method="post">
         {/* Render the actions on top only when the form is not in a modal */}
         {!isModal ? (
-          <div className=" -mx-4 mb-5 flex w-screen items-center justify-between border-b border-gray-200 bg-white px-4 py-2 md:absolute md:right-4 md:top-3 md:m-0 md:w-fit md:justify-end md:border-0 md:bg-transparent md:p-0">
+          <div className=" -mx-4 flex w-screen items-center justify-between bg-white px-4 py-2 md:absolute md:right-4 md:top-3 md:m-0 md:w-fit md:justify-end md:border-0 md:bg-transparent md:p-0">
             <div className=" flex flex-1 gap-2">
               {/* We only render the actions when we are not on the .new route */}
               {routeIsNewBooking || (isCompleted && isSelfService) ? null : ( // When the booking is Completed, there are no actions available for selfService so we don't render it
