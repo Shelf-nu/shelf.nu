@@ -19,7 +19,7 @@ export default function OnboardingChecklist() {
   const { checklistOptions } = useLoaderData<typeof loader>();
 
   return (
-    <div className="rounded border bg-white px-4 py-5 lg:px-20 lg:py-16">
+    <div className="mt-6 rounded border bg-white px-4 py-5 lg:px-20 lg:py-16">
       <div className="mb-8">
         <Heading
           as="h2"
