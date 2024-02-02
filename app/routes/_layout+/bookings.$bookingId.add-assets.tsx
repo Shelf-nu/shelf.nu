@@ -232,7 +232,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
       <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center">
+            <div className="flex size-12 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -240,7 +240,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
                   mainImageExpiration: item.mainImageExpiration,
                   alt: item.title,
                 }}
-                className="h-full w-full rounded-[4px] border object-cover"
+                className="size-full rounded-[4px] border object-cover"
               />
             </div>
             <div className="flex flex-col">

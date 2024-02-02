@@ -1,11 +1,14 @@
 import { Roles } from "@prisma/client";
 import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/node";
-
 import { json, redirect } from "@remix-run/node";
 import { Outlet } from "@remix-run/react";
+import { useAtom } from "jotai";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
+
 import { ErrorBoundryComponent } from "~/components/errors";
 import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
+import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { db } from "~/database";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
@@ -113,19 +116,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   useCrisp();
+  const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
   return (
-    <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
-      <div className="flex flex-col md:flex-row">
-        <Sidebar />
-        <main className=" flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
-          <div className="flex h-full flex-1 flex-col">
-            <Outlet />
-          </div>
-          <Toaster />
-        </main>
+    <>
+      <div id="container" className="flex min-h-screen min-w-[320px] flex-col">
+        <div className="flex flex-col md:flex-row">
+          <Sidebar />
+          <main className=" flex-1 bg-gray-25 px-4 pb-6 md:w-[calc(100%-312px)]">
+            <div className="flex h-full flex-1 flex-col">
+              {workspaceSwitching ? (
+                <div className="flex h-full w-full flex-col items-center justify-center text-center">
+                  <Spinner />
+                  <p className="mt-2">Switching workspaces...</p>
+                </div>
+              ) : (
+                <Outlet />
+              )}
+            </div>
+            <Toaster />
+          </main>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

@@ -343,7 +343,7 @@ function UserBadge({ img, name }: { img?: string; name: string }) {
     <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
       <img
         src={img || "/images/default_pfp.jpg"}
-        className="mr-1 h-4 w-4 rounded-full"
+        className="mr-1 size-4 rounded-full"
         alt=""
       />
       <span className="mt-[1px]">{name}</span>

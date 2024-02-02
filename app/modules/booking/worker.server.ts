@@ -1,6 +1,8 @@
 /* eslint-disable no-console */
 import { BookingStatus } from "@prisma/client";
 import { db } from "~/database";
+import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import { getTimeRemainingMessage } from "~/utils/date-fns";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
@@ -9,7 +11,10 @@ import {
   overdueBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import { scheduleNextBookingJob } from "./service.server";
+import {
+  bookingIncludeForEmails,
+  scheduleNextBookingJob,
+} from "./service.server";
 import type { SchedulerData } from "./types";
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
@@ -21,14 +26,7 @@ export const registerBookingWorkers = () => {
     async ({ data }) => {
       const booking = await db.booking.findFirst({
         where: { id: data.id },
-        include: {
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: true,
-          _count: {
-            select: { assets: true },
-          },
-        },
+        include: bookingIncludeForEmails,
       });
       if (!booking) {
         console.warn(
@@ -50,6 +48,15 @@ export const registerBookingWorkers = () => {
             from: booking.from,
             to: booking.to,
             bookingId: booking.id,
+            hints: data.hints,
+          }),
+          html: bookingUpdatesTemplateString({
+            booking,
+            heading: `Your booking is due for checkout in ${getTimeRemainingMessage(
+              new Date(booking.from),
+              new Date()
+            )}.`,
+            assetCount: booking._count.assets,
             hints: data.hints,
           }),
         }).catch((err) => {
@@ -75,14 +82,7 @@ export const registerBookingWorkers = () => {
     async ({ data }) => {
       const booking = await db.booking.findFirst({
         where: { id: data.id },
-        include: {
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: true,
-          _count: {
-            select: { assets: true },
-          },
-        },
+        include: bookingIncludeForEmails,
       });
       if (!booking) {
         console.warn(
@@ -154,14 +154,7 @@ export const registerBookingWorkers = () => {
     async ({ data }) => {
       const booking = await db.booking.findFirst({
         where: { id: data.id },
-        include: {
-          custodianTeamMember: true,
-          custodianUser: true,
-          organization: true,
-          _count: {
-            select: { assets: true },
-          },
-        },
+        include: bookingIncludeForEmails,
       });
       if (!booking) {
         console.warn(
@@ -189,6 +182,12 @@ export const registerBookingWorkers = () => {
             from: booking.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
             to: booking.to as Date,
             bookingId: booking.id,
+            hints: data.hints,
+          }),
+          html: bookingUpdatesTemplateString({
+            booking,
+            heading: `You have passed the deadline for checking in your booking "${booking.name}".`,
+            assetCount: booking._count.assets,
             hints: data.hints,
           }),
         }).catch((err) => {
