@@ -38,9 +38,9 @@ export function TeamUsersActionsDropdown({
         onOpenChange={(open) => setOpen(open)}
         open={open}
       >
-        <DropdownMenuTrigger className="h-6 w-6 pr-2 outline-none focus-visible:border-0">
+        <DropdownMenuTrigger className="size-6 pr-2 outline-none focus-visible:border-0">
           <i className="inline-block px-3 py-0 text-gray-400 ">
-            {disabled ? <Spinner className="h-4 w-4" /> : <VerticalDotsIcon />}
+            {disabled ? <Spinner className="size-4" /> : <VerticalDotsIcon />}
           </i>
         </DropdownMenuTrigger>
         <DropdownMenuContent

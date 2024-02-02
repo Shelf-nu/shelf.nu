@@ -7,18 +7,15 @@ import type {
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { DeleteCategory } from "~/components/category/delete-category";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
-
-import { requireAuthSession } from "~/modules/auth";
 import { deleteCategory, getCategories } from "~/modules/category";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
-  assertIsDelete,
   generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
@@ -26,10 +23,15 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.category,
+    PermissionAction.read
+  );
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -79,11 +81,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ request }: ActionFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.category,
+    PermissionAction.delete
+  );
   const { userId } = authSession;
 
-  assertIsDelete(request);
   const formData = await request.formData();
   const id = formData.get("id") as string;
 
@@ -101,6 +105,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export const handle = {
   breadcrumb: () => <Link to="/categories">Categories</Link>,
 };
+export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
   return (

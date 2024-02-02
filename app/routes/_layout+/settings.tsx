@@ -1,10 +1,11 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, Outlet, useLocation } from "@remix-run/react";
+import { Link, Outlet } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useMatchesData } from "~/hooks";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { requireAuthSession } from "~/modules/auth";
 import { error } from "~/utils";
 
@@ -38,7 +39,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const shouldRevalidate = () => false;
 
 export default function SettingsPage() {
-  const items = [
+  let items = [
     { to: "account", content: "Account" },
     { to: "general", content: "General" },
     { to: "workspace", content: "Workspaces" },
@@ -46,26 +47,25 @@ export default function SettingsPage() {
     { to: "team", content: "Team" },
   ];
 
-  /**
-   * We check the location because based on our design,
-   * the view /new should not inherit from the parent layouts
-   * */
-  const location = useLocation();
-  const shouldHideHeader =
-    location.pathname === "/settings/custom-fields/new" ||
-    /^\/settings\/workspace\/\w+$/.test(location.pathname);
+  const userIsSelfService = useUserIsSelfService();
+  /** If user is self service, remove the extra items */
+  if (userIsSelfService) {
+    items = items.filter(
+      (item) => !["custom-fields", "team", "general"].includes(item.to)
+    );
+  }
 
   const enablePremium = useMatchesData<{ enablePremium: boolean }>(
     "routes/_layout+/_layout"
   )?.enablePremium;
 
-  if (enablePremium) {
+  if (enablePremium && !userIsSelfService) {
     items.push({ to: "subscription", content: "Subscription" });
   }
 
   return (
     <>
-      {shouldHideHeader ? null : <Header hidePageDescription />}
+      <Header hidePageDescription />
       <HorizontalTabs items={items} />
       <div>
         <Outlet />

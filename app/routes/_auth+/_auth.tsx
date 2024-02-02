@@ -30,14 +30,14 @@ export default function App() {
 
   return (
     <div className="flex h-full min-h-screen flex-col ">
-      <main className="flex h-full w-full ">
-        <div className="flex h-full w-full flex-col items-center justify-center p-6 lg:p-10">
+      <main className="flex size-full">
+        <div className="flex size-full flex-col items-center justify-center p-6 lg:p-10">
           <div className=" mb-8 text-center">
             <Link to="/">
               <img
                 src="/images/shelf-symbol.png"
                 alt="Shelf symbol"
-                className=" mx-auto mb-2 h-12 w-12"
+                className=" mx-auto mb-2 size-12"
               />
             </Link>
 
@@ -59,7 +59,7 @@ export default function App() {
             1904/1907
           </a>
           <img
-            className="absolute inset-0 h-full w-full max-w-none object-cover"
+            className="absolute inset-0 size-full max-w-none object-cover"
             src="/images/auth-cover.jpg"
             alt="John Singer Sargent - A Corner of the Library in Venice, 1904/1907 "
           />

@@ -10,8 +10,9 @@ import type {
   Organization,
   TeamMember,
   CustomField,
+  Booking,
 } from "@prisma/client";
-import { AssetStatus, ErrorCorrection } from "@prisma/client";
+import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import { type LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import { getSupabaseAdmin } from "~/integrations/supabase";
@@ -114,6 +115,10 @@ export async function getAssets({
   search,
   categoriesIds,
   tagsIds,
+  bookingFrom,
+  bookingTo,
+  hideUnavailable,
+  unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
 }: {
   organizationId: Organization["id"];
 
@@ -127,6 +132,10 @@ export async function getAssets({
 
   categoriesIds?: Category["id"][] | null;
   tagsIds?: Tag["id"][] | null;
+  hideUnavailable?: Asset["availableToBook"];
+  bookingFrom?: Booking["from"];
+  bookingTo?: Booking["to"];
+  unhideAssetsBookigIds?: Booking["id"][];
 }) {
   const skip = page > 1 ? (page - 1) * perPage : 0;
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
@@ -165,6 +174,46 @@ export async function getAssets({
         in: categoriesIds,
       };
     }
+  }
+  const unavailableBookingStatuses = [
+    BookingStatus.DRAFT,
+    BookingStatus.RESERVED,
+    BookingStatus.ONGOING,
+  ];
+  if (hideUnavailable && where.asset) {
+    //not disabled for booking
+    where.asset.availableToBook = true;
+    //not assigned to team meber
+    where.asset.custody = null;
+    if (bookingFrom && bookingTo) {
+      //reserved during that time
+      where.asset.bookings = {
+        none: {
+          ...(unhideAssetsBookigIds?.length && {
+            id: { notIn: unhideAssetsBookigIds },
+          }),
+          status: { in: unavailableBookingStatuses },
+          OR: [
+            {
+              from: { lte: bookingTo },
+              to: { gte: bookingFrom },
+            },
+            {
+              from: { gte: bookingFrom },
+              to: { lte: bookingTo },
+            },
+          ],
+        },
+      };
+    }
+  }
+  if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
+    throw new ShelfStackError({
+      message: "booking dates are needed to hide unavailable assets",
+    });
+  }
+  if (bookingFrom && bookingTo && where.asset) {
+    where.asset.availableToBook = true;
   }
 
   if (tagsIds && tagsIds.length > 0 && where.asset) {
@@ -207,6 +256,33 @@ export async function getAssets({
                 },
               },
             },
+            ...(bookingTo && bookingFrom
+              ? {
+                  bookings: {
+                    where: {
+                      status: { in: unavailableBookingStatuses },
+                      OR: [
+                        {
+                          from: { lte: bookingTo },
+                          to: { gte: bookingFrom },
+                        },
+                        {
+                          from: { gte: bookingFrom },
+                          to: { lte: bookingTo },
+                        },
+                      ],
+                    },
+                    take: 1, //just to show in UI if its booked, so take only 1, also at a given slot only 1 booking can be created for an asset
+                    select: {
+                      from: true,
+                      to: true,
+                      status: true,
+                      id: true,
+                      name: true,
+                    },
+                  },
+                }
+              : {}),
           },
         },
       },
@@ -677,7 +753,6 @@ export async function duplicateAsset({
       userId,
       categoryId: asset.categoryId,
       locationId: asset.locationId ?? undefined,
-      custodian: asset?.custody?.custodian.id ?? undefined,
       tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
       valuation: asset.valuation,
     });
@@ -742,26 +817,31 @@ export async function getAllRelatedEntries({
 export const getPaginatedAndFilterableAssets = async ({
   request,
   organizationId,
+  excludeCategoriesQuery = false,
+  excludeTagsQuery = false,
 }: {
   request: LoaderFunctionArgs["request"];
-  userId: User["id"];
   organizationId: Organization["id"];
+  extraInclude?: Prisma.AssetInclude;
+  excludeCategoriesQuery?: boolean;
+  excludeTagsQuery?: boolean;
 }) => {
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search, categoriesIds, tagsIds } =
-    getParamsValues(searchParams);
+  const {
+    page,
+    perPageParam,
+    search,
+    categoriesIds,
+    tagsIds,
+    bookingFrom,
+    bookingTo,
+    hideUnavailable,
+    unhideAssetsBookigIds,
+  } = getParamsValues(searchParams);
 
   const { prev, next } = generatePageMeta(request);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-
-  const categories = await getAllCategories({
-    organizationId,
-  });
-
-  const tags = await getAllTags({
-    organizationId,
-  });
 
   const { assets, totalAssets } = await getAssets({
     organizationId,
@@ -770,6 +850,10 @@ export const getPaginatedAndFilterableAssets = async ({
     search,
     categoriesIds,
     tagsIds,
+    bookingFrom,
+    bookingTo,
+    hideUnavailable,
+    unhideAssetsBookigIds,
   });
   const totalPages = Math.ceil(totalAssets / perPage);
 
@@ -780,8 +864,16 @@ export const getPaginatedAndFilterableAssets = async ({
     totalAssets,
     prev,
     next,
-    categories,
-    tags,
+    categories: excludeCategoriesQuery
+      ? []
+      : await getAllCategories({
+          organizationId,
+        }),
+    tags: excludeTagsQuery
+      ? []
+      : await getAllTags({
+          organizationId,
+        }),
     assets,
     totalPages,
     cookie,
@@ -1182,3 +1274,90 @@ export const createAssetsFromBackupImport = async ({
     }
   });
 };
+
+export async function updateAssetBookingAvailability(
+  id: Asset["id"],
+  availability: Asset["availableToBook"]
+) {
+  try {
+    const asset = await db.asset.update({
+      where: { id },
+      data: { availableToBook: availability },
+    });
+    return { asset, error: null };
+  } catch (cause: any) {
+    return handleUniqueConstraintError(cause, "Asset");
+  }
+}
+
+export async function updateAssetsWithBookingCustodians<T extends Asset>(
+  assets: T[]
+) {
+  /** When assets are checked out, we want to make an extra query to get the custodian for those assets. */
+  const checkedOutAssetsIds = assets
+    .filter((a) => a.status === "CHECKED_OUT")
+    .map((a) => a.id);
+
+  if (checkedOutAssetsIds.length > 0) {
+    /** We query agian the assets that are checked-out so we can get the user via the booking*/
+
+    const assetsWithUsers = await db.asset.findMany({
+      where: {
+        id: {
+          in: checkedOutAssetsIds,
+        },
+      },
+      select: {
+        id: true,
+        bookings: {
+          where: {
+            status: {
+              in: ["ONGOING", "OVERDUE"],
+            },
+          },
+          select: {
+            id: true,
+            custodianUser: {
+              select: {
+                firstName: true,
+                lastName: true,
+                profilePicture: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    /**
+     * We take the first booking of the array and extract the user from it and add it to the asset
+     */
+
+    assets = assets.map((a) => {
+      const assetWithUser = assetsWithUsers.find((awu) => awu.id === a.id);
+      const booking = assetWithUser?.bookings[0];
+      const custodian = booking?.custodianUser;
+
+      if (checkedOutAssetsIds.includes(a.id)) {
+        return {
+          ...a,
+          custody: custodian
+            ? {
+                custodian: {
+                  name: `${custodian?.firstName || ""} ${
+                    custodian?.lastName || ""
+                  }`, // Concatenate firstName and lastName to form the name property with default values
+                  user: {
+                    profilePicture: custodian?.profilePicture || null,
+                  },
+                },
+              }
+            : null,
+        };
+      }
+
+      return a;
+    });
+  }
+  return assets;
+}

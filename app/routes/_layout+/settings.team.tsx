@@ -31,20 +31,28 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError, makeShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 type ActionIntent = "delete" | "revoke" | "resend" | "invite";
+export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
+const organizationRolesMap: Record<string, UserFriendlyRoles> = {
+  [OrganizationRoles.ADMIN]: "Administrator",
+  [OrganizationRoles.OWNER]: "Owner",
+  [OrganizationRoles.SELF_SERVICE]: "Self service",
+};
 export interface TeamMembersWithUserOrInvite {
   name: string;
   img: string;
   email: string;
   status: InviteStatuses;
-  role: "Administrator" | "Owner";
+  role: UserFriendlyRoles;
   userId: string | null;
 }
 
 type InviteWithTeamMember = Pick<
   Invite,
-  "id" | "teamMemberId" | "inviteeEmail" | "status"
+  "id" | "teamMemberId" | "inviteeEmail" | "status" | "roles"
 > & {
   inviteeTeamMember: {
     name: string;
@@ -52,8 +60,14 @@ type InviteWithTeamMember = Pick<
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  // @TODO this needs to be checked again due to messy merge
   try {
-    const authSession = await requireAuthSession(request);
+    const { authSession } = await requirePermision(
+      request,
+      PermissionEntity.teamMember,
+      PermissionAction.read
+    );
+
     const { organizationId } = await requireOrganisationId(
       authSession,
       request
@@ -76,6 +90,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           },
           select: {
             user: true,
+            roles: true,
           },
         }),
         /** Get the invites */
@@ -100,6 +115,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 name: true,
               },
             },
+            roles: true,
           },
         }),
         /** Get the teamMembers */
@@ -130,7 +146,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }),
       ]);
     if (!organization) {
-      throw new ShelfStackError({ message: "Organization not found" });
+      throw new Error("Organization not found");
     }
 
     const header: HeaderData = {
@@ -146,7 +162,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         img: um.user.profilePicture || "/images/default_pfp.jpg",
         email: um.user.email,
         status: "ACCEPTED",
-        role: um.user.id === organization.userId ? "Owner" : "Administrator",
+        role: organizationRolesMap[um.roles[0]],
         userId: um.user.id,
       }));
 
@@ -157,7 +173,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         img: "/images/default_pfp.jpg",
         email: invite.inviteeEmail,
         status: invite.status,
-        role: "Administrator",
+        role: organizationRolesMap[invite?.roles[0]],
         userId: null,
       });
     }

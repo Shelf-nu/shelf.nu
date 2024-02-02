@@ -21,10 +21,9 @@ import {
   updateAssetMainImage,
 } from "~/modules/asset";
 
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
 import { getOrganization } from "~/modules/organization";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -35,10 +34,15 @@ import {
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
   const organization = await getOrganization({ id: organizationId });
   const { userId } = authSession;
 
@@ -82,8 +86,11 @@ export const handle = {
 
 export async function action({ request, params }: ActionFunctionArgs) {
   assertIsPost(request);
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
 
   const id = getRequiredParam(params, "assetId");
   const clonedRequest = request.clone();

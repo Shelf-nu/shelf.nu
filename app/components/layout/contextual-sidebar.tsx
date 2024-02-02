@@ -18,11 +18,11 @@ export default function ContextualSidebar() {
     <AnimatePresence>
       {showSidebar && (
         <div className="absolute inset-0">
-          <Link to={prevRoute.pathname} className="block h-full w-full">
+          <Link to={prevRoute.pathname} className="block size-full">
             <div
               // onClick={toggleSidebar}
               className={tw(
-                "fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-25/70 backdrop-blur transition duration-300 ease-in-out",
+                "size-screen fixed right-0 top-0 z-10 cursor-pointer bg-gray-25/70 backdrop-blur transition duration-300 ease-in-out",
                 showSidebar ? "visible" : "invisible opacity-0"
               )}
             ></div>
@@ -35,7 +35,7 @@ export default function ContextualSidebar() {
             transition={{ duration: 0.1 }}
             className="download-qr-sidebar fixed right-0 top-0 z-50 box-border h-screen w-[392px] border border-solid border-gray-200 bg-white p-6"
           >
-            <div className=" h-full w-full bg-white p-6">
+            <div className=" size-full bg-white p-6">
               <Outlet />
             </div>
           </motion.div>

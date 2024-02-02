@@ -1,6 +1,5 @@
 import { useState } from "react";
-import type { Asset } from "@prisma/client";
-import { useSearchParams } from "@remix-run/react";
+import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import {
   ChevronRight,
@@ -16,24 +15,19 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw-classes";
 import { DeleteAsset } from "./delete-asset";
 import { Button } from "../shared";
 
-interface Props {
-  asset: {
-    title: Asset["title"];
-    mainImage: Asset["mainImage"];
-    status: Asset["status"];
-  };
-}
-
-const ConditionalActionsDropdown = ({ asset }: Props) => {
-  const assetIsAvailable = asset.status === "AVAILABLE";
+const ConditionalActionsDropdown = () => {
+  const { asset } = useLoaderData<typeof loader>();
+  const assetCanBeReleased = asset.custody;
   let [searchParams] = useSearchParams();
   const refIsQrScan = searchParams.get("ref") === "qr";
   const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
   const [open, setOpen] = useState(defaultOpen);
+  const assetIsCheckedOut = asset.status === "CHECKED_OUT";
 
   return (
     <>
@@ -82,8 +76,11 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]"
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            <DropdownMenuItem className="border-b p-4 md:mb-0 md:p-0">
-              {!assetIsAvailable ? (
+            <DropdownMenuItem
+              className="border-b p-4 md:mb-0 md:p-0"
+              disabled={assetIsCheckedOut && !assetCanBeReleased}
+            >
+              {assetCanBeReleased ? (
                 <Button
                   to="release-custody"
                   role="link"
@@ -112,12 +109,17 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
                 </Button>
               )}
             </DropdownMenuItem>
-            <DropdownMenuItem className="mb-2.5 border-b p-4 md:mb-0 md:p-0">
+            <DropdownMenuItem
+              className={tw("mb-2.5 border-b p-4 md:mb-0 md:p-0")}
+              disabled={assetIsCheckedOut}
+            >
               <Button
                 to="update-location"
                 role="link"
                 variant="link"
-                className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                className={tw(
+                  "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                )}
                 width="full"
                 onClick={() => setOpen(false)}
               >
@@ -160,6 +162,7 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
               onSelect={(e) => {
                 e.preventDefault();
               }}
+              disabled={assetIsCheckedOut}
             >
               <DeleteAsset asset={asset} />
             </DropdownMenuItem>
@@ -174,6 +177,11 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
                 Close
               </Button>
             </DropdownMenuItem>
+            {assetIsCheckedOut ? (
+              <div className=" border-t p-2 text-left text-xs">
+                Some actions are disabled due to the asset being checked out.
+              </div>
+            ) : null}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -181,7 +189,7 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
       {/* overlay on mobile */}
       <div
         className={tw(
-          "fixed right-0 top-0 z-50 h-screen w-screen cursor-pointer bg-[#344054]/50 transition duration-300 ease-in-out md:hidden",
+          "size-screen fixed right-0 top-0 z-50 cursor-pointer bg-[#344054]/50 transition duration-300 ease-in-out md:hidden",
           open ? "visible" : "invisible opacity-0"
         )}
       ></div>
@@ -189,19 +197,21 @@ const ConditionalActionsDropdown = ({ asset }: Props) => {
   );
 };
 
-const ActionsDopdown = ({ asset }: Props) => {
+const ActionsDopdown = () => {
   const isHydrated = useHydrated();
+
   if (!isHydrated)
     return (
       <Button variant="secondary" to="#" data-test-id="assetActionsButton">
         <span className="flex items-center gap-2">
-          Actions <ChevronRight className="chev" />
+          Actions <ChevronRight className="chev rotate-90" />
         </span>
       </Button>
     );
+
   return (
     <div className="actions-dropdown">
-      <ConditionalActionsDropdown asset={asset} />
+      <ConditionalActionsDropdown />
     </div>
   );
 };

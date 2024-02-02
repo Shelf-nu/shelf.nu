@@ -1,5 +1,3 @@
-// import { ErrorBoundryComponent } from "~/components/errors";
-
 import { ShelfStackError } from "~/utils/error";
 
 export const loader = () => {
@@ -16,5 +14,3 @@ export const loader = () => {
 export default function LayoutSplat() {
   return null;
 }
-
-// export const ErrorBoundary = () => <ErrorBoundryComponent />;

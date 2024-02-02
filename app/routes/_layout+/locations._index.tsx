@@ -9,10 +9,7 @@ import { List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
-
-import { requireAuthSession } from "~/modules/auth";
 import { getLocations } from "~/modules/location";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
   generatePageMeta,
   getCurrentSearchParams,
@@ -21,10 +18,15 @@ import {
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.read
+  );
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -112,12 +114,12 @@ const ListItemContent = ({ item }: { item: LocationWithAssets }) => (
     <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center">
+          <div className="flex size-12 items-center justify-center">
             <Image
               imageId={item.imageId}
               alt="img"
               className={tw(
-                "h-full w-full rounded-[4px] border object-cover",
+                "size-full rounded-[4px] border object-cover",
                 item.description ? "rounded-b-none border-b-0" : ""
               )}
               updatedAt={item.image?.updatedAt}

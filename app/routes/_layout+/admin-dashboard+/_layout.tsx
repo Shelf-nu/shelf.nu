@@ -3,10 +3,10 @@ import { Link, Outlet } from "@remix-run/react";
 
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 
-import { requireAuthSession } from "~/modules/auth";
+import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+  await requireAdmin(request);
 
   return null;
 }

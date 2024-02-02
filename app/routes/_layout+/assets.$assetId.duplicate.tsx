@@ -9,28 +9,28 @@ import {
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ErrorContent } from "~/components/errors";
 import Input from "~/components/forms/input";
-import { Badge, Button } from "~/components/shared";
+import { Button } from "~/components/shared";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
 import { duplicateAsset } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/custom-modal.css";
-import {
-  assertIsPost,
-  error,
-  isFormProcessing,
-  userFriendlyAssetStatus,
-} from "~/utils";
+import { error, isFormProcessing } from "~/utils";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError, makeShelfError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   try {
-    await requireAuthSession(request);
+    await requirePermision(
+      request,
+      PermissionEntity.asset,
+      PermissionAction.create
+    );
 
     const assetId = params.assetId as string;
     const asset = await db.asset.findUnique({ where: { id: assetId } });
@@ -63,13 +63,12 @@ const DuplicateAssetSchema = z.object({
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
-    assertIsPost(request);
-
-    const authSession = await requireAuthSession(request);
-    const { organizationId } = await requireOrganisationId(
-      authSession,
-      request
+    const { authSession, organizationId } = await requirePermision(
+      request,
+      PermissionEntity.asset,
+      PermissionAction.create
     );
+
     const { userId } = authSession;
 
     const assetId = params.assetId as string;
@@ -137,77 +136,74 @@ export default function DuplicateAsset() {
           Duplicate asset
         </div>
 
-        {asset ? (
-          <div className="flex items-center gap-3 rounded-md border p-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center">
-              <AssetImage
-                asset={{
-                  assetId: asset.id,
-                  mainImage: asset.mainImage,
-                  mainImageExpiration: asset.mainImageExpiration,
-                  alt: asset.title,
-                }}
-                className="h-full w-full rounded-[4px] border object-cover"
+        <div className="flex items-center gap-3 rounded-md border p-4">
+          <div className="flex size-12 shrink-0 items-center justify-center">
+            <AssetImage
+              asset={{
+                assetId: asset.id,
+                mainImage: asset.mainImage,
+                mainImageExpiration: asset.mainImageExpiration,
+                alt: asset.title,
+              }}
+              className="size-full rounded-[4px] border object-cover"
+            />
+          </div>
+          <div className="min-w-[130px]">
+            <span className="word-break mb-1 block font-medium">
+              {asset.title}
+            </span>
+            <div>
+              <AssetStatusBadge
+                status={asset.status}
+                availableToBook={asset.availableToBook}
               />
             </div>
-            <div className="min-w-[130px]">
-              <span className="word-break mb-1 block font-medium">
-                {asset.title}
-              </span>
-              <div>
-                <Badge
-                  color={asset.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-                >
-                  {userFriendlyAssetStatus(asset.status)}
-                </Badge>
-              </div>
+          </div>
+
+          <Input
+            type="number"
+            label="Amount of duplicates"
+            name={zo.fields.amountOfDuplicates()}
+            defaultValue={1}
+            placeholder="How many duplicates assets you want to create for this asset ?"
+            className="w-full"
+            disabled={isProcessing}
+            required
+            /* We have to find a way to normalize the error object when it comes from zod */
+            error={
+              zo.errors.amountOfDuplicates()?.message ||
+              // @ts-ignore
+              actionData?.error?.amountOfDuplicates
+            }
+          />
+
+          <div className="flex gap-3">
+            <Button
+              to=".."
+              variant="secondary"
+              width="full"
+              disabled={isProcessing}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              width="full"
+              type="submit"
+              disabled={isProcessing}
+            >
+              {isProcessing ? <Spinner /> : "Duplicate"}
+            </Button>
+          </div>
+          {actionData?.error ? (
+            <div className="text-error-500">
+              {/*@ts-ignore */}
+              <p className="font-medium">{actionData.error?.title || ""}</p>
+              {/* @ts-ignore */}
+              <p>{actionData?.error?.message}</p>
             </div>
-          </div>
-        ) : null}
-
-        <Input
-          type="number"
-          label="Amount of duplicates"
-          name={zo.fields.amountOfDuplicates()}
-          defaultValue={1}
-          placeholder="How many duplicates assets you want to create for this asset ?"
-          className="w-full"
-          disabled={isProcessing}
-          required
-          /* We have to find a way to normalize the error object when it comes from zod */
-          error={
-            zo.errors.amountOfDuplicates()?.message ||
-            // @ts-ignore
-            actionData?.error?.amountOfDuplicates
-          }
-        />
-
-        <div className="flex gap-3">
-          <Button
-            to=".."
-            variant="secondary"
-            width="full"
-            disabled={isProcessing}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            width="full"
-            type="submit"
-            disabled={isProcessing}
-          >
-            {isProcessing ? <Spinner /> : "Duplicate"}
-          </Button>
+          ) : null}
         </div>
-        {actionData?.error ? (
-          <div className="text-error-500">
-            {/*@ts-ignore */}
-            <p className="font-medium">{actionData.error?.title || ""}</p>
-            {/* @ts-ignore */}
-            <p>{actionData?.error?.message}</p>
-          </div>
-        ) : null}
       </div>
     </Form>
   );

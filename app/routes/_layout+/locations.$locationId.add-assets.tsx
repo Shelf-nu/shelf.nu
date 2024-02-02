@@ -12,15 +12,17 @@ import {
   createLocationChangeNote,
   getPaginatedAndFilterableAssets,
 } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost } from "~/utils";
+
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-  const { userId } = authSession;
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.update
+  );
   const locationId = params.locationId as string;
   const location = await db.location.findUnique({
     where: {
@@ -41,8 +43,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     totalPages,
   } = await getPaginatedAndFilterableAssets({
     request,
-    userId,
     organizationId,
+    excludeCategoriesQuery: true,
+    excludeTagsQuery: true,
   });
 
   const modelName = {
@@ -67,8 +70,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  assertIsPost(request);
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.update
+  );
   const { locationId } = params;
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
@@ -160,7 +166,7 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
       <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center">
+            <div className="flex size-12 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -168,7 +174,7 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
                   mainImageExpiration: item.mainImageExpiration,
                   alt: item.title,
                 }}
-                className="h-full w-full rounded-[4px] border object-cover"
+                className="size-full rounded-[4px] border object-cover"
               />
             </div>
             <div className="flex flex-col">
@@ -178,7 +184,7 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
                   className="flex items-center gap-1 text-[12px] font-medium text-gray-700"
                   title={`Current location: ${item.location.name}`}
                 >
-                  <div className="h-2 w-2 rounded-full bg-gray-500"></div>
+                  <div className="size-2 rounded-full bg-gray-500"></div>
                   <span>{item.location.name}</span>
                 </div>
               ) : null}

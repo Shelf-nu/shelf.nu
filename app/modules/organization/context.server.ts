@@ -52,25 +52,48 @@ export async function requireOrganisationId(
   try {
     const organizationId = await getSelectedOrganizationIdCookie(request);
 
-
-  /** There could be a case when you get removed from an organization while browsing it.
-   * In this case what we do is we set the current organization to the first one in the list
-   */
-  const userOrganizations = await getUserOrganizations({ userId });
-  const userOrganizationIds = userOrganizations.map((org) => org.id);
-  const personalOrganization = userOrganizations.find(
-    (org) => org.type === "PERSONAL"
-  );
-  const currentOrganization = userOrganizations.find(
-    (org) => org.id === organizationId
-  );
+    /** There could be a case when you get removed from an organization while browsing it.
+     * In this case what we do is we set the current organization to the first one in the list
+     */
+    const userOrganizations = await getUserOrganizations({ userId });
+    const organizations = userOrganizations.map((uo) => uo.organization);
+    const userOrganizationIds = organizations.map((org) => org.id);
+    const personalOrganization = organizations.find(
+      (org) => org.type === "PERSONAL"
+    );
+    const currentOrganization = organizations.find(
+      (org) => org.id === organizationId
+    );
 
     if (!personalOrganization) {
       throw new ShelfStackError({
+        cause: null,
         title: "No organization found",
         message:
           "You do not have a personal organization. This should not happen. Please contact support.",
         status: 500,
+      });
+    }
+
+    /**
+     * If for some reason there is no currentOrganization, we handle it by setting it to the personalOrganization
+     */
+    if (!currentOrganization) {
+      if (isGet(request)) {
+        throw redirect(getCurrentPath(request), {
+          headers: [
+            setCookie(
+              await setSelectedOrganizationIdCookie(personalOrganization.id)
+            ),
+          ],
+        });
+      }
+
+      // Other methods should throw an error (mostly for actions)
+      throw new ShelfStackError({
+        cause: null,
+        message: "You do not have access to this organization",
+        status: 401,
       });
     }
 
@@ -96,10 +119,10 @@ export async function requireOrganisationId(
 
     return {
       organizationId,
-      organizations: userOrganizations,
+      organizations,
+      userOrganizations,
       currentOrganization,
-      personalOrganization,
-    }
+    };
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });

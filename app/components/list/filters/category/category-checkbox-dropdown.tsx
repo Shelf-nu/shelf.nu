@@ -75,7 +75,7 @@ export const CategoryCheckboxDropdown = () => {
         <DropdownMenuTrigger className="inline-flex items-center gap-2 font-normal text-gray-500">
           Categories <ChevronRight className="hidden rotate-90 md:inline" />{" "}
           {items.length > 0 && (
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
+            <div className="flex size-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
               {items.length}
             </div>
           )}

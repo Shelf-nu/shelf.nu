@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import { type PropsWithChildren } from "react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -16,8 +16,8 @@ import {
   ScrollRestoration,
   useLoaderData,
 } from "@remix-run/react";
+import { withSentry } from "@sentry/remix";
 
-// import { ErrorBoundryComponent } from "./components/errors";
 import { ErrorContent } from "./components/errors";
 import { HomeIcon } from "./components/icons";
 import MaintenanceMode from "./components/layout/maintenance-mode";
@@ -67,9 +67,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) =>
 
 export const shouldRevalidate = () => false;
 
-export default function App({ title }: PropsWithChildren<{ title?: string }>) {
-  const { env, maintenanceMode } = useLoaderData<typeof loader>();
-
+function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
+  const { env } = useLoaderData<typeof loader>();
   const nonce = useNonce();
   return (
     <html lang="en" className="h-full">
@@ -84,8 +83,7 @@ export default function App({ title }: PropsWithChildren<{ title?: string }>) {
         <Clarity />
       </head>
       <body className="h-full">
-        {maintenanceMode ? <MaintenanceMode /> : <Outlet />}
-
+        {children}
         <ScrollRestoration />
         <script
           dangerouslySetInnerHTML={{
@@ -99,21 +97,14 @@ export default function App({ title }: PropsWithChildren<{ title?: string }>) {
   );
 }
 
-export function ErrorBoundary() {
+function App() {
+  const { maintenanceMode } = useLoaderData<typeof loader>();
+
   return (
-    <html lang="en" className="h-full">
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width,initial-scale=1" />
-        <Meta />
-        <Links />
-      </head>
-      <body className="h-full">
-        <ErrorContent />
-        <ScrollRestoration />
-        <Scripts />
-        <LiveReload />
-      </body>
-    </html>
+    <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
   );
 }
+
+export default withSentry(App);
+
+export const ErrorBoundary = () => <ErrorContent />;

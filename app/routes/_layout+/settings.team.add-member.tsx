@@ -5,15 +5,19 @@ import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { handleUniqueConstraintError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.teamMember,
+    PermissionAction.create
+  );
 
   return json({
     showModal: true,
@@ -21,15 +25,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.teamMember,
+    PermissionAction.create
+  );
   const { userId } = authSession;
   const formData = await request.formData();
 
   try {
+    const name = formData.get("name") as string;
     const teamMember = await db.teamMember.create({
       data: {
-        name: formData.get("name") as string,
+        name: name.trim(),
         organizationId,
       },
     });
@@ -74,7 +82,7 @@ export default function AddMember() {
   return (
     <>
       <div className="modal-content-wrapper">
-        <div className="mb-4 inline-flex h-8 w-8 items-center  justify-center rounded-full bg-primary-100 p-2 text-primary-600">
+        <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
           <UserIcon color="#ef6820" />
         </div>
         <div className="mb-5">

@@ -11,6 +11,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError, makeShelfError } from "~/utils/error";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+  // @TODO - double check because of messy merge
   try {
     /* Get the ID of the QR from the params */
     const id = params.qrId as string;
@@ -77,9 +78,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     /** There could be a case when you get removed from an organization while browsing it.
      * In this case what we do is we set the current organization to the first one in the list
      */
-    const userOrganizations = await getUserOrganizations({
-      userId: authSession.userId,
-    });
+    const userOrganizations = (
+      await getUserOrganizations({
+        userId: authSession.userId,
+      })
+    ).map((uo) => uo.organization);
     const userOrganizationIds = userOrganizations.map((org) => org.id);
     const personalOrganization = userOrganizations.find(
       (org) => org.type === "PERSONAL"

@@ -16,19 +16,23 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { getLocation, updateLocation } from "~/modules/location";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost, getRequiredParam } from "~/utils";
+import { getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.update
+  );
   const id = getRequiredParam(params, "locationId");
 
   const { location } = await getLocation({ organizationId, id });
@@ -52,13 +56,15 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Edit",
+  breadcrumb: () => <span>Edit</span>,
 };
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  assertIsPost(request);
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.location,
+    PermissionAction.update
+  );
   const clonedRequest = request.clone();
 
   const id = getRequiredParam(params, "locationId");

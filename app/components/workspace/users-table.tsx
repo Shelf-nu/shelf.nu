@@ -98,7 +98,7 @@ const UserRow = ({
       <div className="flex items-center gap-3">
         <img
           src={img || "/images/default_pfp.jpg"}
-          className={"h-10 w-10 rounded-[4px]"}
+          className={"size-10 rounded-[4px]"}
           alt={`${name}'s profile`}
         />
         <div className="user-credentials min-w-[240px] flex-1 text-[14px] transition-all duration-200 ease-linear">
@@ -111,7 +111,9 @@ const UserRow = ({
         </div>
       </div>
     </Td>
-    <Td className=" text-gray-600">{role}</Td>
+    <Td className=" text-gray-600 ">
+      <span className="block lowercase first-letter:uppercase">{role}</span>
+    </Td>
     <Td className="!pr-10">
       <InviteStatusBadge status={invite?.status || status} />
     </Td>

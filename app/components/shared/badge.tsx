@@ -6,11 +6,13 @@ export const Badge = ({
   color,
   noBg = false,
   withDot = true,
+  className = "",
 }: {
   children: string | ReactNode;
   color: string;
   noBg?: boolean;
   withDot?: boolean;
+  className?: string;
 }) => (
   <span
     style={{
@@ -20,7 +22,8 @@ export const Badge = ({
     }}
     className={tw(
       "inline-flex items-center rounded-2xl py-[2px] pl-[6px] text-[12px] font-medium",
-      withDot ? " gap-1 pr-2" : "px-2"
+      withDot ? " gap-1 pr-2" : "px-2",
+      className
     )}
   >
     {withDot ? (
@@ -28,7 +31,7 @@ export const Badge = ({
         style={{
           backgroundColor: color,
         }}
-        className="h-1.5 w-1.5 rounded-full"
+        className="size-1.5 rounded-full"
       />
     ) : null}
 
