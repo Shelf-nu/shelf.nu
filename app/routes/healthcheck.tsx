@@ -12,7 +12,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // if we can connect to the database and make a simple query
     // and make a HEAD request to ourselves, then we're good.
     await Promise.all([
-      db.user.count(),
+      db.user.findFirst(),
       fetch(url.toString(), { method: "HEAD" }).then((r) => {
         if (!r.ok) return Promise.reject(r);
       }),
