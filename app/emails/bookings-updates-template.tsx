@@ -45,7 +45,7 @@ export function BookingUpdatesEmailTemplate({
       </Head>
 
       <Container
-        style={{ padding: "32px", textAlign: "center", maxWidth: "60%" }}
+        style={{ padding: "32px 16px", textAlign: "center", maxWidth: "100%" }}
       >
         <div
           style={{
@@ -58,7 +58,7 @@ export function BookingUpdatesEmailTemplate({
           <Img
             src="cid:shelf-logo"
             alt="Shelf's logo"
-            width="100"
+            width="32"
             height="32"
             style={{ margin: "0 auto" }}
           />
@@ -109,11 +109,12 @@ export function BookingUpdatesEmailTemplate({
           >
             {booking.custodianUser!.email}
           </Link>{" "}
-          because it is part of the Shelf workspace.
+          because it is part of the Shelf workspace{" "}
           <span style={{ color: "#101828", fontWeight: "600" }}>
             {booking.organization.name}
           </span>
-          . If you think you weren’t supposed to have received this email please{" "}
+          . <br /> If you think you weren’t supposed to have received this email
+          please{" "}
           <Link
             style={{ color: "#344054", textDecoration: "underline" }}
             href={`mailto:${booking.organization.owner.email}`}
