@@ -20,6 +20,16 @@ if (SENTRY_DSN) {
     tracesSampleRate: 1,
   });
 }
+// === start: register scheduler and workers ===
+schedulerService
+  .init()
+  .then(() => {
+    registerBookingWorkers();
+    // eslint-disable-next-line no-console
+    console.log("Scheduler and workers registered");
+  })
+  .catch((e) => console.error(e));
+// === end: register scheduler and workers ===
 
 export function handleError(
   error: unknown,
@@ -41,11 +51,6 @@ export default async function handleRequest(
   const callbackName = isbot(request.headers.get("user-agent"))
     ? "onAllReady"
     : "onShellReady";
-
-  // === start: register scheduler and workers ===
-  await schedulerService.init();
-  registerBookingWorkers();
-  // === end: register scheduler and workers ===
 
   return new Promise(async (res, reject) => {
     let didError = false;
