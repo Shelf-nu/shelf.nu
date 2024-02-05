@@ -23,7 +23,6 @@ export const ExportButton = ({
         reloadDocument: true,
         disabled: !canExportAssets || totalItems === 0,
         title: totalItems === 0 ? "No assets to export" : "Export assets",
-        className: "grow",
       }}
     />
   );
