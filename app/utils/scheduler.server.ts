@@ -8,19 +8,33 @@ declare global {
   var scheduler: PgBoss;
 }
 
+let isInit = false;
 export const init = async () => {
-  if (!scheduler) {
-    if (NODE_ENV === "production") {
-      scheduler = new PgBoss(DIRECT_URL);
-    } else {
-      if (!global.scheduler) {
-        global.scheduler = new PgBoss(DIRECT_URL);
+  try {
+    if (!scheduler) {
+      if (NODE_ENV === "production") {
+        scheduler = new PgBoss(DIRECT_URL);
+      } else {
+        if (!global.scheduler) {
+          global.scheduler = new PgBoss(DIRECT_URL);
+        }
+        scheduler = global.scheduler;
       }
-      scheduler = global.scheduler;
+
+      if (isInit) {
+        return;
+      }
+
+      await scheduler.start();
+      isInit = true;
     }
-    await scheduler.start();
+    return;
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error(e);
   }
-  return;
 };
+
+init();
 
 export { scheduler };
