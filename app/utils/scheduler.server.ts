@@ -4,37 +4,22 @@ import { DIRECT_URL, NODE_ENV } from "../utils/env";
 let scheduler!: PgBoss;
 
 declare global {
-  // eslint-disable-next-line no-var
   var scheduler: PgBoss;
 }
 
-let isInit = false;
 export const init = async () => {
-  try {
-    if (!scheduler) {
-      if (NODE_ENV === "production") {
-        scheduler = new PgBoss(DIRECT_URL);
-      } else {
-        if (!global.scheduler) {
-          global.scheduler = new PgBoss(DIRECT_URL);
-        }
-        scheduler = global.scheduler;
+  if (!scheduler) {
+    if (NODE_ENV === "production") {
+      scheduler = new PgBoss(DIRECT_URL);
+    } else {
+      if (!global.scheduler) {
+        global.scheduler = new PgBoss(DIRECT_URL);
       }
-
-      if (isInit) {
-        return;
-      }
-
-      await scheduler.start();
-      isInit = true;
+      scheduler = global.scheduler;
     }
-    return;
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.error(e);
+    await scheduler.start();
   }
+  return;
 };
-
-init();
 
 export { scheduler };
