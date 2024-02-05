@@ -28,6 +28,7 @@ schedulerService
     // eslint-disable-next-line no-console
     console.log("Scheduler and workers registered");
   })
+  // eslint-disable-next-line no-console
   .catch((e) => console.error(e));
 // === end: register scheduler and workers ===
 
