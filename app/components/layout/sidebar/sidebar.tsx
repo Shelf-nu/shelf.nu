@@ -112,7 +112,7 @@ export default function Sidebar() {
           </div>
         </div>
 
-        <div className={tw("mx-auto", workspaceSwitching ? "opacity-50" : "")}>
+        <div className={tw("", workspaceSwitching ? "opacity-50" : "")}>
           <SidebarBottom
             isSidebarMinimized={optimisticMinimizedSidebar}
             user={user}
