@@ -1,5 +1,5 @@
-import { json } from "@remix-run/node";
 import type { Organization, OrganizationType, User } from "@prisma/client";
+import { json } from "@remix-run/node";
 import { db } from "~/database";
 import { error } from "~/utils";
 import { ShelfStackError, makeShelfError } from "~/utils/error";

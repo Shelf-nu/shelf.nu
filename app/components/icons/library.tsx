@@ -362,7 +362,6 @@ export function GreenCheckMarkIcon(props: SVGProps<SVGSVGElement>) {
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
-
       />
       <rect
         x="5"
