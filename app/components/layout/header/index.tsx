@@ -42,7 +42,9 @@ export default function Header({
             </div>
             {children && (
               <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:hidden">
-                <div className="flex flex-1 shrink-0 gap-3">{children}</div>
+                <div className="header-buttons flex flex-1 shrink-0 gap-3">
+                  {children}
+                </div>
               </div>
             )}
           </>
