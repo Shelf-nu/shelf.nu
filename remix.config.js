@@ -6,7 +6,13 @@ const { flatRoutes } = require("remix-flat-routes");
 module.exports = {
   ignoredRouteFiles: ["**/.*"],
   serverModuleFormat: "cjs",
-  serverDependenciesToBundle: ["maplibre-gl", /swiper/, /remix-utils/],
+  serverDependenciesToBundle: [
+    "maplibre-gl",
+    /swiper/,
+    /^@remix-pwa*/,
+    /remix-utils/,
+    /^remix-hono*/,
+  ],
   routes: async (defineRoutes) => {
     return flatRoutes("routes", defineRoutes);
   },
@@ -24,4 +30,7 @@ module.exports = {
       crypto: true,
     },
   },
+  server: "./server/index.ts",
+  serverBuildPath: "./build/index.js",
+  serverPlatform: "node",
 };
