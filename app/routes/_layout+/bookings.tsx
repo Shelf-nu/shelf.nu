@@ -12,6 +12,7 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
 import { commitAuthSession } from "~/modules/auth";
@@ -171,8 +172,8 @@ export default function BookingsIndexPage() {
           New booking
         </Button>
       </Header>
-      <div className="mt-2 flex flex-1 flex-col md:mx-0 md:mt-8 md:gap-2">
-        <Filters className="mb-2">
+      <ListContentWrapper>
+        <Filters>
           <StatusFilter />
         </Filters>
         <List
@@ -189,7 +190,7 @@ export default function BookingsIndexPage() {
             </>
           }
         />
-      </div>
+      </ListContentWrapper>
       <ContextualModal />
     </>
   ) : (
@@ -343,7 +344,7 @@ function UserBadge({ img, name }: { img?: string; name: string }) {
     <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
       <img
         src={img || "/images/default_pfp.jpg"}
-        className="mr-1 h-4 w-4 rounded-full"
+        className="mr-1 size-4 rounded-full"
         alt=""
       />
       <span className="mt-[1px]">{name}</span>

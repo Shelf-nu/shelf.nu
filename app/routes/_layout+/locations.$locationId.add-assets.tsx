@@ -44,6 +44,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   } = await getPaginatedAndFilterableAssets({
     request,
     organizationId,
+    excludeCategoriesQuery: true,
+    excludeTagsQuery: true,
   });
 
   const modelName = {

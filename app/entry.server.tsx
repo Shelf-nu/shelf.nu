@@ -14,6 +14,24 @@ import { registerBookingWorkers } from "./modules/booking";
 import { SENTRY_DSN } from "./utils";
 import * as schedulerService from "./utils/scheduler.server";
 
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    tracesSampleRate: 1,
+  });
+}
+// === start: register scheduler and workers ===
+schedulerService
+  .init()
+  .then(() => {
+    registerBookingWorkers();
+    // eslint-disable-next-line no-console
+    console.log("Scheduler and workers registered");
+  })
+  // eslint-disable-next-line no-console
+  .catch((e) => console.error(e));
+// === end: register scheduler and workers ===
+
 export function handleError(
   error: unknown,
   { request }: LoaderFunctionArgs | ActionFunctionArgs
@@ -21,13 +39,6 @@ export function handleError(
   if (Sentry) {
     Sentry.captureRemixServerException(error, "remix.server", request);
   }
-}
-
-if (SENTRY_DSN) {
-  Sentry.init({
-    dsn: SENTRY_DSN,
-    tracesSampleRate: 1,
-  });
 }
 
 const ABORT_DELAY = 5000;
@@ -41,11 +52,6 @@ export default async function handleRequest(
   const callbackName = isbot(request.headers.get("user-agent"))
     ? "onAllReady"
     : "onShellReady";
-
-  // === start: register scheduler and workers ===
-  await schedulerService.init();
-  registerBookingWorkers();
-  // === end: register scheduler and workers ===
 
   return new Promise(async (res, reject) => {
     let didError = false;

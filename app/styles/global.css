@@ -224,3 +224,14 @@ dialog {
 .preview-only-custodian-select svg {
   display: none;
 }
+
+.header-buttons a,
+.header-buttons button,
+.header-buttons div {
+  @apply grow;
+}
+
+.header-buttons button a,
+.header-buttons button button {
+  @apply flex;
+}

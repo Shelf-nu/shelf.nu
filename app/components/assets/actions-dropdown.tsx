@@ -37,7 +37,7 @@ const ConditionalActionsDropdown = () => {
         onOpenChange={(open) => setOpen(open)}
         open={open}
       >
-        <DropdownMenuTrigger className="asset-actions hidden sm:block">
+        <DropdownMenuTrigger className="asset-actions hidden sm:flex">
           <Button variant="secondary" data-test-id="assetActionsButton">
             <span className="flex items-center gap-2">
               Actions <ChevronRight className="chev" />
@@ -210,7 +210,7 @@ const ActionsDopdown = () => {
     );
 
   return (
-    <div className="actions-dropdown">
+    <div className="actions-dropdown flex">
       <ConditionalActionsDropdown />
     </div>
   );
