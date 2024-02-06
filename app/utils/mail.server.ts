@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import type { Attachment } from "nodemailer/lib/mailer";
 import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
-import logoImg from "../../public/images/logo-full-color(x2).png";
+import logoImg from "../../public/images/shelf-symbol.png";
 
 export const sendEmail = async ({
   to,
@@ -52,7 +52,7 @@ export const sendEmail = async ({
     html: html || "", // html body
     attachments: [
       {
-        filename: "logo-full-color(x2).png",
+        filename: "shelf-symbol.png",
         path: `${process.env.SERVER_URL}${logoImg}`,
         cid: "shelf-logo",
       },
