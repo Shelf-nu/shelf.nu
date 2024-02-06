@@ -202,6 +202,16 @@ export function getCustomerActiveSubscription({
     customer?.subscriptions?.data.find((sub) => sub.status === "active") || null
   );
 }
+export function getCustomerTrialSubscription({
+  customer,
+}: {
+  customer: CustomerWithSubscriptions | null;
+}) {
+  return (
+    customer?.subscriptions?.data.find((sub) => sub.status === "trialing") ||
+    null
+  );
+}
 
 export async function fetchStripeSubscription(id: string) {
   return await stripe.subscriptions.retrieve(id, {

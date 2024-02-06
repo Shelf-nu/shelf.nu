@@ -22,7 +22,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       sig,
       process.env.STRIPE_WEBHOOK_ENDPOINT_SECRET
     );
-    // console.log(JSON.stringify(event, null, 2));
     // Handle the event
     switch (event.type) {
       case "checkout.session.completed": {
@@ -64,10 +63,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         /** Check if its a trial subscription */
         const isTrialSubscription =
-          subscription.trial_end && subscription.trial_start;
+          !!subscription.trial_end && !!subscription.trial_start;
+
+        if (isTrialSubscription) {
+          /** WHen its a trial subscription, update the tier of the user */
+          await db.user.update({
+            where: { customerId },
+            data: {
+              tierId: tierId as TierId,
+            },
+          });
+        }
 
         return new Response(null, { status: 200 });
       }
+
       case "customer.subscription.updated": {
         const { customerId, tierId } = await getDataFromStripeEvent(event);
 
@@ -113,7 +123,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           if (!user) throw new ShelfStackError({ message: "No user found" });
 
           await sendEmail({
-            to: user?.email as string,
+            to: "carlos@shelf.nu",
             subject: "Your shelf.nu free trial is ending soon",
             text: trialEndsSoonText({
               user: {

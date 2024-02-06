@@ -9,15 +9,14 @@ export const trialEndsSoonText = ({ user, subscription }: Props) => `Howdy ${
   user.firstName ? user.firstName : ""
 } ${user.lastName ? user.lastName : ""},
 
-Your trial is ending on ${new Date(
+You are reaching the end of your trial period with Shelf, which concludes on ${new Date(
   (subscription.trial_end as number) * 1000 // We force this as we check it before even calling the send email function
-).toLocaleDateString()}. We hope you've enjoyed using Shelf so far. 
-If you want to continue using the premium features, please upgrade to a paid plan to continue using the service. ${SERVER_URL}/settings/subscription
+).toLocaleDateString()}. It's been a pleasure having you explore what Shelf has to offer. To maintain uninterrupted access to our premium features, we invite you to transition to one of our paid plans. You can make this upgrade by visiting your subscription settings: ${SERVER_URL}/settings/subscription .
 
-Once you’re done setting up your account, you'll be able to access the workspace and start exploring features like Asset Explorer, Location Tracking, Collaboration, Custom fields and more.
+Should you have any inquiries or require further assistance, our support team is at your disposal. You can reach us via email at support@shelf.nu.
 
-If you have any questions or need assistance, please don't hesitate to contact our support at support@shelf.nu
+Thank you for considering Shelf for your needs. We look forward to continuing to support your journey.
 
-Thanks,
+Warm regards,
 The Shelf Team
 `;
