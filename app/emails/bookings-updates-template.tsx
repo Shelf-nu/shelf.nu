@@ -55,13 +55,25 @@ export function BookingUpdatesEmailTemplate({
             marginBottom: "32px",
           }}
         >
-          <Img
-            src="cid:shelf-logo"
-            alt="Shelf's logo"
-            width="32"
-            height="32"
-            style={{ margin: "0 auto" }}
-          />
+          <div style={{ margin: "0 auto", display: "flex" }}>
+            <Img
+              src="cid:shelf-logo"
+              alt="Shelf's logo"
+              width="32"
+              height="32"
+              style={{ marginRight: "6px", width: "32px", height: "32px" }}
+            />
+            <Heading
+              as="h1"
+              style={{
+                color: "#101828",
+                fontWeight: "600",
+                margin: "0",
+              }}
+            >
+              shelf
+            </Heading>
+          </div>
         </div>
         <div style={{ margin: "32px" }}>
           <Heading as="h1" style={{ ...styles.h1 }}>
@@ -109,9 +121,9 @@ export function BookingUpdatesEmailTemplate({
           >
             {booking.custodianUser!.email}
           </Link>{" "}
-          because it is part of the Shelf workspace{" "}
+          because it is part of the workspace{" "}
           <span style={{ color: "#101828", fontWeight: "600" }}>
-            {booking.organization.name}
+            "{booking.organization.name}"
           </span>
           . <br /> If you think you weren’t supposed to have received this email
           please{" "}
