@@ -64,7 +64,7 @@ const HoverMessage = ({
     <HoverCard>
       <HoverCardTrigger
         className={tw(
-          "disabled inline-flex grow cursor-not-allowed items-center justify-center border-none p-0 text-left text-text-sm font-semibold text-primary-700 hover:text-primary-800",
+          "disabled inline-flex cursor-not-allowed items-center justify-center border-none p-0 text-left text-text-sm font-semibold text-primary-700 hover:text-primary-800",
           buttonProps?.width === "full" ? "w-full" : ""
         )}
       >
