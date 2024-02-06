@@ -29,12 +29,13 @@ export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger
-        className={tw("asset-actions", fullWidth ? "w-full" : "")}
+        className={tw("asset-actions grow", fullWidth ? "w-full" : "")}
       >
         <Button
           variant="secondary"
           data-test-id="bookingActionsButton"
           as="span"
+          className="flex"
         >
           <span className="flex items-center gap-2">
             Actions <ChevronRight className="chev rotate-90" />

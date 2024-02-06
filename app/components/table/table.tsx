@@ -19,16 +19,19 @@ export function Table({
 export function Th({
   children,
   className,
+  colSpan,
 }: {
   children: React.ReactNode;
   className?: string;
+  colSpan?: number;
 }) {
   return (
     <th
       className={tw(
-        "border-b p-4 text-left font-normal text-gray-600 md:px-6",
+        "p-4 text-left font-normal text-gray-600 md:border-b md:px-6",
         className
       )}
+      colSpan={colSpan || undefined}
     >
       {children}
     </th>

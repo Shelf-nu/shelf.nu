@@ -36,7 +36,7 @@ export const ActionsDopdown = ({ location, fullWidth }: Props) => (
     </DropdownMenuTrigger>
     <DropdownMenuContent
       align="end"
-      className="order w-[180px] bg-white p-1.5 text-right "
+      className="order w-[calc(100vw-32px)] bg-white p-1.5 text-right md:w-[180px] "
     >
       <DropdownMenuItem>
         <Button

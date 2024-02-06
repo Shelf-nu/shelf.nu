@@ -260,12 +260,7 @@ export default function AssetDetailsPage() {
       >
         {!isSelfService ? (
           <>
-            <Button
-              to="qr"
-              variant="secondary"
-              icon="barcode"
-              onlyIconOnMobile={true}
-            >
+            <Button to="qr" variant="secondary" icon="barcode">
               View QR code
             </Button>
             <ActionsDopdown />
@@ -280,7 +275,7 @@ export default function AssetDetailsPage() {
           mainImageExpiration: asset.mainImageExpiration,
           alt: asset.title,
         }}
-        className="mx-auto mb-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
+        className="mx-auto my-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
       />
       <ContextualModal />
       <div className="mt-8 block lg:flex">
