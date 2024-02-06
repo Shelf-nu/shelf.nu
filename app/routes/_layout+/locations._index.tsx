@@ -5,7 +5,8 @@ import { useNavigate } from "@remix-run/react";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { List } from "~/components/list";
+import { Filters, List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
@@ -89,17 +90,18 @@ export default function LocationsIndexPage() {
           Add Location
         </Button>
       </Header>
-      <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
+      <ListContentWrapper>
+        <Filters />
         <List
           ItemComponent={ListItemContent}
           navigate={(itemId) => navigate(itemId)}
           headerChildren={
             <>
-              <Th>Assets</Th>
+              <Th className="hidden md:table-cell">Assets</Th>
             </>
           }
         />
-      </div>
+      </ListContentWrapper>
     </>
   );
 }

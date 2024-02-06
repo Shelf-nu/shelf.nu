@@ -12,7 +12,6 @@ declare global {
       MICROSOFT_CLARITY_ID: string;
       CRISP_WEBSITE_ID: string;
       ENABLE_PREMIUM_FEATURES: string;
-      FORMBRICKS_ENV_ID: string;
       MAINTENANCE_MODE: string;
     };
   }
@@ -34,13 +33,14 @@ declare global {
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
       INVITE_TOKEN_SECRET: string;
-      FORMBRICKS_ENV_ID: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
       SMTP_USER: string;
       MAINTENANCE_MODE: string;
       DATABASE_URL: string;
+      DIRECT_URL: string;
       GEOCODE_API_KEY: string;
+      SENTRY_DSN: string;
     }
   }
 }
@@ -105,6 +105,12 @@ export const SMTP_PWD = getEnv("SMTP_PWD");
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_USER = getEnv("SMTP_USER");
 export const DATABASE_URL = getEnv("DATABASE_URL");
+export const DIRECT_URL = getEnv("DIRECT_URL", {
+  isRequired: false,
+});
+export const SENTRY_DSN = getEnv("SENTRY_DSN", {
+  isRequired: false,
+});
 
 /**
  * Shared envs
@@ -159,7 +165,6 @@ export function getBrowserEnv() {
     CRISP_WEBSITE_ID,
     MICROSOFT_CLARITY_ID,
     ENABLE_PREMIUM_FEATURES,
-    FORMBRICKS_ENV_ID,
     MAINTENANCE_MODE,
   };
 }

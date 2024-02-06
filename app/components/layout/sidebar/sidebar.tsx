@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { Link, useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ScanQRIcon, ShelfTypography } from "~/components/icons/library";
-
 import {
   useMediaStream,
   useStopMediaStream,
@@ -32,7 +32,6 @@ export default function Sidebar() {
   const handleScannerClose = () => {
     stopMediaStream();
     setShowScanner(false);
-    // window.location.reload();
   };
 
   /** We use optimistic UI for folding of the sidebar
@@ -46,6 +45,8 @@ export default function Sidebar() {
     optimisticMinimizedSidebar =
       sidebarFetcher.formData.get("minimizeSidebar") === "open";
   }
+  const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
+
   return (
     <>
       {/* this component is named sidebar as of now but also serves as a mobile navigation header in mobile device */}
@@ -106,12 +107,12 @@ export default function Sidebar() {
           <div className="">
             <OrganizationSelect key={currentOrganizationId} />
           </div>
-          <div className="flex-1">
+          <div className={tw("flex-1", workspaceSwitching ? "opacity-50" : "")}>
             <MenuItems fetcher={sidebarFetcher} />
           </div>
         </div>
 
-        <div className="mt-auto">
+        <div className={tw("", workspaceSwitching ? "opacity-50" : "")}>
           <SidebarBottom
             isSidebarMinimized={optimisticMinimizedSidebar}
             user={user}

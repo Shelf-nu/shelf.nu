@@ -4,6 +4,7 @@
   "sideEffects": false,
   "scripts": {
     "build": "remix build",
+    "build-with-sentry": "remix build --sourcemap && sentry-upload-sourcemaps --org ${SENTRY_ORG} --project ${SENTRY_PROJECT}",
     "db:diff": "prisma migrate diff --from-url=${DATABASE_URL} --to-migrations=./app/database/migrations --shadow-database-url=${SHADOW_DATABASE_URL} --script > rollback.sql",
     "db:prepare-migration": "prisma generate && prisma migrate dev --create-only --skip-seed",
     "db:generate-type": "prisma generate",
@@ -57,6 +58,7 @@
     "@remix-run/node": "2.1.0",
     "@remix-run/react": "2.1.0",
     "@remix-run/serve": "2.1.0",
+    "@sentry/remix": "^7.98.0",
     "@stripe/react-stripe-js": "^2.1.1",
     "@stripe/stripe-js": "^1.54.2",
     "@supabase/supabase-js": "^2.26.0",

@@ -18,6 +18,7 @@ import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
 import {
   clearCategoryFiltersAtom,
   clearTagFiltersAtom,
@@ -33,7 +34,10 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset";
+import {
+  getPaginatedAndFilterableAssets,
+  updateAssetsWithBookingCustodians,
+} from "~/modules/asset";
 import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -167,6 +171,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     assets = assets.filter((a) => a.availableToBook);
   }
 
+  assets = await updateAssetsWithBookingCustodians(assets);
+
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
       ? user?.firstName
@@ -260,7 +266,7 @@ export default function AssetIndexPage() {
           </>
         ) : null}
       </Header>
-      <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
+      <ListContentWrapper>
         <Filters>
           <div className="flex items-center justify-around gap-6 md:justify-end">
             {hasFiltersToClear ? (
@@ -295,7 +301,7 @@ export default function AssetIndexPage() {
             </>
           }
         />
-      </div>
+      </ListContentWrapper>
     </>
   );
 }
@@ -321,7 +327,6 @@ const ListAssetContent = ({
 }) => {
   const { category, tags, custody, location } = item;
   const isSelfService = useUserIsSelfService();
-
   return (
     <>
       {/* Item */}

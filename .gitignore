@@ -33,3 +33,6 @@ desktop-app/portable
 .npmrc
 
 .vscode
+
+# Sentry Config File
+.sentryclirc
