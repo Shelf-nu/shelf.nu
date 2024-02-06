@@ -2,7 +2,6 @@ import {
   Button,
   Html,
   Text,
-  Img,
   Link,
   Head,
   render,
@@ -12,6 +11,7 @@ import {
 import type { ClientHint } from "~/modules/booking/types";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
+import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
 import type { BookingForEmail } from "./types";
 
@@ -55,25 +55,7 @@ export function BookingUpdatesEmailTemplate({
             marginBottom: "32px",
           }}
         >
-          <div style={{ margin: "0 auto", display: "flex" }}>
-            <Img
-              src="cid:shelf-logo"
-              alt="Shelf's logo"
-              width="32"
-              height="32"
-              style={{ marginRight: "6px", width: "32px", height: "32px" }}
-            />
-            <Heading
-              as="h1"
-              style={{
-                color: "#101828",
-                fontWeight: "600",
-                margin: "0",
-              }}
-            >
-              shelf
-            </Heading>
-          </div>
+          <LogoForEmail />
         </div>
         <div style={{ margin: "32px" }}>
           <Heading as="h1" style={{ ...styles.h1 }}>

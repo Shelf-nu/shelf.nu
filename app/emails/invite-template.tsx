@@ -2,14 +2,14 @@ import {
   Button,
   Html,
   Text,
-  Img,
-  Section,
   Link,
   Head,
   render,
+  Container,
 } from "@react-email/components";
 import type { InviteWithInviterAndOrg } from "~/modules/invite/types";
 import { SERVER_URL } from "~/utils/env";
+import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
 
 interface Props {
@@ -24,14 +24,9 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
         <title>Invitation to join Shelf</title>
       </Head>
 
-      <Section style={{ padding: "56px" }}>
-        <Img
-          src="cid:shelf-logo"
-          alt="Shelf's logo"
-          width="100"
-          height="32"
-          style={{ marginBottom: "24px" }}
-        />
+      <Container style={{ padding: "32px 16px", maxWidth: "100%" }}>
+        <LogoForEmail />
+
         <div style={{ paddingTop: "8px" }}>
           <Text style={{ marginBottom: "24px", ...styles.p }}>
             Howdy,
@@ -76,7 +71,7 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
             .
           </Text>
         </div>
-      </Section>
+      </Container>
     </Html>
   );
 }
