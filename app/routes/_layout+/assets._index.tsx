@@ -18,6 +18,7 @@ import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
 import {
   clearCategoryFiltersAtom,
   clearTagFiltersAtom,
@@ -265,7 +266,7 @@ export default function AssetIndexPage() {
           </>
         ) : null}
       </Header>
-      <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
+      <ListContentWrapper>
         <Filters>
           <div className="flex items-center justify-around gap-6 md:justify-end">
             {hasFiltersToClear ? (
@@ -300,7 +301,7 @@ export default function AssetIndexPage() {
             </>
           }
         />
-      </div>
+      </ListContentWrapper>
     </>
   );
 }
