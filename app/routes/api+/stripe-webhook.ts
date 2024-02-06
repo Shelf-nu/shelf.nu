@@ -78,6 +78,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return new Response(null, { status: 200 });
       }
 
+      case "customer.subscription.paused": {
+        /** THis typpically handles expiring of subsciption */
+        const { subscription, customerId, tierId } =
+          await getDataFromStripeEvent(event);
+
+        if (!tierId) throw new Error("No tier ID found");
+
+        /** When its a trial subscription, update the tier of the user
+         * In that case we just set it back to free
+         */
+        if (subscription.status === "paused") {
+          await db.user.update({
+            where: { customerId },
+            data: {
+              tierId: "free",
+            },
+          });
+        }
+
+        return new Response(null, { status: 200 });
+      }
+
       case "customer.subscription.updated": {
         const { customerId, tierId } = await getDataFromStripeEvent(event);
 
