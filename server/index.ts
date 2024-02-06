@@ -27,16 +27,16 @@ const app = new Hono();
 /**
  * Serve build files from public/build
  */
-// app.use(
-//   "/build/*",
-//   cache(60 * 60 * 24 * 365), // 1 year
-//   serveStatic({ root: "./public" })
-// );
+app.use(
+  "/build/*",
+  cache(60 * 60 * 24 * 365), // 1 year
+  serveStatic({ root: "./public" })
+);
 
 /**
  * Serve static files from public
  */
-// app.use("/static/*", cache(60 * 60), serveStatic({ root: "./public" })); // 1 hour
+app.use("*", cache(60 * 60), serveStatic({ root: "./public" })); // 1 hour
 
 /**
  * Add logger middleware
@@ -84,17 +84,17 @@ app.use(refreshSession());
  * Add protected routes middleware
  *
  */
-app.use(
-  protect({
-    onFailRedirectTo: "/auth/sign-in",
-    publicPaths: [
-      "/",
-      "/auth/:path*", // :path* is a wildcard that will match any path after /auth
-      "/manifest.webmanifest", // adapt to your manifest path
-      "/healthcheck",
-    ],
-  })
-);
+// app.use(
+//   protect({
+//     onFailRedirectTo: "/auth/sign-in",
+//     publicPaths: [
+//       "/",
+//       "/auth/:path*", // :path* is a wildcard that will match any path after /auth
+//       "/manifest.webmanifest", // adapt to your manifest path
+//       "/healthcheck",
+//     ],
+//   })
+// );
 
 /**
  * Add remix middleware to Hono server

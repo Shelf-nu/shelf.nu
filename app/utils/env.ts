@@ -67,7 +67,6 @@ function getEnv(
 }
 
 export const EnvSchema = z.object({
-  APP_NAME: z.string().min(1),
   SESSION_SECRET: z.string().min(1),
   NODE_ENV: z.enum(["development", "production", "test"]),
   TZ: z.literal("UTC"),
@@ -77,7 +76,6 @@ type Env = z.infer<typeof EnvSchema>;
 
 const PublicEnvSchema = EnvSchema.pick({
   NODE_ENV: true,
-  APP_NAME: true,
 });
 
 export const env = (

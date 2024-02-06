@@ -11,7 +11,7 @@
     "db:deploy-migration:staging": "dotenv -e .env.staging -- prisma migrate deploy && prisma generate",
     "db:deploy-migration:production": "dotenv -e .env.production -- prisma migrate deploy && prisma generate",
     "dev": "TZ=UTC dotenv -e .env -- run-p dev:*",
-    "dev:remix": "remix dev | pino-pretty",
+    "dev:remix": "remix dev",
     "production:dev": "dotenv -e .env.production -- remix dev",
     "staging:dev": "dotenv -e .env.staging -- remix dev",
     "format": "prettier --write .",
