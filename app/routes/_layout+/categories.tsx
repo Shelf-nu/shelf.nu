@@ -11,6 +11,7 @@ import { ErrorBoundryComponent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
@@ -121,20 +122,20 @@ export default function CategoriesPage() {
           New Category
         </Button>
       </Header>
-      <div className="mt-8 flex flex-1 flex-col gap-2">
+      <ListContentWrapper>
         <Filters />
         <Outlet />
         <List
           ItemComponent={CategoryItem}
           headerChildren={
             <>
-              <Th>Description</Th>
-              <Th>Assets</Th>
-              <Th>Actions</Th>
+              <Th className="hidden md:table-cell">Description</Th>
+              <Th className="hidden md:table-cell">Assets</Th>
+              <Th className="hidden md:table-cell">Actions</Th>
             </>
           }
         />
-      </div>
+      </ListContentWrapper>
     </>
   );
 }

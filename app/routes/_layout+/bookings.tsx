@@ -12,6 +12,7 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
 import { commitAuthSession } from "~/modules/auth";
@@ -171,8 +172,8 @@ export default function BookingsIndexPage() {
           New booking
         </Button>
       </Header>
-      <div className="mt-2 flex flex-1 flex-col md:mx-0 md:mt-8 md:gap-2">
-        <Filters className="mb-2">
+      <ListContentWrapper>
+        <Filters>
           <StatusFilter />
         </Filters>
         <List
@@ -189,7 +190,7 @@ export default function BookingsIndexPage() {
             </>
           }
         />
-      </div>
+      </ListContentWrapper>
       <ContextualModal />
     </>
   ) : (

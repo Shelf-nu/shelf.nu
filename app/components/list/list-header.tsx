@@ -1,5 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
+import { Th } from "../table";
 
 export const ListHeader = ({
   children,
@@ -13,14 +14,14 @@ export const ListHeader = ({
   const { singular, plural } = modelName;
 
   return (
-    <thead>
+    <thead className="border-b ">
       <tr className="">
         {hideFirstColumn ? null : (
-          <th
-            className="border-b text-left font-normal text-gray-600"
+          <Th
+            className="text-left font-normal text-gray-600"
             colSpan={children ? 1 : 100}
           >
-            <div className="flex justify-between px-6 py-[14px] ">
+            <div className="flex justify-between">
               {perPage < totalItems ? (
                 <p>
                   {items.length} {items.length > 1 ? plural : singular}{" "}
@@ -32,7 +33,7 @@ export const ListHeader = ({
                 </span>
               )}
             </div>
-          </th>
+          </Th>
         )}
 
         {children}
