@@ -16,6 +16,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { ExportButton } from "~/components/assets/export-button";
 import { ErrorBoundryComponent } from "~/components/errors";
 import {
   Select,
@@ -39,6 +40,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
+import { canExportAssets } from "~/utils/subscription";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { MAX_SIZE } from "./settings.workspace.new";
 
@@ -83,6 +85,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
                   firstName: true,
                   lastName: true,
                   profilePicture: true,
+                  tier: {
+                    include: { tierLimit: true },
+                  },
                 },
               },
             },
@@ -109,6 +114,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json({
     header,
     currentOrganization: currentOrganization.organization,
+    canExportAssets: canExportAssets(
+      currentOrganization.organization.owner.tier.tierLimit
+    ),
     user,
   });
 }
@@ -182,7 +190,8 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function GeneralPage() {
-  const { currentOrganization, user } = useLoaderData<typeof loader>();
+  const { currentOrganization, user, canExportAssets } =
+    useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", EditWorkspaceFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -328,6 +337,23 @@ export default function GeneralPage() {
           </Button>
         </div>
       </Form>
+
+      <div className=" mb-6">
+        <h4 className="text-text-lg font-semibold">Export</h4>
+        <p className=" text-sm text-gray-600">
+          Download a backup of your assets. If you want to restore a backup,
+          please get in touch with support.
+        </p>
+        <p className=" font-italic mb-2 text-sm text-gray-600">
+          IMPORTANT NOTE: QR codes will not be included in the export. Due to
+          the nature of how Shelf's QR codes work, they currently cannot be
+          exported with assets because they have unique ids. This means that
+          importing will cause a desctuctive action, deleting all existing qr
+          codes. Currently, importing a backup will just create a new QR code
+          for each asset.
+        </p>
+        <ExportButton canExportAssets={canExportAssets} />
+      </div>
     </div>
   );
 }
