@@ -339,7 +339,7 @@ export default function GeneralPage() {
       </Form>
 
       <div className=" mb-6">
-        <h4 className="text-text-lg font-semibold">Export</h4>
+        <h4 className="text-text-lg font-semibold">Asset backup</h4>
         <p className=" text-sm text-gray-600">
           Download a backup of your assets. If you want to restore a backup,
           please get in touch with support.
@@ -347,10 +347,8 @@ export default function GeneralPage() {
         <p className=" font-italic mb-2 text-sm text-gray-600">
           IMPORTANT NOTE: QR codes will not be included in the export. Due to
           the nature of how Shelf's QR codes work, they currently cannot be
-          exported with assets because they have unique ids. This means that
-          importing will cause a desctuctive action, deleting all existing qr
-          codes. Currently, importing a backup will just create a new QR code
-          for each asset.
+          exported with assets because they have unique ids. <br />
+          Importing a backup will just create a new QR code for each asset.
         </p>
         <ExportButton canExportAssets={canExportAssets} />
       </div>
