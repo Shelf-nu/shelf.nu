@@ -35,12 +35,13 @@ Shelf's basic setup is based on a Remix stack by [rphlmr](https://github.com/rph
 - "Project API keys"
 - Add your `MAPTILER_TOKEN`, `SUPABASE_URL`, `SERVER_URL`, `SUPABASE_SERVICE_ROLE` (aka `service_role` `secret`), `SUPABASE_ANON_PUBLIC` (aka `anon` `public`) and `DATABASE_URL` in the `.env` file
   > **Note:** `SERVER_URL` is your localhost on dev. It'll work for magic link login
+- Make sure to set the database connection mode in Supabase to "transaction"
 
 ```shell
 # Most of the connection information can be found within the Supabase dashboard. Navigate to your project > Project Settings > Database.
 # There you will be able to find the values you need to use below
 # You can either copy the connection string and insert your password or use the connection parameters to build the string yourself
-DATABASE_URL="postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true&connection_limit=1"
+DATABASE_URL="postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true"
 
 # Direct URL is used by prisma to run migrations. Depending on how you run your migrations, you could skip this in your procution environment
 # More info here: https://www.prisma.io/docs/orm/prisma-client/setup-and-configuration/databases-connections#external-connection-poolers
