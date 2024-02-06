@@ -4,7 +4,6 @@ import { DIRECT_URL, NODE_ENV } from "../utils/env";
 let scheduler!: PgBoss;
 
 declare global {
-  // eslint-disable-next-line no-var
   var scheduler: PgBoss;
 }
 
