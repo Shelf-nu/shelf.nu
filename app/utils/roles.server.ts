@@ -43,6 +43,15 @@ export async function requirePermision(
   action: PermissionAction
 ) {
   const authSession = await requireAuthSession(request);
+
+  /**
+   * This can be very slow and consuming as there are a few queries with a few joins and this running on every loader/action makes it slow
+   * We need to find a  strategy to make it more performant. Idea:
+   * 1. Have a very light weight query that fetches the lastUpdated in relation to userOrganizationRoles. THis can be done both for roles and organizations
+   * 2. Store it in a cookie
+   * 3. If they mismatch, make the big query to check the actual data
+   */
+
   const {
     organizationId,
     userOrganizations,
