@@ -9,7 +9,7 @@ export const canExportAssets = (
   /** If the premium features are not enabled, just return true */
   if (!premiumIsEnabled()) return true;
   if (tierLimit?.canExportAssets === null) return false;
-  return tierLimit?.canExportAssets;
+  return tierLimit?.canExportAssets || false;
 };
 
 /** Important:
