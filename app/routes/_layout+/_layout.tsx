@@ -128,7 +128,7 @@ export default function App() {
               {workspaceSwitching ? (
                 <div className="flex size-full flex-col items-center justify-center text-center">
                   <Spinner />
-                  <p className="mt-2">Switching workspaces...</p>
+                  <p className="mt-2">Activating workspace...</p>
                 </div>
               ) : (
                 <Outlet />
