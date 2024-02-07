@@ -73,7 +73,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     const asset = await getAsset({ organizationId, id });
     if (!asset) {
-      // @TODO Solve error handling
       throw new ShelfStackError({
         title: "Asset Not Found",
         message: "We couldn't find the assset you were looking for.",

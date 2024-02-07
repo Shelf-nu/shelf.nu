@@ -44,7 +44,7 @@ export const hasPermission = async ({
       throw new ShelfStackError({
         message: `User doesn't belong to organization`,
         status: 403,
-        metadata: { userId, organizationId },
+        additionalData: { userId, organizationId },
       });
     }
     roles = userOrg.roles;

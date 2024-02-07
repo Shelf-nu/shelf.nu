@@ -5,6 +5,12 @@ import type { HTTPStatusCode } from "./http-status";
  */
 
 /**
+ * Additional data to help us debug.
+ */
+type SerializableValue = string | number | boolean | object | null | undefined;
+export type AdditionalData = Record<string, SerializableValue>;
+
+/**
  * @param message The message intended for the user.
  *
  * Other params are for logging purposes and help us debug.
@@ -18,7 +24,7 @@ export type FailureReason = {
   title?: string;
   status?: HTTPStatusCode;
   cause?: unknown;
-  metadata?: Record<string, unknown>;
+  additionalData?: AdditionalData;
   tag?: string;
   traceId?: string;
 };
@@ -28,7 +34,7 @@ export type FailureReason = {
  */
 export class ShelfStackError extends Error {
   readonly cause: FailureReason["cause"];
-  readonly metadata: FailureReason["metadata"];
+  readonly additionalData: FailureReason["additionalData"];
   readonly tag: FailureReason["tag"];
   readonly status: FailureReason["status"];
   readonly title: FailureReason["title"];
@@ -39,7 +45,7 @@ export class ShelfStackError extends Error {
     message,
     status = 500,
     cause = null,
-    metadata,
+    additionalData,
     tag = "untagged 🐞",
     traceId,
     title,
@@ -51,12 +57,11 @@ export class ShelfStackError extends Error {
       ? cause.status || status || 500
       : status || 500;
     this.cause = cause;
-    this.metadata = metadata;
+    this.additionalData = additionalData;
     this.tag = tag;
     this.traceId = traceId;
     this.title = title;
     this.isShelfError = isLikeShelfError(cause);
-    // this.isShelfError = true;
   }
 }
 
@@ -74,11 +79,15 @@ export function isLikeShelfError(cause: unknown): cause is ShelfStackError {
   );
 }
 
-export function makeShelfError(cause: unknown) {
+export function makeShelfError(
+  cause: unknown,
+  additionalData?: AdditionalData
+) {
   if (isLikeShelfError(cause)) {
     // copy the original error and fill in the maybe missing fields like status or traceId
     return new ShelfStackError({
       ...cause,
+      ...additionalData,
     });
   }
 
@@ -86,10 +95,15 @@ export function makeShelfError(cause: unknown) {
   return new ShelfStackError({
     cause,
     message: "Sorry, something went wrong.",
+    additionalData,
   });
 }
 
-export function handleUniqueConstraintError(cause: any, modelName: string) {
+export function handleUniqueConstraintError(
+  cause: any,
+  modelName: string,
+  additionalData?: AdditionalData
+) {
   if (cause?.code && cause.code === "P2002") {
     return {
       item: null,
@@ -101,8 +115,9 @@ export function handleUniqueConstraintError(cause: any, modelName: string) {
     throw new ShelfStackError({
       message: `Error creating ${modelName}: ${cause}`,
       cause,
-      metadata: {
+      additionalData: {
         modelName,
+        ...additionalData,
       },
     });
   }
