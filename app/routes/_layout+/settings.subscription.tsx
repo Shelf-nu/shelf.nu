@@ -22,6 +22,7 @@ import { db } from "~/database";
 import { getUserByID } from "~/modules/user";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
@@ -110,6 +111,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (!user) throw new Error("User not found");
 
+  /**
+   * We create the stripe customer on onboarding,
+   * however we keep this to double check in case something went wrong
+   */
   const customerId = user.customerId
     ? user.customerId
     : await createStripeCustomer({
@@ -117,6 +122,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         name: `${user.firstName} ${user.lastName}`,
         userId,
       });
+
+  if (!customerId) throw new ShelfStackError({ message: "Customer not found" });
 
   const stripeRedirectUrl = await createStripeCheckoutSession({
     userId,
