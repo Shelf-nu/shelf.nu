@@ -52,7 +52,7 @@ app.use(
     createSessionStorage() {
       const sessionStorage = createCookieSessionStorage({
         cookie: {
-          name: "session",
+          name: "__authSession",
           httpOnly: true,
           path: "/",
           sameSite: "lax",
@@ -84,17 +84,16 @@ app.use(refreshSession());
  * Add protected routes middleware
  *
  */
-// app.use(
-//   protect({
-//     onFailRedirectTo: "/auth/sign-in",
-//     publicPaths: [
-//       "/",
-//       "/auth/:path*", // :path* is a wildcard that will match any path after /auth
-//       "/manifest.webmanifest", // adapt to your manifest path
-//       "/healthcheck",
-//     ],
-//   })
-// );
+app.use(
+  protect({
+    onFailRedirectTo: "/auth/sign-in",
+    publicPaths: [
+      "/",
+      "/auth/:path*", // :path* is a wildcard that will match any path after /auth
+      "/healthcheck",
+    ],
+  })
+);
 
 /**
  * Add remix middleware to Hono server

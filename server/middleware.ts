@@ -1,4 +1,3 @@
-import { type MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
@@ -121,6 +120,7 @@ export function cache(seconds: number) {
 
 // TODO: REMOVE
 async function refreshAccessToken(refreshToken: string) {
+  // eslint-disable-next-line no-console
   console.log("refreshAccessToken", refreshToken);
   return {} as AuthSession;
 }

@@ -25,6 +25,7 @@ const REFRESH_ACCESS_TOKEN_THRESHOLD = 60 * 10; // 10 minutes left before token 
  * Session storage CRUD
  */
 
+// @TODO do we still need this?
 const sessionStorage = createCookieSessionStorage({
   cookie: {
     name: "__authSession",
