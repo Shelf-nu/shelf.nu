@@ -23,6 +23,7 @@ import type { UpdateUserPayload } from "~/modules/user/types";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { createStripeCustomer } from "~/utils/stripe.server";
 
 function createOnboardingSchema(userSignedUpWithPassword: boolean) {
   return z
@@ -116,10 +117,22 @@ export async function action({ request }: ActionFunctionArgs) {
   };
 
   /** Update the user */
-  const updatedUser = await updateUser(updateUserPayload);
+  const { user, errors } = await updateUser(updateUserPayload);
 
-  if (updatedUser.errors) {
-    return json({ errors: updatedUser.errors }, { status: 400 });
+  if (!user && errors) {
+    return json({ errors }, { status: 400 });
+  }
+
+  if (user) {
+    /** We create the stripe customer when the user gets onboarded.
+     * This is to make sure that we have a stripe customer for the user.
+     * We have to do it at this point, as its the first time we have the user's first and last name
+     */
+    await createStripeCustomer({
+      email: user.email,
+      name: `${user.firstName} ${user.lastName}`,
+      userId: user.id,
+    });
   }
 
   const organizationIdFromForm =

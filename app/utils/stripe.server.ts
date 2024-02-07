@@ -128,20 +128,22 @@ export const createStripeCustomer = async ({
   email: User["email"];
   userId: User["id"];
 }) => {
-  const { id: customerId } = await stripe.customers.create({
-    email,
-    name,
-    metadata: {
-      userId,
-    },
-  });
+  if (ENABLE_PREMIUM_FEATURES && stripe) {
+    const { id: customerId } = await stripe.customers.create({
+      email,
+      name,
+      metadata: {
+        userId,
+      },
+    });
 
-  await db.user.update({
-    where: { id: userId },
-    data: { customerId },
-  });
+    await db.user.update({
+      where: { id: userId },
+      data: { customerId },
+    });
 
-  return customerId;
+    return customerId;
+  }
 };
 
 /** Fetches customer based on ID */
