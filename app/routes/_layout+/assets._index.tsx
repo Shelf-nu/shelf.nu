@@ -12,7 +12,6 @@ import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ExportButton } from "~/components/assets/export-button";
 import { ImportButton } from "~/components/assets/import-button";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
@@ -46,7 +45,7 @@ import { ShelfStackError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
-import { canExportAssets, canImportAssets } from "~/utils/subscription";
+import { canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */
@@ -97,6 +96,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const { userId } = authSession;
 
+  // @TODO we shouldnt have to do this. We can combine it with the requirePermission
   const user = await db.user.findUnique({
     where: {
       id: userId,
@@ -203,7 +203,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       next,
       prev,
       modelName,
-      canExportAssets: canExportAssets(tierLimit),
       canImportAssets: canImportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
@@ -231,7 +230,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
-  const { canExportAssets, canImportAssets } = useLoaderData<typeof loader>();
+  const { canImportAssets } = useLoaderData<typeof loader>();
   const selectedCategories = useAtomValue(selectedCategoriesAtom);
   const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
 
@@ -253,7 +252,6 @@ export default function AssetIndexPage() {
       <Header>
         {!isSelfService ? (
           <>
-            <ExportButton canExportAssets={canExportAssets} />
             <ImportButton canImportAssets={canImportAssets} />
             <Button
               to="new"
