@@ -1,10 +1,10 @@
-// TODO: import your AuthSession
 export type AuthSession = {
-  userId: string;
-  refreshToken: string;
   accessToken: string;
-  expiresAt: number;
+  refreshToken: string;
+  userId: string;
+  email: string;
   expiresIn: number;
+  expiresAt: number;
 };
 
 export const authSessionKey = "auth";

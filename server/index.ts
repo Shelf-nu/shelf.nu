@@ -84,16 +84,18 @@ app.use(refreshSession());
  * Add protected routes middleware
  *
  */
-app.use(
-  protect({
-    onFailRedirectTo: "/auth/sign-in",
-    publicPaths: [
-      "/",
-      "/auth/:path*", // :path* is a wildcard that will match any path after /auth
-      "/healthcheck",
-    ],
-  })
-);
+// app.use(
+//   protect({
+//     onFailRedirectTo: "/login",
+//     publicPaths: [
+//       "/accept-invite/:path*", // :path* is a wildcard that will match any path after /accept-invite @TODO test this
+//       "/forgot-password",
+//       "/join",
+//       "/login", // :path* is a wildcard that will match any path after /auth
+//       "/healthcheck",
+//     ],
+//   })
+// );
 
 /**
  * Add remix middleware to Hono server

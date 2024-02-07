@@ -1,4 +1,5 @@
 import { createCookie, redirect } from "@remix-run/node";
+import type { AuthSession } from "server/session";
 import { NODE_ENV, SESSION_SECRET, getCurrentPath, isGet } from "~/utils";
 import {
   destroyCookie,
@@ -9,7 +10,6 @@ import {
 import { ShelfStackError } from "~/utils/error";
 
 import { getUserOrganizations } from "./service.server";
-import type { AuthSession } from "../auth/types";
 
 const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
   httpOnly: true,

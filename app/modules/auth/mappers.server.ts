@@ -1,7 +1,7 @@
+import type { AuthSession } from "server/session";
 import type { SupabaseAuthSession } from "~/integrations/supabase";
 
 import { ShelfStackError } from "~/utils/error";
-import type { AuthSession } from "./types";
 
 export async function mapAuthSession(
   supabaseAuthSession: SupabaseAuthSession | null

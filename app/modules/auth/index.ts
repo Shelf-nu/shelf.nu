@@ -14,5 +14,4 @@ export {
   requireAuthSession,
   getAuthSession,
 } from "./session.server";
-export * from "./types";
 export * from "./components";

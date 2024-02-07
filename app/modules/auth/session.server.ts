@@ -1,5 +1,6 @@
 import { createCookieSessionStorage, redirect } from "@remix-run/node";
 
+import type { AuthSession } from "server/session";
 import {
   getCurrentPath,
   isGet,
@@ -12,7 +13,6 @@ import {
 
 import { setCookie } from "~/utils/cookies.server";
 import { refreshAccessToken, verifyAuthSession } from "./service.server";
-import type { AuthSession } from "./types";
 import { destroySelectedOrganizationIdCookie } from "../organization/context.server";
 
 const SESSION_KEY = "authenticated";
