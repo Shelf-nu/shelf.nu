@@ -19,10 +19,7 @@ import type { SchedulerData } from "./types";
 
 /** ===== start: listens and creates chain of jobs for a given booking ===== */
 
-let counter = 0;
 export const registerBookingWorkers = () => {
-  console.log(`called registerBookingWorkers ${++counter} `);
-
   /** Check-out reminder */
   scheduler.work<SchedulerData>(
     schedulerKeys.checkoutReminder,
