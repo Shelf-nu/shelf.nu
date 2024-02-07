@@ -36,7 +36,11 @@ app.use(
 /**
  * Serve static files from public
  */
-app.use("*", cache(60 * 60), serveStatic({ root: "./public" })); // 1 hour
+app.use(
+  "/static/*",
+  cache(60 * 60), // cache for 1 hour
+  serveStatic({ root: "./public" })
+);
 
 /**
  * Add logger middleware
@@ -84,18 +88,18 @@ app.use(refreshSession());
  * Add protected routes middleware
  *
  */
-// app.use(
-//   protect({
-//     onFailRedirectTo: "/login",
-//     publicPaths: [
-//       "/accept-invite/:path*", // :path* is a wildcard that will match any path after /accept-invite @TODO test this
-//       "/forgot-password",
-//       "/join",
-//       "/login", // :path* is a wildcard that will match any path after /auth
-//       "/healthcheck",
-//     ],
-//   })
-// );
+app.use(
+  protect({
+    onFailRedirectTo: "/login",
+    publicPaths: [
+      "/accept-invite/:path*", // :path* is a wildcard that will match any path after /accept-invite @TODO test this
+      "/forgot-password",
+      "/join",
+      "/login", // :path* is a wildcard that will match any path after /auth
+      "/healthcheck",
+    ],
+  })
+);
 
 /**
  * Add remix middleware to Hono server

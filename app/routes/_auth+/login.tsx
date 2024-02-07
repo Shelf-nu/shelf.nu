@@ -20,7 +20,6 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 
 import {
-  getAuthSession,
   signInWithEmail,
   ContinueWithEmailForm,
   commitAuthSession,
@@ -36,12 +35,11 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await getAuthSession(request);
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
+  if (context.isAuthenticated) redirect("/"); //@TODO double check this
 
-  if (authSession) return redirect(`/`);
   return json({ title, subHeading });
 }
 
@@ -56,7 +54,7 @@ const LoginFormSchema = z.object({
   redirectTo: z.string().optional(),
 });
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
   const formData = await request.formData();
   /** Check the zo validations */
@@ -118,16 +116,13 @@ export async function action({ request }: ActionFunctionArgs) {
       orgType: "PERSONAL",
     });
 
-    return redirect(safeRedirect(redirectTo || "/"), {
+    // Set the auth session and redirect to the assets page
+    context.setSession({ ...authSession });
+
+    return redirect(safeRedirect(redirectTo || "/assets"), {
       headers: [
         setCookie(
           await setSelectedOrganizationIdCookie(personalOrganization.id)
-        ),
-        setCookie(
-          await commitAuthSession(request, {
-            authSession,
-            flashErrorMessage: null,
-          })
         ),
       ],
     });
@@ -195,7 +190,6 @@ export default function IndexLoginForm() {
           inputClassName="w-full"
           error={zo.errors.password()?.message || data?.errors?.password}
         />
-
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
         <Button
           className="text-center"

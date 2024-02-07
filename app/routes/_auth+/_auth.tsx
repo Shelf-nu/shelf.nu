@@ -35,7 +35,7 @@ export default function App() {
           <div className=" mb-8 text-center">
             <Link to="/">
               <img
-                src="/images/shelf-symbol.png"
+                src="/static/images/shelf-symbol.png"
                 alt="Shelf symbol"
                 className=" mx-auto mb-2 size-12"
               />
@@ -60,7 +60,7 @@ export default function App() {
           </a>
           <img
             className="absolute inset-0 size-full max-w-none object-cover"
-            src="/images/auth-cover.jpg"
+            src="/static/images/auth-cover.jpg"
             alt="John Singer Sargent - A Corner of the Library in Venice, 1904/1907 "
           />
         </aside>

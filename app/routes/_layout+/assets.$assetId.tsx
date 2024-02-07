@@ -325,7 +325,7 @@ export default function AssetDetailsPage() {
             <Card>
               <div className="flex items-center gap-3">
                 <img
-                  src="/images/default_pfp.jpg"
+                  src="/static/images/default_pfp.jpg"
                   alt="custodian"
                   className="size-10 rounded"
                 />

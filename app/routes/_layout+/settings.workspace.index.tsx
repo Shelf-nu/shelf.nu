@@ -154,7 +154,8 @@ export default function WorkspacePage() {
                           : org.name,
                       image:
                         org.type === "PERSONAL"
-                          ? user?.profilePicture || "/images/default_pfp.jpg"
+                          ? user?.profilePicture ||
+                            "/static/images/default_pfp.jpg"
                           : org?.imageId || undefined,
                       _count: org._count,
                       type: org.type,
@@ -201,7 +202,7 @@ const OrganizationRow = ({
             <div className="flex size-12 items-center justify-center">
               {isPersonalOrg(item) ? (
                 <img
-                  src={item?.image || "/images/default_pfp.jpg"}
+                  src={item?.image || "/static/images/default_pfp.jpg"}
                   alt={`${item.name}`}
                   className="size-12 rounded-[4px] object-cover"
                 />

@@ -315,7 +315,8 @@ const ListAssetContent = ({
         {item?.custodianUser ? (
           <UserBadge
             img={
-              item?.custodianUser?.profilePicture || "/images/default_pfp.jpg"
+              item?.custodianUser?.profilePicture ||
+              "/static/images/default_pfp.jpg"
             }
             name={`${item?.custodianUser?.firstName || ""} ${
               item?.custodianUser?.lastName || ""
@@ -329,7 +330,9 @@ const ListAssetContent = ({
       {/* Created by */}
       <Td className="hidden md:table-cell">
         <UserBadge
-          img={item?.creator?.profilePicture || "/images/default_pfp.jpg"}
+          img={
+            item?.creator?.profilePicture || "/static/images/default_pfp.jpg"
+          }
           name={`${item?.creator?.firstName || ""} ${
             item?.creator?.lastName || ""
           }`}
@@ -343,7 +346,7 @@ function UserBadge({ img, name }: { img?: string; name: string }) {
   return (
     <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
       <img
-        src={img || "/images/default_pfp.jpg"}
+        src={img || "/static/images/default_pfp.jpg"}
         className="mr-1 size-4 rounded-full"
         alt=""
       />

@@ -152,7 +152,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       name: `${um.user.firstName ? um.user.firstName : ""} ${
         um.user.lastName ? um.user.lastName : ""
       }`,
-      img: um.user.profilePicture || "/images/default_pfp.jpg",
+      img: um.user.profilePicture || "/static/images/default_pfp.jpg",
       email: um.user.email,
       status: "ACCEPTED",
       role: organizationRolesMap[um.roles[0]],
@@ -163,7 +163,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   for (const invite of invites as InviteWithTeamMember[]) {
     teamMembersWithUserOrInvite.push({
       name: invite.inviteeTeamMember.name,
-      img: "/images/default_pfp.jpg",
+      img: "/static/images/default_pfp.jpg",
       email: invite.inviteeEmail,
       status: invite.status,
       role: organizationRolesMap[invite?.roles[0]],

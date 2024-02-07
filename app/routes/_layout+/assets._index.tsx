@@ -81,6 +81,13 @@ export interface IndexResponse {
   };
 }
 
+// export async function loader({ context, request }: LoaderFunctionArgs) {
+//   const authSession = context.getSession();
+//   console.log("authSession", authSession);
+
+//   return json({});
+// }
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const {
     authSession,
@@ -93,9 +100,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     PermissionEntity.asset,
     PermissionAction.read
   );
-
   const { userId } = authSession;
-
   // @TODO we shouldnt have to do this. We can combine it with the requirePermission
   const user = await db.user.findUnique({
     where: {
@@ -129,12 +134,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     },
   });
-
   const tierLimit = await getOrganizationTierLimit({
     organizationId,
     organizations,
   });
-
   let {
     search,
     totalAssets,
@@ -151,11 +154,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     request,
     organizationId,
   });
-
   if (totalPages !== 0 && page > totalPages) {
     return redirect("/assets");
   }
-
   if (!assets) {
     throw new ShelfStackError({
       title: "Hey!",
@@ -163,16 +164,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: 404,
     });
   }
-
   if (role === OrganizationRoles.SELF_SERVICE) {
     /**
      * For self service users we dont return the assets that are not available to book
      */
     assets = assets.filter((a) => a.availableToBook);
   }
-
   assets = await updateAssetsWithBookingCustodians(assets);
-
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
       ? user?.firstName
@@ -182,12 +180,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? `${currentOrganization?.name}'s inventory`
       : "Your inventory",
   };
-
   const modelName = {
     singular: "asset",
     plural: "assets",
   };
-
   return json(
     {
       header,
@@ -223,86 +219,86 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 }
 
-export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.header.title) },
-];
+// export const meta: MetaFunction<typeof loader> = ({ data }) => [
+//   { title: appendToMetaTitle(data.header.title) },
+// ];
 
-export default function AssetIndexPage() {
-  const navigate = useNavigate();
-  const { canImportAssets } = useLoaderData<typeof loader>();
-  const selectedCategories = useAtomValue(selectedCategoriesAtom);
-  const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
+// export default function AssetIndexPage() {
+//   const navigate = useNavigate();
+//   const { canImportAssets } = useLoaderData<typeof loader>();
+//   const selectedCategories = useAtomValue(selectedCategoriesAtom);
+//   const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
 
-  const selectedTags = useAtomValue(selectedTagsAtom);
-  const [, clearTagFilters] = useAtom(clearTagFiltersAtom);
+//   const selectedTags = useAtomValue(selectedTagsAtom);
+//   const [, clearTagFilters] = useAtom(clearTagFiltersAtom);
 
-  const hasFiltersToClear =
-    selectedCategories.items.length > 0 || selectedTags.items.length > 0;
+//   const hasFiltersToClear =
+//     selectedCategories.items.length > 0 || selectedTags.items.length > 0;
 
-  const handleClearFilters = () => {
-    clearCategoryFilters();
-    clearTagFilters();
-  };
+//   const handleClearFilters = () => {
+//     clearCategoryFilters();
+//     clearTagFilters();
+//   };
 
-  const isSelfService = useUserIsSelfService();
+//   const isSelfService = useUserIsSelfService();
 
-  return (
-    <>
-      <Header>
-        {!isSelfService ? (
-          <>
-            <ImportButton canImportAssets={canImportAssets} />
-            <Button
-              to="new"
-              role="link"
-              aria-label={`new asset`}
-              icon="asset"
-              data-test-id="createNewAsset"
-            >
-              New Asset
-            </Button>
-          </>
-        ) : null}
-      </Header>
-      <ListContentWrapper>
-        <Filters>
-          <div className="flex items-center justify-around gap-6 md:justify-end">
-            {hasFiltersToClear ? (
-              <div className="hidden gap-6 md:flex">
-                <Button
-                  as="button"
-                  onClick={handleClearFilters}
-                  variant="link"
-                  className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
-                >
-                  Clear all filters
-                </Button>
-                <div className="text-gray-500"> | </div>
-              </div>
-            ) : null}
-            <CategoryFilters />
-            <TagFilters />
-          </div>
-        </Filters>
-        <List
-          ItemComponent={ListAssetContent}
-          navigate={(itemId) => navigate(itemId)}
-          className=" overflow-x-visible md:overflow-x-auto"
-          headerChildren={
-            <>
-              <Th className="hidden md:table-cell">Category</Th>
-              <Th className="hidden md:table-cell">Tags</Th>
-              {!isSelfService ? (
-                <Th className="hidden md:table-cell">Custodian</Th>
-              ) : null}
-              <Th className="hidden md:table-cell">Location</Th>
-            </>
-          }
-        />
-      </ListContentWrapper>
-    </>
-  );
-}
+//   return (
+//     <>
+//       <Header>
+//         {!isSelfService ? (
+//           <>
+//             <ImportButton canImportAssets={canImportAssets} />
+//             <Button
+//               to="new"
+//               role="link"
+//               aria-label={`new asset`}
+//               icon="asset"
+//               data-test-id="createNewAsset"
+//             >
+//               New Asset
+//             </Button>
+//           </>
+//         ) : null}
+//       </Header>
+//       <ListContentWrapper>
+//         <Filters>
+//           <div className="flex items-center justify-around gap-6 md:justify-end">
+//             {hasFiltersToClear ? (
+//               <div className="hidden gap-6 md:flex">
+//                 <Button
+//                   as="button"
+//                   onClick={handleClearFilters}
+//                   variant="link"
+//                   className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+//                 >
+//                   Clear all filters
+//                 </Button>
+//                 <div className="text-gray-500"> | </div>
+//               </div>
+//             ) : null}
+//             <CategoryFilters />
+//             <TagFilters />
+//           </div>
+//         </Filters>
+//         <List
+//           ItemComponent={ListAssetContent}
+//           navigate={(itemId) => navigate(itemId)}
+//           className=" overflow-x-visible md:overflow-x-auto"
+//           headerChildren={
+//             <>
+//               <Th className="hidden md:table-cell">Category</Th>
+//               <Th className="hidden md:table-cell">Tags</Th>
+//               {!isSelfService ? (
+//                 <Th className="hidden md:table-cell">Custodian</Th>
+//               ) : null}
+//               <Th className="hidden md:table-cell">Location</Th>
+//             </>
+//           }
+//         />
+//       </ListContentWrapper>
+//     </>
+//   );
+// }
 
 const ListAssetContent = ({
   item,
@@ -389,7 +385,7 @@ const ListAssetContent = ({
                   <img
                     src={
                       custody.custodian?.user?.profilePicture ||
-                      "/images/default_pfp.jpg"
+                      "/static/images/default_pfp.jpg"
                     }
                     className="mr-1 size-4 rounded-full"
                     alt=""
@@ -442,3 +438,7 @@ const GrayBadge = ({
     {children}
   </span>
 );
+
+export default function Test() {
+  return <div> Testicle 1-2</div>;
+}

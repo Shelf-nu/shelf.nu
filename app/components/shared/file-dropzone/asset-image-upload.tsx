@@ -37,7 +37,7 @@ export function AssetImageUpload() {
   //       <img
   //         className=" h-full object-contain"
   //         // @ts-ignore
-  //         src={!temp ? "/images/item-placeholder.png" : temp}
+  //         src={!temp ? "/static/images/item-placeholder.png" : temp}
   //         alt="Main "
   //       />
   //     </div>

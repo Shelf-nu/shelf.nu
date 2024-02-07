@@ -9,7 +9,7 @@ export default function QR() {
       <div className="flex h-full flex-col justify-center text-center">
         <Link to="./../" title="Home" className="mx-auto inline-block h-[32px]">
           <img
-            src="/images/logo-full-color(x2).png"
+            src="/static/images/logo-full-color(x2).png"
             alt="logo"
             className="h-full"
           />

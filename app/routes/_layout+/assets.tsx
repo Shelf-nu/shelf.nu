@@ -7,25 +7,14 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.read
-  );
+  // @TODO double check this
+  // const { authSession } = await requirePermision(
+  //   request,
+  //   PermissionEntity.asset,
+  //   PermissionAction.read
+  // );
 
-  return json(
-    {},
-    {
-      headers: [
-        [
-          "Set-Cookie",
-          await commitAuthSession(request, {
-            authSession,
-          }),
-        ],
-      ],
-    }
-  );
+  return json({});
 }
 
 export const handle = {
