@@ -1,5 +1,6 @@
-import { useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/settings.subscription";
+import { Button } from "../shared";
 
 export const CurrentPlanDetails = () => {
   const { activeProduct, expiration, subscription, isTrialSubscription } =
@@ -31,8 +32,15 @@ export const CurrentPlanDetails = () => {
             ) : (
               <>
                 {" "}
-                Your free trial expires on <b>{expiration.date}</b> at{" "}
-                <b>{expiration.time}</b>
+                Your{" "}
+                <Button
+                  to="https://www.shelf.nu/knowledge-base/free-trial"
+                  target="_blank"
+                  variant="link"
+                >
+                  free trial
+                </Button>{" "}
+                expires on <b>{expiration.date}</b> at <b>{expiration.time}</b>
               </>
             )}
           </p>

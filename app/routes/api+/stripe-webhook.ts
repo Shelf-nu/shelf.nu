@@ -23,6 +23,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       process.env.STRIPE_WEBHOOK_ENDPOINT_SECRET
     );
     // Handle the event
+    // Don't forget to enable the events in the Stripe dashboard
     switch (event.type) {
       case "checkout.session.completed": {
         // Here we need to update the user's tier in the database based on the subscription they created
