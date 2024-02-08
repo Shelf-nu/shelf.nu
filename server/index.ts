@@ -102,6 +102,12 @@ app.use(
       "/forgot-password",
       "/join",
       "/login", // :path* is a wildcard that will match any path after /auth
+      "/logout",
+      "/oauth/callback",
+      "/resend-email-confirmation",
+      "/reset-password",
+      "/send-magic-link",
+      "/verify-email",
       "/healthcheck",
     ],
   })

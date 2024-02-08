@@ -17,20 +17,17 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { getAuthSession, ContinueWithEmailForm } from "~/modules/auth";
+import { ContinueWithEmailForm } from "~/modules/auth";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { getUserByEmail } from "~/modules/user";
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await getAuthSession(request);
-
+export async function loader({ context }: LoaderFunctionArgs) {
   const title = "Create an account";
-
   const subHeading = "Start your journey with Shelf";
 
-  if (authSession) return redirect("/");
+  if (context.isAuthenticated) redirect("/assets"); //@TODO double check this
 
   return json({ title, subHeading });
 }

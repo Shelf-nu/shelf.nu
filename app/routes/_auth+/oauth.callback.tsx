@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { json, redirect } from "@remix-run/node";
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "@remix-run/node";
 import { useActionData, useFetcher, useSearchParams } from "@remix-run/react";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
@@ -9,11 +9,7 @@ import { z } from "zod";
 import { Button } from "~/components/shared";
 import { Spinner } from "~/components/shared/spinner";
 import { supabaseClient } from "~/integrations/supabase";
-import {
-  refreshAccessToken,
-  commitAuthSession,
-  getAuthSession,
-} from "~/modules/auth";
+import { refreshAccessToken } from "~/modules/auth";
 import { getOrganizationByUserId } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { tryCreateUser, getUserByEmail } from "~/modules/user";
@@ -22,15 +18,11 @@ import { setCookie } from "~/utils/cookies.server";
 
 // imagine a user go back after OAuth login success or type this URL
 // we don't want him to fall in a black hole 👽
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await getAuthSession(request);
-
-  if (authSession) return redirect("/");
-
+export async function loader() {
   return json({});
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const formData = await request.formData();
@@ -73,15 +65,13 @@ export async function action({ request }: ActionFunctionArgs) {
       orgType: "PERSONAL",
     });
 
+    // Set the session
+    context.setSession(authSession);
+
     return redirect(safeRedirectTo, {
       headers: [
         setCookie(
           await setSelectedOrganizationIdCookie(personalOrganization.id)
-        ),
-        setCookie(
-          await commitAuthSession(request, {
-            authSession,
-          })
         ),
       ],
     });
@@ -101,15 +91,12 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const personalOrganization = user.organizations[0];
+  // Set the session
+  context.setSession(authSession);
 
   return redirect(safeRedirectTo, {
     headers: [
       setCookie(await setSelectedOrganizationIdCookie(personalOrganization.id)),
-      setCookie(
-        await commitAuthSession(request, {
-          authSession,
-        })
-      ),
     ],
   });
 }
