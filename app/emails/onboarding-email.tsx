@@ -2,20 +2,9 @@
  * THis is the text version of the onboarding email
  */
 export const onboardingEmailText = ({
-  firstName, // assetsCount,
-  // emailContent,
-} // to,
-// hints,
-: {
+  firstName,
+}: {
   firstName: string;
-  // bookingName: string;
-  // assetsCount: number;
-  // custodian: string;
-  // from: Date;
-  // to: Date;
-  // bookingId: string;
-  // emailContent: string;
-  // hints: ClientHint;
 }) => `Hi ${firstName},
 
 I hope this message finds you well! My name is Carlos Virreira, co-founder of Shelf.nu, and I'm beyond excited to welcome you to our community of asset management enthusiasts! 🎉

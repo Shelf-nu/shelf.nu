@@ -8,6 +8,7 @@ import {
   Form,
   useActionData,
   useLoaderData,
+  useNavigation,
   useSearchParams,
 } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -15,14 +16,16 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared";
+import { onboardingEmailText } from "~/emails/onboarding-email";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getAuthUserByAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user";
 import type { UpdateUserPayload } from "~/modules/user/types";
-import { assertIsPost } from "~/utils";
+import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { sendEmail } from "~/utils/mail.server";
 import { createStripeCustomer } from "~/utils/stripe.server";
 
 function createOnboardingSchema(userSignedUpWithPassword: boolean) {
@@ -133,6 +136,12 @@ export async function action({ request }: ActionFunctionArgs) {
       name: `${user.firstName} ${user.lastName}`,
       userId: user.id,
     });
+    /** Send onboarding email */
+    await sendEmail({
+      to: user.email,
+      subject: "🏷️ Welcome to Shelf.nu",
+      text: onboardingEmailText({ firstName: user.firstName as string }),
+    });
   }
 
   const organizationIdFromForm =
@@ -172,6 +181,8 @@ export default function Onboarding() {
 
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
   const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
 
   return (
     <div className="p-6 sm:p-8">
@@ -248,7 +259,12 @@ export default function Onboarding() {
           </>
         )}
         <div>
-          <Button data-test-id="onboard" type="submit" width="full">
+          <Button
+            data-test-id="onboard"
+            type="submit"
+            width="full"
+            disabled={disabled}
+          >
             Submit
           </Button>
         </div>
