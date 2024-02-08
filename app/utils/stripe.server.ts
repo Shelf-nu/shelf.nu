@@ -128,20 +128,22 @@ export const createStripeCustomer = async ({
   email: User["email"];
   userId: User["id"];
 }) => {
-  const { id: customerId } = await stripe.customers.create({
-    email,
-    name,
-    metadata: {
-      userId,
-    },
-  });
+  if (ENABLE_PREMIUM_FEATURES && stripe) {
+    const { id: customerId } = await stripe.customers.create({
+      email,
+      name,
+      metadata: {
+        userId,
+      },
+    });
 
-  await db.user.update({
-    where: { id: userId },
-    data: { customerId },
-  });
+    await db.user.update({
+      where: { id: userId },
+      data: { customerId },
+    });
 
-  return customerId;
+    return customerId;
+  }
 };
 
 /** Fetches customer based on ID */
@@ -202,9 +204,36 @@ export function getCustomerActiveSubscription({
     customer?.subscriptions?.data.find((sub) => sub.status === "active") || null
   );
 }
+export function getCustomerTrialSubscription({
+  customer,
+}: {
+  customer: CustomerWithSubscriptions | null;
+}) {
+  return (
+    customer?.subscriptions?.data.find((sub) => sub.status === "trialing") ||
+    null
+  );
+}
 
 export async function fetchStripeSubscription(id: string) {
   return await stripe.subscriptions.retrieve(id, {
     expand: ["items.data.plan.product"],
   });
+}
+
+export async function getDataFromStripeEvent(event: Stripe.Event) {
+  // Here we need to update the user's tier in the database based on the subscription they created
+  const subscription = event.data.object as Stripe.Subscription;
+
+  /** Get the product */
+  const productId = subscription.items.data[0].plan.product as string;
+  const product = await stripe.products.retrieve(productId);
+  const customerId = subscription.customer as string;
+  const tierId = product?.metadata?.shelf_tier;
+
+  return {
+    subscription,
+    customerId,
+    tierId,
+  };
 }

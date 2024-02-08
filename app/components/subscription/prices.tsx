@@ -59,8 +59,8 @@ export const Price = ({
   price: Price;
   previousPlanName?: string;
 }) => {
-  const { activeSubscription } = useLoaderData<typeof loader>();
-  const activePlan = activeSubscription?.items.data[0]?.plan;
+  const { subscription, isTrialSubscription } = useLoaderData<typeof loader>();
+  const activePlan = subscription?.items.data[0]?.plan;
   const isFreePlan = price.id != "free";
   const features = price.product.metadata.features?.split(",") || [];
 
@@ -71,8 +71,7 @@ export const Price = ({
       <div
         className={tw(
           "mb-8 rounded-2xl border p-8",
-          activePlan?.id === price.id ||
-            (!activeSubscription && price.id === "free")
+          activePlan?.id === price.id || (!subscription && price.id === "free")
             ? "border-primary-500 bg-primary-50"
             : "bg-white"
         )}
@@ -91,9 +90,9 @@ export const Price = ({
               {price.product.name}
             </h2>
             {activePlan?.id === price.id ||
-            (!activeSubscription && price.id === "free") ? (
+            (!subscription && price.id === "free") ? (
               <div className="rounded-2xl bg-primary-50 px-2 py-0.5 text-[12px] font-medium text-primary-700 mix-blend-multiply">
-                Current
+                Current {isTrialSubscription ? "(Free Trial)" : ""}
               </div>
             ) : null}
           </div>
@@ -115,7 +114,7 @@ export const Price = ({
         </div>
       </div>
       <div className="mb-8">
-        <PriceCta price={price} activeSubscription={activeSubscription} />
+        <PriceCta price={price} subscription={subscription} />
       </div>
       {features ? (
         <>
