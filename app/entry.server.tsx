@@ -25,8 +25,10 @@ schedulerService
   .init()
   .then(() => {
     registerBookingWorkers();
+  })
+  .finally(() => {
     // eslint-disable-next-line no-console
-    console.log("Scheduler and workers registered");
+    console.log("Scheduler and workers registration completed");
   })
   // eslint-disable-next-line no-console
   .catch((e) => console.error(e));
