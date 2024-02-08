@@ -19,6 +19,7 @@ import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 
+import { onboardingEmailText } from "~/emails/onboarding-email";
 import {
   getAuthSession,
   signInWithEmail,
@@ -35,11 +36,18 @@ import {
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { sendEmail } from "~/utils/mail.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await getAuthSession(request);
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
+
+  sendEmail({
+    to: "carlos@shelf.nu",
+    subject: "Welcome to Shelf.nu",
+    text: onboardingEmailText({ firstName: "Nikolay" }),
+  });
 
   if (authSession) return redirect(`/`);
   return json({ title, subHeading });
