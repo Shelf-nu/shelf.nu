@@ -16,6 +16,7 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared";
+import { config } from "~/config/shelf.config";
 import { onboardingEmailText } from "~/emails/onboarding-email";
 import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getAuthUserByAccessToken } from "~/modules/auth/service.server";
@@ -136,12 +137,15 @@ export async function action({ request }: ActionFunctionArgs) {
       name: `${user.firstName} ${user.lastName}`,
       userId: user.id,
     });
-    /** Send onboarding email */
-    await sendEmail({
-      to: user.email,
-      subject: "🏷️ Welcome to Shelf.nu",
-      text: onboardingEmailText({ firstName: user.firstName as string }),
-    });
+
+    if (config.sendOnboardingEmail) {
+      /** Send onboarding email */
+      await sendEmail({
+        to: user.email,
+        subject: "🏷️ Welcome to Shelf.nu",
+        text: onboardingEmailText({ firstName: user.firstName as string }),
+      });
+    }
   }
 
   const organizationIdFromForm =
