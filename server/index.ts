@@ -12,6 +12,7 @@ import { getSession, session } from "remix-hono/session";
 import { initEnv, env } from "~/utils/env";
 import { ShelfStackError } from "~/utils/error";
 
+import { customLogger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey, type FlashData, type SessionData } from "./session";
 
@@ -45,7 +46,12 @@ app.use(
 /**
  * Add logger middleware
  */
-app.use("*", logger());
+app.use("*", logger(customLogger));
+app.use((c, next) => {
+  customLogger("\n"); // Some space between each request to make it easier to see
+  customLogger(c.req.url);
+  return next();
+});
 
 /**
  * Add session middleware

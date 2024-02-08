@@ -81,143 +81,142 @@ export interface IndexResponse {
   };
 }
 
-// export async function loader({ context, request }: LoaderFunctionArgs) {
-//   const authSession = context.getSession();
-//   console.log("authSession", authSession);
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
 
-//   return json({});
-// }
-
-export async function loader({ request }: LoaderFunctionArgs) {
-  const {
-    authSession,
-    organizationId,
-    organizations,
-    currentOrganization,
-    role,
-  } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.read
-  );
-  const { userId } = authSession;
-  // @TODO we shouldnt have to do this. We can combine it with the requirePermission
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      userOrganizations: {
-        where: {
-          userId,
-        },
-        select: {
-          organization: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              owner: {
-                select: {
-                  tier: {
-                    include: { tierLimit: true },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-  const tierLimit = await getOrganizationTierLimit({
-    organizationId,
-    organizations,
-  });
-  let {
-    search,
-    totalAssets,
-    perPage,
-    page,
-    prev,
-    next,
-    categories,
-    tags,
-    assets,
-    totalPages,
-    cookie,
-  } = await getPaginatedAndFilterableAssets({
-    request,
-    organizationId,
-  });
-  if (totalPages !== 0 && page > totalPages) {
-    return redirect("/assets");
-  }
-  if (!assets) {
-    throw new ShelfStackError({
-      title: "Hey!",
-      message: `No assets found`,
-      status: 404,
-    });
-  }
-  if (role === OrganizationRoles.SELF_SERVICE) {
-    /**
-     * For self service users we dont return the assets that are not available to book
-     */
-    assets = assets.filter((a) => a.availableToBook);
-  }
-  assets = await updateAssetsWithBookingCustodians(assets);
-  const header: HeaderData = {
-    title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
-        : `Your inventory`
-      : currentOrganization?.name
-      ? `${currentOrganization?.name}'s inventory`
-      : "Your inventory",
-  };
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
-  return json(
-    {
-      header,
-      items: assets,
-      categories,
-      tags,
-      search,
-      page,
-      totalItems: totalAssets,
-      perPage,
-      totalPages,
-      next,
-      prev,
-      modelName,
-      canImportAssets: canImportAssets(tierLimit),
-      searchFieldLabel: "Search assets",
-      searchFieldTooltip: {
-        title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-      },
-    },
-    {
-      headers: [
-        ["Set-Cookie", await userPrefs.serialize(cookie)],
-        [
-          "Set-Cookie",
-          await commitAuthSession(request, {
-            authSession,
-          }),
-        ],
-      ],
-    }
-  );
+  return json({});
 }
+
+// export async function loader({ request }: LoaderFunctionArgs) {
+//   const {
+//     authSession,
+//     organizationId,
+//     organizations,
+//     currentOrganization,
+//     role,
+//   } = await requirePermision(
+//     request,
+//     PermissionEntity.asset,
+//     PermissionAction.read
+//   );
+//   const { userId } = authSession;
+//   // @TODO we shouldnt have to do this. We can combine it with the requirePermission
+//   const user = await db.user.findUnique({
+//     where: {
+//       id: userId,
+//     },
+//     select: {
+//       firstName: true,
+//       tier: {
+//         include: { tierLimit: true },
+//       },
+//       userOrganizations: {
+//         where: {
+//           userId,
+//         },
+//         select: {
+//           organization: {
+//             select: {
+//               id: true,
+//               name: true,
+//               type: true,
+//               owner: {
+//                 select: {
+//                   tier: {
+//                     include: { tierLimit: true },
+//                   },
+//                 },
+//               },
+//             },
+//           },
+//         },
+//       },
+//     },
+//   });
+//   const tierLimit = await getOrganizationTierLimit({
+//     organizationId,
+//     organizations,
+//   });
+//   let {
+//     search,
+//     totalAssets,
+//     perPage,
+//     page,
+//     prev,
+//     next,
+//     categories,
+//     tags,
+//     assets,
+//     totalPages,
+//     cookie,
+//   } = await getPaginatedAndFilterableAssets({
+//     request,
+//     organizationId,
+//   });
+//   if (totalPages !== 0 && page > totalPages) {
+//     return redirect("/assets");
+//   }
+//   if (!assets) {
+//     throw new ShelfStackError({
+//       title: "Hey!",
+//       message: `No assets found`,
+//       status: 404,
+//     });
+//   }
+//   if (role === OrganizationRoles.SELF_SERVICE) {
+//     /**
+//      * For self service users we dont return the assets that are not available to book
+//      */
+//     assets = assets.filter((a) => a.availableToBook);
+//   }
+//   assets = await updateAssetsWithBookingCustodians(assets);
+//   const header: HeaderData = {
+//     title: isPersonalOrg(currentOrganization)
+//       ? user?.firstName
+//         ? `${user.firstName}'s inventory`
+//         : `Your inventory`
+//       : currentOrganization?.name
+//       ? `${currentOrganization?.name}'s inventory`
+//       : "Your inventory",
+//   };
+//   const modelName = {
+//     singular: "asset",
+//     plural: "assets",
+//   };
+//   return json(
+//     {
+//       header,
+//       items: assets,
+//       categories,
+//       tags,
+//       search,
+//       page,
+//       totalItems: totalAssets,
+//       perPage,
+//       totalPages,
+//       next,
+//       prev,
+//       modelName,
+//       canImportAssets: canImportAssets(tierLimit),
+//       searchFieldLabel: "Search assets",
+//       searchFieldTooltip: {
+//         title: "Search your asset database",
+//         text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+//       },
+//     },
+//     {
+//       headers: [
+//         ["Set-Cookie", await userPrefs.serialize(cookie)],
+//         [
+//           "Set-Cookie",
+//           await commitAuthSession(request, {
+//             authSession,
+//           }),
+//         ],
+//       ],
+//     }
+//   );
+// }
 
 // export const meta: MetaFunction<typeof loader> = ({ data }) => [
 //   { title: appendToMetaTitle(data.header.title) },

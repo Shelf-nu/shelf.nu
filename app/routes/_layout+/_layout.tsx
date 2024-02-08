@@ -11,7 +11,6 @@ import { useCrisp } from "~/components/marketing/crisp";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { db } from "~/database";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils";
@@ -31,8 +30,9 @@ import { canUseBookings } from "~/utils/subscription";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
     ? await db.user.findUnique({
@@ -102,14 +102,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       canUseBookings: canUseBookings(currentOrganization),
     },
     {
-      headers: [
-        setCookie(await userPrefs.serialize(cookie)),
-        setCookie(
-          await commitAuthSession(request, {
-            authSession,
-          })
-        ),
-      ],
+      headers: [setCookie(await userPrefs.serialize(cookie))],
     }
   );
 };

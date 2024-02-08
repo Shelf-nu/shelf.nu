@@ -19,11 +19,7 @@ import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 
-import {
-  signInWithEmail,
-  ContinueWithEmailForm,
-  commitAuthSession,
-} from "~/modules/auth";
+import { signInWithEmail, ContinueWithEmailForm } from "~/modules/auth";
 import { getOrganizationByUserId } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
@@ -35,10 +31,10 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
+export async function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
-  if (context.isAuthenticated) redirect("/"); //@TODO double check this
+  if (context.isAuthenticated) redirect("/assets"); //@TODO double check this
 
   return json({ title, subHeading });
 }

@@ -1,23 +1,7 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, useMatches } from "@remix-run/react";
-import { Outlet, redirect } from "react-router";
+import { Outlet } from "react-router";
 import { ErrorBoundryComponent } from "~/components/errors";
 import SubHeading from "~/components/shared/sub-heading";
-import { getAuthSession } from "~/modules/auth";
-import { getUserByEmail } from "~/modules/user";
-
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await getAuthSession(request);
-
-  const user = authSession
-    ? await getUserByEmail(authSession?.email)
-    : undefined;
-
-  if (user && user.onboarded) {
-    return redirect("assets");
-  }
-  return null;
-};
 
 export default function App() {
   const matches = useMatches();
