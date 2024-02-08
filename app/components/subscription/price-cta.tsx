@@ -5,17 +5,17 @@ import { Button } from "../shared";
 
 export const PriceCta = ({
   price,
-  activeSubscription,
+  subscription,
 }: {
   price: Price;
-  activeSubscription: Object | null;
+  subscription: Object | null;
 }) => {
   if (price.id === "free") return null;
 
-  if (activeSubscription) {
+  if (subscription) {
     return (
       <CustomerPortalForm
-        buttonText={activeSubscription ? "Manage subscription" : undefined}
+        buttonText={subscription ? "Manage subscription" : undefined}
       />
     );
   }

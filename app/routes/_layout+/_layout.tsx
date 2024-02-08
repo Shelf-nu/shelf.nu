@@ -10,10 +10,10 @@ import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
-import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 import {
   initializePerPageCookieOnLayout,
   setCookie,
@@ -95,7 +95,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
         (userOrg) => userOrg.organization.id === organizationId
       )?.roles,
       subscription,
-      enablePremium: ENABLE_PREMIUM_FEATURES,
+      enablePremium: config.enablePremiumFeatures,
       hideSupportBanner: cookie.hideSupportBanner,
       minimizedSidebar: cookie.minimizedSidebar,
       isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
