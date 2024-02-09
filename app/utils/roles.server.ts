@@ -6,9 +6,7 @@ import { requireOrganisationId } from "~/modules/organization/context.server";
 import type { PermissionAction, PermissionEntity } from "./permissions";
 import { validatePermission } from "./permissions";
 
-export async function requireUserWithPermission(name: Roles, request: Request) {
-  const { userId } = await requireAuthSession(request);
-
+export async function requireUserWithPermission(name: Roles, userId: string) {
   const user = await db.user.findFirst({
     where: { id: userId, roles: { some: { name } } },
   });
@@ -19,12 +17,8 @@ export async function requireUserWithPermission(name: Roles, request: Request) {
   return user;
 }
 
-export async function requireAdmin(request: Request) {
-  return requireUserWithPermission(Roles["ADMIN"], request);
-}
-
-export async function requireDealer(request: Request) {
-  return requireUserWithPermission(Roles["USER"], request);
+export async function requireAdmin(userId: string) {
+  return requireUserWithPermission(Roles["ADMIN"], userId);
 }
 
 export async function isAdmin(request: Request) {

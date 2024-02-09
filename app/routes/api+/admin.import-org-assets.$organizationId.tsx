@@ -11,7 +11,7 @@ import { requireAdmin } from "~/utils/roles.server";
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
     await requireAuthSession(request);
-    await requireAdmin(request);
+    await requireAdmin(userId);
     const organizationId = getRequiredParam(params, "organizationId");
     const organization = await db.organization.findUnique({
       where: { id: organizationId },

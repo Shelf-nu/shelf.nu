@@ -21,8 +21,9 @@ export type UserWithQrCodes = User & {
   qrCodes: QrCodeWithAsset[];
 };
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  requireAdmin(request);
+export const loader = async ({ context, params }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
   const userId = params.userId as string;
   const user = (await db.user.findUnique({
     where: { id: userId },
@@ -57,7 +58,7 @@ export const handle = {
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  await requireAdmin(request);
+  await requireAdmin(authSession.userId);
   /** ID of the target user we are generating codes for */
   const userId = params.userId as string;
 

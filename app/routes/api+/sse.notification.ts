@@ -1,11 +1,11 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 
 import { eventStream } from "remix-utils/sse/server";
-import { requireAuthSession } from "~/modules/auth";
+
 import { emitter } from "~/utils/emitter/emitter.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
 
   return eventStream(request.signal, function setup(send) {
     /** Notification is a strigified json object with the shape {@link Notification} */

@@ -112,6 +112,7 @@ app.use(
       "/healthcheck",
       "/api/public-stats",
       "/api/oss-friends",
+      "/api/stripe-webhook",
     ],
   })
 );

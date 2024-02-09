@@ -6,7 +6,7 @@ import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await requireAuthSession(request);
-  await requireAdmin(request);
+  await requireAdmin(userId);
   const organizationId = getRequiredParam(params, "organizationId");
   // const { organizations } = await requireOrganisationId({userId: authSession.userId, request});
 

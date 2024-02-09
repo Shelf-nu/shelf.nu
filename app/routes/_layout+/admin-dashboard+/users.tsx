@@ -9,8 +9,9 @@ import { Td } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await requireAdmin(request);
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
   const { search, totalUsers, perPage, page, prev, next, users, totalPages } =
     await getPaginatedAndFilterableUsers({
       request,
