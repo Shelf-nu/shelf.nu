@@ -1,4 +1,7 @@
+import { useEffect } from "react";
 import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useAtom } from "jotai";
+import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import {
   Select,
   SelectContent,
@@ -11,12 +14,21 @@ import { Button } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import ProfilePicture from "~/components/user/profile-picture";
 import type { loader } from "~/routes/_layout+/_layout";
-import { tw } from "~/utils";
+import { isFormProcessing, tw } from "~/utils";
 
 export const OrganizationSelect = () => {
   const { organizations, currentOrganizationId } =
     useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+
+  /** We track if the fetcher is submitting */
+  const isProcessing = isFormProcessing(fetcher.state);
+  const [_workspaceSwitching, setWorkspaceSwitching] = useAtom(
+    switchingWorkspaceAtom
+  );
+  useEffect(() => {
+    setWorkspaceSwitching(isProcessing);
+  }, [isProcessing, setWorkspaceSwitching]);
 
   return (
     <fetcher.Form

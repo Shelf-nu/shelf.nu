@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import { type PropsWithChildren } from "react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -100,6 +100,7 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
 
 function App() {
   const { maintenanceMode } = useLoaderData<typeof loader>();
+
   return (
     <Document>{maintenanceMode ? <MaintenanceMode /> : <Outlet />}</Document>
   );
