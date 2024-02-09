@@ -5,7 +5,6 @@ import { useLoaderData, Link } from "@remix-run/react";
 import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { deleteUser } from "~/modules/user";
 import { isDelete } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -56,8 +55,12 @@ export const handle = {
   breadcrumb: () => "User details",
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
   await requireAdmin(authSession.userId);
   /** ID of the target user we are generating codes for */
   const userId = params.userId as string;

@@ -63,14 +63,18 @@ export const ErrorBoundryComponent = ({
     }
   } else if (error instanceof Error) {
     return (
-      <ErrorContent
-        title={title ? title : "Oops, something went wrong"}
-        message={
-          NODE_ENV === "development"
-            ? error.message
-            : "Please try again and if the issue persists, contact support"
-        }
-      />
+      <>
+        <ErrorContent
+          title={title ? title : "Oops, something went wrong"}
+          message={
+            NODE_ENV === "development"
+              ? error.message
+              : "Please try again and if the issue persists, contact support"
+          }
+        />
+        {/* @TODO this needs to be tested */}
+        {NODE_ENV === "development" ? <pre>{error.stack}</pre> : null}
+      </>
     );
   } else {
     return (

@@ -12,7 +12,6 @@ import { getSession, session } from "remix-hono/session";
 import { initEnv, env } from "~/utils/env";
 import { ShelfStackError } from "~/utils/error";
 
-import { customLogger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey, type FlashData, type SessionData } from "./session";
 
@@ -122,6 +121,7 @@ app.use(
  */
 app.use(
   remix({
+    // @ts-ignore
     build,
     mode,
     getLoadContext(context) {

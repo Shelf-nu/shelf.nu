@@ -1,7 +1,6 @@
 import { Roles } from "@prisma/client";
 import { json } from "@remix-run/node";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import type { PermissionAction, PermissionEntity } from "./permissions";
 import { validatePermission } from "./permissions";
@@ -21,11 +20,14 @@ export async function requireAdmin(userId: string) {
   return requireUserWithPermission(Roles["ADMIN"], userId);
 }
 
-export async function isAdmin(request: Request) {
-  const { userId } = await requireAuthSession(request);
+export async function isAdmin(context: Record<string, any>) {
+  const authSession = context.getSession();
 
   const user = await db.user.findFirst({
-    where: { id: userId, roles: { some: { name: Roles["ADMIN"] } } },
+    where: {
+      id: authSession.userId,
+      roles: { some: { name: Roles["ADMIN"] } },
+    },
   });
 
   return !!user;
