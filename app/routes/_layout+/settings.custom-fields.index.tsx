@@ -33,12 +33,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId, organizations } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId, organizations } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.customField,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.customField,
+    action: PermissionAction.read,
+  });
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -154,9 +156,13 @@ function TeamMemberRow({ item }: { item: CustomField }) {
         </span>
       </Td>
       <Td>
-        {!item.active && (
+        {!item.active ? (
           <Badge color="#dc2626" withDot={false}>
             Inactive
+          </Badge>
+        ) : (
+          <Badge color="#059669" withDot={false}>
+            Active
           </Badge>
         )}
       </Td>

@@ -22,12 +22,15 @@ import { requirePermision } from "~/utils/roles.server";
 
 const title = "New Custom Field";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId, organizations } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+
+  const { organizationId, organizations } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.customField,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.customField,
+    action: PermissionAction.create,
+  });
 
   await assertUserCanCreateMoreCustomFields({ organizations, organizationId });
 
@@ -48,12 +51,15 @@ export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export async function action({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId, organizations } = await requirePermision(
+export async function action({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+
+  const { organizationId, organizations } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.customField,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.customField,
+    action: PermissionAction.create,
+  });
   await assertUserCanCreateMoreCustomFields({
     organizations,
     organizationId,

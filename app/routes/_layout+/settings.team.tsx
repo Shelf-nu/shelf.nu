@@ -19,7 +19,6 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { TeamMembersTable } from "~/components/workspace/team-members-table";
 import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { requireOrganisationId } from "~/modules/organization/context.server";
@@ -186,13 +185,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   });
 }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  // @TODO shouldnt we require permissions here
   const { organizationId } = await requireOrganisationId({
-    userId: authSession.userId,
+    userId: userId,
     request,
   });
-  const { userId } = authSession;
 
   const formData = await request.formData();
   const intent = formData.get("intent") as ActionIntent;

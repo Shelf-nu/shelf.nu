@@ -14,7 +14,6 @@ import { Table, Td, Th } from "~/components/table";
 import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
 import { db } from "~/database";
 import { useUserData } from "~/hooks";
-import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -22,8 +21,9 @@ import { ShelfStackError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  // @TODO permissions here? Not sure what we have to do and why we dont have anything
   const { organizationId } = await requireOrganisationId({
     userId: authSession.userId,
     request,

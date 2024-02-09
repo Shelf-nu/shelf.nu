@@ -46,12 +46,13 @@ app.use(
 /**
  * Add logger middleware
  */
-app.use("*", logger(customLogger));
-app.use((c, next) => {
-  customLogger("\n"); // Some space between each request to make it easier to see
-  customLogger(c.req.url);
-  return next();
-});
+app.use("*", logger());
+// app.use("*", logger(customLogger));
+// app.use((c, next) => {
+//   customLogger("\n"); // Some space between each request to make it easier to see
+//   customLogger(c.req.url);
+//   return next();
+// });
 
 /**
  * Add session middleware
