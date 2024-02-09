@@ -37,12 +37,17 @@ export async function isAdmin(request: Request) {
   return !!user;
 }
 
-export async function requirePermision(
-  userId: string,
-  request: Request,
-  entity: PermissionEntity,
-  action: PermissionAction
-) {
+export async function requirePermision({
+  userId,
+  request,
+  entity,
+  action,
+}: {
+  userId: string;
+  request: Request;
+  entity: PermissionEntity;
+  action: PermissionAction;
+}) {
   /**
    * This can be very slow and consuming as there are a few queries with a few joins and this running on every loader/action makes it slow
    * We need to find a  strategy to make it more performant. Idea:
@@ -50,8 +55,6 @@ export async function requirePermision(
    * 2. Store it in a cookie
    * 3. If they mismatch, make the big query to check the actual data
    */
-
-  console.log("userId inside requirePermision", userId);
 
   const {
     organizationId,

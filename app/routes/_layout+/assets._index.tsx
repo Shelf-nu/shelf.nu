@@ -37,7 +37,6 @@ import {
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
@@ -86,12 +85,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   const { organizationId, organizations, currentOrganization, role } =
-    await requirePermision(
+    await requirePermision({
       userId,
       request,
-      PermissionEntity.asset,
-      PermissionAction.read
-    );
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
   // @TODO we shouldnt have to do this. We can combine it with the requirePermission
   const user = await db.user.findUnique({
     where: {
@@ -197,15 +196,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       },
     },
     {
-      headers: [
-        ["Set-Cookie", await userPrefs.serialize(cookie)],
-        [
-          "Set-Cookie",
-          await commitAuthSession(request, {
-            authSession,
-          }),
-        ],
-      ],
+      headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
     }
   );
 }

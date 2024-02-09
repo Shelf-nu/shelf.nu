@@ -2,6 +2,7 @@ import type { AuthSession } from "server/session";
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { SERVER_URL } from "~/utils/env";
 
+import { ShelfStackError } from "~/utils/error";
 import { mapAuthSession } from "./mappers.server";
 
 export async function createEmailAuthAccount(email: string, password: string) {
@@ -121,15 +122,20 @@ export async function getAuthUserByAccessToken(accessToken: string) {
 export async function getAuthResponseByAccessToken(accessToken: string) {
   return await getSupabaseAdmin().auth.getUser(accessToken);
 }
+
 export async function refreshAccessToken(
   refreshToken?: string
 ): Promise<AuthSession | null> {
-  if (!refreshToken) return null;
+  if (!refreshToken) {
+    throw new ShelfStackError({ message: "Refresh token is required" });
+  }
 
   const { data, error } = await getSupabaseAdmin().auth.refreshSession({
     refresh_token: refreshToken,
   });
 
+  // @TODO - handle error. BEtter to throw here
+  // don't allow null authSession or you will have massives .? everywhere 😅
   if (!data.session || error) return null;
 
   return await mapAuthSession(data.session);

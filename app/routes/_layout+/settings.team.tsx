@@ -57,14 +57,19 @@ type InviteWithTeamMember = Pick<
   };
 };
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.teamMember,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.read,
+  });
 
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId({
+    userId: authSession.userId,
+    request,
+  });
   const [organization, userMembers, invites, teamMembers] =
     await db.$transaction([
       /** Get the org */
@@ -183,7 +188,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId({
+    userId: authSession.userId,
+    request,
+  });
   const { userId } = authSession;
 
   const formData = await request.formData();

@@ -25,7 +25,10 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId({
+    userId: authSession.userId,
+    request,
+  });
   const { userId } = authSession;
   assertUserCanCreateMoreOrganizations(userId);
 

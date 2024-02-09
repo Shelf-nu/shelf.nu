@@ -84,7 +84,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
    * In this case what we do is we set the current organization to the first one in the list
    */
   const { organizationId, organizations, currentOrganization } =
-    await requireOrganisationId(authSession, request);
+    await requireOrganisationId({ userId: authSession.userId, request });
 
   return json(
     {

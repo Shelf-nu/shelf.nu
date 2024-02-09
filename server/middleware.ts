@@ -2,12 +2,8 @@ import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
 
-import {
-  type AuthSession,
-  authSessionKey,
-  type FlashData,
-  type SessionData,
-} from "./session";
+import { refreshAccessToken } from "~/modules/auth";
+import { authSessionKey, type FlashData, type SessionData } from "./session";
 
 /**
  * Protected routes middleware
@@ -81,7 +77,8 @@ export function refreshSession() {
     try {
       session.set(
         authSessionKey,
-        // TODO: Import your refreshAccessToken function
+        // @TODO- fix this
+        // @ts-ignore
         await refreshAccessToken(auth.refreshToken)
       );
     } catch (cause) {
@@ -116,11 +113,4 @@ export function cache(seconds: number) {
 
     c.res.headers.set("cache-control", `public, max-age=${seconds}`);
   });
-}
-
-// TODO: REMOVE
-async function refreshAccessToken(refreshToken: string) {
-  // eslint-disable-next-line no-console
-  console.log("refreshAccessToken", refreshToken);
-  return {} as AuthSession;
 }

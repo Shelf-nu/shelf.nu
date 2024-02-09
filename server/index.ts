@@ -109,6 +109,8 @@ app.use(
       "/send-magic-link",
       "/verify-email",
       "/healthcheck",
+      "/api/public-stats",
+      "/api/oss-friends",
     ],
   })
 );
@@ -118,7 +120,6 @@ app.use(
  */
 app.use(
   remix({
-    // @ts-ignore
     build,
     mode,
     getLoadContext(context) {

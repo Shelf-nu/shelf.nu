@@ -8,7 +8,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await requireAuthSession(request);
   await requireAdmin(request);
   const organizationId = getRequiredParam(params, "organizationId");
-  // const { organizations } = await requireOrganisationId(authSession, request);
+  // const { organizations } = await requireOrganisationId({userId: authSession.userId, request});
 
   /** We dont need to do this anymore, because this is only for admin */
   // await assertUserCanExportAssets({ organizationId, organizations });
