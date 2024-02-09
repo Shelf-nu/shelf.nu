@@ -84,7 +84,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   if (!user) {
     return json(
       {
-        message: "create-user-error",
+        message: "We had trouble creating your account. Please try again.",
       },
       { status: 500 }
     );

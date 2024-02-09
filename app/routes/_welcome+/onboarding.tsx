@@ -18,7 +18,6 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared";
 import { config } from "~/config/shelf.config";
 import { onboardingEmailText } from "~/emails/onboarding-email";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getAuthUserByAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user";
@@ -58,8 +57,8 @@ function createOnboardingSchema(userSignedUpWithPassword: boolean) {
     );
 }
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
+export async function loader({ context }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const user = await getUserByID(authSession?.userId);
 
   /** If the user is already onboarded, we assume they finished the process so we send them to the index */
@@ -90,10 +89,10 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
 
-  const authSession = await requireAuthSession(request);
+  const authSession = context.getSession();
   const formData = await request.formData();
 
   const userSignedUpWithPassword =
@@ -152,14 +151,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const organizationIdFromForm =
     (formData.get("organizationId") as string) || null;
 
-  const headers = [
-    setCookie(
-      await commitAuthSession(request, {
-        authSession,
-        flashErrorMessage: null,
-      })
-    ),
-  ];
+  const headers = [];
 
   if (organizationIdFromForm) {
     headers.push(

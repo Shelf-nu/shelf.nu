@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
+import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -14,22 +10,14 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { supabaseClient } from "~/integrations/supabase";
 
-import {
-  commitAuthSession,
-  getAuthSession,
-  refreshAccessToken,
-  updateAccountPassword,
-} from "~/modules/auth";
+import { refreshAccessToken, updateAccountPassword } from "~/modules/auth";
 import { assertIsPost, isFormProcessing, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await getAuthSession(request);
+export async function loader() {
   const title = "Set new password";
   const subHeading =
     "Your new password must be different to previously used passwords.";
-
-  if (authSession) return redirect("/");
 
   return json({ title, subHeading });
 }
@@ -54,7 +42,7 @@ const ResetPasswordSchema = z
     return { password, confirmPassword, refreshToken };
   });
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const formData = await request.formData();
@@ -97,13 +85,9 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  return redirect("/", {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, {
-        authSession,
-      }),
-    },
-  });
+  // Commit the session and redirect
+  context.setSession({ ...authSession });
+  return redirect("/", {});
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
