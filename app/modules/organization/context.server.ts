@@ -1,5 +1,4 @@
 import { createCookie, redirect } from "@remix-run/node";
-import type { AuthSession } from "server/session";
 import { NODE_ENV, SESSION_SECRET, getCurrentPath, isGet } from "~/utils";
 import {
   destroyCookie,
@@ -39,10 +38,13 @@ export function destroySelectedOrganizationIdCookie() {
   return destroyCookie(selectedOrganizationIdCookie);
 }
 
-export async function requireOrganisationId(
-  { userId }: AuthSession,
-  request: Request
-) {
+export async function requireOrganisationId({
+  userId,
+  request,
+}: {
+  userId: string;
+  request: Request;
+}) {
   const organizationId = await getSelectedOrganizationIdCookie(request);
 
   /** There could be a case when you get removed from an organization while browsing it.

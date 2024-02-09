@@ -38,12 +38,11 @@ export async function isAdmin(request: Request) {
 }
 
 export async function requirePermision(
+  userId: string,
   request: Request,
   entity: PermissionEntity,
   action: PermissionAction
 ) {
-  const authSession = await requireAuthSession(request);
-
   /**
    * This can be very slow and consuming as there are a few queries with a few joins and this running on every loader/action makes it slow
    * We need to find a  strategy to make it more performant. Idea:
@@ -52,12 +51,14 @@ export async function requirePermision(
    * 3. If they mismatch, make the big query to check the actual data
    */
 
+  console.log("userId inside requirePermision", userId);
+
   const {
     organizationId,
     userOrganizations,
     organizations,
     currentOrganization,
-  } = await requireOrganisationId(authSession, request);
+  } = await requireOrganisationId({ userId, request });
 
   const roles = userOrganizations.find(
     (o) => o.organization.id === organizationId
@@ -68,11 +69,10 @@ export async function requirePermision(
     action,
     entity,
     organizationId,
-    userId: authSession.userId,
+    userId,
   });
 
   return {
-    authSession,
     organizations,
     organizationId,
     currentOrganization,

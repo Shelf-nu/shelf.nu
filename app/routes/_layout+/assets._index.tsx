@@ -83,221 +83,213 @@ export interface IndexResponse {
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
+  const { userId } = authSession;
 
-  return json({});
+  const { organizationId, organizations, currentOrganization, role } =
+    await requirePermision(
+      userId,
+      request,
+      PermissionEntity.asset,
+      PermissionAction.read
+    );
+  // @TODO we shouldnt have to do this. We can combine it with the requirePermission
+  const user = await db.user.findUnique({
+    where: {
+      id: userId,
+    },
+    select: {
+      firstName: true,
+      tier: {
+        include: { tierLimit: true },
+      },
+      userOrganizations: {
+        where: {
+          userId,
+        },
+        select: {
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              owner: {
+                select: {
+                  tier: {
+                    include: { tierLimit: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+  let {
+    search,
+    totalAssets,
+    perPage,
+    page,
+    prev,
+    next,
+    categories,
+    tags,
+    assets,
+    totalPages,
+    cookie,
+  } = await getPaginatedAndFilterableAssets({
+    request,
+    organizationId,
+  });
+  if (totalPages !== 0 && page > totalPages) {
+    return redirect("/assets");
+  }
+  if (!assets) {
+    throw new ShelfStackError({
+      title: "Hey!",
+      message: `No assets found`,
+      status: 404,
+    });
+  }
+  if (role === OrganizationRoles.SELF_SERVICE) {
+    /**
+     * For self service users we dont return the assets that are not available to book
+     */
+    assets = assets.filter((a) => a.availableToBook);
+  }
+  assets = await updateAssetsWithBookingCustodians(assets);
+  const header: HeaderData = {
+    title: isPersonalOrg(currentOrganization)
+      ? user?.firstName
+        ? `${user.firstName}'s inventory`
+        : `Your inventory`
+      : currentOrganization?.name
+      ? `${currentOrganization?.name}'s inventory`
+      : "Your inventory",
+  };
+  const modelName = {
+    singular: "asset",
+    plural: "assets",
+  };
+  return json(
+    {
+      header,
+      items: assets,
+      categories,
+      tags,
+      search,
+      page,
+      totalItems: totalAssets,
+      perPage,
+      totalPages,
+      next,
+      prev,
+      modelName,
+      canImportAssets: canImportAssets(tierLimit),
+      searchFieldLabel: "Search assets",
+      searchFieldTooltip: {
+        title: "Search your asset database",
+        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+      },
+    },
+    {
+      headers: [
+        ["Set-Cookie", await userPrefs.serialize(cookie)],
+        [
+          "Set-Cookie",
+          await commitAuthSession(request, {
+            authSession,
+          }),
+        ],
+      ],
+    }
+  );
 }
 
-// export async function loader({ request }: LoaderFunctionArgs) {
-//   const {
-//     authSession,
-//     organizationId,
-//     organizations,
-//     currentOrganization,
-//     role,
-//   } = await requirePermision(
-//     request,
-//     PermissionEntity.asset,
-//     PermissionAction.read
-//   );
-//   const { userId } = authSession;
-//   // @TODO we shouldnt have to do this. We can combine it with the requirePermission
-//   const user = await db.user.findUnique({
-//     where: {
-//       id: userId,
-//     },
-//     select: {
-//       firstName: true,
-//       tier: {
-//         include: { tierLimit: true },
-//       },
-//       userOrganizations: {
-//         where: {
-//           userId,
-//         },
-//         select: {
-//           organization: {
-//             select: {
-//               id: true,
-//               name: true,
-//               type: true,
-//               owner: {
-//                 select: {
-//                   tier: {
-//                     include: { tierLimit: true },
-//                   },
-//                 },
-//               },
-//             },
-//           },
-//         },
-//       },
-//     },
-//   });
-//   const tierLimit = await getOrganizationTierLimit({
-//     organizationId,
-//     organizations,
-//   });
-//   let {
-//     search,
-//     totalAssets,
-//     perPage,
-//     page,
-//     prev,
-//     next,
-//     categories,
-//     tags,
-//     assets,
-//     totalPages,
-//     cookie,
-//   } = await getPaginatedAndFilterableAssets({
-//     request,
-//     organizationId,
-//   });
-//   if (totalPages !== 0 && page > totalPages) {
-//     return redirect("/assets");
-//   }
-//   if (!assets) {
-//     throw new ShelfStackError({
-//       title: "Hey!",
-//       message: `No assets found`,
-//       status: 404,
-//     });
-//   }
-//   if (role === OrganizationRoles.SELF_SERVICE) {
-//     /**
-//      * For self service users we dont return the assets that are not available to book
-//      */
-//     assets = assets.filter((a) => a.availableToBook);
-//   }
-//   assets = await updateAssetsWithBookingCustodians(assets);
-//   const header: HeaderData = {
-//     title: isPersonalOrg(currentOrganization)
-//       ? user?.firstName
-//         ? `${user.firstName}'s inventory`
-//         : `Your inventory`
-//       : currentOrganization?.name
-//       ? `${currentOrganization?.name}'s inventory`
-//       : "Your inventory",
-//   };
-//   const modelName = {
-//     singular: "asset",
-//     plural: "assets",
-//   };
-//   return json(
-//     {
-//       header,
-//       items: assets,
-//       categories,
-//       tags,
-//       search,
-//       page,
-//       totalItems: totalAssets,
-//       perPage,
-//       totalPages,
-//       next,
-//       prev,
-//       modelName,
-//       canImportAssets: canImportAssets(tierLimit),
-//       searchFieldLabel: "Search assets",
-//       searchFieldTooltip: {
-//         title: "Search your asset database",
-//         text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-//       },
-//     },
-//     {
-//       headers: [
-//         ["Set-Cookie", await userPrefs.serialize(cookie)],
-//         [
-//           "Set-Cookie",
-//           await commitAuthSession(request, {
-//             authSession,
-//           }),
-//         ],
-//       ],
-//     }
-//   );
-// }
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data.header.title) },
+];
 
-// export const meta: MetaFunction<typeof loader> = ({ data }) => [
-//   { title: appendToMetaTitle(data.header.title) },
-// ];
+export default function AssetIndexPage() {
+  const navigate = useNavigate();
+  const { canImportAssets } = useLoaderData<typeof loader>();
+  const selectedCategories = useAtomValue(selectedCategoriesAtom);
+  const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
 
-// export default function AssetIndexPage() {
-//   const navigate = useNavigate();
-//   const { canImportAssets } = useLoaderData<typeof loader>();
-//   const selectedCategories = useAtomValue(selectedCategoriesAtom);
-//   const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
+  const selectedTags = useAtomValue(selectedTagsAtom);
+  const [, clearTagFilters] = useAtom(clearTagFiltersAtom);
 
-//   const selectedTags = useAtomValue(selectedTagsAtom);
-//   const [, clearTagFilters] = useAtom(clearTagFiltersAtom);
+  const hasFiltersToClear =
+    selectedCategories.items.length > 0 || selectedTags.items.length > 0;
 
-//   const hasFiltersToClear =
-//     selectedCategories.items.length > 0 || selectedTags.items.length > 0;
+  const handleClearFilters = () => {
+    clearCategoryFilters();
+    clearTagFilters();
+  };
 
-//   const handleClearFilters = () => {
-//     clearCategoryFilters();
-//     clearTagFilters();
-//   };
+  const isSelfService = useUserIsSelfService();
 
-//   const isSelfService = useUserIsSelfService();
-
-//   return (
-//     <>
-//       <Header>
-//         {!isSelfService ? (
-//           <>
-//             <ImportButton canImportAssets={canImportAssets} />
-//             <Button
-//               to="new"
-//               role="link"
-//               aria-label={`new asset`}
-//               icon="asset"
-//               data-test-id="createNewAsset"
-//             >
-//               New Asset
-//             </Button>
-//           </>
-//         ) : null}
-//       </Header>
-//       <ListContentWrapper>
-//         <Filters>
-//           <div className="flex items-center justify-around gap-6 md:justify-end">
-//             {hasFiltersToClear ? (
-//               <div className="hidden gap-6 md:flex">
-//                 <Button
-//                   as="button"
-//                   onClick={handleClearFilters}
-//                   variant="link"
-//                   className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
-//                 >
-//                   Clear all filters
-//                 </Button>
-//                 <div className="text-gray-500"> | </div>
-//               </div>
-//             ) : null}
-//             <CategoryFilters />
-//             <TagFilters />
-//           </div>
-//         </Filters>
-//         <List
-//           ItemComponent={ListAssetContent}
-//           navigate={(itemId) => navigate(itemId)}
-//           className=" overflow-x-visible md:overflow-x-auto"
-//           headerChildren={
-//             <>
-//               <Th className="hidden md:table-cell">Category</Th>
-//               <Th className="hidden md:table-cell">Tags</Th>
-//               {!isSelfService ? (
-//                 <Th className="hidden md:table-cell">Custodian</Th>
-//               ) : null}
-//               <Th className="hidden md:table-cell">Location</Th>
-//             </>
-//           }
-//         />
-//       </ListContentWrapper>
-//     </>
-//   );
-// }
+  return (
+    <>
+      <Header>
+        {!isSelfService ? (
+          <>
+            <ImportButton canImportAssets={canImportAssets} />
+            <Button
+              to="new"
+              role="link"
+              aria-label={`new asset`}
+              icon="asset"
+              data-test-id="createNewAsset"
+            >
+              New Asset
+            </Button>
+          </>
+        ) : null}
+      </Header>
+      <ListContentWrapper>
+        <Filters>
+          <div className="flex items-center justify-around gap-6 md:justify-end">
+            {hasFiltersToClear ? (
+              <div className="hidden gap-6 md:flex">
+                <Button
+                  as="button"
+                  onClick={handleClearFilters}
+                  variant="link"
+                  className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+                >
+                  Clear all filters
+                </Button>
+                <div className="text-gray-500"> | </div>
+              </div>
+            ) : null}
+            <CategoryFilters />
+            <TagFilters />
+          </div>
+        </Filters>
+        <List
+          ItemComponent={ListAssetContent}
+          navigate={(itemId) => navigate(itemId)}
+          className=" overflow-x-visible md:overflow-x-auto"
+          headerChildren={
+            <>
+              <Th className="hidden md:table-cell">Category</Th>
+              <Th className="hidden md:table-cell">Tags</Th>
+              {!isSelfService ? (
+                <Th className="hidden md:table-cell">Custodian</Th>
+              ) : null}
+              <Th className="hidden md:table-cell">Location</Th>
+            </>
+          }
+        />
+      </ListContentWrapper>
+    </>
+  );
+}
 
 const ListAssetContent = ({
   item,
@@ -437,7 +429,3 @@ const GrayBadge = ({
     {children}
   </span>
 );
-
-export default function Test() {
-  return <div> Testicle 1-2</div>;
-}
