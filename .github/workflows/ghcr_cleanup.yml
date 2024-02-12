@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: 🗑 Delete untagged images
-        uses: actions/github-script@v7
+        uses: actions/github-script@v7.0.1
         with:
           script: |
             const response = await github.request("GET /user/packages/container/${{ env.PACKAGE_NAME }}/versions",
