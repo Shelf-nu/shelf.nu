@@ -146,7 +146,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           if (!user) throw new ShelfStackError({ message: "No user found" });
 
           await sendEmail({
-            to: "carlos@shelf.nu",
+            to: user.email,
             subject: "Your shelf.nu free trial is ending soon",
             text: trialEndsSoonText({
               user: {

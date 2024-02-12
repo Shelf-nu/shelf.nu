@@ -47,6 +47,17 @@ export const sendEmail = async ({
     },
   });
 
+  // verify connection configuration
+  transporter.verify(function (error) {
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.log(error);
+    } else {
+      // eslint-disable-next-line no-console
+      console.log("Server is ready to take our messages");
+    }
+  });
+
   // send mail with defined transport object
   await transporter.sendMail({
     from: from || `"Shelf" <no-reply@shelf.nu>`, // sender address

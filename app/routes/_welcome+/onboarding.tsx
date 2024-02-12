@@ -131,11 +131,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * This is to make sure that we have a stripe customer for the user.
      * We have to do it at this point, as its the first time we have the user's first and last name
      */
-    await createStripeCustomer({
-      email: user.email,
-      name: `${user.firstName} ${user.lastName}`,
-      userId: user.id,
-    });
+    if (!user.customerId) {
+      await createStripeCustomer({
+        email: user.email,
+        name: `${user.firstName} ${user.lastName}`,
+        userId: user.id,
+      });
+    }
 
     if (config.sendOnboardingEmail) {
       /** Send onboarding email */
