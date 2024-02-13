@@ -23,7 +23,7 @@ docker run -d \
   -e 'SMTP_PWD=super-safe-passw0rd' \
   -p 3000:8080 \
   --restart unless-stopped \
-  ghcr.io/thundersquared/shelf:latest
+  ghcr.io/Shelf-nu/shelf.nu:latest
 ```
 
 ### ARM processors
