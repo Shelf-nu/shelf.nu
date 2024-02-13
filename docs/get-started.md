@@ -19,6 +19,12 @@ Shelf's basic setup is based on a Remix stack by [rphlmr](https://github.com/rph
 - Linting with [ESLint](https://eslint.org)
 - Static Types with [TypeScript](https://typescriptlang.org)
 
+## Docker
+
+If you prefer to run shelf locally or host your live app via docker, please check our [Docker](./docker.md) documentation.
+
+_**Note**: Currently we dont have a docker setup that also includes self hositng supabase. Once released the docker documentation will be updated to include it as well._
+
 ## Development
 
 - Create a [Supabase Database](https://supabase.com/) (free tier gives you 2 databases)
