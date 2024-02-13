@@ -5,14 +5,13 @@ import type { AppLoadContext, ServerBuild } from "@remix-run/node";
 import { createCookieSessionStorage } from "@remix-run/node";
 import { broadcastDevReady } from "@remix-run/server-runtime";
 import { Hono } from "hono";
-import { logger } from "hono/logger";
 import { remix } from "remix-hono/handler";
 import { getSession, session } from "remix-hono/session";
 
 import { initEnv, env } from "~/utils/env";
 import { ShelfStackError } from "~/utils/error";
 
-import { customLogger } from "./logger";
+import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey, type FlashData, type SessionData } from "./session";
 
@@ -46,15 +45,7 @@ app.use(
 /**
  * Add logger middleware
  */
-// app.use("*", logger());
-
-// app.use("*", logger(customLogger));
-
-app.use("*", (c, next) => {
-  customLogger("\n"); // Some space between each request to make it easier to see
-  customLogger(`${c.req.url} - ${c.req.method} - ${c.res.status}`);
-  return next();
-});
+app.use("*", logger());
 
 /**
  * Add session middleware
