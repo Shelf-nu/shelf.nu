@@ -92,8 +92,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
   );
 
-  // const file = formDataFile.get("image") as File | null;
-  // invariant(file instanceof File, "file not the right type");
+  const file = formDataFile.get("image") as File | null;
+  invariant(file instanceof File, "file not the right type");
 
   const rsp = await createLocation({
     name,
@@ -101,8 +101,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     address,
     userId: authSession.userId,
     organizationId,
-    // image: file || null,
-    image: null,
+    image: file || null,
   });
 
   // Handle unique constraint error for name

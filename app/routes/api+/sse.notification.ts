@@ -1,7 +1,5 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-
 import { eventStream } from "remix-utils/sse/server";
-
 import { emitter } from "~/utils/emitter/emitter.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

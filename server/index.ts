@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import * as serverBuild from "@remix-run/dev/server-build";
 import type { AppLoadContext, ServerBuild } from "@remix-run/node";
-import { createCookieSessionStorage, installGlobals } from "@remix-run/node";
+import { createCookieSessionStorage } from "@remix-run/node";
 import { broadcastDevReady } from "@remix-run/server-runtime";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
@@ -12,6 +12,7 @@ import { getSession, session } from "remix-hono/session";
 import { initEnv, env } from "~/utils/env";
 import { ShelfStackError } from "~/utils/error";
 
+import { customLogger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey, type FlashData, type SessionData } from "./session";
 
@@ -45,18 +46,21 @@ app.use(
 /**
  * Add logger middleware
  */
-app.use("*", logger());
+// app.use("*", logger());
+
 // app.use("*", logger(customLogger));
-// app.use((c, next) => {
-//   customLogger("\n"); // Some space between each request to make it easier to see
-//   customLogger(c.req.url);
-//   return next();
-// });
+
+app.use("*", (c, next) => {
+  customLogger("\n"); // Some space between each request to make it easier to see
+  customLogger(`${c.req.url} - ${c.req.method} - ${c.res.status}`);
+  return next();
+});
 
 /**
  * Add session middleware
  */
 app.use(
+  "*",
   session({
     autoCommit: true,
     createSessionStorage() {
@@ -88,13 +92,14 @@ app.use(
  * Add refresh session middleware
  *
  */
-app.use(refreshSession());
+app.use("*", refreshSession());
 
 /**
  * Add protected routes middleware
  *
  */
 app.use(
+  "*",
   protect({
     onFailRedirectTo: "/login",
     publicPaths: [
@@ -120,6 +125,7 @@ app.use(
  * Add remix middleware to Hono server
  */
 app.use(
+  "*",
   remix({
     // @ts-ignore
     build,
