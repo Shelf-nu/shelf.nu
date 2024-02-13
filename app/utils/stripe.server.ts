@@ -1,8 +1,9 @@
 import type { User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database";
-import { ENABLE_PREMIUM_FEATURES, STRIPE_SECRET_KEY } from "./env";
+import { STRIPE_SECRET_KEY } from "./env";
 
 export type CustomerWithSubscriptions = Stripe.Customer & {
   subscriptions: {
@@ -17,7 +18,7 @@ let _stripe: Stripe;
 function getStripeServerClient() {
   if (
     !_stripe &&
-    ENABLE_PREMIUM_FEATURES &&
+    config.enablePremiumFeatures &&
     STRIPE_SECRET_KEY !== "" &&
     typeof STRIPE_SECRET_KEY === "string"
   ) {
@@ -128,7 +129,7 @@ export const createStripeCustomer = async ({
   email: User["email"];
   userId: User["id"];
 }) => {
-  if (ENABLE_PREMIUM_FEATURES && stripe) {
+  if (config.enablePremiumFeatures && stripe) {
     const { id: customerId } = await stripe.customers.create({
       email,
       name,

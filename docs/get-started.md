@@ -59,6 +59,7 @@ SMTP_USER="you@example.com"
 SMTP_PWD="yourSMTPpassword"
 
 # Set this to false to disable requirement of subscription for premium features. This will make premium features available for all users
+# You can also directly adjust this in remix.config.js and set it to false
 ENABLE_PREMIUM_FEATURES="true"
 
 # The Stripe keys are needed only if you want to enable premium features
@@ -286,7 +287,8 @@ To do that navigate to Authentication > URL configuration and add the following 
 
 ## Premium
 
-Shelf hosted version has some premium features that are locked behind different tiers of subscriptions. By default those features are disabled. To enable them add the env variable:
+Shelf hosted version has some premium features that are locked behind different tiers of subscriptions. By default those features are disabled. To enable them add the env variable.
+Moreover if you don't have different servers and environments, you can directly adjust the value in shelf.config.ts
 
 ```
 ENABLE_PREMIUM_FEATURES="true"

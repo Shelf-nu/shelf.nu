@@ -1,4 +1,4 @@
-import { Link, useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/settings.subscription";
 import { Button } from "../shared";
 
