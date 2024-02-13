@@ -28,7 +28,7 @@ docker run -d \
 
 ### ARM processors
 
-You can also run shelf on ARM processors.
+You can also run shelf on ARM64 processors.
 
 1. Linux / Pine A64
 
