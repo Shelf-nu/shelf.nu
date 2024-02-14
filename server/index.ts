@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import * as serverBuild from "@remix-run/dev/server-build";
 import type { AppLoadContext, ServerBuild } from "@remix-run/node";
-import { createCookieSessionStorage, installGlobals } from "@remix-run/node";
+import { createCookieSessionStorage } from "@remix-run/node";
 import { broadcastDevReady } from "@remix-run/server-runtime";
 import { Hono } from "hono";
 import { remix } from "remix-hono/handler";
@@ -11,12 +11,15 @@ import { getSession, session } from "remix-hono/session";
 import { initEnv, env } from "~/utils/env";
 import { ShelfStackError } from "~/utils/error";
 
+// import { installGlobals } from "./globals";
 import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey, type FlashData, type SessionData } from "./session";
 
 // @TODO this needs to be fixed, as without it imports of those types are failing so we can use stuff like File and Request on the server
+// What we have now is just a temporary fix
 // installGlobals();
+
 // Server will not start if the env is not valid
 initEnv();
 
@@ -53,7 +56,7 @@ app.use("*", logger());
  * Add session middleware
  */
 app.use(
-  "*",
+  //@ts-expect-error fixed soon
   session({
     autoCommit: true,
     createSessionStorage() {
@@ -122,7 +125,7 @@ app.use(
  * Add remix middleware to Hono server
  */
 app.use(
-  "*",
+  //@ts-expect-error fixed soon
   remix({
     // @ts-ignore
     build,

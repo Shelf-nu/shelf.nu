@@ -24,7 +24,7 @@ export function protect({
     if (isPublic) {
       return next();
     }
-
+    //@ts-expect-error fixed soon
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
 
@@ -67,6 +67,7 @@ function isExpiringSoon(expiresAt: number | undefined) {
  */
 export function refreshSession() {
   return createMiddleware(async (c, next) => {
+    //@ts-expect-error fixed soon
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
 
