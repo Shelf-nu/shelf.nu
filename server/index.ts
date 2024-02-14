@@ -15,7 +15,8 @@ import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey, type FlashData, type SessionData } from "./session";
 
-installGlobals();
+// @TODO this needs to be fixed, as without it imports of those types are failing so we can use stuff like File and Request on the server
+// installGlobals();
 // Server will not start if the env is not valid
 initEnv();
 
@@ -109,6 +110,10 @@ app.use(
       "/api/public-stats",
       "/api/oss-friends",
       "/api/stripe-webhook",
+      "/qr",
+      "/qr/:path*/",
+      "/qr/:path*/contact-owner",
+      "/qr/:path*/not-logged-in",
     ],
   })
 );

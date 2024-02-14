@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { PassThrough } from "stream";
 
 import { createReadableStreamFromReadable } from "@remix-run/node";
@@ -9,7 +10,7 @@ import type {
 } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
-import isbot from "isbot";
+import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { registerBookingWorkers } from "./modules/booking";
 import { SENTRY_DSN } from "./utils";

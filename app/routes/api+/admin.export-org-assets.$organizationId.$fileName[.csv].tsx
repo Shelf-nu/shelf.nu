@@ -1,17 +1,12 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { requireAuthSession } from "~/modules/auth";
 import { getRequiredParam } from "~/utils";
 import { exportAssetsToCsv } from "~/utils/csv.server";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
-  await requireAdmin(userId);
+export const loader = async ({ context, params }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
   const organizationId = getRequiredParam(params, "organizationId");
-  // const { organizations } = await requireOrganisationId({userId: authSession.userId, request});
-
-  /** We dont need to do this anymore, because this is only for admin */
-  // await assertUserCanExportAssets({ organizationId, organizations });
 
   /** Join the rows with a new line */
   const csvString = await exportAssetsToCsv({ organizationId });
