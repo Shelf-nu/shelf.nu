@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
@@ -199,6 +200,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
     }
   );
+}
+
+export function shouldRevalidate({
+  actionResult,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  /**
+   * If we are toggliong the sidebar, no need to revalidate this loader.
+   * Revalidation happens in _layout
+   */
+  if (actionResult?.isTogglingSidebar) {
+    return false;
+  }
+
+  return defaultShouldRevalidate;
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

@@ -32,7 +32,6 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
     ? await db.user.findUnique({

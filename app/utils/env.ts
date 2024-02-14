@@ -42,16 +42,16 @@ declare global {
       GEOCODE_API_KEY: string;
       SENTRY_DSN: string;
     }
-    interface Global {
-      File: typeof File;
-      Headers: typeof Headers;
-      Request: typeof Request;
-      Response: typeof Response;
-      fetch: typeof fetch;
-      FormData: typeof FormData;
-      ReadableStream: typeof ReadableStream;
-      WritableStream: typeof WritableStream;
-    }
+    // interface Global {
+    //   File: typeof File;
+    //   Headers: typeof Headers;
+    //   Request: typeof Request;
+    //   Response: typeof Response;
+    //   fetch: typeof fetch;
+    //   FormData: typeof FormData;
+    //   ReadableStream: typeof ReadableStream;
+    //   WritableStream: typeof WritableStream;
+    // }
   }
 }
 
