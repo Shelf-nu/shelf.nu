@@ -23,7 +23,8 @@ import { canCreateMoreOrganizations } from "~/utils/subscription";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  // @TODO permissions here? Not sure what we have to do and why we dont have anything
+  // permissions here?
+  // Every user can see this view for themseleves, so we dont have to manage any permissions here
   const { organizationId } = await requireOrganisationId({
     userId: authSession.userId,
     request,

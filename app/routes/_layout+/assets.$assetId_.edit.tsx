@@ -150,7 +150,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   /** This checks if tags are passed and build the  */
   const tags = buildTagsSet(result.data.tags);
 
-  // @TODO location is not updated when updating asset
   const rsp = await updateAsset({
     id,
     title,

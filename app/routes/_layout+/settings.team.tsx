@@ -189,10 +189,11 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  // @TODO shouldnt we require permissions here
-  const { organizationId } = await requireOrganisationId({
-    userId: userId,
+  const { organizationId } = await requirePermision({
+    userId,
     request,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.update,
   });
 
   const formData = await request.formData();
