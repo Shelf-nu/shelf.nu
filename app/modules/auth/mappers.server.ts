@@ -5,8 +5,12 @@ import { ShelfStackError } from "~/utils/error";
 
 export async function mapAuthSession(
   supabaseAuthSession: SupabaseAuthSession | null
-): Promise<AuthSession | null> {
-  if (!supabaseAuthSession) return null;
+): Promise<AuthSession> {
+  if (!supabaseAuthSession) {
+    throw new ShelfStackError({
+      message: "Supabase auth session is null",
+    });
+  }
 
   if (!supabaseAuthSession.refresh_token)
     throw new ShelfStackError({ message: "User should have a refresh token" });

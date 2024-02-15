@@ -76,12 +76,7 @@ export function refreshSession() {
     }
 
     try {
-      session.set(
-        authSessionKey,
-        // @TODO- fix this
-        // @ts-ignore
-        await refreshAccessToken(auth.refreshToken)
-      );
+      session.set(authSessionKey, await refreshAccessToken(auth.refreshToken));
     } catch (cause) {
       session.flash(
         "errorMessage",

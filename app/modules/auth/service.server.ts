@@ -125,20 +125,34 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
 
 export async function refreshAccessToken(
   refreshToken?: string
-): Promise<AuthSession | null> {
-  if (!refreshToken) {
-    throw new ShelfStackError({ message: "Refresh token is required" });
+): Promise<AuthSession> {
+  try {
+    if (!refreshToken) {
+      throw new ShelfStackError({ message: "Refresh token is required" });
+    }
+
+    const { data, error } = await getSupabaseAdmin().auth.refreshSession({
+      refresh_token: refreshToken,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const { session } = data;
+    if (!session) {
+      throw new ShelfStackError({
+        message: "Session returned by Supabase is null",
+      });
+    }
+
+    return await mapAuthSession(data.session);
+  } catch (cause) {
+    throw new ShelfStackError({
+      message: "Unable to refresh access token",
+      cause,
+    });
   }
-
-  const { data, error } = await getSupabaseAdmin().auth.refreshSession({
-    refresh_token: refreshToken,
-  });
-
-  // @TODO - handle error. BEtter to throw here
-  // don't allow null authSession or you will have massives .? everywhere 😅
-  if (!data.session || error) return null;
-
-  return await mapAuthSession(data.session);
 }
 
 export async function verifyAuthSession(authSession: AuthSession) {
