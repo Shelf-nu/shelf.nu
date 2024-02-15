@@ -16,7 +16,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       try {
         send({ event: "new-notification", data: notification });
       } catch (cause) {
-        // eslint-disable-next-line no-console
         /**
          * node:92658) UnsupportedWarning: The provided connection header is not valid, the value will be dropped from the header and will never be in use.
          * This is 'expected'
@@ -27,7 +26,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           cause.message.match(/Controller is already closed/)
         ) {
           // eslint-disable-next-line no-console
-          console.error("Failed to send SSE notification", cause);
+          console.error("ERROR: Failed to send SSE notification");
         }
       }
     }

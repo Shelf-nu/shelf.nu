@@ -13,7 +13,6 @@ export async function loader() {
   return json({ title, subHeading });
 }
 
-// @TODO this is for some reason showing not found
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];

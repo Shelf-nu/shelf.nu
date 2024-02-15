@@ -7,7 +7,7 @@ import SubHeading from "~/components/shared/sub-heading";
 
 export const loader = ({ context }: LoaderFunctionArgs) => {
   /** WE do this on the layout so it runs for all child routes */
-  if (context.isAuthenticated) return redirect("/assets"); //@TODO double check this
+  if (context.isAuthenticated) return redirect("/assets");
   return null;
 };
 

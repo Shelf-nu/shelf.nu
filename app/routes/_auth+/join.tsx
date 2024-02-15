@@ -27,7 +27,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const title = "Create an account";
   const subHeading = "Start your journey with Shelf";
 
-  if (context.isAuthenticated) redirect("/assets"); //@TODO double check this
+  if (context.isAuthenticated) redirect("/assets");
 
   return json({ title, subHeading });
 }
