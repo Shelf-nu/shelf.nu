@@ -12,7 +12,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * We do this to prevent other users receiving notifications
        */
       if (authSession.userId !== JSON.parse(notification).senderId) return;
-      send({ event: "new-notification", data: notification });
+
+      try {
+        send({ event: "new-notification", data: notification });
+      } catch (cause) {
+        // eslint-disable-next-line no-console
+        /**
+         * node:92658) UnsupportedWarning: The provided connection header is not valid, the value will be dropped from the header and will never be in use.
+         * This is 'expected'
+         * sse wants 0 headers lol (they are removed in Remix Express). Can't do that for Hono since reading response consume the ReadableStream :/
+         */
+        if (
+          cause instanceof Error &&
+          cause.message.match(/Controller is already closed/)
+        ) {
+          // eslint-disable-next-line no-console
+          console.error("Failed to send SSE notification", cause);
+        }
+      }
     }
     emitter.on("notification", handle);
 

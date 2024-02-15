@@ -62,7 +62,7 @@ export function TeamUsersActionsDropdown({
                 <Button
                   type="submit"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 focus:bg-slate-100 hover:bg-slate-100 hover:text-gray-700"
+                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
                   width="full"
                   name="intent"
                   value="resend"
@@ -82,7 +82,7 @@ export function TeamUsersActionsDropdown({
                 <Button
                   type="submit"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 focus:bg-slate-100 hover:bg-slate-100 hover:text-gray-700"
+                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
                   width="full"
                   name="intent"
                   value="revoke"
