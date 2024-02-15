@@ -11,14 +11,9 @@ import { getSession, session } from "remix-hono/session";
 import { initEnv, env } from "~/utils/env";
 import { ShelfStackError } from "~/utils/error";
 
-// import { installGlobals } from "./globals";
 import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey, type FlashData, type SessionData } from "./session";
-
-// @TODO this needs to be fixed, as without it imports of those types are failing so we can use stuff like File and Request on the server
-// What we have now is just a temporary fix
-// installGlobals();
 
 // Server will not start if the env is not valid
 initEnv();
@@ -99,10 +94,10 @@ app.use(
   protect({
     onFailRedirectTo: "/login",
     publicPaths: [
-      "/accept-invite/:path*", // :path* is a wildcard that will match any path after /accept-invite @TODO test this
+      "/accept-invite/:path*", // :path* is a wildcard that will match any path after /accept-invite
       "/forgot-password",
       "/join",
-      "/login", // :path* is a wildcard that will match any path after /auth
+      "/login",
       "/logout",
       "/oauth/callback",
       "/resend-email-confirmation",
