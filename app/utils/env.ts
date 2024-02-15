@@ -69,7 +69,6 @@ function getEnv(
 export const EnvSchema = z.object({
   SESSION_SECRET: z.string().min(1),
   NODE_ENV: z.enum(["development", "production", "test"]),
-  TZ: z.literal("UTC"),
 });
 
 type Env = z.infer<typeof EnvSchema>;

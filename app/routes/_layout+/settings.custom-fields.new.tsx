@@ -10,12 +10,10 @@ import {
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 
-import { commitAuthSession } from "~/modules/auth";
 import { createCustomField } from "~/modules/custom-field";
 import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
@@ -77,9 +75,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -104,7 +99,6 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -116,11 +110,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/settings/custom-fields`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect(`/settings/custom-fields`);
 }
 
 export default function NewCustomFieldPage() {

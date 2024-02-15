@@ -72,7 +72,6 @@ export const ErrorBoundryComponent = ({
               : "Please try again and if the issue persists, contact support"
           }
         />
-        {/* @TODO this needs to be tested */}
         {NODE_ENV === "development" ? <pre>{error.stack}</pre> : null}
       </>
     );
