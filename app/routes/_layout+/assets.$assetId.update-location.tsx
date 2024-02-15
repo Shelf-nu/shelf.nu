@@ -5,20 +5,25 @@ import { LocationMarkerIcon } from "~/components/icons";
 import { LocationSelect } from "~/components/location";
 import { Button } from "~/components/shared/button";
 import { getAllRelatedEntries, getAsset, updateAsset } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
 import styles from "~/styles/layout/custom-modal.css";
 import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
 
   const { locations } = await getAllRelatedEntries({
     userId,
@@ -35,13 +40,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 };
 
-export async function action({ request, params }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   assertIsPost(request);
-  const { authSession } = await requirePermision(
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  await requirePermision({
+    userId,
     request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
 
   const id = getRequiredParam(params, "assetId");
 
@@ -63,11 +71,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/assets/${id}`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect(`/assets/${id}`);
 }
 
 export function links() {

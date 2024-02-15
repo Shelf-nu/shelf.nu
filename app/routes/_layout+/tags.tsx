@@ -29,12 +29,14 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.tag,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.tag,
+    action: PermissionAction.read,
+  });
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
@@ -81,13 +83,16 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request }: ActionFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.tag,
-    PermissionAction.delete
-  );
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
+
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.tag,
+    action: PermissionAction.delete,
+  });
 
   assertIsDelete(request);
   const formData = await request.formData();

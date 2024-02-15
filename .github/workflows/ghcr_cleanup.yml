@@ -11,7 +11,7 @@ permissions:
   packages: write
 
 env:
-  PACKAGE_NAME: shelf
+  PACKAGE_NAME: shelf.nu
   PER_PAGE: 2000
 
 jobs:
