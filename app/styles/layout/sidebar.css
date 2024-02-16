@@ -21,8 +21,8 @@
     pointer-events: none;
   }
 
-  .collapsed-navigation .menu li a,
-  .collapsed-navigation .menu li button {
+  .collapsed-navigation .menu li a:not(.disabled),
+  .collapsed-navigation .menu li button:not(.disabled) {
     @apply py-2.5;
   }
 

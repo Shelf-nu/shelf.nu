@@ -1,11 +1,11 @@
-import { PremiumFeatureButton } from "../subscription/premium-feature-button";
+import { ControlledActionButton } from "../shared/controlled-action-button";
 
 export const ImportButton = ({
   canImportAssets,
 }: {
   canImportAssets: boolean;
 }) => (
-  <PremiumFeatureButton
+  <ControlledActionButton
     canUseFeature={canImportAssets}
     buttonContent={{
       title: "Import",

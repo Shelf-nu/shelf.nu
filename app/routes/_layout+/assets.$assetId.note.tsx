@@ -3,16 +3,22 @@ import { json, redirect } from "@remix-run/node";
 import { parseFormAny } from "react-zorm";
 import { NewNoteSchema } from "~/components/assets/notes/new";
 import { createNote, deleteNote } from "~/modules/asset";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { assertIsDelete, assertIsPost, isDelete, isPost } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ params }: LoaderFunctionArgs) =>
   /** makes sure that if the user navigates to that url, it redirects back to asset */
   redirect(`/assets/${params.assetId}`);
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
   const formData = await request.formData();
 
   /* Create note */

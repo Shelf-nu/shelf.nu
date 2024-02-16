@@ -1,8 +1,6 @@
 ### Shelf's current stack
 
-We have decided to give RemixJS a try.
-
-For the purpose of shipping asap, we have opted into using a template: https://github.com/rphlmr/supa-fly-stack
+Shelf's basic setup is based on a Remix stack by [rphlmr](https://github.com/rphlmr): https://github.com/rphlmr/supa-fly-stack
 
 ## What's in the stack
 
@@ -21,6 +19,12 @@ For the purpose of shipping asap, we have opted into using a template: https://g
 - Linting with [ESLint](https://eslint.org)
 - Static Types with [TypeScript](https://typescriptlang.org)
 
+## Docker
+
+If you prefer to run shelf locally or host your live app via docker, please check our [Docker](./docker.md) documentation.
+
+_**Note**: Currently we dont have a docker setup that also includes self hositng supabase. Once released the docker documentation will be updated to include it as well._
+
 ## Development
 
 - Create a [Supabase Database](https://supabase.com/) (free tier gives you 2 databases)
@@ -37,18 +41,43 @@ For the purpose of shipping asap, we have opted into using a template: https://g
 - "Project API keys"
 - Add your `MAPTILER_TOKEN`, `SUPABASE_URL`, `SERVER_URL`, `SUPABASE_SERVICE_ROLE` (aka `service_role` `secret`), `SUPABASE_ANON_PUBLIC` (aka `anon` `public`) and `DATABASE_URL` in the `.env` file
   > **Note:** `SERVER_URL` is your localhost on dev. It'll work for magic link login
+- Make sure to set the database connection mode in Supabase to "transaction"
 
-```en
-DATABASE_URL="postgres://postgres:{STAGING_POSTGRES_PASSWORD}@db.{STAGING_YOUR_INSTANCE_NAME}.supabase.co:5432/postgres"
+```shell
+# Most of the connection information can be found within the Supabase dashboard. Navigate to your project > Project Settings > Database.
+# There you will be able to find the values you need to use below
+# You can either copy the connection string and insert your password or use the connection parameters to build the string yourself
+DATABASE_URL="postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true"
+
+# Direct URL is used by prisma to run migrations. Depending on how you run your migrations, you could skip this in your procution environment
+# More info here: https://www.prisma.io/docs/orm/prisma-client/setup-and-configuration/databases-connections#external-connection-poolers
+# and here: https://www.prisma.io/docs/orm/reference/prisma-schema-reference#fields
+DIRECT_URL="postgres://{USER}:{PASSWORD}@{HOST}:5432/{DB_NAME}"
+
 SUPABASE_ANON_PUBLIC="{ANON_PUBLIC}"
 SUPABASE_SERVICE_ROLE="{SERVICE_ROLE}"
 SUPABASE_URL="https://{STAGING_YOUR_INSTANCE_NAME}.supabase.co"
 SESSION_SECRET="super-duper-s3cret"
 SERVER_URL="http://localhost:3000"
-MAPTILER_TOKEN="someToken"
+
 SMTP_HOST="smtp.yourhost.com"
 SMTP_USER="you@example.com"
 SMTP_PWD="yourSMTPpassword"
+
+# Set this to false to disable requirement of subscription for premium features. This will make premium features available for all users
+# You can also directly adjust this in remix.config.js and set it to false
+ENABLE_PREMIUM_FEATURES="true"
+
+# The Stripe keys are needed only if you want to enable premium features
+STRIPE_SECRET_KEY="stripe-secret-key"
+STRIPE_PUBLIC_KEY="stripe-public-key"
+STRIPE_WEBHOOK_ENDPOINT_SECRET="stripe-endpoint-secret"
+
+MAPTILER_TOKEN="maptiler-token"
+MICROSOFT_CLARITY_ID="microsoft-clarity-id"
+
+INVITE_TOKEN_SECRET="secret-test-invite"
+GEOCODE_API_KEY="geocode-api-key"
 ```
 
 - This step only applies if you've opted out of having the CLI install dependencies for you:
@@ -104,8 +133,8 @@ Prior to your first deployment, you'll need to do a few things:
 - Create two apps on Fly, one for staging and one for production:
 
   ```sh
-  fly apps create supa-fly-stack-template
-  fly apps create supa-fly-stack-template-staging  # ** not mandatory if you don't want a staging environment **
+  fly apps create shelf-webapp
+  fly apps create shelf-webapp-staging  # ** not mandatory if you don't want a staging environment **
   ```
 
   > **Note:** For production app, make sure this name matches the `app` set in your `fly.toml` file. Otherwise, you will not be able to deploy.
@@ -128,17 +157,17 @@ Prior to your first deployment, you'll need to do a few things:
 
 - Add a `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`,`SUPABASE_ANON_PUBLIC`, `SERVER_URL` and `DATABASE_URL` to your fly app secrets
 
-  > **Note:** To find your `SERVER_URL`, go to [your fly.io dashboard](https://fly.io/apps/supa-fly-stack-template-3a36)
+  > **Note:** To find your `SERVER_URL`, go to [your fly.io dashboard](https://fly.io/dashboard/)
 
   To do this you can run the following commands:
 
-  ```sh
+  ```shell
   # production (--app name is resolved from fly.toml)
   fly secrets set SESSION_SECRET=$(openssl rand -hex 32)
   fly secrets set SUPABASE_URL="https://{YOUR_INSTANCE_NAME}.supabase.co"
   fly secrets set SUPABASE_SERVICE_ROLE="{SUPABASE_SERVICE_ROLE}"
   fly secrets set SUPABASE_ANON_PUBLIC="{SUPABASE_ANON_PUBLIC}"
-  fly secrets set DATABASE_URL="postgres://postgres:{POSTGRES_PASSWORD}@db.{YOUR_INSTANCE_NAME}.supabase.co:5432/postgres"
+  fly secrets set DATABASE_URL="postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true&connection_limit=1"
   fly secrets set SERVER_URL="https://{YOUR_STAGING_SERVEUR_URL}"
   fly secrets set MAPTILER_TOKEN="{YOUR_MAPTILER_TOKEN}"
 
@@ -148,12 +177,12 @@ Prior to your first deployment, you'll need to do a few things:
 
 
   # staging (specify --app name) ** not mandatory if you don't want a staging environnement **
-  fly secrets set SESSION_SECRET=$(openssl rand -hex 32) --app supa-fly-stack-template-staging
-  fly secrets set SUPABASE_URL="https://{YOUR_STAGING_INSTANCE_NAME}.supabase.co" --app supa-fly-stack-template-staging
-  fly secrets set SUPABASE_SERVICE_ROLE="{STAGING_SUPABASE_SERVICE_ROLE}" --app supa-fly-stack-template-staging
-  fly secrets set SUPABASE_ANON_PUBLIC="{STAGING_SUPABASE_ANON_PUBLIC}" --app supa-fly-stack-template-staging
-  fly secrets set DATABASE_URL="postgres://postgres:{STAGING_POSTGRES_PASSWORD}@db.{STAGING_YOUR_INSTANCE_NAME}.supabase.co:5432/postgres" --app supa-fly-stack-template-staging
-  fly secrets set SERVER_URL="https://{YOUR_STAGING_SERVEUR_URL}" --app supa-fly-stack-template-staging
+  fly secrets set SESSION_SECRET=$(openssl rand -hex 32) --app shelf-webapp-staging
+  fly secrets set SUPABASE_URL="https://{YOUR_STAGING_INSTANCE_NAME}.supabase.co" --app shelf-webapp-staging
+  fly secrets set SUPABASE_SERVICE_ROLE="{STAGING_SUPABASE_SERVICE_ROLE}" --app shelf-webapp-staging
+  fly secrets set SUPABASE_ANON_PUBLIC="{STAGING_SUPABASE_ANON_PUBLIC}" --app shelf-webapp-staging
+  fly secrets set DATABASE_URL="postgres://{USER}:{PASSWORD}@{HOST}:6543/{DB_NAME}?pgbouncer=true&connection_limit=1" --app shelf-webapp-staging
+  fly secrets set SERVER_URL="https://{YOUR_STAGING_SERVEUR_URL}" --app shelf-webapp-staging
 
   ```
 
@@ -264,7 +293,8 @@ To do that navigate to Authentication > URL configuration and add the following 
 
 ## Premium
 
-Shelf hosted version has some premium features that are locked behind different tiers of subscriptions. By default those features are disabled. To enable them add the env variable:
+Shelf hosted version has some premium features that are locked behind different tiers of subscriptions. By default those features are disabled. To enable them add the env variable.
+Moreover if you don't have different servers and environments, you can directly adjust the value in shelf.config.ts
 
 ```
 ENABLE_PREMIUM_FEATURES="true"

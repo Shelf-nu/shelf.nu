@@ -7,13 +7,14 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { commitAuthSession } from "~/modules/auth";
 import { createTag } from "~/modules/tag";
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const NewTagFormSchema = z.object({
@@ -24,7 +25,11 @@ export const NewTagFormSchema = z.object({
 const title = "New Tag";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.tag,
+    PermissionAction.create
+  );
 
   const header = {
     title,
@@ -38,8 +43,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.tag,
+    PermissionAction.create
+  );
   assertIsPost(request);
   const formData = await request.formData();
   const result = await NewTagFormSchema.safeParseAsync(parseFormAny(formData));

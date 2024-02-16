@@ -1,11 +1,15 @@
 import nodemailer from "nodemailer";
+import type { Attachment } from "nodemailer/lib/mailer";
 import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
+import logoImg from "../../public/images/shelf-symbol.png";
 
 export const sendEmail = async ({
   to,
   subject,
   text,
   html,
+  attachments,
+  from,
 }: {
   /** Email address of recipient */
   to: string;
@@ -18,6 +22,11 @@ export const sendEmail = async ({
 
   /** HTML content of email */
   html?: string;
+
+  attachments?: Attachment[];
+
+  /** Override the default sender */
+  from?: string;
 }) => {
   // Generate test SMTP service account from ethereal.email
 
@@ -38,13 +47,32 @@ export const sendEmail = async ({
     },
   });
 
+  // verify connection configuration
+  transporter.verify(function (error) {
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.log(error);
+    } else {
+      // eslint-disable-next-line no-console
+      console.log("Server is ready to take our messages");
+    }
+  });
+
   // send mail with defined transport object
   await transporter.sendMail({
-    from: '"Shelf.nu" <no-reply@shelf.nu>', // sender address
+    from: from || `"Shelf" <no-reply@shelf.nu>`, // sender address
     to, // list of receivers
     subject, // Subject line
     text, // plain text body
     html: html || "", // html body
+    attachments: [
+      {
+        filename: "shelf-symbol.png",
+        path: `${process.env.SERVER_URL}${logoImg}`,
+        cid: "shelf-logo",
+      },
+      ...(attachments || []),
+    ],
   });
 
   // Message sent: <b658f8ca-6296-ccf4-8306-87d57a0b4321@example.com>

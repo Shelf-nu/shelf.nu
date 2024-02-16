@@ -24,7 +24,7 @@ export const Dialog = ({
   return open ? (
     <div className="dialog-backdrop" onClick={handleBackdropClose}>
       <dialog className="dialog" open={true}>
-        <div className="scrollable-content relative z-10 h-full w-full overflow-y-auto bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded">
+        <div className="scrollable-content relative z-10 size-full overflow-y-auto bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded">
           <Button
             to={prevRoute}
             variant="link"

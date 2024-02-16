@@ -112,7 +112,7 @@ export default function NewWorkspace() {
 
   return (
     <div>
-      <Header title={title} />
+      <Header title={title} hideBreadcrumbs classNames="-mt-5" />
       <div>
         <WorkspaceForm />
       </div>

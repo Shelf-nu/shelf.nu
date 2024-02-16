@@ -1,6 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/assets._index";
-import { PremiumFeatureButton } from "../subscription/premium-feature-button";
+import { ControlledActionButton } from "../shared/controlled-action-button";
 
 export const ExportButton = ({
   canExportAssets,
@@ -9,14 +9,16 @@ export const ExportButton = ({
 }) => {
   const { totalItems } = useLoaderData<typeof loader>();
   return (
-    <PremiumFeatureButton
+    <ControlledActionButton
       canUseFeature={canExportAssets}
       buttonContent={{
-        title: "Export",
+        title: "Download CSV",
         message: "Exporting is not available on the free tier of shelf.",
       }}
       buttonProps={{
-        to: `export/assets-${new Date().toISOString().slice(0, 10)}.csv`,
+        to: `/assets/export/assets-${new Date()
+          .toISOString()
+          .slice(0, 10)}.csv`,
         variant: "secondary",
         role: "link",
         download: true,

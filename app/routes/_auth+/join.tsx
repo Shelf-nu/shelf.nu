@@ -91,7 +91,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // Handle the results of the sign up
   if (signUpResult.status === "error") {
     return json(
-      { errors: { email: "unable-to-create-account", password: null } },
+      { errors: { email: signUpResult.error, password: null } },
       { status: 500 }
     );
   } else if (

@@ -1,17 +1,24 @@
-import type { Category, Asset, Tag, Custody } from "@prisma/client";
+import {
+  type Category,
+  type Asset,
+  type Tag,
+  type Custody,
+  OrganizationRoles,
+} from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
-import { ExportButton } from "~/components/assets/export-button";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
+import { ListContentWrapper } from "~/components/list/content-wrapper";
 import {
   clearCategoryFiltersAtom,
   clearTagFiltersAtom,
@@ -24,16 +31,20 @@ import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import {
+  getPaginatedAndFilterableAssets,
+  updateAssetsWithBookingCustodians,
+} from "~/modules/asset";
+import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
-import { userFriendlyAssetStatus } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
-import { canExportAssets, canImportAssets } from "~/utils/subscription";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
+import { canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */
@@ -70,12 +81,21 @@ export interface IndexResponse {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId, organizations, currentOrganization } =
-    await requireOrganisationId(authSession, request);
+  const {
+    authSession,
+    organizationId,
+    organizations,
+    currentOrganization,
+    role,
+  } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.read
+  );
 
   const { userId } = authSession;
 
+  // @TODO we shouldnt have to do this. We can combine it with the requirePermission
   const user = await db.user.findUnique({
     where: {
       id: userId,
@@ -114,7 +134,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     organizations,
   });
 
-  const {
+  let {
     search,
     totalAssets,
     perPage,
@@ -145,6 +165,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
+  if (role === OrganizationRoles.SELF_SERVICE) {
+    /**
+     * For self service users we dont return the assets that are not available to book
+     */
+    assets = assets.filter((a) => a.availableToBook);
+  }
+
+  assets = await updateAssetsWithBookingCustodians(assets);
+
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
       ? user?.firstName
@@ -174,7 +203,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       next,
       prev,
       modelName,
-      canExportAssets: canExportAssets(tierLimit),
       canImportAssets: canImportAssets(tierLimit),
       searchFieldLabel: "Search assets",
       searchFieldTooltip: {
@@ -204,7 +232,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
-  const { canExportAssets, canImportAssets } = useLoaderData<typeof loader>();
+  const { canImportAssets } = useLoaderData<typeof loader>();
   const selectedCategories = useAtomValue(selectedCategoriesAtom);
   const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
 
@@ -219,22 +247,27 @@ export default function AssetIndexPage() {
     clearTagFilters();
   };
 
+  const isSelfService = useUserIsSelfService();
+
   return (
     <>
       <Header>
-        <ExportButton canExportAssets={canExportAssets} />
-        <ImportButton canImportAssets={canImportAssets} />
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new asset`}
-          icon="asset"
-          data-test-id="createNewAsset"
-        >
-          New Asset
-        </Button>
+        {!isSelfService ? (
+          <>
+            <ImportButton canImportAssets={canImportAssets} />
+            <Button
+              to="new"
+              role="link"
+              aria-label={`new asset`}
+              icon="asset"
+              data-test-id="createNewAsset"
+            >
+              New Asset
+            </Button>
+          </>
+        ) : null}
       </Header>
-      <div className="mt-8 flex flex-1 flex-col md:mx-0 md:gap-2">
+      <ListContentWrapper>
         <Filters>
           <div className="flex items-center justify-around gap-6 md:justify-end">
             {hasFiltersToClear ? (
@@ -285,12 +318,14 @@ export default function AssetIndexPage() {
             <>
               <Th className="hidden md:table-cell">Category</Th>
               <Th className="hidden md:table-cell">Tags</Th>
-              <Th className="hidden md:table-cell">Custodian</Th>
+              {!isSelfService ? (
+                <Th className="hidden md:table-cell">Custodian</Th>
+              ) : null}
               <Th className="hidden md:table-cell">Location</Th>
             </>
           }
         />
-      </div>
+      </ListContentWrapper>
     </>
   );
 }
@@ -315,13 +350,14 @@ const ListAssetContent = ({
   };
 }) => {
   const { category, tags, custody, location } = item;
+  const isSelfService = useUserIsSelfService();
   return (
     <>
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center">
+            <div className="flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -329,7 +365,7 @@ const ListAssetContent = ({
                   mainImageExpiration: item.mainImageExpiration,
                   alt: item.title,
                 }}
-                className="h-full w-full rounded-[4px] border object-cover"
+                className="size-full rounded-[4px] border object-cover"
               />
             </div>
             <div className="min-w-[130px]">
@@ -337,11 +373,10 @@ const ListAssetContent = ({
                 {item.title}
               </span>
               <div>
-                <Badge
-                  color={item.status === "AVAILABLE" ? "#12B76A" : "#2E90FA"}
-                >
-                  {userFriendlyAssetStatus(item.status)}
-                </Badge>
+                <AssetStatusBadge
+                  status={item.status}
+                  availableToBook={item.availableToBook}
+                />
               </div>
             </div>
           </div>
@@ -371,25 +406,27 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      <Td className="hidden md:table-cell">
-        {custody ? (
-          <GrayBadge>
-            <>
-              {custody.custodian?.user ? (
-                <img
-                  src={
-                    custody.custodian?.user?.profilePicture ||
-                    "/images/default_pfp.jpg"
-                  }
-                  className="mr-1 h-4 w-4 rounded-full"
-                  alt=""
-                />
-              ) : null}
-              <span className="mt-[1px]">{custody.custodian.name}</span>
-            </>
-          </GrayBadge>
-        ) : null}
-      </Td>
+      {!isSelfService ? (
+        <Td className="hidden md:table-cell">
+          {custody ? (
+            <GrayBadge>
+              <>
+                {custody.custodian?.user ? (
+                  <img
+                    src={
+                      custody.custodian?.user?.profilePicture ||
+                      "/images/default_pfp.jpg"
+                    }
+                    className="mr-1 size-4 rounded-full"
+                    alt=""
+                  />
+                ) : null}
+                <span className="mt-[1px]">{custody.custodian.name}</span>
+              </>
+            </GrayBadge>
+          ) : null}
+        </Td>
+      ) : null}
 
       {/* Location */}
       <Td className="hidden md:table-cell">

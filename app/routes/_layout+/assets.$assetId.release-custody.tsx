@@ -5,16 +5,21 @@ import { UserXIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import { createNote } from "~/modules/asset";
-import { requireAuthSession } from "~/modules/auth";
 import { releaseCustody } from "~/modules/custody";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
+  await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
   const custody = await db.custody.findUnique({
     where: { assetId: params.assetId as string },
     select: {
@@ -42,7 +47,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { userId } = await requireAuthSession(request);
+  const {
+    authSession: { userId },
+  } = await requirePermision(
+    request,
+    PermissionEntity.asset,
+    PermissionAction.update
+  );
   const assetId = params.assetId as string;
   const user = await getUserByID(userId);
 
@@ -59,7 +70,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
     /** Once the asset is updated, we create the note */
     await createNote({
-      content: `**${user.firstName} ${user.lastName}** has released **${custodianName}'s** custody over **${asset.title}**`,
+      content: `**${user.firstName?.trim()} ${
+        user.lastName
+      }** has released **${custodianName?.trim()}'s** custody over **${asset.title?.trim()}**`,
       type: "UPDATE",
       userId: asset.userId,
       assetId: asset.id,

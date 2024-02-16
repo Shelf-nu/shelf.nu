@@ -16,6 +16,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { ExportButton } from "~/components/assets/export-button";
 import { ErrorBoundryComponent } from "~/components/errors";
 import {
   Select,
@@ -31,13 +32,15 @@ import { Button } from "~/components/shared";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { commitAuthSession } from "~/modules/auth";
 import { updateOrganization } from "~/modules/organization";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { assertIsPost, isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
+import { canExportAssets } from "~/utils/subscription";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { MAX_SIZE } from "./settings.workspace.new";
 
@@ -49,8 +52,11 @@ const EditWorkspaceFormSchema = z.object({
 });
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { authSession, organizationId } = await requirePermision(
+    request,
+    PermissionEntity.generalSettings,
+    PermissionAction.read
+  );
   const { userId } = authSession;
 
   const user = await db.user.findUnique({
@@ -79,6 +85,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
                   firstName: true,
                   lastName: true,
                   profilePicture: true,
+                  tier: {
+                    include: { tierLimit: true },
+                  },
                 },
               },
             },
@@ -105,6 +114,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json({
     header,
     currentOrganization: currentOrganization.organization,
+    canExportAssets: canExportAssets(
+      currentOrganization.organization.owner.tier.tierLimit
+    ),
     user,
   });
 }
@@ -120,8 +132,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export async function action({ request }: ActionFunctionArgs) {
-  assertIsPost(request);
-  const authSession = await requireAuthSession(request);
+  const { authSession } = await requirePermision(
+    request,
+    PermissionEntity.generalSettings,
+    PermissionAction.update
+  );
 
   const clonedRequest = request.clone();
   const formData = await clonedRequest.formData();
@@ -175,7 +190,8 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function GeneralPage() {
-  const { currentOrganization, user } = useLoaderData<typeof loader>();
+  const { currentOrganization, user, canExportAssets } =
+    useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", EditWorkspaceFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -293,11 +309,8 @@ export default function GeneralPage() {
               disabled={disabled}
               name={zo.fields.currency()}
             >
-              <SelectTrigger
-                className="px-3.5 py-3"
-                placeholder="Choose a field type"
-              >
-                <SelectValue />
+              <SelectTrigger className="px-3.5 py-3">
+                <SelectValue placeholder="Choose a field type" />
               </SelectTrigger>
               <SelectContent
                 position="popper"
@@ -324,6 +337,21 @@ export default function GeneralPage() {
           </Button>
         </div>
       </Form>
+
+      <div className=" mb-6">
+        <h4 className="text-text-lg font-semibold">Asset backup</h4>
+        <p className=" text-sm text-gray-600">
+          Download a backup of your assets. If you want to restore a backup,
+          please get in touch with support.
+        </p>
+        <p className=" font-italic mb-2 text-sm text-gray-600">
+          IMPORTANT NOTE: QR codes will not be included in the export. Due to
+          the nature of how Shelf's QR codes work, they currently cannot be
+          exported with assets because they have unique ids. <br />
+          Importing a backup will just create a new QR code for each asset.
+        </p>
+        <ExportButton canExportAssets={canExportAssets} />
+      </div>
     </div>
   );
 }

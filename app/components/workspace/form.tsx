@@ -93,11 +93,8 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
             disabled={disabled}
             name={zo.fields.currency()}
           >
-            <SelectTrigger
-              className="px-3.5 py-3"
-              placeholder="Choose a field type"
-            >
-              <SelectValue />
+            <SelectTrigger className="px-3.5 py-3">
+              <SelectValue placeholder="Choose a field type" />
             </SelectTrigger>
             <SelectContent
               position="popper"

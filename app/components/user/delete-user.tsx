@@ -38,7 +38,7 @@ export const DeleteUser = ({
     <AlertDialogContent>
       <AlertDialogHeader>
         <div className="mx-auto md:m-0">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
+          <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
             <TrashIcon />
           </span>
         </div>

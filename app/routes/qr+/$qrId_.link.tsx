@@ -2,10 +2,12 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { UnlinkIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
-import { requireAuthSession } from "~/modules/auth";
+
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
+  await requirePermision(request, PermissionEntity.qr, PermissionAction.update);
   const { qrId } = params;
   return json({ qrId });
 };

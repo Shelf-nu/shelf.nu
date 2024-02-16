@@ -39,7 +39,7 @@ const DropdownMenuSubTrigger = React.forwardRef<
       {...props}
     >
       {children}
-      <ChevronRight className="ml-auto h-4 w-4" />
+      <ChevronRight className="ml-auto size-4" />
     </DropdownMenuPrimitive.SubTrigger>
   );
 });
@@ -84,13 +84,17 @@ const DropdownMenuItem = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
     inset?: boolean;
   }
->(function DropdownMenuItem({ className, inset, ...props }, ref) {
+>(function DropdownMenuItem(
+  { className, inset, disabled = false, ...props },
+  ref
+) {
   return (
     <DropdownMenuPrimitive.Item
       ref={ref}
       className={tw(
         "relative flex cursor-default select-none items-center px-2 py-1.5 text-sm font-medium outline-none focus:bg-slate-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 ",
         inset && "pl-8",
+        disabled && "pointer-events-none cursor-not-allowed opacity-30",
         className
       )}
       {...props}
@@ -138,9 +142,9 @@ const DropdownMenuRadioItem = React.forwardRef<
       )}
       {...props}
     >
-      <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <span className="absolute left-2 flex size-3.5 items-center justify-center">
         <DropdownMenuPrimitive.ItemIndicator>
-          <div className="h-2 w-2 fill-current" />
+          <div className="size-2 fill-current" />
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
       {children}
