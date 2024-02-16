@@ -1,12 +1,26 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 import { NODE_ENV } from "../utils/env";
 
-let db: PrismaClient;
+let db: ReturnType<typeof getNewPrismaClient>;
 
 declare global {
   // eslint-disable-next-line no-var
-  var __db__: PrismaClient;
+  var __db__: ReturnType<typeof getNewPrismaClient>;
+}
+
+/** Extending prisma client for dynamic findMany */
+function getNewPrismaClient() {
+  return new PrismaClient().$extends({
+    model: {
+      $allModels: {
+        async dynamicFindMany<T>(this: T, options: Prisma.Args<T, "findMany">) {
+          const ctx = Prisma.getExtensionContext(this) as any;
+          return ctx.findMany(options);
+        },
+      },
+    },
+  });
 }
 
 // this is needed because in development we don't want to restart
@@ -14,10 +28,10 @@ declare global {
 // create a new connection to the DB with every change either.
 // in production, we'll have a single connection to the DB.
 if (NODE_ENV === "production") {
-  db = new PrismaClient();
+  db = getNewPrismaClient();
 } else {
   if (!global.__db__) {
-    global.__db__ = new PrismaClient();
+    global.__db__ = getNewPrismaClient();
   }
   db = global.__db__;
   db.$connect();

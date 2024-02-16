@@ -11,7 +11,7 @@ import Header from "~/components/layout/header";
 import {
   createAsset,
   createNote,
-  getAllRelatedEntries,
+  getAllEntriesForCreateAndEdit,
   updateAssetMainImage,
 } from "~/modules/asset";
 import { commitAuthSession } from "~/modules/auth";
@@ -33,13 +33,24 @@ import { requirePermision } from "~/utils/roles.server";
 const title = "New Asset";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+  const { currentOrganization, organizationId } = await requirePermision(
     request,
     PermissionEntity.asset,
     PermissionAction.create
   );
-  const { userId } = authSession;
-  const organization = await getOrganization({ id: organizationId });
+
+  const {
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  } = await getAllEntriesForCreateAndEdit({
+    organizationId,
+    request,
+  });
+
   /**
    * We need to check if the QR code passed in the URL belongs to the current org
    * This is relevant whenever the user is trying to link a new asset with an existing QR code
@@ -49,12 +60,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     organizationId,
   });
 
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
-      organizationId,
-    });
-
   const header = {
     title,
   };
@@ -62,9 +67,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json({
     header,
     categories,
+    totalCategories,
     tags,
+    totalTags: tags.length,
     locations,
-    currency: organization?.currency,
+    totalLocations,
+    currency: currentOrganization?.currency,
     customFields,
   });
 }

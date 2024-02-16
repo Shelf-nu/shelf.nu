@@ -9,7 +9,6 @@ import type {
   Tag,
   Organization,
   TeamMember,
-  CustomField,
   Booking,
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
@@ -30,13 +29,15 @@ import {
 } from "~/utils/custom-fields";
 import { ShelfStackError, handleUniqueConstraintError } from "~/utils/error";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+
 import type {
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
-import { createCategoriesIfNotExists, getAllCategories } from "../category";
+import { createCategoriesIfNotExists } from "../category";
+
 import {
   createCustomFieldsIfNotExists,
   upsertCustomField,
@@ -44,7 +45,7 @@ import {
 import type { CustomFieldDraftPayload } from "../custom-field/types";
 import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
-import { createTagsIfNotExists, getAllTags } from "../tag";
+import { createTagsIfNotExists } from "../tag";
 import { createTeamMemberIfNotExists } from "../team-member";
 
 export async function getAsset({
@@ -966,34 +967,60 @@ export async function duplicateAsset({
   return duplicatedAssets;
 }
 
-/** Fetches all related entries required for creating a new asset */
-export async function getAllRelatedEntries({
+export async function getAllEntriesForCreateAndEdit({
   organizationId,
+  request,
 }: {
-  userId: User["id"];
   organizationId: Organization["id"];
-}): Promise<{
-  categories: Category[];
-  tags: Tag[];
-  locations: Location[];
-  customFields: CustomField[];
-}> {
-  const [categories, tags, locations, customFields] = await db.$transaction([
+  request: LoaderFunctionArgs["request"];
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const categorySelected = searchParams.get("category") ?? "";
+  const locationSelected = searchParams.get("location") ?? "";
+
+  const [
+    categoryExcludedSelected,
+    selectedCategories,
+    totalCategories,
+    tags,
+    locationExcludedSelected,
+    selectedLocation,
+    totalLocations,
+    customFields,
+  ] = await db.$transaction([
     /** Get the categories */
-    db.category.findMany({ where: { organizationId } }),
+    db.category.findMany({
+      where: { organizationId, id: { not: categorySelected } },
+      take: 4,
+    }),
+    db.category.findMany({ where: { organizationId, id: categorySelected } }),
+    db.category.count({ where: { organizationId } }),
 
     /** Get the tags */
     db.tag.findMany({ where: { organizationId } }),
 
     /** Get the locations */
-    db.location.findMany({ where: { organizationId } }),
+    db.location.findMany({
+      where: { organizationId, id: { not: locationSelected } },
+      take: 4,
+    }),
+    db.location.findMany({ where: { organizationId, id: locationSelected } }),
+    db.location.count({ where: { organizationId } }),
 
     /** Get the custom fields */
     db.customField.findMany({
       where: { organizationId, active: { equals: true } },
     }),
   ]);
-  return { categories, tags, locations, customFields };
+
+  return {
+    categories: [...selectedCategories, ...categoryExcludedSelected],
+    totalCategories,
+    tags,
+    locations: [...selectedLocation, ...locationExcludedSelected],
+    totalLocations,
+    customFields,
+  };
 }
 
 export const getPaginatedAndFilterableAssets = async ({
@@ -1036,6 +1063,33 @@ export const getPaginatedAndFilterableAssets = async ({
     getFunction = getAssets;
   }
 
+  const [
+    categoryExcludedSelected,
+    selectedCategories,
+    totalCategories,
+    tagsExcludedSelected,
+    selectedTags,
+    totalTags,
+  ] = await db.$transaction([
+    db.category.findMany({
+      where: { organizationId, id: { notIn: categoriesIds } },
+      take: 4,
+    }),
+    db.category.findMany({
+      where: { organizationId, id: { in: categoriesIds } },
+    }),
+    db.category.count({ where: { organizationId } }),
+    db.tag.findMany({
+      where: { organizationId, id: { notIn: tagsIds } },
+      take: 4,
+    }),
+    db.tag.findMany({
+      where: { organizationId, id: { in: tagsIds } },
+      take: 4,
+    }),
+    db.tag.count({ where: { organizationId } }),
+  ]);
+
   const { assets, totalAssets } = await getFunction({
     organizationId,
     page,
@@ -1059,14 +1113,10 @@ export const getPaginatedAndFilterableAssets = async ({
     next,
     categories: excludeCategoriesQuery
       ? []
-      : await getAllCategories({
-          organizationId,
-        }),
-    tags: excludeTagsQuery
-      ? []
-      : await getAllTags({
-          organizationId,
-        }),
+      : [...selectedCategories, ...categoryExcludedSelected],
+    totalCategories,
+    tags: excludeTagsQuery ? [] : [...selectedTags, ...tagsExcludedSelected],
+    totalTags,
     assets,
     totalPages,
     cookie,
@@ -1427,6 +1477,7 @@ export const createAssetsFromBackupImport = async ({
       const customFieldDef = asset.customFields.reduce(
         (res, { value, customField }) => {
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
           const { id, createdAt, updatedAt, ...rest } = customField;
           const options = value?.valueOption?.length
             ? [value?.valueOption]

@@ -15,7 +15,7 @@ import { ErrorBoundryComponent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
-  getAllRelatedEntries,
+  getAllEntriesForCreateAndEdit,
   getAsset,
   updateAsset,
   updateAssetMainImage,
@@ -38,19 +38,24 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+  const { organizationId } = await requirePermision(
     request,
     PermissionEntity.asset,
     PermissionAction.update
   );
   const organization = await getOrganization({ id: organizationId });
-  const { userId } = authSession;
 
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
-      organizationId,
-    });
+  const {
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  } = await getAllEntriesForCreateAndEdit({
+    request,
+    organizationId,
+  });
 
   const id = getRequiredParam(params, "assetId");
 
@@ -68,9 +73,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     asset,
     header,
     categories,
+    totalCategories,
     tags,
+    totalTags: tags.length,
     locations,
     currency: organization?.currency,
+    totalLocations,
     customFields,
   });
 }
