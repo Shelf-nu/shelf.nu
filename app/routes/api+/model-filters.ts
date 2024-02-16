@@ -1,5 +1,4 @@
 import type { Prisma } from "@prisma/client";
-import type { DefaultArgs } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
