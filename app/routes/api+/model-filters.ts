@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+import type { DefaultArgs } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
@@ -5,7 +7,12 @@ import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
 
 export type AllowedModelNames = "asset" | "tag" | "category" | "location";
-
+type ModelMap = {
+  asset: Prisma.AssetDelegate<any>;
+  tag: Prisma.TagDelegate<any>;
+  category: Prisma.CategoryDelegate<any>;
+  location: Prisma.LocationDelegate<any>;
+};
 const ModelFiltersSchema = z.object({
   /** Models that are allowed to filter */
   model: z.enum(["asset", "tag", "category"]),
@@ -36,8 +43,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return json({ errors: result.error }, { status: 400 });
   }
 
-  const model = result.data.model as AllowedModelNames;
-  const queryData = (await db[model].dynamicFindMany({
+  const model = result.data.model as keyof ModelMap;
+  const delegate = db[model] as ModelMap[typeof model] & {
+    dynamicFindMany: typeof db.$allModels.dynamicFindMany;
+  };
+  const queryData = (await delegate.dynamicFindMany({
     where: {
       userId,
       OR: [
@@ -53,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ],
     },
     take: 4,
-  })) as Array<Record<string, string>>;
+  })) as Array<any>;
 
   return json(
     queryData.map((item) => ({

@@ -1,10 +1,11 @@
-import type { PrismaClient, Organization, User } from "@prisma/client";
+import type { Organization, PrismaClient, User } from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import sharp from "sharp";
+import type { ExtendedPrismaClient } from "~/database";
 import { db } from "~/database";
 
 import {
@@ -58,9 +59,19 @@ async function createUserOrgAssociation(
     userId: User["id"];
   }
 ) {
+  /**
+   * @TODO this should be addressed in the future
+   * From copilot:
+   * I see, the issue is that the tx object you're getting from the $transaction method is not of type ExtendedPrismaClient, but rather PrismaClient.
+   * The PrismaClient type doesn't include the $allModels property, which is why you're seeing this error. Unfortunately, Prisma's $transaction method doesn't support extending the PrismaClient type, so you can't directly pass an ExtendedPrismaClient to the transaction callback.
+   * A workaround for this issue is to change the createUserOrgAssociation function to accept a PrismaClient and manually cast it to an ExtendedPrismaClient inside the function:
+   * This way, you can still use the ExtendedPrismaClient inside the function, but you won't get any type errors when you pass a PrismaClient to the function. Please note that this is a workaround and might not be the best solution if you're planning to use the $allModels property inside the transaction.
+   */
+  const extendedTx = tx as Omit<ExtendedPrismaClient, ITXClientDenyList>;
+
   return await Promise.all(
     Array.from(new Set(organizationIds)).map((organizationId) =>
-      tx.userOrganization.upsert({
+      extendedTx.userOrganization.upsert({
         where: {
           userId_organizationId: {
             userId,

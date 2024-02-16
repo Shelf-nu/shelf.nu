@@ -9,18 +9,26 @@ declare global {
   var __db__: ReturnType<typeof getNewPrismaClient>;
 }
 
+export interface ExtendedPrismaClient extends PrismaClient {
+  $allModels: {
+    dynamicFindMany<T>(
+      this: T,
+      options: Prisma.Args<T, "findMany">
+    ): Promise<T[]>;
+  };
+}
+
 /** Extending prisma client for dynamic findMany */
-function getNewPrismaClient() {
-  return new PrismaClient().$extends({
-    model: {
-      $allModels: {
-        async dynamicFindMany<T>(this: T, options: Prisma.Args<T, "findMany">) {
-          const ctx = Prisma.getExtensionContext(this) as any;
-          return ctx.findMany(options);
-        },
-      },
+/** Extending prisma client for dynamic findMany */
+function getNewPrismaClient(): ExtendedPrismaClient {
+  const client = new PrismaClient() as ExtendedPrismaClient;
+  client.$allModels = {
+    async dynamicFindMany<T>(this: T, options: Prisma.Args<T, "findMany">) {
+      const ctx = Prisma.getExtensionContext(this) as any;
+      return ctx.findMany(options);
     },
-  });
+  };
+  return client;
 }
 
 // this is needed because in development we don't want to restart
