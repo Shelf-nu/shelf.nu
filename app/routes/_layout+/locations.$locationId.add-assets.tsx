@@ -46,6 +46,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     organizationId,
     excludeCategoriesQuery: true,
     excludeTagsQuery: true,
+    excludeSearchFromView: true,
   });
 
   const modelName = {
