@@ -20,7 +20,7 @@ import { TeamMembersTable } from "~/components/workspace/team-members-table";
 import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
-import { createInvite } from "~/modules/invite";
+import { createInvite, updateInviteStatus } from "~/modules/invite";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { revokeAccessToOrganization } from "~/modules/user";
@@ -32,7 +32,12 @@ import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-type ActionIntent = "delete" | "revoke" | "resend" | "invite";
+type ActionIntent =
+  | "delete"
+  | "revokeAccess"
+  | "resend"
+  | "invite"
+  | "revokeInvite";
 export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
@@ -201,7 +206,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
       return redirect(`/settings/team`);
-    case "revoke":
+    case "revokeAccess":
       const targetUserId = formData.get("userId") as string;
       const user = await revokeAccessToOrganization({
         userId: targetUserId,
@@ -242,6 +247,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         senderId: userId,
       });
       return redirect("/settings/team");
+    // case "revokeInvite":
+    //   await db.invite.update({
+    //     where: {
+    //       inviteeEmail: formData.get("email") as string,
+    //     },
+    //     data: {
+    //       status: "REVOKED",
+    //     },
+    //   });
+    //   })
     case "resend":
       const invite = await createInvite({
         organizationId,

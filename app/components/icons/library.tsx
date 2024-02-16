@@ -396,7 +396,8 @@ export function SearchIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export const XIcon = (props: SVGProps<SVGSVGElement>) => (
+export function XIcon(props: SVGProps<SVGSVGElement>) {
+  return;
   <svg
     width={10}
     height={10}
@@ -411,8 +412,8 @@ export const XIcon = (props: SVGProps<SVGSVGElement>) => (
       strokeLinecap="round"
       strokeLinejoin="round"
     />
-  </svg>
-);
+  </svg>;
+}
 
 export const AssetsIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg

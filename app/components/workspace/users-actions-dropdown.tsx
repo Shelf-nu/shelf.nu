@@ -4,6 +4,7 @@ import { Form, useNavigation } from "@remix-run/react";
 import {
   RefreshIcon,
   RemoveUserIcon,
+  UserXIcon,
   VerticalDotsIcon,
 } from "~/components/icons";
 import {
@@ -72,6 +73,19 @@ export function TeamUsersActionsDropdown({
                     <RefreshIcon /> Resend invite
                   </span>
                 </Button>
+                <Button
+                  type="submit"
+                  variant="link"
+                  className="justify-start px-4 py-3  text-gray-700 focus:bg-slate-100 hover:bg-slate-100 hover:text-gray-700"
+                  width="full"
+                  name="intent"
+                  value="revokeInvite"
+                  disabled={disabled}
+                >
+                  <span className="flex items-center gap-2">
+                    <UserXIcon /> Revoke invite
+                  </span>
+                </Button>
               </>
             ) : null}
             {inviteStatus === "ACCEPTED" ? (
@@ -85,7 +99,7 @@ export function TeamUsersActionsDropdown({
                   className="justify-start px-4 py-3  text-gray-700 focus:bg-slate-100 hover:bg-slate-100 hover:text-gray-700"
                   width="full"
                   name="intent"
-                  value="revoke"
+                  value="revokeAccess"
                   disabled={disabled}
                 >
                   <span className="flex items-center gap-2">
