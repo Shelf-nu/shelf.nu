@@ -235,7 +235,7 @@ export const AssetForm = ({
                 imageId={metadata.imageId}
                 alt="img"
                 className={tw(
-                  "h-6 w-6 rounded-[2px] object-cover",
+                  "size-6 rounded-[2px] object-cover",
                   metadata.description ? "rounded-b-none border-b-0" : ""
                 )}
               />

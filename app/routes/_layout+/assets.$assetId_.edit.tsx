@@ -38,7 +38,6 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-
   const { authSession, organizationId } = await requirePermision(
     request,
     PermissionEntity.asset,

@@ -1059,7 +1059,6 @@ export const getPaginatedAndFilterableAssets = async ({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
-
   const [
     categoryExcludedSelected,
     selectedCategories,
@@ -1092,7 +1091,6 @@ export const getPaginatedAndFilterableAssets = async ({
     getFunction = getAssets;
   }
 
-
   const { assets, totalAssets } = await getFunction({
     organizationId,
     page,
@@ -1119,9 +1117,7 @@ export const getPaginatedAndFilterableAssets = async ({
     categories: excludeCategoriesQuery
       ? []
       : [...selectedCategories, ...categoryExcludedSelected],
-    tags: excludeTagsQuery
-      ? []
-      : [...selectedTags, ...tagsExcludedSelected],
+    tags: excludeTagsQuery ? [] : [...selectedTags, ...tagsExcludedSelected],
     assets,
     totalPages,
     cookie,

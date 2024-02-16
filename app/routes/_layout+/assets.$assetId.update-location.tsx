@@ -7,7 +7,6 @@ import { Button } from "~/components/shared/button";
 
 import {
   getAllEntriesForCreateAndEdit,
-  getAllRelatedEntries
   getAsset,
   updateAsset,
 } from "~/modules/asset";

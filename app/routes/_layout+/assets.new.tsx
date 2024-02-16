@@ -16,7 +16,6 @@ import {
 } from "~/modules/asset";
 import { commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganization } from "~/modules/organization";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
@@ -33,7 +32,7 @@ import { requirePermision } from "~/utils/roles.server";
 const title = "New Asset";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId, currentOrganization } = await requirePermision(
+  const { organizationId, currentOrganization } = await requirePermision(
     request,
     PermissionEntity.asset,
     PermissionAction.create
@@ -50,7 +49,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     request,
   });
 
-  const { userId } = authSession;
   /**
    * We need to check if the QR code passed in the URL belongs to the current org
    * This is relevant whenever the user is trying to link a new asset with an existing QR code
@@ -72,7 +70,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalTags: tags.length,
     locations,
     totalLocations,
-    locations,
     currency: currentOrganization?.currency,
     customFields,
   });

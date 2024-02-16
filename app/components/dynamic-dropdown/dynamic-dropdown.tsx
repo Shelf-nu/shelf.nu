@@ -64,7 +64,7 @@ export default function DynamicDropdown({
           <div>
             {cloneElement(trigger)}
             <When truthy={selectedItems.length > 0}>
-              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
+              <div className="flex size-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
                 {selectedItems.length}
               </div>
             </When>
