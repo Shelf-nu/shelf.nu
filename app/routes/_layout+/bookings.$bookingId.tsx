@@ -220,9 +220,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     action: intent2ActionMap[intent],
   });
   const id = getRequiredParam(params, "bookingId");
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+
   const headers = [
     setCookie(await setSelectedOrganizationIdCookie(organizationId)),
   ];
+
   switch (intent) {
     case "save":
       const result = await NewBookingFormSchema().safeParseAsync(
@@ -280,7 +284,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     case "reserve":
       await upsertBooking(
         { id, status: BookingStatus.RESERVED },
-        getClientHint(request)
+        getClientHint(request),
+        isSelfService
       );
       sendNotification({
         title: "Booking reserved",
@@ -295,7 +300,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }
       );
     case "delete":
-      const isSelfService = role === OrganizationRoles.SELF_SERVICE;
       if (isSelfService) {
         /**
          * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.

@@ -67,6 +67,7 @@ export const loader = async ({
     organizationId,
     excludeCategoriesQuery: true,
     excludeTagsQuery: true,
+    excludeSearchFromView: true,
   });
 
   const modelName = {

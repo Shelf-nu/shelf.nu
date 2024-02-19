@@ -38,8 +38,12 @@ const JoinFormSchema = z
       .string()
       .email("invalid-email")
       .transform((email) => email.toLowerCase()),
-    password: z.string().min(8, "password-too-short"),
-    confirmPassword: z.string().min(8, "password-too-short"),
+    password: z
+      .string()
+      .min(8, "Your password is too short. Min 8 characters are required."),
+    confirmPassword: z
+      .string()
+      .min(8, "Your password is too short. Min 8 characters are required."),
     redirectTo: z.string().optional(),
   })
   .superRefine(({ password, confirmPassword }, ctx) => {
