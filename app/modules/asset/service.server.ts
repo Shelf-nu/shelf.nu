@@ -110,7 +110,11 @@ export async function getAsset({
   return asset;
 }
 
-export async function getAssets({
+/**
+ * Fetches assets from AssetSearchView
+ * This is used to have a more advanced search however its less performant
+ */
+export async function getAssetsFromView({
   organizationId,
   page = 1,
   perPage = 8,
@@ -302,6 +306,185 @@ export async function getAssets({
   ]);
 
   return { assets: assetSearch.map((a) => a.asset), totalAssets };
+}
+
+/**
+ * Fetches assets directly from asset table
+ */
+export async function getAssets({
+  organizationId,
+  page = 1,
+  perPage = 8,
+  search,
+  categoriesIds,
+  tagsIds,
+  bookingFrom,
+  bookingTo,
+  hideUnavailable,
+  unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
+}: {
+  organizationId: Organization["id"];
+
+  /** Page number. Starts at 1 */
+  page: number;
+
+  /** Assets to be loaded per page */
+  perPage?: number;
+
+  search?: string | null;
+
+  categoriesIds?: Category["id"][] | null;
+  tagsIds?: Tag["id"][] | null;
+  hideUnavailable?: Asset["availableToBook"];
+  bookingFrom?: Booking["from"];
+  bookingTo?: Booking["to"];
+  unhideAssetsBookigIds?: Booking["id"][];
+}) {
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
+
+  /** Default value of where. Takes the assetss belonging to current user */
+  let where: Prisma.AssetWhereInput = { organizationId };
+
+  /** If the search string exists, add it to the where object */
+  if (search) {
+    const words = search.trim().replace(/ +/g, " "); //replace multiple spaces into 1
+    where.title = words;
+  }
+
+  if (categoriesIds && categoriesIds.length > 0) {
+    if (categoriesIds.includes("uncategorized")) {
+      where.OR = [
+        {
+          categoryId: {
+            in: categoriesIds,
+          },
+        },
+        {
+          categoryId: null,
+        },
+      ];
+    } else {
+      where.categoryId = {
+        in: categoriesIds,
+      };
+    }
+  }
+  const unavailableBookingStatuses = [
+    BookingStatus.DRAFT,
+    BookingStatus.RESERVED,
+    BookingStatus.ONGOING,
+  ];
+  if (hideUnavailable) {
+    //not disabled for booking
+    where.availableToBook = true;
+    //not assigned to team meber
+    where.custody = null;
+    if (bookingFrom && bookingTo) {
+      //reserved during that time
+      where.bookings = {
+        none: {
+          ...(unhideAssetsBookigIds?.length && {
+            id: { notIn: unhideAssetsBookigIds },
+          }),
+          status: { in: unavailableBookingStatuses },
+          OR: [
+            {
+              from: { lte: bookingTo },
+              to: { gte: bookingFrom },
+            },
+            {
+              from: { gte: bookingFrom },
+              to: { lte: bookingTo },
+            },
+          ],
+        },
+      };
+    }
+  }
+  if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
+    throw new ShelfStackError({
+      message: "booking dates are needed to hide unavailable assets",
+    });
+  }
+  if (bookingFrom && bookingTo) {
+    where.availableToBook = true;
+  }
+
+  if (tagsIds && tagsIds.length > 0) {
+    where.tags = {
+      some: {
+        id: {
+          in: tagsIds,
+        },
+      },
+    };
+  }
+
+  const [assets, totalAssets] = await db.$transaction([
+    /** Get the assets */
+    db.asset.findMany({
+      skip,
+      take,
+      where,
+      include: {
+        category: true,
+        tags: true,
+        location: {
+          select: {
+            name: true,
+          },
+        },
+        custody: {
+          select: {
+            custodian: {
+              select: {
+                name: true,
+                user: {
+                  select: {
+                    profilePicture: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        ...(bookingTo && bookingFrom
+          ? {
+              bookings: {
+                where: {
+                  status: { in: unavailableBookingStatuses },
+                  OR: [
+                    {
+                      from: { lte: bookingTo },
+                      to: { gte: bookingFrom },
+                    },
+                    {
+                      from: { gte: bookingFrom },
+                      to: { lte: bookingTo },
+                    },
+                  ],
+                },
+                take: 1, //just to show in UI if its booked, so take only 1, also at a given slot only 1 booking can be created for an asset
+                select: {
+                  from: true,
+                  to: true,
+                  status: true,
+                  id: true,
+                  name: true,
+                },
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+
+    /** Count them */
+    db.asset.count({ where }),
+  ]);
+
+  return { assets, totalAssets };
 }
 
 export async function createAsset({
@@ -826,12 +1009,18 @@ export const getPaginatedAndFilterableAssets = async ({
   organizationId,
   excludeCategoriesQuery = false,
   excludeTagsQuery = false,
+  excludeSearchFromView = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   extraInclude?: Prisma.AssetInclude;
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
+  /**
+   * Set to true if you want the query to be performed by directly accessing the assets table
+   *  instead of the AssetSearchView
+   */
+  excludeSearchFromView?: boolean;
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const {
@@ -850,7 +1039,12 @@ export const getPaginatedAndFilterableAssets = async ({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
-  const { assets, totalAssets } = await getAssets({
+  let getFunction = getAssetsFromView;
+  if (excludeSearchFromView) {
+    getFunction = getAssets;
+  }
+
+  const { assets, totalAssets } = await getFunction({
     organizationId,
     page,
     perPage,

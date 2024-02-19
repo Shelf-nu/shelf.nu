@@ -503,13 +503,24 @@ export const removeAssets = async (
   /** When removing an asset from a booking we need to make sure to set their status back to available
    * This is needed because the user is allowed to remove an asset from a booking that is ongoing, which means the asset status will be CHECKED_OUT
    * So we need to set it back to AVAILABLE
+   * We only do that if the booking we removed it from is ongoing or overdue.
+   * Reason is that the user can add an asset to a draft booking and remove it and that will reset its status back to available, which shouldnt happen
+   * https://github.com/Shelf-nu/shelf.nu/issues/703#issuecomment-1944315975
+   *
    * Because prisma doesnt support transactional execution of nested queries, we need to do them in 2 steps, because if the disconnect runs first,
    * the updateMany will not find the assets in the booking anymore and wont update them
    */
-  await db.asset.updateMany({
-    where: { id: { in: assetIds } },
-    data: { status: AssetStatus.AVAILABLE },
-  });
+
+  if (
+    b.status === BookingStatus.ONGOING ||
+    b.status === BookingStatus.OVERDUE
+  ) {
+    await db.asset.updateMany({
+      where: { id: { in: assetIds } },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+  }
+
   return b;
 };
 
