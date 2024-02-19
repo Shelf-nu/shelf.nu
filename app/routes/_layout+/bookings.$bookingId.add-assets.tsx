@@ -26,8 +26,9 @@ import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 
 import { Td } from "~/components/table";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset";
+import { createNote, getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
+import { getUserByID } from "~/modules/user";
 import { getRequiredParam, isFormProcessing } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfStackError } from "~/utils/error";
@@ -92,7 +93,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  await requirePermision(
+  const { authSession } = await requirePermision(
     request,
     PermissionEntity.booking,
     PermissionAction.update
@@ -102,20 +103,41 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
   const isChecked = formData.get("isChecked") === "yes";
+  const user = await getUserByID(authSession.userId);
+  if (!user) {
+    throw new ShelfStackError({ message: "User not found" });
+  }
+
+  let noteContent = "";
   if (isChecked) {
-    await upsertBooking(
+    const b = await upsertBooking(
       {
         id: bookingId,
         assetIds: [assetId],
       },
       getClientHint(request)
     );
+
+    noteContent = `**${user.firstName?.trim()} ${user.lastName?.trim()}** included asset in booking **[${
+      b.name
+    }](/bookings/${b.id})**.`;
   } else {
-    await removeAssets({
+    const b = await removeAssets({
       id: bookingId,
       assetIds: [assetId],
     });
+
+    noteContent = `**${user.firstName?.trim()} ${user.lastName?.trim()}** removed asset from booking **[${
+      b.name
+    }](/bookings/${b.id})**.`;
   }
+
+  await createNote({
+    content: noteContent,
+    type: "UPDATE",
+    userId: authSession.userId,
+    assetId,
+  });
 
   return json({ ok: true });
 };
