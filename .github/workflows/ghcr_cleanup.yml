@@ -1,0 +1,39 @@
+# https://github.com/Koenkk/zigbee2mqtt/blob/fe0742a628fb782692f9679367e2ab1b11139dd6/.github/workflows/ghcr_cleanup.yml
+
+name: 🧹 ghcr.io Cleanup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  packages: write
+
+env:
+  PACKAGE_NAME: shelf.nu
+  PER_PAGE: 2000
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🗑 Delete untagged images
+        uses: actions/github-script@v7.0.1
+        with:
+          script: |
+            const response = await github.request("GET /user/packages/container/${{ env.PACKAGE_NAME }}/versions",
+              { per_page: ${{ env.PER_PAGE }}
+            });
+            for(version of response.data) {
+                if (version.metadata.container.tags.length == 0) {
+                    try {
+                        console.log("delete " + version.id)
+                        const deleteResponse = await github.request("DELETE /user/packages/container/${{ env.PACKAGE_NAME }}/versions/" + version.id, { });
+                        console.log("status " + deleteResponse.status)
+                    } catch (e) {
+                        console.log("failed")
+                    }
+                }
+            }

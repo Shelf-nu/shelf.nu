@@ -10,7 +10,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     PermissionEntity.asset,
     PermissionAction.export
   );
-
   await assertUserCanExportAssets({ organizationId, organizations });
 
   /** Join the rows with a new line */
