@@ -66,9 +66,11 @@ export const ErrorBoundryComponent = ({
       <ErrorContent
         title={title ? title : "Oops, something went wrong"}
         message={
-          NODE_ENV === "development"
-            ? error.message
-            : "Please try again and if the issue persists, contact support"
+          NODE_ENV === "development" ? (
+            <pre>{error.message}</pre>
+          ) : (
+            "Please try again and if the issue persists, contact support"
+          )
         }
       />
     );

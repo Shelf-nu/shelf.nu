@@ -83,7 +83,7 @@ export const assetReservedEmailContent = ({
     to,
     bookingId,
     assetsCount,
-    emailContent: `Booking confirmation for ${custodian}.`,
+    emailContent: `Booking reservation for ${custodian}.`,
   });
 
 /**
