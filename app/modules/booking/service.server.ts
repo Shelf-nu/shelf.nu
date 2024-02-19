@@ -21,6 +21,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
+import { getOrganizationAdminsEmails } from "../organization";
 
 /** Includes needed for booking to have all data required for emails */
 export const bookingIncludeForEmails = {
@@ -96,7 +97,8 @@ export const upsertBooking = async (
       | "custodianUserId"
     > & { assetIds: Asset["id"][] }
   >,
-  hints: ClientHint
+  hints: ClientHint,
+  isSelfService: boolean = false
 ) => {
   const {
     assetIds,
@@ -247,10 +249,36 @@ export const upsertBooking = async (
           });
           let html = bookingUpdatesTemplateString({
             booking: res,
-            heading: `Booking confirmation for ${custodian}`,
+            heading: `Booking reservation for ${custodian}`,
             assetCount: res.assets.length,
             hints,
           });
+
+          /** Here we need to check if the custodian is different than the admin and send email to the admin in case they are different */
+          if (isSelfService) {
+            const adminsEmails = await getOrganizationAdminsEmails({
+              organizationId: res.organizationId,
+            });
+
+            const adminSubject = `Booking reservation request (${res.name}) by ${custodian} - shelf.nu`;
+
+            /** Pushing admins emails to promises */
+            promises.push(
+              sendEmail({
+                to: adminsEmails.join(","),
+                subject: adminSubject,
+                text,
+                /** We need to invoke this function separately for the admin email as the footer of emails is different */
+                html: bookingUpdatesTemplateString({
+                  booking: res,
+                  heading: `Booking reservation for ${custodian}`,
+                  assetCount: res.assets.length,
+                  hints,
+                  isAdminEmail: true,
+                }),
+              })
+            );
+          }
 
           if (data.status === BookingStatus.COMPLETE) {
             subject = `Booking completed (${res.name}) - shelf.nu`;
