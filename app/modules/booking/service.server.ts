@@ -271,7 +271,7 @@ export const upsertBooking = async (
                 /** We need to invoke this function separately for the admin email as the footer of emails is different */
                 html: bookingUpdatesTemplateString({
                   booking: res,
-                  heading: `Booking reservation for ${custodian}`,
+                  heading: `Booking reservation request for ${custodian}`,
                   assetCount: res.assets.length,
                   hints,
                   isAdminEmail: true,
