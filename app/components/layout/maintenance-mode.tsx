@@ -5,7 +5,7 @@ export default function MaintenanceMode() {
   return (
     <div className="size-screen relative px-4 py-16 md:p-16">
       <img
-        src="/images/bg-overlay1.png"
+        src="/static/images/bg-overlay1.png"
         alt="background"
         className="absolute left-0 top-0 -z-10 size-full object-cover"
       />

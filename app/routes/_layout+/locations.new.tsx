@@ -17,21 +17,21 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
 
-import { commitAuthSession } from "~/modules/auth";
 import { createLocation } from "~/modules/location";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 const title = "New Location";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.create,
+  });
 
   const header = {
     title,
@@ -50,12 +50,14 @@ export const handle = {
 
 export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
-export async function action({ request }: ActionFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.create,
+  });
 
   /** Here we need to clone the request as we need 2 different streams:
    * 1. Access form data for creating asset
@@ -78,9 +80,6 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -115,7 +114,6 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -128,11 +126,7 @@ export async function action({ request }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/locations/${location.id}`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect(`/locations/${location.id}`);
 }
 
 export default function NewLocationPage() {

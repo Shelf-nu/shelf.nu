@@ -1,12 +1,16 @@
+import type { AuthSession } from "server/session";
 import type { SupabaseAuthSession } from "~/integrations/supabase";
 
 import { ShelfStackError } from "~/utils/error";
-import type { AuthSession } from "./types";
 
 export async function mapAuthSession(
   supabaseAuthSession: SupabaseAuthSession | null
-): Promise<AuthSession | null> {
-  if (!supabaseAuthSession) return null;
+): Promise<AuthSession> {
+  if (!supabaseAuthSession) {
+    throw new ShelfStackError({
+      message: "Supabase auth session is null",
+    });
+  }
 
   if (!supabaseAuthSession.refresh_token)
     throw new ShelfStackError({ message: "User should have a refresh token" });

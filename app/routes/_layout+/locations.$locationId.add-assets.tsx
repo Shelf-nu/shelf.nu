@@ -17,12 +17,18 @@ import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { organizationId } = await requirePermision(
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.update,
+  });
   const locationId = params.locationId as string;
   const location = await db.location.findUnique({
     where: {
@@ -70,12 +76,18 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  await requirePermision(
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.update,
+  });
   const { locationId } = params;
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;

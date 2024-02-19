@@ -19,7 +19,6 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { TeamMembersTable } from "~/components/workspace/team-members-table";
 import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { requireOrganisationId } from "~/modules/organization/context.server";
@@ -57,14 +56,19 @@ type InviteWithTeamMember = Pick<
   };
 };
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.teamMember,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.read,
+  });
 
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId({
+    userId: authSession.userId,
+    request,
+  });
   const [organization, userMembers, invites, teamMembers] =
     await db.$transaction([
       /** Get the org */
@@ -152,7 +156,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       name: `${um.user.firstName ? um.user.firstName : ""} ${
         um.user.lastName ? um.user.lastName : ""
       }`,
-      img: um.user.profilePicture || "/images/default_pfp.jpg",
+      img: um.user.profilePicture || "/static/images/default_pfp.jpg",
       email: um.user.email,
       status: "ACCEPTED",
       role: organizationRolesMap[um.roles[0]],
@@ -163,7 +167,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   for (const invite of invites as InviteWithTeamMember[]) {
     teamMembersWithUserOrInvite.push({
       name: invite.inviteeTeamMember.name,
-      img: "/images/default_pfp.jpg",
+      img: "/static/images/default_pfp.jpg",
       email: invite.inviteeEmail,
       status: invite.status,
       role: organizationRolesMap[invite?.roles[0]],
@@ -181,10 +185,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
+
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.update,
+  });
 
   const formData = await request.formData();
   const intent = formData.get("intent") as ActionIntent;

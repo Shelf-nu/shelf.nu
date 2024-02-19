@@ -1,9 +1,5 @@
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
@@ -17,19 +13,14 @@ import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
 
 import { useUserData } from "~/hooks";
-import {
-  commitAuthSession,
-  destroyAuthSession,
-  requireAuthSession,
-  sendResetPasswordLink,
-} from "~/modules/auth";
+import { sendResetPasswordLink } from "~/modules/auth";
 import { updateProfilePicture, updateUser } from "~/modules/user";
 import type {
   UpdateUserPayload,
   UpdateUserResponse,
 } from "~/modules/user/types";
 
-import { assertIsPost, isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -47,9 +38,8 @@ export const UpdateFormSchema = z.object({
   lastName: z.string().optional(),
 });
 
-export async function action({ request }: ActionFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  assertIsPost(request);
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
 
   const clonedRequest = request.clone();
   const formData = await clonedRequest.formData();
@@ -72,7 +62,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     /** Logout user after 3 seconds */
     await delay(2000);
-    return destroyAuthSession(clonedRequest);
+    context.destroySession();
+    return redirect("/login");
   }
 
   /** Handle the use update */
@@ -115,20 +106,11 @@ export async function action({ request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return json(
-      { success: true },
-      {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
-    );
+    return json({ success: true });
   }
 }
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
-
+export async function loader() {
   const title = "Account Details";
 
   return json({ title });
@@ -150,7 +132,6 @@ export default function UserPage() {
   const errors = data?.errors as UpdateUserResponse["errors"];
   const user = useUserData();
   const usernameError = errors?.username || zo.errors.username()?.message;
-
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   return (

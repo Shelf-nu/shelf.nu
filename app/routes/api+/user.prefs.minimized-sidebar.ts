@@ -8,7 +8,7 @@ export async function action({ request }: ActionFunctionArgs) {
   cookie.minimizedSidebar = bodyParams.get("minimizeSidebar") === "open";
 
   return json(
-    { success: true },
+    { success: true, isTogglingSidebar: true },
     {
       headers: {
         "Set-Cookie": await userPrefs.serialize(cookie),
