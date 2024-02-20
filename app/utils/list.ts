@@ -18,7 +18,11 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
     ? searchParams.get("hideUnavailable") == "true"
     : undefined,
   unhideAssetsBookigIds: searchParams.getAll("unhideAssetsBookigIds") || [],
-  status: (searchParams.get("status") || null) as BookingStatus | null,
+
+  status:
+    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
+      ? null
+      : (searchParams.get("status") as BookingStatus | null),
 });
 
 /** Generates prev & next links  */

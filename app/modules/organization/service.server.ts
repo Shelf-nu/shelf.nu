@@ -183,3 +183,27 @@ export const getUserOrganizations = async ({ userId }: { userId: string }) => {
 
   return userOrganizations;
 };
+
+export const getOrganizationAdminsEmails = async ({
+  organizationId,
+}: {
+  organizationId: string;
+}) => {
+  const admins = await db.userOrganization.findMany({
+    where: {
+      organizationId,
+      roles: {
+        hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
+      },
+    },
+    select: {
+      user: {
+        select: {
+          email: true,
+        },
+      },
+    },
+  });
+
+  return admins.map((a) => a.user.email);
+};

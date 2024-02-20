@@ -840,6 +840,7 @@ export async function updateAssetMainImage({
   });
 }
 
+/** Creates a singular note */
 export async function createNote({
   content,
   type,
@@ -866,6 +867,29 @@ export async function createNote({
   };
 
   return db.note.create({
+    data,
+  });
+}
+
+/** Creates multiple notes with the same content */
+export async function createNotes({
+  content,
+  type,
+  userId,
+  assetIds,
+}: Pick<Note, "content"> & {
+  type?: Note["type"];
+  userId: User["id"];
+  assetIds: Asset["id"][];
+}) {
+  const data = assetIds.map((id) => ({
+    content,
+    type: type || "COMMENT",
+    userId,
+    assetId: id,
+  }));
+
+  return db.note.createMany({
     data,
   });
 }
