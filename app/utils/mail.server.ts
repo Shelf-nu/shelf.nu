@@ -1,6 +1,5 @@
-import nodemailer from "nodemailer";
 import type { Attachment } from "nodemailer/lib/mailer";
-import { NODE_ENV, SMTP_HOST, SMTP_PWD, SMTP_USER } from ".";
+import { transporter } from "~/emails/transporter.server";
 import logoImg from "../../public/images/shelf-symbol.png";
 
 export const sendEmail = async ({
@@ -28,25 +27,6 @@ export const sendEmail = async ({
   /** Override the default sender */
   from?: string;
 }) => {
-  // Generate test SMTP service account from ethereal.email
-
-  // create reusable transporter object using the default SMTP transport
-  const transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: 465,
-    secure: true, // true for 465, false for other ports
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PWD,
-    },
-    logger: NODE_ENV === "development",
-    debug: NODE_ENV === "development",
-    tls: {
-      // do not fail on invalid certs
-      rejectUnauthorized: true,
-    },
-  });
-
   // verify connection configuration
   transporter.verify(function (error) {
     if (error) {
