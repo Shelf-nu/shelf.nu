@@ -227,6 +227,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const headers = [
     setCookie(await setSelectedOrganizationIdCookie(organizationId)),
   ];
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const user = await getUserByID(authSession.userId);
 
   switch (intent) {
     case "save":

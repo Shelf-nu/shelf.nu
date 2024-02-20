@@ -107,6 +107,7 @@ export const action = async ({
   const authSession = context.getSession();
   await requirePermision({
     userId: authSession?.userId,
+
     request,
     entity: PermissionEntity.booking,
     action: PermissionAction.update,
