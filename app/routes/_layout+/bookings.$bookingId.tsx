@@ -19,7 +19,6 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { db } from "~/database";
 import { createNotes } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
 import {
   deleteBooking,
   getBooking,
@@ -224,7 +223,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const id = getRequiredParam(params, "bookingId");
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
   const user = await getUserByID(authSession.userId);
-
 
   const headers = [
     setCookie(await setSelectedOrganizationIdCookie(organizationId)),
