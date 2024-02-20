@@ -21,6 +21,8 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
+import { createNotes } from "../asset";
+import { getOrganizationAdminsEmails } from "../organization";
 
 /** Includes needed for booking to have all data required for emails */
 export const bookingIncludeForEmails = {
@@ -96,7 +98,8 @@ export const upsertBooking = async (
       | "custodianUserId"
     > & { assetIds: Asset["id"][] }
   >,
-  hints: ClientHint
+  hints: ClientHint,
+  isSelfService: boolean = false
 ) => {
   const {
     assetIds,
@@ -247,10 +250,36 @@ export const upsertBooking = async (
           });
           let html = bookingUpdatesTemplateString({
             booking: res,
-            heading: `Booking confirmation for ${custodian}`,
+            heading: `Booking reservation for ${custodian}`,
             assetCount: res.assets.length,
             hints,
           });
+
+          /** Here we need to check if the custodian is different than the admin and send email to the admin in case they are different */
+          if (isSelfService) {
+            const adminsEmails = await getOrganizationAdminsEmails({
+              organizationId: res.organizationId,
+            });
+
+            const adminSubject = `Booking reservation request (${res.name}) by ${custodian} - shelf.nu`;
+
+            /** Pushing admins emails to promises */
+            promises.push(
+              sendEmail({
+                to: adminsEmails.join(","),
+                subject: adminSubject,
+                text,
+                /** We need to invoke this function separately for the admin email as the footer of emails is different */
+                html: bookingUpdatesTemplateString({
+                  booking: res,
+                  heading: `Booking reservation request for ${custodian}`,
+                  assetCount: res.assets.length,
+                  hints,
+                  isAdminEmail: true,
+                }),
+              })
+            );
+          }
 
           if (data.status === BookingStatus.COMPLETE) {
             subject = `Booking completed (${res.name}) - shelf.nu`;
@@ -486,9 +515,19 @@ export async function getBookings({
   return { bookings, bookingCount };
 }
 
-export const removeAssets = async (
-  booking: Pick<Booking, "id"> & { assetIds: Asset["id"][] }
-) => {
+export const removeAssets = async ({
+  booking,
+  firstName,
+  lastName,
+  userId,
+}: {
+  booking: Pick<Booking, "id"> & {
+    assetIds: Asset["id"][];
+  };
+  firstName: string;
+  lastName: string;
+  userId: string;
+}) => {
   const { assetIds, id } = booking;
   const b = await db.booking.update({
     // First, disconnect the assets from the booking
@@ -502,13 +541,33 @@ export const removeAssets = async (
   /** When removing an asset from a booking we need to make sure to set their status back to available
    * This is needed because the user is allowed to remove an asset from a booking that is ongoing, which means the asset status will be CHECKED_OUT
    * So we need to set it back to AVAILABLE
+   * We only do that if the booking we removed it from is ongoing or overdue.
+   * Reason is that the user can add an asset to a draft booking and remove it and that will reset its status back to available, which shouldnt happen
+   * https://github.com/Shelf-nu/shelf.nu/issues/703#issuecomment-1944315975
+   *
    * Because prisma doesnt support transactional execution of nested queries, we need to do them in 2 steps, because if the disconnect runs first,
    * the updateMany will not find the assets in the booking anymore and wont update them
    */
-  await db.asset.updateMany({
-    where: { id: { in: assetIds } },
-    data: { status: AssetStatus.AVAILABLE },
+
+  if (
+    b.status === BookingStatus.ONGOING ||
+    b.status === BookingStatus.OVERDUE
+  ) {
+    await db.asset.updateMany({
+      where: { id: { in: assetIds } },
+      data: { status: AssetStatus.AVAILABLE },
+    });
+  }
+
+  createNotes({
+    content: `**${firstName?.trim()} ${lastName?.trim()}** removed asset from booking **[${
+      b.name
+    }](/bookings/${b.id})**.`,
+    type: "UPDATE",
+    userId,
+    assetIds,
   });
+
   return b;
 };
 
@@ -535,6 +594,11 @@ export const deleteBooking = async (
     include: {
       ...commonInclude,
       ...bookingIncludeForEmails,
+      assets: {
+        select: {
+          id: true,
+        },
+      },
     },
   });
 

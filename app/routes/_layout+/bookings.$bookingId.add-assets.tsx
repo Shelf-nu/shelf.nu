@@ -26,8 +26,9 @@ import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 
 import { Td } from "~/components/table";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset";
+import { createNote, getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
+import { getUserByID } from "~/modules/user";
 import { getRequiredParam, isFormProcessing } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfStackError } from "~/utils/error";
@@ -67,6 +68,7 @@ export const loader = async ({
     organizationId,
     excludeCategoriesQuery: true,
     excludeTagsQuery: true,
+    excludeSearchFromView: true,
   });
 
   const modelName = {
@@ -104,6 +106,7 @@ export const action = async ({
   const authSession = context.getSession();
   await requirePermision({
     userId: authSession?.userId,
+
     request,
     entity: PermissionEntity.booking,
     action: PermissionAction.update,
@@ -113,18 +116,39 @@ export const action = async ({
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
   const isChecked = formData.get("isChecked") === "yes";
+  const user = await getUserByID(authSession.userId);
+  if (!user) {
+    throw new ShelfStackError({ message: "User not found" });
+  }
+
   if (isChecked) {
-    await upsertBooking(
+    const b = await upsertBooking(
       {
         id: bookingId,
         assetIds: [assetId],
       },
       getClientHint(request)
     );
+    /** We check the ids again after updating, and if they were sent, that means assets are being added
+     * So we create notes for the assets that were added
+     */
+    await createNote({
+      content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
+        b.name
+      }](/bookings/${b.id})**.`,
+      type: "UPDATE",
+      userId: authSession.userId,
+      assetId,
+    });
   } else {
     await removeAssets({
-      id: bookingId,
-      assetIds: [assetId],
+      booking: {
+        id: bookingId,
+        assetIds: [assetId],
+      },
+      firstName: user.firstName ? user.firstName : "",
+      lastName: user.lastName ? user.lastName : "",
+      userId: authSession.userId,
     });
   }
 
