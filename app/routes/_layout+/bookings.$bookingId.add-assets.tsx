@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type Asset,
   type Booking,
@@ -18,19 +18,20 @@ import {
   useSearchParams,
 } from "@remix-run/react";
 import { useAtomValue } from "jotai";
+import { useHydrateAtoms } from "jotai/utils";
 import { bookingsSelectedAssetsAtom } from "~/atoms/booking-selected-assets-atom";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AddAssetForm } from "~/components/booking/add-asset-form";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css";
 import Input from "~/components/forms/input";
 import { List } from "~/components/list";
-import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 
 import { Td } from "~/components/table";
 import { createNotes, getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { getBooking, upsertBooking } from "~/modules/booking";
+import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
 import { getUserByID } from "~/modules/user";
 import { getRequiredParam, isFormProcessing } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
@@ -106,13 +107,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const bookingId = getRequiredParam(params, "bookingId");
   const formData = await request.formData();
   const assetIds = formData.getAll("assetId") as string[];
+  const removedAssetIds = formData.getAll("removedAssetId") as string[];
 
   const user = await getUserByID(authSession.userId);
   if (!user) {
     throw new ShelfStackError({ message: "User not found" });
   }
 
+  /** We only update the booking if there are assets to add */
   if (assetIds.length > 0) {
+    /** We update the booking with the new assets */
     const b = await upsertBooking(
       {
         id: bookingId,
@@ -120,9 +124,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       },
       getClientHint(request)
     );
-    /** We check the ids again after updating, and if they were sent, that means assets are being added
-     * So we create notes for the assets that were added
-     */
+
+    /** We create notes for the assets that were added */
     await createNotes({
       content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
         b.name
@@ -131,41 +134,19 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       userId: authSession.userId,
       assetIds,
     });
-    return redirect(`/bookings/${bookingId}`);
   }
 
-  // if (isChecked) {
-  //   const b = await upsertBooking(
-  //     {
-  //       id: bookingId,
-  //       assetIds: [assetId],
-  //     },
-  //     getClientHint(request)
-  //   );
-  //   /** We check the ids again after updating, and if they were sent, that means assets are being added
-  //    * So we create notes for the assets that were added
-  //    */
-  //   await createNote({
-  //     content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
-  //       b.name
-  //     }](/bookings/${b.id})**.`,
-  //     type: "UPDATE",
-  //     userId: authSession.userId,
-  //     assetId,
-  //   });
-  // } else {
-  //   await removeAssets({
-  //     booking: {
-  //       id: bookingId,
-  //       assetIds: [assetId],
-  //     },
-  //     firstName: user.firstName ? user.firstName : "",
-  //     lastName: user.lastName ? user.lastName : "",
-  //     userId: authSession.userId,
-  //   });
-  // }
+  /** If some assets were removed, we also need to handle those */
+  if (removedAssetIds.length > 0) {
+    await removeAssets({
+      booking: { id: bookingId, assetIds: removedAssetIds },
+      firstName: user?.firstName || "",
+      lastName: user?.lastName || "",
+      userId: authSession.userId,
+    });
+  }
 
-  return json({ ok: true });
+  return redirect(`/bookings/${bookingId}`);
 };
 
 export default function AddAssetsToNewBooking() {
@@ -174,14 +155,12 @@ export default function AddAssetsToNewBooking() {
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const [searchValue, setSearchValue] = useState(search || "");
-
   function handleSearch(value: string) {
     setSearchParams((prev) => {
       prev.set("s", value);
       return prev;
     });
   }
-
   function clearSearch() {
     setSearchParams((prev) => {
       prev.delete("s");
@@ -189,8 +168,19 @@ export default function AddAssetsToNewBooking() {
     });
   }
 
-  const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
+  const bookingAssetsIds = useMemo(
+    () => booking?.assets.map((a) => a.id) || [],
+    [booking.assets]
+  );
 
+  /** We hydrate the selected assets atom with the assets that are already in the booking */
+  useHydrateAtoms([[bookingsSelectedAssetsAtom, bookingAssetsIds]]);
+
+  const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
+  const removedAssetIds = useMemo(
+    () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
+    [bookingAssetsIds, selectedAssets]
+  );
   return (
     <div className="flex max-h-full flex-col">
       <header className="mb-3">
@@ -271,6 +261,17 @@ export default function AddAssetsToNewBooking() {
             Close
           </Button>
           <Form method="post">
+            {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
+            {/* These are the asset ids, coming from the server */}
+            {removedAssetIds.map((assetId) => (
+              <input
+                key={assetId}
+                type="hidden"
+                name="removedAssetId"
+                value={assetId}
+              />
+            ))}
+            {/* These are the ids selected by the user and stored in the atom */}
             {selectedAssets.map((assetId) => (
               <input
                 key={assetId}
@@ -300,44 +301,38 @@ export type AssetWithBooking = Asset & {
   category: Category;
 };
 
-const RowComponent = ({ item }: { item: AssetWithBooking }) => {
-  const { booking } = useLoaderData<typeof loader>();
-  const isChecked =
-    booking?.assets.some((asset) => asset.id === item.id) ?? false;
-
-  return (
-    <>
-      <Td className="w-full p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex size-12 items-center justify-center">
-              <AssetImage
-                asset={{
-                  assetId: item.id,
-                  mainImage: item.mainImage,
-                  mainImageExpiration: item.mainImageExpiration,
-                  alt: item.title,
-                }}
-                className="size-full rounded-[4px] border object-cover"
-              />
-            </div>
-            <div className="flex flex-col">
-              <div className="font-medium">{item.title}</div>
-            </div>
+const RowComponent = ({ item }: { item: AssetWithBooking }) => (
+  <>
+    <Td className="w-full p-0 md:p-0">
+      <div className="flex justify-between gap-3 p-4 md:px-6">
+        <div className="flex items-center gap-3">
+          <div className="flex size-12 items-center justify-center">
+            <AssetImage
+              asset={{
+                assetId: item.id,
+                mainImage: item.mainImage,
+                mainImageExpiration: item.mainImageExpiration,
+                alt: item.title,
+              }}
+              className="size-full rounded-[4px] border object-cover"
+            />
+          </div>
+          <div className="flex flex-col">
+            <div className="font-medium">{item.title}</div>
           </div>
         </div>
-      </Td>
+      </div>
+    </Td>
 
-      <Td className="text-right">
-        <AvailabilityLabel
-          asset={item}
-          isCheckedOut={item.status === "CHECKED_OUT"}
-        />
-      </Td>
+    <Td className="text-right">
+      <AvailabilityLabel
+        asset={item}
+        isCheckedOut={item.status === "CHECKED_OUT"}
+      />
+    </Td>
 
-      <Td>
-        <AddAssetForm assetId={item.id} isChecked={isChecked} />
-      </Td>
-    </>
-  );
-};
+    <Td>
+      <AddAssetForm assetId={item.id} />
+    </Td>
+  </>
+);
