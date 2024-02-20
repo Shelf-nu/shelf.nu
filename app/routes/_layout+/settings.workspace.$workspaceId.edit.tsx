@@ -13,7 +13,7 @@ import { useLoaderData } from "@remix-run/react";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/workspace.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
@@ -121,7 +121,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function WorkspaceEditPage() {
-  const name = useAtomValue(titleAtom);
+  const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "Untitled workspace";
   const { organization } = useLoaderData<typeof loader>();
 
