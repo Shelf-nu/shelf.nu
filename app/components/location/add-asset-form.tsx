@@ -1,5 +1,6 @@
 import type { Asset } from "@prisma/client";
-import { useFetcher } from "@remix-run/react";
+import { useAtom } from "jotai";
+import { bookingsSelectedAssetsAtom } from "~/atoms/booking-selected-assets-atom";
 
 export const AddAssetForm = ({
   assetId,
@@ -8,24 +9,27 @@ export const AddAssetForm = ({
   assetId: Asset["id"];
   isChecked: boolean;
 }) => {
-  const fetcher = useFetcher();
-  let optimisticIsChecked = isChecked;
-  if (fetcher.formData) {
-    optimisticIsChecked = fetcher.formData.get("isChecked") === "yes";
+  const [selectedAssets, setSelectedAssets] = useAtom(
+    bookingsSelectedAssetsAtom
+  );
+  const atomIsChecked =
+    isChecked || selectedAssets.some((id) => id === assetId);
+
+  function handleClick(e: React.MouseEvent<HTMLButtonElement>) {
+    e.preventDefault();
+    setSelectedAssets((selectedAssets) => {
+      if (selectedAssets.includes(assetId)) {
+        return selectedAssets.filter((id) => id !== assetId);
+      } else {
+        return [...selectedAssets, assetId];
+      }
+    });
   }
 
   return (
-    <fetcher.Form method="post">
-      <input type="hidden" name="assetId" value={assetId} />
-      <input
-        type="hidden"
-        name="isChecked"
-        value={optimisticIsChecked ? "no" : "yes"}
-      />
-      <button type="submit">
-        <FakeCheckbox checked={optimisticIsChecked} />
-      </button>
-    </fetcher.Form>
+    <button type="submit" onClick={handleClick}>
+      <FakeCheckbox checked={atomIsChecked} />
+    </button>
   );
 };
 

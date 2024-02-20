@@ -10,12 +10,15 @@ import type {
   LinksFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import {
+  Form,
   useLoaderData,
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
+import { useAtomValue } from "jotai";
+import { bookingsSelectedAssetsAtom } from "~/atoms/booking-selected-assets-atom";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
@@ -26,8 +29,8 @@ import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 
 import { Td } from "~/components/table";
-import { createNote, getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
+import { createNotes, getPaginatedAndFilterableAssets } from "~/modules/asset";
+import { getBooking, upsertBooking } from "~/modules/booking";
 import { getUserByID } from "~/modules/user";
 import { getRequiredParam, isFormProcessing } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
@@ -77,6 +80,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   return json({
     showModal: true,
+    noScroll: true,
     booking,
     items: assets,
     categories,
@@ -101,43 +105,65 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   const bookingId = getRequiredParam(params, "bookingId");
   const formData = await request.formData();
-  const assetId = formData.get("assetId") as string;
-  const isChecked = formData.get("isChecked") === "yes";
+  const assetIds = formData.getAll("assetId") as string[];
+
   const user = await getUserByID(authSession.userId);
   if (!user) {
     throw new ShelfStackError({ message: "User not found" });
   }
 
-  if (isChecked) {
+  if (assetIds.length > 0) {
     const b = await upsertBooking(
       {
         id: bookingId,
-        assetIds: [assetId],
+        assetIds,
       },
       getClientHint(request)
     );
     /** We check the ids again after updating, and if they were sent, that means assets are being added
      * So we create notes for the assets that were added
      */
-    await createNote({
+    await createNotes({
       content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
         b.name
       }](/bookings/${b.id})**.`,
       type: "UPDATE",
       userId: authSession.userId,
-      assetId,
+      assetIds,
     });
-  } else {
-    await removeAssets({
-      booking: {
-        id: bookingId,
-        assetIds: [assetId],
-      },
-      firstName: user.firstName ? user.firstName : "",
-      lastName: user.lastName ? user.lastName : "",
-      userId: authSession.userId,
-    });
+    return redirect(`/bookings/${bookingId}`);
   }
+
+  // if (isChecked) {
+  //   const b = await upsertBooking(
+  //     {
+  //       id: bookingId,
+  //       assetIds: [assetId],
+  //     },
+  //     getClientHint(request)
+  //   );
+  //   /** We check the ids again after updating, and if they were sent, that means assets are being added
+  //    * So we create notes for the assets that were added
+  //    */
+  //   await createNote({
+  //     content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
+  //       b.name
+  //     }](/bookings/${b.id})**.`,
+  //     type: "UPDATE",
+  //     userId: authSession.userId,
+  //     assetId,
+  //   });
+  // } else {
+  //   await removeAssets({
+  //     booking: {
+  //       id: bookingId,
+  //       assetIds: [assetId],
+  //     },
+  //     firstName: user.firstName ? user.firstName : "",
+  //     lastName: user.lastName ? user.lastName : "",
+  //     userId: authSession.userId,
+  //   });
+  // }
 
   return json({ ok: true });
 };
@@ -163,9 +189,11 @@ export default function AddAssetsToNewBooking() {
     });
   }
 
+  const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
+
   return (
-    <div>
-      <header className="mb-5">
+    <div className="flex max-h-full flex-col">
+      <header className="mb-3">
         <h2>Add assets to ‘{booking?.name}’ booking</h2>
         <p>Fill up the booking with the assets of your choice</p>
       </header>
@@ -221,20 +249,47 @@ export default function AddAssetsToNewBooking() {
           <AvailabilitySelect />
         </div>
       </div>
+      {/* Body of the modal*/}
+      <div className="flex-1 overflow-y-auto">
+        <List
+          ItemComponent={RowComponent}
+          className="mb-8 mt-4"
+          customEmptyStateContent={{
+            title: "You haven't added any assets yet.",
+            text: "What are you waiting for? Create your first asset now!",
+            newButtonRoute: "/assets/new",
+            newButtonContent: "New asset",
+          }}
+        />
+      </div>
 
-      <List
-        ItemComponent={RowComponent}
-        className="mb-8 mt-4"
-        customEmptyStateContent={{
-          title: "You haven't added any assets yet.",
-          text: "What are you waiting for? Create your first asset now!",
-          newButtonRoute: "/assets/new",
-          newButtonContent: "New asset",
-        }}
-      />
-      <Button variant="secondary" width="full" to={".."}>
-        Close
-      </Button>
+      {/* Footer of the modal */}
+      <footer className="flex justify-between border-t pt-3">
+        <div>{selectedAssets.length} assets selected</div>
+        <div className="flex gap-3">
+          <Button variant="secondary" to={".."}>
+            Close
+          </Button>
+          <Form method="post">
+            {selectedAssets.map((assetId) => (
+              <input
+                key={assetId}
+                type="hidden"
+                name="assetId"
+                value={assetId}
+              />
+            ))}
+            <Button
+              type="submit"
+              name="intent"
+              value="addAssets"
+              disabled={isSearching}
+            >
+              Confirm
+            </Button>
+          </Form>
+        </div>
+      </footer>
     </div>
   );
 }

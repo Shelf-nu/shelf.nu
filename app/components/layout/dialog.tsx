@@ -1,14 +1,17 @@
 import { useCallback, type ReactNode } from "react";
 import { useMatches, useNavigate } from "@remix-run/react";
+import { tw } from "~/utils";
 import { XIcon } from "../icons";
 import { Button } from "../shared";
 
 export const Dialog = ({
   children,
   open,
+  noScroll,
 }: {
   children: ReactNode;
   open: boolean;
+  noScroll: boolean;
 }) => {
   const matches = useMatches();
   const prevRoute = matches[matches.length - 2];
@@ -24,7 +27,12 @@ export const Dialog = ({
   return open ? (
     <div className="dialog-backdrop" onClick={handleBackdropClose}>
       <dialog className="dialog" open={true}>
-        <div className="scrollable-content relative z-10 size-full overflow-y-auto bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded">
+        <div
+          className={tw(
+            " relative z-10 size-full  bg-white p-6 shadow-lg md:h-[85vh] md:rounded",
+            noScroll ? "" : "overflow-y-auto"
+          )}
+        >
           <Button
             to={prevRoute}
             variant="link"
