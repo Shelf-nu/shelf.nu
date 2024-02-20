@@ -19,7 +19,6 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { db } from "~/database";
 import { createNotes } from "~/modules/asset";
-
 import {
   deleteBooking,
   getBooking,
@@ -222,12 +221,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     action: intent2ActionMap[intent],
   });
   const id = getRequiredParam(params, "bookingId");
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const user = await getUserByID(authSession.userId);
+
   const headers = [
     setCookie(await setSelectedOrganizationIdCookie(organizationId)),
   ];
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
   const user = await getUserByID(authSession.userId);
-
 
   switch (intent) {
     case "save":
