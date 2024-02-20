@@ -20,7 +20,7 @@ import { TeamMembersTable } from "~/components/workspace/team-members-table";
 import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
 import { requireAuthSession } from "~/modules/auth";
-import { createInvite, updateInviteStatus } from "~/modules/invite";
+import { createInvite } from "~/modules/invite";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { revokeAccessToOrganization } from "~/modules/user";
@@ -37,7 +37,7 @@ type ActionIntent =
   | "revokeAccess"
   | "resend"
   | "invite"
-  | "revokeInvite";
+  | "cancelInvite";
 export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
@@ -247,16 +247,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         senderId: userId,
       });
       return redirect("/settings/team");
-    // case "revokeInvite":
-    //   await db.invite.update({
-    //     where: {
-    //       inviteeEmail: formData.get("email") as string,
-    //     },
-    //     data: {
-    //       status: "REVOKED",
-    //     },
-    //   });
-    //   })
+    case "cancelInvite":
+      await db.invite.updateMany({
+        where: {
+          inviteeEmail: formData.get("email") as string,
+          organizationId,
+          status: InviteStatuses.PENDING,
+        },
+        data: {
+          status: InviteStatuses.INVALIDATED,
+        },
+      });
+      sendNotification({
+        title: "Invitation cancelled",
+        message: "The invitation has successfully been cancelled.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+      return null;
+
     case "resend":
       const invite = await createInvite({
         organizationId,

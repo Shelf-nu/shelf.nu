@@ -183,11 +183,12 @@ export async function updateInviteStatus({
   });
   if (!invite) {
     throw new ShelfStackError({
-      message: `invite with id ${id} not found or expired`,
-      title: "invite not found",
+      message: `The invitation you are trying to accept is either not found or expired`,
+      title: "Invite not found",
       status: 404,
     });
   }
+
   const data = { status };
   if (status === "ACCEPTED") {
     const user = await createUserOrAttachOrg({
@@ -216,6 +217,7 @@ export async function updateInviteStatus({
       data: { user: { connect: { id: user.id } } },
     });
   }
+
   const updatedInvite = await db.invite.update({ where: { id }, data });
   //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we invalidate all of them if user rejects 1
   //because user doesnt or want to join that org, so we should update all pending invite to show the same
