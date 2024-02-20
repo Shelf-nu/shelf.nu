@@ -21,7 +21,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
-import { createNote } from "../asset";
+import { createNotes } from "../asset";
 import { getOrganizationAdminsEmails } from "../organization";
 
 /** Includes needed for booking to have all data required for emails */
@@ -560,16 +560,14 @@ export const removeAssets = async ({
     });
   }
 
-  for (const assetId of assetIds) {
-    await createNote({
-      content: `**${firstName?.trim()} ${lastName?.trim()}** removed asset from booking **[${
-        b.name
-      }](/bookings/${b.id})**.`,
-      type: "UPDATE",
-      userId,
-      assetId,
-    });
-  }
+  createNotes({
+    content: `**${firstName?.trim()} ${lastName?.trim()}** removed asset from booking **[${
+      b.name
+    }](/bookings/${b.id})**.`,
+    type: "UPDATE",
+    userId,
+    assetIds,
+  });
 
   return b;
 };
@@ -597,6 +595,11 @@ export const deleteBooking = async (
     include: {
       ...commonInclude,
       ...bookingIncludeForEmails,
+      assets: {
+        select: {
+          id: true,
+        },
+      },
     },
   });
 
