@@ -36,7 +36,14 @@ export async function getUserByEmail(email: User["email"]) {
 }
 
 export async function getUserByID(id: User["id"]) {
-  return db.user.findUnique({ where: { id } });
+  try {
+    return db.user.findUnique({ where: { id } });
+  } catch (cause) {
+    throw new ShelfStackError({
+      message: "Failed to get user",
+      cause,
+    });
+  }
 }
 
 export async function getUserByIDWithOrg(id: User["id"]) {
