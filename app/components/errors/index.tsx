@@ -74,7 +74,6 @@ export const ErrorBoundryComponent = ({
         />
         {NODE_ENV === "development" ? <pre>{error.stack}</pre> : null}
       </>
-
     );
   } else {
     return (

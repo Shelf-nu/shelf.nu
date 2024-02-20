@@ -1,6 +1,6 @@
 import type { Attachment } from "nodemailer/lib/mailer";
-import logoImg from "../../public/static/images/shelf-symbol.png";
 import { transporter } from "~/emails/transporter.server";
+import logoImg from "../../public/static/images/shelf-symbol.png";
 
 export const sendEmail = async ({
   to,
