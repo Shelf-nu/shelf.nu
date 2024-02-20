@@ -480,7 +480,7 @@ export async function revokeAccessToOrganization({
   organizationId: Organization["id"];
 }) {
   /**
-   * if I want to revoke access, i simply need to:
+   * if I want to revokeAccess access, i simply need to:
    * 1. Remove relation between user and team member
    * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
    */

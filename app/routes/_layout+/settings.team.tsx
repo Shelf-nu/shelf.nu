@@ -32,7 +32,12 @@ import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-type ActionIntent = "delete" | "revoke" | "resend" | "invite";
+type ActionIntent =
+  | "delete"
+  | "revokeAccess"
+  | "resend"
+  | "invite"
+  | "cancelInvite";
 export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
@@ -201,7 +206,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
       return redirect(`/settings/team`);
-    case "revoke":
+    case "revokeAccess":
       const targetUserId = formData.get("userId") as string;
       const user = await revokeAccessToOrganization({
         userId: targetUserId,
@@ -242,6 +247,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         senderId: userId,
       });
       return redirect("/settings/team");
+    case "cancelInvite":
+      await db.invite.updateMany({
+        where: {
+          inviteeEmail: formData.get("email") as string,
+          organizationId,
+          status: InviteStatuses.PENDING,
+        },
+        data: {
+          status: InviteStatuses.INVALIDATED,
+        },
+      });
+      sendNotification({
+        title: "Invitation cancelled",
+        message: "The invitation has successfully been cancelled.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+      return null;
+
     case "resend":
       const invite = await createInvite({
         organizationId,
