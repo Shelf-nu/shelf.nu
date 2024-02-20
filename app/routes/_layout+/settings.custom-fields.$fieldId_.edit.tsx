@@ -14,7 +14,6 @@ import {
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { commitAuthSession } from "~/modules/auth";
 import {
   countAcviteCustomFields,
   getCustomField,
@@ -28,12 +27,15 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { organizationId } = await requirePermision(
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.customField,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.customField,
+    action: PermissionAction.update,
+  });
 
   const id = getRequiredParam(params, "fieldId");
 
@@ -60,12 +62,15 @@ export const handle = {
   breadcrumb: () => <span>Edit</span>,
 };
 
-export async function action({ request, params }: ActionFunctionArgs) {
-  const { authSession, organizationId, organizations } = await requirePermision(
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+
+  const { organizationId, organizations } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.customField,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.customField,
+    action: PermissionAction.update,
+  });
 
   const id = getRequiredParam(params, "fieldId");
   const formData = await request.formData();
@@ -81,9 +86,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -118,9 +120,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
         },
         {
           status: 400,
-          headers: {
-            "Set-Cookie": await commitAuthSession(request, { authSession }),
-          },
         }
       );
     }
@@ -143,9 +142,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -157,14 +153,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return json(
-    { success: true, errors: null },
-    {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, { authSession }),
-      },
-    }
-  );
+  return json({ success: true, errors: null });
 }
 
 export default function CustomFieldEditPage() {

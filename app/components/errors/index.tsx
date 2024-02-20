@@ -73,6 +73,7 @@ export const ErrorBoundryComponent = ({
           )
         }
       />
+
     );
   } else {
     return (

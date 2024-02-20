@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
@@ -37,7 +38,6 @@ import {
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
@@ -81,21 +81,17 @@ export interface IndexResponse {
   };
 }
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const {
-    authSession,
-    organizationId,
-    organizations,
-    currentOrganization,
-    role,
-  } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.read
-  );
-
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
 
+  const { organizationId, organizations, currentOrganization, role } =
+    await requirePermision({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
   // @TODO we shouldnt have to do this. We can combine it with the requirePermission
   const user = await db.user.findUnique({
     where: {
@@ -129,12 +125,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     },
   });
-
   const tierLimit = await getOrganizationTierLimit({
     organizationId,
     organizations,
   });
-
   let {
     search,
     totalAssets,
@@ -151,11 +145,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     request,
     organizationId,
   });
-
   if (totalPages !== 0 && page > totalPages) {
     return redirect("/assets");
   }
-
   if (!assets) {
     throw new ShelfStackError({
       title: "Hey!",
@@ -163,16 +155,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: 404,
     });
   }
-
   if (role === OrganizationRoles.SELF_SERVICE) {
     /**
      * For self service users we dont return the assets that are not available to book
      */
     assets = assets.filter((a) => a.availableToBook);
   }
-
   assets = await updateAssetsWithBookingCustodians(assets);
-
   const header: HeaderData = {
     title: isPersonalOrg(currentOrganization)
       ? user?.firstName
@@ -182,12 +171,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? `${currentOrganization?.name}'s inventory`
       : "Your inventory",
   };
-
   const modelName = {
     singular: "asset",
     plural: "assets",
   };
-
   return json(
     {
       header,
@@ -210,17 +197,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
     },
     {
-      headers: [
-        ["Set-Cookie", await userPrefs.serialize(cookie)],
-        [
-          "Set-Cookie",
-          await commitAuthSession(request, {
-            authSession,
-          }),
-        ],
-      ],
+      headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
     }
   );
+}
+
+export function shouldRevalidate({
+  actionResult,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  /**
+   * If we are toggliong the sidebar, no need to revalidate this loader.
+   * Revalidation happens in _layout
+   */
+  if (actionResult?.isTogglingSidebar) {
+    return false;
+  }
+
+  return defaultShouldRevalidate;
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -389,7 +383,7 @@ const ListAssetContent = ({
                   <img
                     src={
                       custody.custodian?.user?.profilePicture ||
-                      "/images/default_pfp.jpg"
+                      "/static/images/default_pfp.jpg"
                     }
                     className="mr-1 size-4 rounded-full"
                     alt=""

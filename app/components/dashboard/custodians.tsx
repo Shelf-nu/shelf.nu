@@ -76,7 +76,7 @@ function Row({
                 src={
                   custodian?.user?.profilePicture
                     ? custodian?.user?.profilePicture
-                    : "/images/default_pfp.jpg"
+                    : "/static/images/default_pfp.jpg"
                 }
                 className={"size-10 rounded-[4px]"}
                 alt={`${custodian.name}'s profile`}

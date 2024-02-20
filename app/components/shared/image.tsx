@@ -22,7 +22,7 @@ export const Image = ({
       src={
         imageId
           ? `/api/image/${imageId}${forceReload ? `?t=${Date.now()}` : ""}`
-          : `/images/asset-placeholder.jpg`
+          : `/static/images/asset-placeholder.jpg`
       }
       alt={alt}
       className={tw(className)}

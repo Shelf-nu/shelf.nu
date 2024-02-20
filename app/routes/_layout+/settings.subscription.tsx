@@ -37,12 +37,15 @@ import {
   getCustomerTrialSubscription,
 } from "~/utils/stripe.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.subscription,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.subscription,
+    action: PermissionAction.read,
+  });
 
   const { userId } = authSession;
   const user = await getUserByID(userId);
@@ -93,12 +96,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { authSession } = await requirePermision(
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.subscription,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.subscription,
+    action: PermissionAction.update,
+  });
 
   const { userId, email } = authSession;
   const formData = await request.formData();

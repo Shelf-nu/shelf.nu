@@ -1,11 +1,10 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import type { MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useMatchesData } from "~/hooks";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import { requireAuthSession } from "~/modules/auth";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -13,8 +12,7 @@ export const handle = {
   breadcrumb: () => <Link to="/settings">Settings</Link>,
 };
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+export async function loader() {
   const title = "Settings";
   const subHeading = "Manage your preferences here.";
   const header = {

@@ -22,12 +22,14 @@ import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.read,
+  });
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);

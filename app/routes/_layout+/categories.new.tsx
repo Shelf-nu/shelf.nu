@@ -13,11 +13,9 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { commitAuthSession } from "~/modules/auth";
 import { createCategory } from "~/modules/category";
 import { getRandomColor, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
@@ -31,12 +29,14 @@ export const NewCategoryFormSchema = z.object({
 
 const title = "New category";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.category,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.category,
+    action: PermissionAction.create,
+  });
 
   const colorFromServer = getRandomColor();
 
@@ -51,12 +51,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+export async function action({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.category,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.category,
+    action: PermissionAction.create,
+  });
   const formData = await request.formData();
   const result = await NewCategoryFormSchema.safeParseAsync(
     parseFormAny(formData)
@@ -69,7 +71,6 @@ export async function action({ request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -87,7 +88,6 @@ export async function action({ request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -99,9 +99,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/categories`, {
-    headers: [setCookie(await commitAuthSession(request, { authSession }))],
-  });
+  return redirect(`/categories`);
 }
 
 export default function NewCategory() {
