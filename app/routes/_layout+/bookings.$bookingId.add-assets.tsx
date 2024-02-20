@@ -108,7 +108,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     throw new ShelfStackError({ message: "User not found" });
   }
 
-  let noteContent = "";
   if (isChecked) {
     const b = await upsertBooking(
       {
@@ -117,27 +116,28 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       },
       getClientHint(request)
     );
-
-    noteContent = `**${user.firstName?.trim()} ${user.lastName?.trim()}** included asset in booking **[${
-      b.name
-    }](/bookings/${b.id})**.`;
-  } else {
-    const b = await removeAssets({
-      id: bookingId,
-      assetIds: [assetId],
+    /** We check the ids again after updating, and if they were sent, that means assets are being added
+     * So we create notes for the assets that were added
+     */
+    await createNote({
+      content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
+        b.name
+      }](/bookings/${b.id})**.`,
+      type: "UPDATE",
+      userId: authSession.userId,
+      assetId,
     });
-
-    noteContent = `**${user.firstName?.trim()} ${user.lastName?.trim()}** removed asset from booking **[${
-      b.name
-    }](/bookings/${b.id})**.`;
+  } else {
+    await removeAssets({
+      booking: {
+        id: bookingId,
+        assetIds: [assetId],
+      },
+      firstName: user.firstName ? user.firstName : "",
+      lastName: user.lastName ? user.lastName : "",
+      userId: authSession.userId,
+    });
   }
-
-  await createNote({
-    content: noteContent,
-    type: "UPDATE",
-    userId: authSession.userId,
-    assetId,
-  });
 
   return json({ ok: true });
 };

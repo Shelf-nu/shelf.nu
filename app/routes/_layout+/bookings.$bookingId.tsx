@@ -331,8 +331,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
     case "removeAsset":
       const assetId = formData.get("assetId");
-      // @ts-ignore @TODO we need to fix this. Not sure how
-      var booking = await removeAssets({ id, assetIds: [assetId as string] });
+      const user = await getUserByID(authSession.userId);
+      if (!user) {
+        throw new ShelfStackError({ message: "User not found" });
+      }
+      var b = await removeAssets({
+        booking: { id, assetIds: [assetId as string] },
+        firstName: user?.firstName || "",
+        lastName: user?.lastName || "",
+        userId: authSession.userId,
+      });
       sendNotification({
         title: "Asset removed",
         message: "Your asset has been removed from the booking",
@@ -340,7 +348,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         senderId: authSession.userId,
       });
       return json(
-        { booking },
+        { booking: b },
         {
           status: 200,
           headers: [

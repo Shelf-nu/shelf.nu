@@ -21,6 +21,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
+import { createNote } from "../asset";
 import { getOrganizationAdminsEmails } from "../organization";
 
 /** Includes needed for booking to have all data required for emails */
@@ -515,9 +516,19 @@ export async function getBookings({
   return { bookings, bookingCount };
 }
 
-export const removeAssets = async (
-  booking: Pick<Booking, "id"> & { assetIds: Asset["id"][] }
-) => {
+export const removeAssets = async ({
+  booking,
+  firstName,
+  lastName,
+  userId,
+}: {
+  booking: Pick<Booking, "id"> & {
+    assetIds: Asset["id"][];
+  };
+  firstName: string;
+  lastName: string;
+  userId: string;
+}) => {
   const { assetIds, id } = booking;
   const b = await db.booking.update({
     // First, disconnect the assets from the booking
@@ -546,6 +557,17 @@ export const removeAssets = async (
     await db.asset.updateMany({
       where: { id: { in: assetIds } },
       data: { status: AssetStatus.AVAILABLE },
+    });
+  }
+
+  for (const assetId of assetIds) {
+    await createNote({
+      content: `**${firstName?.trim()} ${lastName?.trim()}** removed asset from booking **[${
+        b.name
+      }](/bookings/${b.id})**.`,
+      type: "UPDATE",
+      userId,
+      assetId,
     });
   }
 
