@@ -21,6 +21,7 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
+import { createNotes } from "../asset";
 import { getOrganizationAdminsEmails } from "../organization";
 
 /** Includes needed for booking to have all data required for emails */
@@ -271,7 +272,7 @@ export const upsertBooking = async (
                 /** We need to invoke this function separately for the admin email as the footer of emails is different */
                 html: bookingUpdatesTemplateString({
                   booking: res,
-                  heading: `Booking reservation for ${custodian}`,
+                  heading: `Booking reservation request for ${custodian}`,
                   assetCount: res.assets.length,
                   hints,
                   isAdminEmail: true,
@@ -515,9 +516,19 @@ export async function getBookings({
   return { bookings, bookingCount };
 }
 
-export const removeAssets = async (
-  booking: Pick<Booking, "id"> & { assetIds: Asset["id"][] }
-) => {
+export const removeAssets = async ({
+  booking,
+  firstName,
+  lastName,
+  userId,
+}: {
+  booking: Pick<Booking, "id"> & {
+    assetIds: Asset["id"][];
+  };
+  firstName: string;
+  lastName: string;
+  userId: string;
+}) => {
   const { assetIds, id } = booking;
   const b = await db.booking.update({
     // First, disconnect the assets from the booking
@@ -549,6 +560,15 @@ export const removeAssets = async (
     });
   }
 
+  createNotes({
+    content: `**${firstName?.trim()} ${lastName?.trim()}** removed asset from booking **[${
+      b.name
+    }](/bookings/${b.id})**.`,
+    type: "UPDATE",
+    userId,
+    assetIds,
+  });
+
   return b;
 };
 
@@ -575,6 +595,11 @@ export const deleteBooking = async (
     include: {
       ...commonInclude,
       ...bookingIncludeForEmails,
+      assets: {
+        select: {
+          id: true,
+        },
+      },
     },
   });
 

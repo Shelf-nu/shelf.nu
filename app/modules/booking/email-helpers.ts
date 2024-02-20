@@ -179,7 +179,7 @@ export const sendCheckinReminder = async (
       heading: `Your booking is due for checkin in ${getTimeRemainingMessage(
         new Date(booking.to!),
         new Date()
-      )} minutes.`,
+      )}.`,
       assetCount,
       hints,
     }),
