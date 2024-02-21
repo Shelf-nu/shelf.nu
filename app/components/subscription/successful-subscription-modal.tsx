@@ -29,14 +29,8 @@ export default function SuccessfulSubscriptionModal() {
             className="dialog m-auto h-auto w-[90%] sm:w-[400px]"
             open={true}
           >
-            <div className="relative z-10  rounded-lg bg-white p-6 shadow-lg">
-              <video
-                height="200"
-                autoPlay
-                loop
-                muted
-                className="mb-6 rounded-lg"
-              >
+            <div className="relative z-10  rounded bg-white p-6 shadow-lg">
+              <video height="200" autoPlay loop muted className="mb-6 rounded">
                 <source src="/static/videos/celebration.mp4" type="video/mp4" />
               </video>
               <div className="mb-8 text-center">

@@ -155,7 +155,7 @@ export default function UserPage() {
   return (
     <>
       <div className=" flex flex-col">
-        <div className="mb-8 mt-3 flex items-center gap-3 rounded-lg border border-gray-300 p-4">
+        <div className="mb-8 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
           <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
             <InfoIcon />
           </div>
