@@ -5,11 +5,11 @@ import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import sharp from "sharp";
+import type { AuthSession } from "server/session";
 import { db } from "~/database";
 
 import {
   deleteAuthAccount,
-  type AuthSession,
   createEmailAuthAccount,
   signInWithEmail,
   updateAccountPassword,

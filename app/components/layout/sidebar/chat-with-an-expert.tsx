@@ -32,7 +32,7 @@ export const ChatWithAnExpert = () => {
         turnaround, global shipping, various materials.
       </p>
       <img
-        src="/images/carlos-support.jpg"
+        src="/static/images/carlos-support.jpg"
         alt="Carlos support shelf.nu"
         className="my-4 rounded-lg"
       />

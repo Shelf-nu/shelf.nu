@@ -37,7 +37,7 @@ export default function SuccessfulSubscriptionModal() {
                 muted
                 className="mb-6 rounded-lg"
               >
-                <source src="/videos/celebration.mp4" type="video/mp4" />
+                <source src="/static/videos/celebration.mp4" type="video/mp4" />
               </video>
               <div className="mb-8 text-center">
                 <h4 className="mb-1 text-[18px] font-semibold">

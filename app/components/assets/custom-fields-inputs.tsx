@@ -23,7 +23,7 @@ import {
   SelectValue,
   SelectItem,
 } from "../forms";
-import { Calendar } from "../forms/calender-input";
+import { Calendar } from "../forms/calendar-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";

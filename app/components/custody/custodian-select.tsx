@@ -93,7 +93,7 @@ export default function CustodianSelect(
                         <img
                           src={
                             member.user.profilePicture ||
-                            "/images/default_pfp.jpg"
+                            "/static/images/default_pfp.jpg"
                           }
                           className={"w-[20px] rounded-[4px]"}
                           alt={`${member.user.firstName} ${member.user.lastName}'s profile`}

@@ -4,12 +4,14 @@ import { ErrorBoundryComponent } from "~/components/errors";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.read,
+  });
 
   return null;
 }

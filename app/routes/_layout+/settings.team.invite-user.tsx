@@ -24,7 +24,6 @@ import { Button } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import { db } from "~/database";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
-import { commitAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
 import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier";
 import styles from "~/styles/layout/custom-modal.css";
@@ -45,25 +44,33 @@ const InviteUserFormSchema = z.object({
   role: z.nativeEnum(OrganizationRoles),
 });
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { organizationId } = await requirePermision(
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  const { organizationId } = await requirePermision({
+    userId,
     request,
-    PermissionEntity.teamMember,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.create,
+  });
   await assertUserCanInviteUsersToWorkspace({ organizationId });
   return json({
     showModal: true,
   });
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.teamMember,
-    PermissionAction.create
-  );
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
+
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.create,
+  });
+
   const formData = await request.formData();
   const result = await InviteUserFormSchema.safeParseAsync(
     parseFormAny(formData)
@@ -108,11 +115,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
-    return redirect("/settings/team", {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, { authSession }),
-      },
-    });
+    return redirect("/settings/team", {});
   }
   return null;
 };
