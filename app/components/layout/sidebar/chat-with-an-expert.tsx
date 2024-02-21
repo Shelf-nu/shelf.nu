@@ -8,7 +8,7 @@ export const ChatWithAnExpert = () => {
 
   const fetcher = useFetcher();
   return hideSupportBanner ? null : (
-    <div className="support-banner mb-6 hidden rounded-lg bg-gray-50 px-4 py-5 md:mt-10 md:block">
+    <div className="support-banner mb-6 hidden rounded bg-gray-50 px-4 py-5 md:mt-10 md:block">
       <div className="flex justify-between align-middle">
         <h5 className="mb-1 font-semibold text-gray-900">
           New: Order Asset Labels
@@ -34,7 +34,7 @@ export const ChatWithAnExpert = () => {
       <img
         src="/static/images/carlos-support.jpg"
         alt="Carlos support shelf.nu"
-        className="my-4 rounded-lg"
+        className="my-4 rounded"
       />
       <p>
         <Button

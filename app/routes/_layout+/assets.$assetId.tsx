@@ -257,7 +257,7 @@ export default function AssetDetailsPage() {
           mainImageExpiration: asset.mainImageExpiration,
           alt: asset.title,
         }}
-        className="mx-auto my-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
+        className="mx-auto my-8 h-[240px] w-full rounded object-cover sm:w-[343px] md:hidden"
       />
       <ContextualModal />
       <div className="mt-8 block lg:flex">
@@ -270,7 +270,7 @@ export default function AssetDetailsPage() {
               alt: asset.title,
             }}
             className={tw(
-              "mb-8 hidden h-auto w-[343px] rounded-lg border object-cover md:block lg:w-full",
+              "mb-8 hidden h-auto w-[343px] rounded border object-cover md:block lg:w-full",
               asset.description ? "rounded-b-none border-b-0" : ""
             )}
           />

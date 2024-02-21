@@ -161,7 +161,7 @@ export default function LocationPage() {
             imageId={location?.imageId}
             alt={`${location.name}`}
             className={tw(
-              "block h-auto w-full rounded-lg border object-cover 2xl:h-auto",
+              "block h-auto w-full rounded border object-cover 2xl:h-auto",
               location.description ? "rounded-b-none border-b-0" : ""
             )}
             updatedAt={location.image?.updatedAt}
@@ -176,7 +176,7 @@ export default function LocationPage() {
 
           {location.address ? (
             <>
-              <div className="mt-4 flex items-center justify-between gap-10 rounded-lg border border-gray-200 px-4 py-5">
+              <div className="mt-4 flex items-center justify-between gap-10 rounded border border-gray-200 px-4 py-5">
                 <span className=" text-xs font-medium text-gray-600">
                   Address
                 </span>

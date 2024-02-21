@@ -108,7 +108,7 @@ p {
 }
 
 .markdown-viewer table {
-  @apply w-full border-collapse rounded-lg text-xs;
+  @apply w-full border-collapse rounded text-xs;
 }
 .markdown-viewer table td,
 .markdown-viewer table th {

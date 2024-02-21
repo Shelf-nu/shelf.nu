@@ -27,7 +27,7 @@ export const Notes = () => {
       {hasNotes ? (
         <ul className="notes-list mt-8 w-full">
           {isFormProcessing(fetcher.state) ? (
-            <li className="note mb-6 rounded-lg border bg-white md:mb-8">
+            <li className="note mb-2 rounded border bg-white md:mb-8">
               <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
                 <div>
                   <span className="commentator font-medium text-gray-900">

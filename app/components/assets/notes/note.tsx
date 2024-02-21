@@ -16,7 +16,7 @@ export type NoteWithDate = WithDateFields<NoteType, string> & {
 };
 
 export const Note = ({ note }: { note: NoteWithDate }) => (
-  <li key={note.id} className="note mb-6 rounded-lg border bg-white md:mb-8">
+  <li key={note.id} className="note mb-2 rounded border bg-white md:mb-4">
     <Switch>
       <Comment when={note.type === "COMMENT"} note={note} />
       <Update when={note.type === "UPDATE"} note={note} />
