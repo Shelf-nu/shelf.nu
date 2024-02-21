@@ -23,6 +23,7 @@ import { Button } from "../shared";
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
   const assetCanBeReleased = asset.custody;
+
   let [searchParams] = useSearchParams();
   const refIsQrScan = searchParams.get("ref") === "qr";
   const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
@@ -85,8 +86,7 @@ const ConditionalActionsDropdown = () => {
                   to="release-custody"
                   role="link"
                   variant="link"
-                  className="justify-start whitespace-nowrap
-                px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
                   onClick={() => setOpen(false)}
                 >
@@ -99,7 +99,7 @@ const ConditionalActionsDropdown = () => {
                   to="give-custody"
                   role="link"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                   width="full"
                   onClick={() => setOpen(false)}
                 >

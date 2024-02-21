@@ -7,13 +7,13 @@ import {
 } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { Link, useLoaderData, useNavigate } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
-import { ChevronRight } from "~/components/icons";
+import { ChevronRight, SignIcon } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
@@ -29,6 +29,7 @@ import { TagFilters } from "~/components/list/filters/tag";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
@@ -317,6 +318,9 @@ const ListAssetContent = ({
           profilePicture: string | null;
         };
       };
+      template: {
+        signatureRequired: boolean;
+      };
     };
     location: {
       name: string;
@@ -346,11 +350,38 @@ const ListAssetContent = ({
               <span className="word-break mb-1 block font-medium">
                 {item.title}
               </span>
-              <div>
+              <div className="flex items-center gap-x-1">
                 <AssetStatusBadge
                   status={item.status}
                   availableToBook={item.availableToBook}
                 />
+                {item.custody?.template?.signatureRequired &&
+                  !item.custody.templateSigned && (
+                    <CustomTooltip
+                      content={
+                        <div className="flex flex-col gap-y-2 p-3">
+                          <span className="text-sm text-gray-700">
+                            Awaiting signature to complete custody assignment
+                          </span>
+                          <span className="text-sm text-gray-500">
+                            Asset status will change after signing. To cancel
+                            custody assignment, choose{" "}
+                            <span className="font-semibold text-gray-600">
+                              Release custody
+                            </span>{" "}
+                            action
+                          </span>
+                        </div>
+                      }
+                    >
+                      <Link
+                        className="rounded-full bg-gray-200 p-1"
+                        to={`${item.id}/share-template`}
+                      >
+                        <SignIcon />
+                      </Link>
+                    </CustomTooltip>
+                  )}
               </div>
             </div>
           </div>

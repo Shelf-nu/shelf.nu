@@ -47,6 +47,7 @@ model User {
 
   // Relationships
   assets            Asset[]
+  templates         Template[]
   categories        Category[]
   notes             Note[]
   qrCodes           Qr[]
@@ -159,7 +160,7 @@ model Tag {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
- //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  //@@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 model Note {
@@ -274,7 +275,7 @@ model Location {
 
   assets Asset[]
 
- // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
+  // @@unique([lower(name), organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 
 // Master data for roles
@@ -297,11 +298,11 @@ model TeamMember {
   id   String @id @unique @default(cuid())
   name String
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
-  organizationId String
+  organization    Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId  String
   custodies       Custody[]
   receivedInvites Invite[]
-  user            User?          @relation(fields: [userId], references: [id], onUpdate: Cascade)
+  user            User?        @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId          String?
 
   createdAt DateTime  @default(now())
@@ -318,6 +319,13 @@ model Custody {
 
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String @unique
+
+  template       Template? @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  templateId     String?   @unique
+  templateSigned Boolean?  @default(false)
+
+  signatureText  String?
+  signatureImage String?
 
   // DateTime
   createdAt DateTime @default(now())
@@ -339,8 +347,6 @@ model Organization {
   image   Image?  @relation("orgImage", fields: [imageId], references: [id])
   imageId String? @unique
 
-  // members           TeamMember[]
-  // assets            Asset[]
   locations         Location[]
   categories        Category[]
   tags              Tag[]
@@ -352,6 +358,7 @@ model Organization {
   updatedAt    DateTime      @updatedAt
   customFields CustomField[]
   images       Image[]       @relation("owner")
+  templates    Template[]
   bookings     Booking[]
 }
 
@@ -409,8 +416,39 @@ model TierLimit {
   canExportAssets  Boolean  @default(false)
   maxCustomFields  Int      @default(0)
   maxOrganizations Int      @default(1)
+  maxTemplates     Int      @default(3)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+}
+
+enum TemplateType {
+  CUSTODY
+  BOOKINGS
+}
+
+model Template {
+  id                String       @id @default(cuid())
+  name              String
+  description       String?
+  type              TemplateType @default(BOOKINGS)
+  signatureRequired Boolean      @default(false)
+  isDefault         Boolean      @default(false)
+  isActive          Boolean      @default(true)
+  pdfUrl            String?
+  pdfSize           Int?
+  pdfName           String?
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  creator User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId  String
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
+
+  custodies Custody[]
 }
 
 model CustomField {

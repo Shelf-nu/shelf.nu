@@ -77,6 +77,8 @@ export async function getAsset({
         select: {
           createdAt: true,
           custodian: true,
+          template: true,
+          templateSigned: true,
         },
       },
       organization: {
@@ -248,6 +250,12 @@ export async function getAssetsFromView({
             },
             custody: {
               select: {
+                templateSigned: true,
+                template: {
+                  select: {
+                    signatureRequired: true,
+                  },
+                },
                 custodian: {
                   select: {
                     name: true,

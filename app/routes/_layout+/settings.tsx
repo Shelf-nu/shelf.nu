@@ -35,6 +35,7 @@ export default function SettingsPage() {
     { to: "account", content: "Account" },
     { to: "general", content: "General" },
     { to: "workspace", content: "Workspaces" },
+    { to: "template", content: "Templates" },
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },
   ];

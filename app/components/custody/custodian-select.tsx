@@ -1,6 +1,8 @@
 import { useLoaderData } from "@remix-run/react";
+import { useAtom } from "jotai";
 import type { loader } from "~/routes/_layout+/assets.$assetId.give-custody";
 import { tw } from "~/utils";
+import { updateSelectedCustodyUserAtom } from "../../atoms/assign-custody-user";
 import {
   Select,
   SelectTrigger,
@@ -32,6 +34,7 @@ export default function CustodianSelect(
   }
 ) {
   const { teamMembers } = useLoaderData<typeof loader>();
+  const [, updateSelectedCustodyUser] = useAtom(updateSelectedCustodyUserAtom);
 
   let defaultValue = undefined;
 
@@ -43,6 +46,7 @@ export default function CustodianSelect(
         ?.name,
       userId: teamMembers.find((member) => member.id === defaultCustodianId)
         ?.userId,
+      email: null,
     });
   } else if (defaultTeamMemberId) {
     // In the case of team member id passed, we set that to id and find the rest in the teamMembers array
@@ -52,12 +56,19 @@ export default function CustodianSelect(
       name: teamMembers.find((member) => member.userId === defaultTeamMemberId)
         ?.name,
       userId: defaultTeamMemberId,
+      email: teamMembers.find((member) => member.userId === defaultTeamMemberId)
+        ?.user?.email,
     });
   }
 
   return (
     <div className="relative w-full">
-      <Select name="custodian" defaultValue={defaultValue} disabled={disabled}>
+      <Select
+        onValueChange={(value) => updateSelectedCustodyUser(JSON.parse(value))}
+        name="custodian"
+        disabled={disabled}
+        defaultValue={defaultValue}
+      >
         <SelectTrigger
           className={tw(
             disabled ? "cursor-not-allowed" : "",
@@ -82,11 +93,12 @@ export default function CustodianSelect(
                 {teamMembers.map((member) => (
                   <SelectItem
                     key={member.id}
-                    value={`${JSON.stringify({
+                    value={JSON.stringify({
                       id: member.id,
                       name: member.name,
                       userId: member?.userId,
-                    })}`}
+                      email: member.user?.email,
+                    })}
                   >
                     {member.user ? (
                       <div className="flex items-center gap-3 truncate py-3.5 pr-1">
