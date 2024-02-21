@@ -4,8 +4,8 @@ import { Form, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
-import { updateTitleAtom } from "~/atoms/workspace.new";
 import { isFormProcessing } from "~/utils";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
@@ -37,7 +37,7 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
   const disabled = isFormProcessing(navigation.state);
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
-  const [, updateName] = useAtom(updateTitleAtom);
+  const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
   return (
     <Form
@@ -58,7 +58,7 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
           disabled={disabled}
           error={zo.errors.name()?.message}
           autoFocus
-          onChange={updateName}
+          onChange={updateTitle}
           className="w-full"
           defaultValue={name || undefined}
           placeholder=""
