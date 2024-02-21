@@ -62,6 +62,7 @@ export default function CustodianSelect(
           className={tw(
             disabled ? "cursor-not-allowed" : "",
             "custodian-selector",
+            "text-left",
             className
           )}
         >
@@ -97,7 +98,7 @@ export default function CustodianSelect(
                           className={"w-[20px] rounded-[4px]"}
                           alt={`${member.user.firstName} ${member.user.lastName}'s profile`}
                         />
-                        <span className=" whitespace-nowrap font-medium text-gray-900">
+                        <span className=" whitespace-nowrap text-left font-medium text-gray-900">
                           {member.user.firstName} {member.user.lastName}
                         </span>
                         {showEmail ? (
