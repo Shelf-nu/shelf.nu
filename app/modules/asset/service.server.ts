@@ -340,8 +340,7 @@ export async function getAssets({
 
   /** If the search string exists, add it to the where object */
   if (search) {
-    const words = search.trim().replace(/ +/g, " "); //replace multiple spaces into 1
-    where.title = words;
+    where.title = { contains: search.toLowerCase().trim() };
   }
 
   if (categoriesIds && categoriesIds.length > 0) {

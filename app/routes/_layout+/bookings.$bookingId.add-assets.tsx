@@ -244,14 +244,13 @@ export default function AddAssetsToNewBooking() {
       <div className="flex-1 overflow-y-auto">
         <List
           ItemComponent={RowComponent}
+          /** Clicking on the row will add the current asset to the atom of selected assets */
           navigate={(assetId) => {
-            setSelectedAssets((selectedAssets) => {
-              if (selectedAssets.includes(assetId)) {
-                return selectedAssets.filter((id) => id !== assetId);
-              } else {
-                return [...selectedAssets, assetId];
-              }
-            });
+            setSelectedAssets((selectedAssets) =>
+              selectedAssets.includes(assetId)
+                ? selectedAssets.filter((id) => id !== assetId)
+                : [...selectedAssets, assetId]
+            );
           }}
           className="mb-8 mt-4"
           customEmptyStateContent={{
