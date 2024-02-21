@@ -29,8 +29,8 @@ export const Dialog = ({
       <dialog className="dialog" open={true}>
         <div
           className={tw(
-            " relative z-10 size-full  bg-white p-6 shadow-lg md:h-[85vh] md:rounded",
-            noScroll ? "" : "overflow-y-auto"
+            " relative z-10 size-full  bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded",
+            noScroll ? "md:h-[85vh]" : "overflow-y-auto"
           )}
         >
           <Button

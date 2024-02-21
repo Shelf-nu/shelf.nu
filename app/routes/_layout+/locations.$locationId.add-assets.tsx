@@ -72,6 +72,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   };
   return json({
     showModal: true,
+    noScroll: true,
     items: assets,
     categories,
     tags,
