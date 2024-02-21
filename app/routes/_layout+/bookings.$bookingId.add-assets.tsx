@@ -17,11 +17,10 @@ import {
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { useHydrateAtoms } from "jotai/utils";
 import { bookingsSelectedAssetsAtom } from "~/atoms/booking-selected-assets-atom";
 import { AssetImage } from "~/components/assets/asset-image";
-import { AddAssetForm } from "~/components/booking/add-asset-form";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css";
@@ -189,7 +188,9 @@ export default function AddAssetsToNewBooking() {
   /** We hydrate the selected assets atom with the assets that are already in the booking */
   useHydrateAtoms([[bookingsSelectedAssetsAtom, bookingAssetsIds]]);
 
-  const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
+  const [selectedAssets, setSelectedAssets] = useAtom(
+    bookingsSelectedAssetsAtom
+  );
   const removedAssetIds = useMemo(
     () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
     [bookingAssetsIds, selectedAssets]
@@ -253,10 +254,17 @@ export default function AddAssetsToNewBooking() {
         </div>
       </div>
       {/* Body of the modal*/}
-      <div className="flex-1 overflow-y-auto">
+      <div className="mt-4 flex-1 overflow-y-auto pb-4">
         <List
           ItemComponent={RowComponent}
-          className="mb-8 mt-4"
+          /** Clicking on the row will add the current asset to the atom of selected assets */
+          navigate={(assetId) => {
+            setSelectedAssets((selectedAssets) =>
+              selectedAssets.includes(assetId)
+                ? selectedAssets.filter((id) => id !== assetId)
+                : [...selectedAssets, assetId]
+            );
+          }}
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",
             text: "What are you waiting for? Create your first asset now!",
@@ -314,38 +322,74 @@ export type AssetWithBooking = Asset & {
   category: Category;
 };
 
-const RowComponent = ({ item }: { item: AssetWithBooking }) => (
-  <>
-    <Td className="w-full p-0 md:p-0">
-      <div className="flex justify-between gap-3 p-4 md:px-6">
-        <div className="flex items-center gap-3">
-          <div className="flex size-12 items-center justify-center">
-            <AssetImage
-              asset={{
-                assetId: item.id,
-                mainImage: item.mainImage,
-                mainImageExpiration: item.mainImageExpiration,
-                alt: item.title,
-              }}
-              className="size-full rounded-[4px] border object-cover"
-            />
-          </div>
-          <div className="flex flex-col">
-            <div className="font-medium">{item.title}</div>
+const RowComponent = ({ item }: { item: AssetWithBooking }) => {
+  const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
+  const checked = selectedAssets.some((id) => id === item.id);
+  return (
+    <>
+      <Td className="w-full p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex size-12 items-center justify-center">
+              <AssetImage
+                asset={{
+                  assetId: item.id,
+                  mainImage: item.mainImage,
+                  mainImageExpiration: item.mainImageExpiration,
+                  alt: item.title,
+                }}
+                className="size-full rounded-[4px] border object-cover"
+              />
+            </div>
+            <div className="flex flex-col">
+              <div className="font-medium">{item.title}</div>
+            </div>
           </div>
         </div>
-      </div>
-    </Td>
+      </Td>
 
-    <Td className="text-right">
-      <AvailabilityLabel
-        asset={item}
-        isCheckedOut={item.status === "CHECKED_OUT"}
+      <Td className="text-right">
+        <AvailabilityLabel
+          asset={item}
+          isCheckedOut={item.status === "CHECKED_OUT"}
+        />
+      </Td>
+
+      <Td>
+        <FakeCheckbox checked={checked} />
+      </Td>
+    </>
+  );
+};
+
+const FakeCheckbox = ({ checked }: { checked: boolean }) =>
+  checked ? (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" fill="#FEF6EE" />
+      <path
+        d="M14.6668 6.5L8.25016 12.9167L5.3335 10"
+        stroke="#EF6820"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
-    </Td>
-
-    <Td>
-      <AddAssetForm assetId={item.id} />
-    </Td>
-  </>
-);
+      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" stroke="#EF6820" />
+    </svg>
+  ) : (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" fill="white" />
+      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" stroke="#D0D5DD" />
+    </svg>
+  );
