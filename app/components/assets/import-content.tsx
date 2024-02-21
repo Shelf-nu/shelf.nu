@@ -173,7 +173,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
               </>
             ) : null}
           </AlertDialogHeader>
-          {fetcher.data?.error ? (
+          {fetcher.data?.error?.details?.code && !isSuccessful ? (
             <div>
               <b className="text-red-500">{fetcher.data?.error?.message}</b>
               <p>
