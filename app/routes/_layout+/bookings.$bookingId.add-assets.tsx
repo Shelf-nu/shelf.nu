@@ -19,11 +19,12 @@ import {
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useHydrateAtoms } from "jotai/utils";
-import { bookingsSelectedAssetsAtom } from "~/atoms/booking-selected-assets-atom";
+import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css";
+import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import Input from "~/components/forms/input";
 import { List } from "~/components/list";
 import { Button } from "~/components/shared";
@@ -240,6 +241,7 @@ export default function AddAssetsToNewBooking() {
           <AvailabilitySelect />
         </div>
       </div>
+
       {/* Body of the modal*/}
       <div className="mt-4 flex-1 overflow-y-auto pb-4">
         <List
@@ -348,35 +350,3 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
     </>
   );
 };
-
-const FakeCheckbox = ({ checked }: { checked: boolean }) =>
-  checked ? (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" fill="#FEF6EE" />
-      <path
-        d="M14.6668 6.5L8.25016 12.9167L5.3335 10"
-        stroke="#EF6820"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" stroke="#EF6820" />
-    </svg>
-  ) : (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" fill="white" />
-      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" stroke="#D0D5DD" />
-    </svg>
-  );
