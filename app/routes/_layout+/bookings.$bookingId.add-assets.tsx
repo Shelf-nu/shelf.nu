@@ -241,7 +241,7 @@ export default function AddAssetsToNewBooking() {
         </div>
       </div>
       {/* Body of the modal*/}
-      <div className="flex-1 overflow-y-auto">
+      <div className="mt-4 flex-1 overflow-y-auto pb-4">
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
@@ -252,7 +252,6 @@ export default function AddAssetsToNewBooking() {
                 : [...selectedAssets, assetId]
             );
           }}
-          className="mb-8 mt-4"
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",
             text: "What are you waiting for? Create your first asset now!",
