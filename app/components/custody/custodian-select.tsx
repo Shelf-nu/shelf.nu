@@ -59,7 +59,12 @@ export default function CustodianSelect(
     <div className="relative w-full">
       <Select name="custodian" defaultValue={defaultValue} disabled={disabled}>
         <SelectTrigger
-          className={tw(disabled ? "cursor-not-allowed" : "", className)}
+          className={tw(
+            disabled ? "cursor-not-allowed" : "",
+            "custodian-selector",
+            "text-left",
+            className
+          )}
         >
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>
@@ -93,7 +98,7 @@ export default function CustodianSelect(
                           className={"w-[20px] rounded-[4px]"}
                           alt={`${member.user.firstName} ${member.user.lastName}'s profile`}
                         />
-                        <span className=" flex-1 whitespace-nowrap font-medium text-gray-900">
+                        <span className=" whitespace-nowrap text-left font-medium text-gray-900">
                           {member.user.firstName} {member.user.lastName}
                         </span>
                         {showEmail ? (

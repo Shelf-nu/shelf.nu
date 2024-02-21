@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   type Asset,
   type Booking,
@@ -10,23 +10,27 @@ import type {
   LinksFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import {
+  Form,
   useLoaderData,
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
+import { useAtom, useAtomValue } from "jotai";
+import { useHydrateAtoms } from "jotai/utils";
+import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css";
+import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import Input from "~/components/forms/input";
 import { List } from "~/components/list";
-import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 
 import { Td } from "~/components/table";
-import { createNote, getPaginatedAndFilterableAssets } from "~/modules/asset";
+import { createNotes, getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
 import { getUserByID } from "~/modules/user";
 import { getRequiredParam, isFormProcessing } from "~/utils";
@@ -83,6 +87,7 @@ export const loader = async ({
 
   return json({
     showModal: true,
+    noScroll: true,
     booking,
     items: assets,
     categories,
@@ -114,45 +119,47 @@ export const action = async ({
 
   const bookingId = getRequiredParam(params, "bookingId");
   const formData = await request.formData();
-  const assetId = formData.get("assetId") as string;
-  const isChecked = formData.get("isChecked") === "yes";
+  const assetIds = formData.getAll("assetId") as string[];
+  const removedAssetIds = formData.getAll("removedAssetId") as string[];
+
   const user = await getUserByID(authSession.userId);
   if (!user) {
     throw new ShelfStackError({ message: "User not found" });
   }
 
-  if (isChecked) {
+  /** We only update the booking if there are assets to add */
+  if (assetIds.length > 0) {
+    /** We update the booking with the new assets */
     const b = await upsertBooking(
       {
         id: bookingId,
-        assetIds: [assetId],
+        assetIds,
       },
       getClientHint(request)
     );
-    /** We check the ids again after updating, and if they were sent, that means assets are being added
-     * So we create notes for the assets that were added
-     */
-    await createNote({
+
+    /** We create notes for the assets that were added */
+    await createNotes({
       content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
         b.name
       }](/bookings/${b.id})**.`,
       type: "UPDATE",
       userId: authSession.userId,
-      assetId,
+      assetIds,
     });
-  } else {
+  }
+
+  /** If some assets were removed, we also need to handle those */
+  if (removedAssetIds.length > 0) {
     await removeAssets({
-      booking: {
-        id: bookingId,
-        assetIds: [assetId],
-      },
-      firstName: user.firstName ? user.firstName : "",
-      lastName: user.lastName ? user.lastName : "",
+      booking: { id: bookingId, assetIds: removedAssetIds },
+      firstName: user?.firstName || "",
+      lastName: user?.lastName || "",
       userId: authSession.userId,
     });
   }
 
-  return json({ ok: true });
+  return redirect(`/bookings/${bookingId}`);
 };
 
 export default function AddAssetsToNewBooking() {
@@ -161,14 +168,12 @@ export default function AddAssetsToNewBooking() {
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const [searchValue, setSearchValue] = useState(search || "");
-
   function handleSearch(value: string) {
     setSearchParams((prev) => {
       prev.set("s", value);
       return prev;
     });
   }
-
   function clearSearch() {
     setSearchParams((prev) => {
       prev.delete("s");
@@ -176,9 +181,24 @@ export default function AddAssetsToNewBooking() {
     });
   }
 
+  const bookingAssetsIds = useMemo(
+    () => booking?.assets.map((a) => a.id) || [],
+    [booking.assets]
+  );
+
+  /** We hydrate the selected assets atom with the assets that are already in the booking */
+  useHydrateAtoms([[bookingsSelectedAssetsAtom, bookingAssetsIds]]);
+
+  const [selectedAssets, setSelectedAssets] = useAtom(
+    bookingsSelectedAssetsAtom
+  );
+  const removedAssetIds = useMemo(
+    () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
+    [bookingAssetsIds, selectedAssets]
+  );
   return (
-    <div>
-      <header className="mb-5">
+    <div className="flex max-h-full flex-col">
+      <header className="mb-3">
         <h2>Add assets to ‘{booking?.name}’ booking</h2>
         <p>Fill up the booking with the assets of your choice</p>
       </header>
@@ -235,19 +255,65 @@ export default function AddAssetsToNewBooking() {
         </div>
       </div>
 
-      <List
-        ItemComponent={RowComponent}
-        className="mb-8 mt-4"
-        customEmptyStateContent={{
-          title: "You haven't added any assets yet.",
-          text: "What are you waiting for? Create your first asset now!",
-          newButtonRoute: "/assets/new",
-          newButtonContent: "New asset",
-        }}
-      />
-      <Button variant="secondary" width="full" to={".."}>
-        Close
-      </Button>
+      {/* Body of the modal*/}
+      <div className="mt-4 flex-1 overflow-y-auto pb-4">
+        <List
+          ItemComponent={RowComponent}
+          /** Clicking on the row will add the current asset to the atom of selected assets */
+          navigate={(assetId) => {
+            setSelectedAssets((selectedAssets) =>
+              selectedAssets.includes(assetId)
+                ? selectedAssets.filter((id) => id !== assetId)
+                : [...selectedAssets, assetId]
+            );
+          }}
+          customEmptyStateContent={{
+            title: "You haven't added any assets yet.",
+            text: "What are you waiting for? Create your first asset now!",
+            newButtonRoute: "/assets/new",
+            newButtonContent: "New asset",
+          }}
+        />
+      </div>
+
+      {/* Footer of the modal */}
+      <footer className="flex justify-between border-t pt-3">
+        <div>{selectedAssets.length} assets selected</div>
+        <div className="flex gap-3">
+          <Button variant="secondary" to={".."}>
+            Close
+          </Button>
+          <Form method="post">
+            {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
+            {/* These are the asset ids, coming from the server */}
+            {removedAssetIds.map((assetId) => (
+              <input
+                key={assetId}
+                type="hidden"
+                name="removedAssetId"
+                value={assetId}
+              />
+            ))}
+            {/* These are the ids selected by the user and stored in the atom */}
+            {selectedAssets.map((assetId) => (
+              <input
+                key={assetId}
+                type="hidden"
+                name="assetId"
+                value={assetId}
+              />
+            ))}
+            <Button
+              type="submit"
+              name="intent"
+              value="addAssets"
+              disabled={isSearching}
+            >
+              Confirm
+            </Button>
+          </Form>
+        </div>
+      </footer>
     </div>
   );
 }
@@ -259,10 +325,8 @@ export type AssetWithBooking = Asset & {
 };
 
 const RowComponent = ({ item }: { item: AssetWithBooking }) => {
-  const { booking } = useLoaderData<typeof loader>();
-  const isChecked =
-    booking?.assets.some((asset) => asset.id === item.id) ?? false;
-
+  const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
+  const checked = selectedAssets.some((id) => id === item.id);
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -294,7 +358,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
       </Td>
 
       <Td>
-        <AddAssetForm assetId={item.id} isChecked={isChecked} />
+        <FakeCheckbox checked={checked} />
       </Td>
     </>
   );

@@ -235,3 +235,7 @@ dialog {
 .header-buttons button button {
   @apply flex;
 }
+
+.custodian-selector > span {
+  @apply w-full;
+}
