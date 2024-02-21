@@ -1170,6 +1170,23 @@ export const createBulkLocationChangeNotes = async ({
   userId: User["id"];
   location: Location;
 }) => {
+  const user = await db.user.findFirst({
+    where: {
+      id: userId,
+    },
+    select: {
+      firstName: true,
+      lastName: true,
+    },
+  });
+
+  if (!user) {
+    throw new ShelfStackError({
+      message: "User not found",
+      status: 404,
+    });
+  }
+
   // Iterate over the modified assets
   for (const asset of modifiedAssets) {
     const isRemoving = removedAssetIds.includes(asset.id);
@@ -1183,8 +1200,8 @@ export const createBulkLocationChangeNotes = async ({
       await createLocationChangeNote({
         currentLocation,
         newLocation,
-        firstName: asset?.user?.firstName || "",
-        lastName: asset?.user?.lastName || "",
+        firstName: user?.firstName || "",
+        lastName: user?.lastName || "",
         assetName: asset.title,
         assetId: asset.id,
         userId,
