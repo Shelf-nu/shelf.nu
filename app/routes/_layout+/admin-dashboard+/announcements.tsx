@@ -6,13 +6,12 @@ import { MarkdownViewer } from "~/components/markdown";
 import { Button } from "~/components/shared";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
-  await requireAdmin(request);
+export const loader = async ({ context }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
 
   const announcements = await db.announcement.findMany({
     orderBy: {
@@ -28,9 +27,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  await requireAuthSession(request);
-  await requireAdmin(request);
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
   const formData = await request.formData();
   const published = formData.get("published") === "on";
   const announcementId = formData.get("id") as string;

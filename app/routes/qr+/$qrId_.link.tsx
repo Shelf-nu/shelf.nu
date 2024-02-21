@@ -6,8 +6,18 @@ import { Button } from "~/components/shared";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requirePermision(request, PermissionEntity.qr, PermissionAction.update);
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
+    request,
+    entity: PermissionEntity.qr,
+    action: PermissionAction.update,
+  });
   const { qrId } = params;
   return json({ qrId });
 };

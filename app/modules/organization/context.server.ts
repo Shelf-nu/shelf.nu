@@ -9,7 +9,6 @@ import {
 import { ShelfStackError } from "~/utils/error";
 
 import { getUserOrganizations } from "./service.server";
-import type { AuthSession } from "../auth/types";
 
 const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
   httpOnly: true,
@@ -39,10 +38,13 @@ export function destroySelectedOrganizationIdCookie() {
   return destroyCookie(selectedOrganizationIdCookie);
 }
 
-export async function requireOrganisationId(
-  { userId }: AuthSession,
-  request: Request
-) {
+export async function requireOrganisationId({
+  userId,
+  request,
+}: {
+  userId: string;
+  request: Request;
+}) {
   const organizationId = await getSelectedOrganizationIdCookie(request);
 
   /** There could be a case when you get removed from an organization while browsing it.

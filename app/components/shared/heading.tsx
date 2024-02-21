@@ -2,7 +2,7 @@ interface Props {
   /** What type of heading element do you want to render?
    * Options are: "h1" | "h2" | "h3" | "h4" | "h5"
    */
-  as?: React.ElementType;
+  as?: React.ComponentType<any> | string;
 
   /** Content to be rendered inside the heading */
   children: React.ReactNode;

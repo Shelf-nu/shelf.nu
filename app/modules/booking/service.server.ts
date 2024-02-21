@@ -466,7 +466,6 @@ export async function getBookings({
         },
       },
     };
-    // @TODO if status of the booking is ONGOING, the assets added should have their status updated to CHECKED_OUT
   }
 
   if (excludeBookingIds?.length) {

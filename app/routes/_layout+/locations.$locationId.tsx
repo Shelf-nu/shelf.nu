@@ -24,7 +24,6 @@ import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
-import { commitAuthSession } from "~/modules/auth";
 import { deleteLocation, getLocation } from "~/modules/location";
 import assetCss from "~/styles/asset.css";
 import {
@@ -42,12 +41,18 @@ import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { organizationId } = await requirePermision(
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.read,
+  });
   const id = getRequiredParam(params, "locationId");
 
   const searchParams = getCurrentSearchParams(request);
@@ -117,12 +122,14 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
 ];
 
-export async function action({ request, params }: ActionFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.delete,
+  });
   const id = getRequiredParam(params, "locationId");
 
   await deleteLocation({ id });
@@ -134,11 +141,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/locations`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect(`/locations`);
 }
 
 export default function LocationPage() {

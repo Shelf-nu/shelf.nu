@@ -41,12 +41,18 @@ import { requirePermision } from "~/utils/roles.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { organizationId } = await requirePermision(
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession?.userId,
     request,
-    PermissionEntity.booking,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.booking,
+    action: PermissionAction.update,
+  });
 
   const id = getRequiredParam(params, "bookingId");
 
@@ -97,12 +103,19 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { authSession } = await requirePermision(
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession?.userId,
+
     request,
-    PermissionEntity.booking,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.booking,
+    action: PermissionAction.update,
+  });
 
   const bookingId = getRequiredParam(params, "bookingId");
   const formData = await request.formData();

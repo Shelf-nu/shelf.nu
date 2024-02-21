@@ -6,19 +6,18 @@ import { Switch } from "~/components/forms/switch";
 import { MarkdownEditor } from "~/components/markdown";
 import { Button } from "~/components/shared";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
-  await requireAdmin(request);
+export const loader = async ({ context }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
 
   return json({});
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  await requireAuthSession(request);
-  await requireAdmin(request);
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
 
   const formData = await request.formData();
   const name = formData.get("name") as string;

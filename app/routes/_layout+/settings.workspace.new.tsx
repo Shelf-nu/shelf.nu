@@ -16,16 +16,18 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createOrganization } from "~/modules/organization";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreOrganizations } from "~/modules/tier";
 import { assertIsPost } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requireOrganisationId({
+    userId: authSession.userId,
+    request,
+  });
   const { userId } = authSession;
   assertUserCanCreateMoreOrganizations(userId);
 
@@ -38,8 +40,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
-export async function action({ request }: ActionFunctionArgs) {
-  const authSession = await requireAuthSession(request);
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
   assertIsPost(request);
   assertUserCanCreateMoreOrganizations(authSession.userId);
 
@@ -64,9 +66,6 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -96,11 +95,7 @@ export async function action({ request }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/settings/workspace/`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect(`/settings/workspace/`);
 }
 
 export const handle = {
