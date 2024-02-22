@@ -11,12 +11,7 @@ import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
 import { getLocations } from "~/modules/location";
-import {
-  generatePageMeta,
-  getCurrentSearchParams,
-  getParamsValues,
-  tw,
-} from "~/utils";
+import { getCurrentSearchParams, getParamsValues, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
@@ -34,8 +29,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-
-  const { prev, next } = generatePageMeta(request);
 
   const { locations, totalLocations } = await getLocations({
     organizationId,
@@ -61,8 +54,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalItems: totalLocations,
       totalPages,
       perPage,
-      prev,
-      next,
+
       modelName,
     },
     {

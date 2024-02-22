@@ -58,8 +58,6 @@ export const loader = async ({
     totalAssets,
     perPage,
     page,
-    prev,
-    next,
     categories,
     tags,
     assets,
@@ -87,8 +85,6 @@ export const loader = async ({
     totalItems: totalAssets,
     perPage,
     totalPages,
-    next,
-    prev,
     modelName,
     location,
   });

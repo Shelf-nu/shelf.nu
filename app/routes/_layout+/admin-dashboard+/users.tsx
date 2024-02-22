@@ -12,7 +12,7 @@ import { requireAdmin } from "~/utils/roles.server";
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   await requireAdmin(authSession.userId);
-  const { search, totalUsers, perPage, page, prev, next, users, totalPages } =
+  const { search, totalUsers, perPage, page, users, totalPages } =
     await getPaginatedAndFilterableUsers({
       request,
     });
@@ -38,8 +38,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     totalItems: totalUsers,
     perPage,
     totalPages,
-    next,
-    prev,
     modelName,
   });
 };

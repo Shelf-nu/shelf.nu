@@ -28,7 +28,6 @@ import {
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user";
 import {
-  generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
   getRequiredParam,
@@ -153,7 +152,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     singular: "asset",
     plural: "assets",
   };
-  const { prev, next } = generatePageMeta(request);
 
   const header: HeaderData = {
     title: `Edit | ${booking.name}`,
@@ -169,8 +167,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalItems: booking.assets.length,
       perPage,
       totalPages: booking.assets.length / perPage,
-      next,
-      prev,
       teamMembers,
     },
     {

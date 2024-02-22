@@ -16,11 +16,7 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
 import { deleteCategory, getCategories } from "~/modules/category";
-import {
-  generatePageMeta,
-  getCurrentSearchParams,
-  getParamsValues,
-} from "~/utils";
+import { getCurrentSearchParams, getParamsValues } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -40,7 +36,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-  const { prev, next } = generatePageMeta(request);
 
   const { categories, totalCategories } = await getCategories({
     organizationId,
@@ -67,8 +62,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalItems: totalCategories,
       totalPages,
       perPage,
-      prev,
-      next,
       modelName,
     },
     {

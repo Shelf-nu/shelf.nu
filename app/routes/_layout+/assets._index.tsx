@@ -68,12 +68,6 @@ export interface IndexResponse {
   /** Search string */
   search: string | null;
 
-  /** Next page url - used for pagination */
-  next: string;
-
-  /** Prev page url - used for pagination */
-  prev: string;
-
   /** Used so all the default actions can be generate such as empty state, creating and so on */
   modelName: {
     singular: string;
@@ -134,8 +128,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     totalAssets,
     perPage,
     page,
-    prev,
-    next,
     categories,
     tags,
     assets,
@@ -186,8 +178,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalItems: totalAssets,
       perPage,
       totalPages,
-      next,
-      prev,
       modelName,
       canImportAssets: canImportAssets(tierLimit),
       searchFieldLabel: "Search assets",
