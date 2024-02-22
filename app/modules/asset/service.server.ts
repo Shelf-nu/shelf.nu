@@ -475,7 +475,6 @@ export async function getAssets({
     /** Count them */
     db.asset.count({ where }),
   ]);
-  console.log(assets);
 
   return { assets, totalAssets };
 }
