@@ -178,6 +178,7 @@ export const handle = {
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
+
   return (
     <div>
       <header className="mb-5">

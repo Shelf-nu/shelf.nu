@@ -1,10 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { Asset } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
-import { useHydrateAtoms } from "jotai/utils";
 import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
@@ -209,9 +208,6 @@ export default function AddAssetsToLocation() {
     [location.assets]
   );
 
-  /** We hydrate the selected assets atom with the assets that are already in the booking */
-  useHydrateAtoms([[locationsSelectedAssetsAtom, locationAssetsIds]]);
-
   const [selectedAssets, setSelectedAssets] = useAtom(
     locationsSelectedAssetsAtom
   );
@@ -221,6 +217,15 @@ export default function AddAssetsToLocation() {
     [locationAssetsIds, selectedAssets]
   );
 
+  /**
+   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per location
+   * So we do a manual effect to set the selected assets to the location assets ids
+   */
+  useEffect(() => {
+    if (location) {
+      setSelectedAssets(locationAssetsIds);
+    }
+  }, [location, locationAssetsIds, setSelectedAssets]);
   return (
     <div className="flex max-h-full flex-col">
       <header className="mb-5">
