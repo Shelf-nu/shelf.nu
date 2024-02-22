@@ -20,6 +20,7 @@ import SuccessfulSubscriptionModal from "~/components/subscription/successful-su
 import { db } from "~/database";
 
 import { getUserByID } from "~/modules/user";
+import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfStackError } from "~/utils/error";
@@ -39,6 +40,9 @@ import {
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
+  if (!ENABLE_PREMIUM_FEATURES) {
+    return redirect("/settings/account");
+  }
 
   await requirePermision({
     userId: authSession.userId,

@@ -361,7 +361,6 @@ export async function getAssets({
     }
   }
   const unavailableBookingStatuses = [
-    BookingStatus.DRAFT,
     BookingStatus.RESERVED,
     BookingStatus.ONGOING,
   ];
