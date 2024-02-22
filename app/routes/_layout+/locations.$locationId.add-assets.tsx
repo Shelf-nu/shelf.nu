@@ -222,10 +222,10 @@ export default function AddAssetsToLocation() {
    * So we do a manual effect to set the selected assets to the location assets ids
    */
   useEffect(() => {
-    if (location) {
-      setSelectedAssets(locationAssetsIds);
-    }
-  }, [location, locationAssetsIds, setSelectedAssets]);
+    setSelectedAssets(locationAssetsIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.id]);
+
   return (
     <div className="flex max-h-full flex-col">
       <header className="mb-5">

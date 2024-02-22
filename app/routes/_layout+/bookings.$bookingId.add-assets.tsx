@@ -192,12 +192,13 @@ export default function AddAssetsToNewBooking() {
   /**
    * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per booking
    * So we do a manual effect to set the selected assets to the booking assets ids
+   * I would still rather use the useHydrateAtoms, but it's not working as expected.
+   * @TODO Going to ask here: https://github.com/pmndrs/jotai/discussions/669
    */
   useEffect(() => {
-    if (booking) {
-      setSelectedAssets(bookingAssetsIds);
-    }
-  }, [booking, bookingAssetsIds, setSelectedAssets]);
+    setSelectedAssets(bookingAssetsIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking.id]);
 
   return (
     <div className="flex max-h-full flex-col">
