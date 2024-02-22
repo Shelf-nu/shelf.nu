@@ -17,9 +17,13 @@ import {
 } from "~/components/workspace/form";
 
 import { createOrganization } from "~/modules/organization";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import {
+  requireOrganisationId,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreOrganizations } from "~/modules/tier";
 import { assertIsPost } from "~/utils";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -81,7 +85,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const file = formDataFile.get("image") as File | null;
   invariant(file instanceof File, "file not the right type");
 
-  await createOrganization({
+  const newOrg = await createOrganization({
     name,
     userId: authSession.userId,
     image: file || null,
@@ -95,7 +99,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/settings/workspace/`);
+  return redirect(`/settings/workspace/`, {
+    headers: [setCookie(await setSelectedOrganizationIdCookie(newOrg.id))],
+  });
 }
 
 export const handle = {

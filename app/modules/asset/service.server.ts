@@ -339,7 +339,10 @@ export async function getAssets({
 
   /** If the search string exists, add it to the where object */
   if (search) {
-    where.title = { contains: search.toLowerCase().trim() };
+    where.title = {
+      contains: search.toLowerCase().trim(),
+      mode: "insensitive",
+    };
   }
 
   if (categoriesIds && categoriesIds.length > 0) {
@@ -472,6 +475,7 @@ export async function getAssets({
     /** Count them */
     db.asset.count({ where }),
   ]);
+  console.log(assets);
 
   return { assets, totalAssets };
 }
