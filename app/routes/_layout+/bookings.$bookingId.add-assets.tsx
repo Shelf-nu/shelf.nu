@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type Asset,
   type Booking,
@@ -18,7 +18,6 @@ import {
   useSearchParams,
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
-import { useHydrateAtoms } from "jotai/utils";
 import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
@@ -182,9 +181,6 @@ export default function AddAssetsToNewBooking() {
     [booking.assets]
   );
 
-  /** We hydrate the selected assets atom with the assets that are already in the booking */
-  useHydrateAtoms([[bookingsSelectedAssetsAtom, bookingAssetsIds]]);
-
   const [selectedAssets, setSelectedAssets] = useAtom(
     bookingsSelectedAssetsAtom
   );
@@ -192,6 +188,17 @@ export default function AddAssetsToNewBooking() {
     () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
     [bookingAssetsIds, selectedAssets]
   );
+
+  /**
+   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per booking
+   * So we do a manual effect to set the selected assets to the booking assets ids
+   */
+  useEffect(() => {
+    if (booking) {
+      setSelectedAssets(bookingAssetsIds);
+    }
+  }, [booking, bookingAssetsIds, setSelectedAssets]);
+
   return (
     <div className="flex max-h-full flex-col">
       <header className="mb-3">
