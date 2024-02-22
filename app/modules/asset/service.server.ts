@@ -18,7 +18,6 @@ import { db } from "~/database";
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import {
   dateTimeInUnix,
-  generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
   oneDayFromNow,
@@ -1050,7 +1049,6 @@ export const getPaginatedAndFilterableAssets = async ({
     unhideAssetsBookigIds,
   } = getParamsValues(searchParams);
 
-  const { prev, next } = generatePageMeta(request);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -1078,8 +1076,6 @@ export const getPaginatedAndFilterableAssets = async ({
     perPage,
     search,
     totalAssets,
-    prev,
-    next,
     categories: excludeCategoriesQuery
       ? []
       : await getAllCategories({

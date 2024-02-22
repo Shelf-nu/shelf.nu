@@ -19,7 +19,6 @@ import { DeleteTag } from "~/components/tag/delete-tag";
 import { deleteTag, getTags } from "~/modules/tag";
 import {
   assertIsDelete,
-  generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
 } from "~/utils";
@@ -42,7 +41,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-  const { prev, next } = generatePageMeta(request);
   const { tags, totalTags } = await getTags({
     organizationId,
     page,
@@ -67,8 +65,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalItems: totalTags,
       totalPages,
       perPage,
-      prev,
-      next,
       modelName,
     },
     {

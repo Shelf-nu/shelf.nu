@@ -15,11 +15,7 @@ import {
 } from "~/modules/custom-field";
 import { getOrganizationTierLimit } from "~/modules/tier";
 
-import {
-  getCurrentSearchParams,
-  getParamsValues,
-  generatePageMeta,
-} from "~/utils";
+import { getCurrentSearchParams, getParamsValues } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
@@ -46,7 +42,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-  const { prev, next } = generatePageMeta(request);
 
   const { customFields, totalCustomFields } =
     await getFilteredAndPaginatedCustomFields({
@@ -80,8 +75,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalItems: totalCustomFields,
       totalPages,
       perPage,
-      prev,
-      next,
       modelName,
       canCreateMoreCustomFields: canCreateMoreCustomFields({
         tierLimit,

@@ -27,7 +27,6 @@ import { Td, Th } from "~/components/table";
 import { deleteLocation, getLocation } from "~/modules/location";
 import assetCss from "~/styles/asset.css";
 import {
-  generatePageMeta,
   geolocate,
   getCurrentSearchParams,
   getParamsValues,
@@ -74,7 +73,6 @@ export const loader = async ({
 
   const totalItems = totalAssetsWithinLocation;
   const totalPages = totalAssetsWithinLocation / perPage;
-  const { prev, next } = generatePageMeta(request);
 
   const header: HeaderData = {
     title: location.name,
@@ -97,8 +95,6 @@ export const loader = async ({
       totalItems,
       perPage,
       totalPages,
-      next,
-      prev,
       mapData,
     },
     {

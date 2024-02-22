@@ -18,11 +18,7 @@ import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
 import { getBookings } from "~/modules/booking";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import {
-  generatePageMeta,
-  getCurrentSearchParams,
-  getParamsValues,
-} from "~/utils";
+import { getCurrentSearchParams, getParamsValues } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
@@ -46,8 +42,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { page, perPageParam, search, status } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-
-  const { prev, next } = generatePageMeta(request);
 
   const { bookings, bookingCount } = await getBookings({
     organizationId,
@@ -108,8 +102,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalItems: bookingCount,
       totalPages,
       perPage,
-      prev,
-      next,
       modelName,
     },
     {

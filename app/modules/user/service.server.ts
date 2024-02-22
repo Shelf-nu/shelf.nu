@@ -17,7 +17,6 @@ import {
 
 import {
   dateTimeInUnix,
-  generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
   randomUsernameFromEmail,
@@ -296,7 +295,6 @@ export const getPaginatedAndFilterableUsers = async ({
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, search } = getParamsValues(searchParams);
-  const { prev, next } = generatePageMeta(request);
 
   const { users, totalUsers } = await getUsers({
     page,
@@ -310,8 +308,6 @@ export const getPaginatedAndFilterableUsers = async ({
     perPage: 25,
     search,
     totalUsers,
-    prev,
-    next,
     users,
     totalPages,
   };
