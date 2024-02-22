@@ -73,7 +73,11 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     singular: "Workspace",
     plural: "Workspaces",
   };
-  const organizations = user.userOrganizations.map((r) => r.organization);
+
+  /** Get the organization that are owner by the current uer */
+  const organizations = user.userOrganizations
+    .map((r) => r.organization)
+    .filter((o) => o.owner.id === userId);
 
   return json({
     userId,
