@@ -339,7 +339,10 @@ export async function getAssets({
 
   /** If the search string exists, add it to the where object */
   if (search) {
-    where.title = { contains: search.toLowerCase().trim() };
+    where.title = {
+      contains: search.toLowerCase().trim(),
+      mode: "insensitive",
+    };
   }
 
   if (categoriesIds && categoriesIds.length > 0) {
