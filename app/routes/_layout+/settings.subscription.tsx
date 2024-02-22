@@ -57,11 +57,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     ? ((await getStripeCustomer(user.customerId)) as CustomerWithSubscriptions)
     : null;
 
-  let subscription = getCustomerActiveSubscription({ customer });
-  /** Check if the customer has an active subscription */
+  /** Check if the customer has an trial subscription */
+  let subscription = getCustomerTrialSubscription({ customer });
 
+  /** If no tial, check if they have an active one */
   if (!subscription) {
-    subscription = getCustomerTrialSubscription({ customer });
+    subscription = getCustomerActiveSubscription({ customer });
   }
 
   /* Get the prices and products from Stripe */
