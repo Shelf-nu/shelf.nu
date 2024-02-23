@@ -104,13 +104,16 @@ export async function createUserOrAttachOrg({
 
   /**
    * If user does not exist, create a new user and attach the org to it
+   * WE have a case where a user registers which only creates an auth account and before confirming their email they try to accept an invite
+   * This will always fail because we need them to confirm their email before we create a user in shelf
    */
   if (!shelfUser?.id) {
     authAccount = await createEmailAuthAccount(email, password);
     if (!authAccount) {
       throw new ShelfStackError({
         status: 500,
-        message: "failed to create auth account",
+        message:
+          "We are facing some issue with your account. Most likely you are trying to accept an invite, before you have confirmed your account's email. Please try again after confirming your email. If the issue persists, feel free to contact support.",
       });
     }
 
@@ -125,6 +128,7 @@ export async function createUserOrAttachOrg({
     return user;
   }
 
+  /** If the user already exists, we just attach the new org to it */
   await createUserOrgAssociation(db, {
     userId: shelfUser.id,
     organizationIds: [organizationId],

@@ -1,14 +1,15 @@
 import * as React from "react";
-import type { MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Link, useSearchParams } from "@remix-run/react";
 import { GreenCheckMarkIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader() {
+export async function loader({ context }: LoaderFunctionArgs) {
   const title = "Check your email";
   const subHeading = "";
+  if (context.isAuthenticated) return redirect("/assets");
 
   return json({ title, subHeading });
 }

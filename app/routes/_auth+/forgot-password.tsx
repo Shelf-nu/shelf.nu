@@ -1,5 +1,9 @@
-import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
@@ -19,9 +23,10 @@ const ForgotPasswordSchema = z.object({
       message: "Please enter a valid email",
     })),
 });
-export async function loader() {
+export async function loader({ context }: LoaderFunctionArgs) {
   const title = "Forgot password?";
   const subHeading = "No worries, we’ll send you reset instructions.";
+  if (context.isAuthenticated) return redirect("/assets");
 
   return json({ title, subHeading });
 }

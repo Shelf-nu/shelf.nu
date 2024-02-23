@@ -1,15 +1,9 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
 import { Link, useMatches } from "@remix-run/react";
 import { Outlet } from "react-router";
 import { ErrorBoundryComponent } from "~/components/errors";
 import SubHeading from "~/components/shared/sub-heading";
 
-export const loader = ({ context }: LoaderFunctionArgs) => {
-  /** WE do this on the layout so it runs for all child routes */
-  if (context.isAuthenticated) return redirect("/assets");
-  return null;
-};
+export const loader = () => null;
 
 export default function App() {
   const matches = useMatches();

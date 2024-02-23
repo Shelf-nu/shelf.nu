@@ -1,6 +1,10 @@
 import * as React from "react";
 
-import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
+import type {
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
   Form,
@@ -27,9 +31,10 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 
-export async function loader() {
+export async function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
+  if (context.isAuthenticated) return redirect("/assets");
 
   return json({ title, subHeading });
 }
