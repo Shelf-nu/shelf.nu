@@ -15,6 +15,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  // if (context.isAuthenticated) return redirect("/assets");
   const searchParams = getCurrentSearchParams(request);
   const token = searchParams.get("token") as string;
 
@@ -42,14 +43,26 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     });
   }
 
+  /** If the user is already signed in, we jus redirect them to assets index and set */
+  if (context.isAuthenticated) {
+    return redirect(safeRedirect(`/assets`), {
+      headers: [
+        setCookie(
+          await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
+        ),
+      ],
+    });
+  }
+
   /** Sign in the user */
   const signInResult = await signInWithEmail(
     updatedInvite.inviteeEmail,
     password
   );
-
+  /**
+   * User could already be registered and hence loggin in with our password failed,
+   * redirect to home and let user login or go to home */
   if (signInResult.status === "error") {
-    //user could already be registered and hence loggin in with our password failed, redirect to home and let user login or go to home
     return redirect("/login?acceptedInvite=yes");
   }
 
@@ -64,7 +77,9 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       ),
       {
         headers: [
-          setCookie(await setSelectedOrganizationIdCookie(updatedInvite.id)),
+          setCookie(
+            await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
+          ),
         ],
       }
     );

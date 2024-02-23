@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { json, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useActionData, useFetcher, useSearchParams } from "@remix-run/react";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
@@ -15,10 +15,20 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { tryCreateUser, getUserByEmail } from "~/modules/user";
 import { assertIsPost, randomUsernameFromEmail, safeRedirect } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
+import { ShelfStackError } from "~/utils/error";
 
 // imagine a user go back after OAuth login success or type this URL
 // we don't want him to fall in a black hole 👽
-export async function loader() {
+export async function loader({ context }: LoaderFunctionArgs) {
+  if (context.isAuthenticated) {
+    throw new ShelfStackError({
+      status: 400,
+      title: "Already authenticated",
+      message:
+        "You are already authenticated so we cannot perform the magic link validation. Please log-out of your current account and try again",
+    });
+  }
+
   return json({});
 }
 
@@ -49,6 +59,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   // https://github.com/rphlmr/supa-fly-stack/issues/45
   const authSession = await refreshAccessToken(refreshToken);
 
+  console.log(authSession, "authSession");
   if (!authSession) {
     return json(
       {
@@ -64,7 +75,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId: authSession.userId,
       orgType: "PERSONAL",
     });
-
+    console.log(personalOrganization, "personalOrganization");
     // Set the session
     context.setSession(authSession);
 
@@ -161,9 +172,13 @@ export default function LoginCallback() {
     return (
       <div className="text-center">
         <h3 className="font-medium">{clientError}.</h3>
-        <Button variant="link" to="/join?resend">
-          Resend confirmation link
-        </Button>
+        <p>
+          You can use the{" "}
+          <Button variant="link" to="/login">
+            Magic link
+          </Button>{" "}
+          functionality to resend your confirmation email.
+        </p>
         <p>If the issue persists please get in touch with the Shelf</p>
         team.{" "}
       </div>
