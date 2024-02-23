@@ -59,7 +59,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
   // https://github.com/rphlmr/supa-fly-stack/issues/45
   const authSession = await refreshAccessToken(refreshToken);
 
-  console.log(authSession, "authSession");
   if (!authSession) {
     return json(
       {
@@ -75,7 +74,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId: authSession.userId,
       orgType: "PERSONAL",
     });
-    console.log(personalOrganization, "personalOrganization");
     // Set the session
     context.setSession(authSession);
 
