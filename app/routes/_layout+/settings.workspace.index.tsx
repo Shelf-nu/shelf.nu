@@ -75,9 +75,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   };
 
   /** Get the organization that are owner by the current uer */
-  const organizations = user.userOrganizations
-    .map((r) => r.organization)
-    .filter((o) => o.owner.id === userId);
+  const organizations = user.userOrganizations.map((r) => r.organization);
 
   return json({
     userId,
@@ -85,7 +83,8 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     currentOrganizationId: organizationId,
     canCreateMoreOrganizations: canCreateMoreOrganizations({
       tierLimit: user?.tier?.tierLimit,
-      totalOrganizations: organizations?.length,
+      totalOrganizations: organizations.filter((o) => o.owner.id === userId)
+        .length,
     }),
     items: organizations,
     totalItems: organizations.length,
