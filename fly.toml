@@ -1,52 +1,41 @@
 app = "shelf-webapp"
-
+primary_region = "xx"
 kill_signal = "SIGINT"
-kill_timeout = 5
+kill_timeout = "5s"
 swap_size_mb = 512
-processes = []
-
-[env]
-  PORT = "8080"
-  NODE_ENV = "production"
 
 [experimental]
-  allowed_public_ports = []
-  auto_rollback = true
-  cmd = "start.sh"
-  entrypoint = "sh"
+auto_rollback = true
 
-[[services]]
-  internal_port = 8080
-  processes = ["app"]
-  protocol = "tcp"
-  script_checks = []
+[deploy]
+strategy = "bluegreen"
 
-  [services.concurrency]
-    hard_limit = 125
-    soft_limit = 100
-    type = "connections"
+[env]
+NODE_ENV = "production"
+PORT = "8080"
 
-  [[services.ports]]
-    handlers = ["http"]
-    port = 80
-    force_https = true
+[http_service]
+internal_port = 8080
+force_https = true
+auto_stop_machines = false
+auto_start_machines = false
+min_machines_running = 1
+processes = ["app"]
 
-  [[services.ports]]
-    handlers = ["tls", "http"]
-    port = 443
+[http_service.concurrency]
+type = "requests"
+soft_limit = 100
+hard_limit = 125
 
-  [[services.tcp_checks]]
-    grace_period = "1s"
-    interval = "15s"
-    restart_limit = 0
-    timeout = "2s"
+[[http_service.checks]]
+grace_period = "5s"
+interval = "10s"
+method = "GET"
+timeout = "2s"
+path = "/healthcheck"
+protocol = "http"
 
-  [[services.http_checks]]
-    interval = "10s"
-    grace_period = "5s"
-    method = "get"
-    path = "/healthcheck"
-    protocol = "http"
-    timeout = "2s"
-    tls_skip_verify = false
-    [services.http_checks.headers]
+[[vm]]
+cpu_kind = "shared"
+cpus = 2
+memory_mb = 256
