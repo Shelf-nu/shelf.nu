@@ -22,7 +22,7 @@
     "setup:seed": "prisma db seed",
     "reset:db": "prisma migrate reset",
     "reset:db:staging": "dotenv -e .env.staging -- prisma migrate reset",
-    "start": "remix-serve build/index.js",
+    "start": "NODE_ENV=production node build/index.js",
     "start:ci": "dotenv -- remix-serve build",
     "test": "echo test",
     "test:cov": "vitest --coverage",
