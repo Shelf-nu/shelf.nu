@@ -34,8 +34,3 @@ method = "GET"
 timeout = "2s"
 path = "/healthcheck"
 protocol = "http"
-
-[[vm]]
-cpu_kind = "shared"
-cpus = 2
-memory_mb = 256
