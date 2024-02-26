@@ -85,7 +85,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       {
         errors: {
           email: null,
-          password: "incorrect Username and password",
+          password: "Incorrect email or password",
         },
       },
       { status: 400 }
