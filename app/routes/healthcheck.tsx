@@ -1,5 +1,5 @@
 // learn more: https://fly.io/docs/reference/configuration/#services-http_checks
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
 
 import { db } from "~/database";
 
@@ -17,10 +17,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         if (!r.ok) return Promise.reject(r);
       }),
     ]);
-    return new Response("OK");
+    return json({ status: "OK" });
   } catch (error: unknown) {
     // eslint-disable-next-line no-console
     console.log("healthcheck ❌", { error });
-    return new Response("ERROR", { status: 500 });
+    return json({ status: "ERROR" }, { status: 500 });
   }
 }
