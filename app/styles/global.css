@@ -239,3 +239,7 @@ dialog {
 .custodian-selector > span {
   @apply w-full;
 }
+
+.word-break {
+  word-break: break-word;
+}
