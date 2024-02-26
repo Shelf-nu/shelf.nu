@@ -14,6 +14,15 @@ strategy = "bluegreen"
 NODE_ENV = "production"
 PORT = "8080"
 
+[[services.ports]]
+handlers = ["http"]
+port = 80
+force_https = true
+
+[[services.ports]]
+handlers = ["tls", "http"]
+port = 443
+
 [http_service]
 internal_port = 8080
 force_https = true
@@ -34,3 +43,4 @@ method = "GET"
 timeout = "2s"
 path = "/healthcheck"
 protocol = "http"
+
