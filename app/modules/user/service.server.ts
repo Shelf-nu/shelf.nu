@@ -1,10 +1,11 @@
-import type { PrismaClient, Organization, User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import sharp from "sharp";
+import type { ExtendedPrismaClient } from "~/database";
 import { db } from "~/database";
 
 import {
@@ -54,7 +55,7 @@ export async function getUserByIDWithOrg(id: User["id"]) {
 }
 
 async function createUserOrgAssociation(
-  tx: Omit<PrismaClient, ITXClientDenyList>,
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
   {
     organizationIds,
     userId,

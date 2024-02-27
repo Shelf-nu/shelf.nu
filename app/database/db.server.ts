@@ -2,11 +2,13 @@ import { Prisma, PrismaClient } from "@prisma/client";
 
 import { NODE_ENV } from "../utils/env";
 
-let db: ReturnType<typeof getNewPrismaClient>;
+export type ExtendedPrismaClient = ReturnType<typeof getNewPrismaClient>;
+
+let db: ExtendedPrismaClient;
 
 declare global {
   // eslint-disable-next-line no-var
-  var __db__: ReturnType<typeof getNewPrismaClient>;
+  var __db__: ExtendedPrismaClient;
 }
 
 /** Extending prisma client for dynamic findMany */
