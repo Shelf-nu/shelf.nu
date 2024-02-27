@@ -38,14 +38,13 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+  const { organizationId } = await requirePermision(
     request,
     PermissionEntity.asset,
     PermissionAction.update
   );
 
   const organization = await getOrganization({ id: organizationId });
-  const { userId } = authSession;
 
   const {
     categories,
