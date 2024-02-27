@@ -9,7 +9,6 @@ import type {
   Tag,
   Organization,
   TeamMember,
-  CustomField,
   Booking,
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
@@ -37,7 +36,7 @@ import type {
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
-import { createCategoriesIfNotExists, getAllCategories } from "../category";
+import { createCategoriesIfNotExists } from "../category";
 
 import {
   createCustomFieldsIfNotExists,
@@ -1502,7 +1501,6 @@ export const createAssetsFromBackupImport = async ({
       const customFieldDef = asset.customFields.reduce(
         (res, { value, customField }) => {
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-
           const { id, createdAt, updatedAt, ...rest } = customField;
           const options = value?.valueOption?.length
             ? [value?.valueOption]
