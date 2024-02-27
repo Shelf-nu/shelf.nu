@@ -1,42 +1,62 @@
+import { useEffect, useMemo } from "react";
 import type { Asset } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData, useParams } from "@remix-run/react";
+import { json, redirect } from "@remix-run/node";
+import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { useAtom, useAtomValue } from "jotai";
+import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
+import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { List, Filters } from "~/components/list";
-import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 import { Td } from "~/components/table";
 import { db } from "~/database";
 import {
-  createLocationChangeNote,
+  createBulkLocationChangeNotes,
   getPaginatedAndFilterableAssets,
 } from "~/modules/asset";
 
+import { isFormProcessing } from "~/utils";
 import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { organizationId } = await requirePermision(
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.update,
+  });
   const locationId = params.locationId as string;
   const location = await db.location.findUnique({
     where: {
       id: locationId,
+      organizationId,
+    },
+    include: {
+      assets: {
+        select: { id: true },
+      },
     },
   });
+  if (!location) {
+    throw new ShelfStackError({
+      message: "Location not found",
+      status: 404,
+    });
+  }
 
   const {
     search,
     totalAssets,
     perPage,
     page,
-    prev,
-    next,
     categories,
     tags,
     assets,
@@ -55,7 +75,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   };
   return json({
     showModal: true,
-    items: [...assets, ...assets, ...assets],
+    noScroll: true,
+    items: assets,
     categories,
     tags,
     search,
@@ -63,69 +84,150 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     totalItems: totalAssets,
     perPage,
     totalPages,
-    next,
-    prev,
     modelName,
     location,
   });
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  await requirePermision(
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.update,
+  });
   const { locationId } = params;
   const formData = await request.formData();
-  const assetId = formData.get("assetId") as string;
-  const isChecked = formData.get("isChecked") === "yes";
-  const asset = await db.asset.findUnique({
-    where: {
-      id: assetId,
-    },
-    include: {
-      location: true,
-      user: true,
-    },
-  });
+  const assetIds = formData.getAll("assetId") as string[];
+  const removedAssetIds = formData.getAll("removedAssetId") as string[];
 
-  const location = await db.location.update({
+  const location = await db.location.findUnique({
     where: {
       id: locationId,
+      organizationId,
     },
-    data: {
-      assets: isChecked
-        ? { connect: { id: assetId } }
-        : { disconnect: { id: assetId } },
+    include: {
+      assets: true,
     },
   });
-
   if (!location) {
-    throw new ShelfStackError({ message: "Something went wrong", status: 500 });
-  }
-
-  if (asset) {
-    await createLocationChangeNote({
-      currentLocation: asset?.location || null,
-      newLocation: location,
-      firstName: asset?.user.firstName || "",
-      lastName: asset?.user.lastName || "",
-      assetName: asset?.title,
-      assetId: asset.id,
-      userId: asset?.user.id,
-      isRemoving: !isChecked,
+    throw new ShelfStackError({
+      message: "Location not found",
+      status: 404,
     });
   }
 
-  return json({ ok: true });
+  /**
+   * We need to query all the modified assets so we know their location before the change
+   * That way we can later create notes for all the location changes
+   */
+  const modifiedAssets = await db.asset.findMany({
+    where: {
+      id: {
+        in: [...assetIds, ...removedAssetIds],
+      },
+      organizationId,
+    },
+    select: {
+      title: true,
+      id: true,
+      location: {
+        select: {
+          name: true,
+          id: true,
+        },
+      },
+      user: {
+        select: {
+          firstName: true,
+          lastName: true,
+          id: true,
+        },
+      },
+    },
+  });
+
+  if (assetIds.length > 0) {
+    /** We update the location with the new assets */
+    await db.location.update({
+      where: {
+        id: locationId,
+        organizationId,
+      },
+      data: {
+        assets: {
+          connect: assetIds.map((id) => ({
+            id,
+          })),
+        },
+      },
+    });
+  }
+
+  /** If some assets were removed, we also need to handle those */
+  if (removedAssetIds.length > 0) {
+    await db.location.update({
+      where: {
+        organizationId,
+        id: locationId,
+      },
+      data: {
+        assets: {
+          disconnect: removedAssetIds.map((id) => ({
+            id,
+          })),
+        },
+      },
+    });
+  }
+
+  /** Creates the relevant notes for all the changed assets */
+  createBulkLocationChangeNotes({
+    modifiedAssets,
+    assetIds,
+    removedAssetIds,
+    userId: authSession.userId,
+    location,
+  });
+
+  return redirect(`/locations/${locationId}`);
 };
 
 export default function AddAssetsToLocation() {
   const { location } = useLoaderData<typeof loader>();
+  const navigation = useNavigation();
+  const isSearching = isFormProcessing(navigation.state);
+
+  const locationAssetsIds = useMemo(
+    () => location.assets.map((a) => a.id),
+    [location.assets]
+  );
+
+  const [selectedAssets, setSelectedAssets] = useAtom(
+    locationsSelectedAssetsAtom
+  );
+  const removedAssetIds = useMemo(
+    () =>
+      locationAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
+    [locationAssetsIds, selectedAssets]
+  );
+
+  /**
+   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per location
+   * So we do a manual effect to set the selected assets to the location assets ids
+   */
+  useEffect(() => {
+    setSelectedAssets(locationAssetsIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.id]);
 
   return (
-    <div className="rounded">
+    <div className="flex max-h-full flex-col">
       <header className="mb-5">
         <h2>Move assets to ‘{location?.name}’ location</h2>
         <p>
@@ -133,21 +235,67 @@ export default function AddAssetsToLocation() {
           location.
         </p>
       </header>
-      <Filters className="mb-2" />
 
-      <List
-        ItemComponent={RowComponent}
-        className="mb-8"
-        customEmptyStateContent={{
-          title: "You haven't added any assets yet.",
-          text: "What are you waiting for? Create your first asset now!",
-          newButtonRoute: "/assets/new",
-          newButtonContent: "New asset",
-        }}
-      />
-      <Button variant="secondary" width="full" to={".."}>
-        Done
-      </Button>
+      <div>
+        <Filters className="mb-2" />
+      </div>
+      <div className="mt-4 flex-1 overflow-y-auto pb-4">
+        <List
+          ItemComponent={RowComponent}
+          /** Clicking on the row will add the current asset to the atom of selected assets */
+          navigate={(assetId) => {
+            setSelectedAssets((selectedAssets) =>
+              selectedAssets.includes(assetId)
+                ? selectedAssets.filter((id) => id !== assetId)
+                : [...selectedAssets, assetId]
+            );
+          }}
+          customEmptyStateContent={{
+            title: "You haven't added any assets yet.",
+            text: "What are you waiting for? Create your first asset now!",
+            newButtonRoute: "/assets/new",
+            newButtonContent: "New asset",
+          }}
+        />
+      </div>
+      {/* Footer of the modal */}
+      <footer className="flex justify-between border-t pt-3">
+        <div>{selectedAssets.length} assets selected</div>
+        <div className="flex gap-3">
+          <Button variant="secondary" to={".."}>
+            Close
+          </Button>
+          <Form method="post">
+            {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
+            {/* These are the asset ids, coming from the server */}
+            {removedAssetIds.map((assetId) => (
+              <input
+                key={assetId}
+                type="hidden"
+                name="removedAssetId"
+                value={assetId}
+              />
+            ))}
+            {/* These are the ids selected by the user and stored in the atom */}
+            {selectedAssets.map((assetId) => (
+              <input
+                key={assetId}
+                type="hidden"
+                name="assetId"
+                value={assetId}
+              />
+            ))}
+            <Button
+              type="submit"
+              name="intent"
+              value="addAssets"
+              disabled={isSearching}
+            >
+              Confirm
+            </Button>
+          </Form>
+        </div>
+      </footer>
     </div>
   );
 }
@@ -159,7 +307,8 @@ type AssetWithLocation = Asset & {
 };
 
 const RowComponent = ({ item }: { item: AssetWithLocation }) => {
-  const { locationId } = useParams();
+  const selectedAssets = useAtomValue(locationsSelectedAssetsAtom);
+  const checked = selectedAssets.some((id) => id === item.id);
 
   return (
     <>
@@ -194,10 +343,7 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
       </Td>
 
       <Td>
-        <AddAssetForm
-          assetId={item.id}
-          isChecked={item.locationId === locationId || false}
-        />
+        <FakeCheckbox checked={checked} />
       </Td>
     </>
   );

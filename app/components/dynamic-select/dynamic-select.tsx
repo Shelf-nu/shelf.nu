@@ -122,7 +122,7 @@ export default function DynamicSelect({
               <SelectItem
                 value={item.id}
                 key={item.id}
-                className="cursor-pointer select-none px-6 py-4 outline-none focus:bg-gray-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100"
+                className="cursor-pointer select-none px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
               >
                 {typeof renderItem === "function" ? (
                   renderItem({ ...item, metadata: item })

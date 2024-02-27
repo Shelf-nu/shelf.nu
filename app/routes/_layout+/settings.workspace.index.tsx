@@ -14,7 +14,6 @@ import { Table, Td, Th } from "~/components/table";
 import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
 import { db } from "~/database";
 import { useUserData } from "~/hooks";
-import { requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -22,9 +21,14 @@ import { ShelfStackError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  // permissions here?
+  // Every user can see this view for themseleves, so we dont have to manage any permissions here
+  const { organizationId } = await requireOrganisationId({
+    userId: authSession.userId,
+    request,
+  });
   const { userId } = authSession;
 
   const user = await db.user.findUnique({
@@ -69,7 +73,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     singular: "Workspace",
     plural: "Workspaces",
   };
-  const organizations = user.userOrganizations.map((r) => r.organization);
+
+  /** Get the organization that are owner by the current uer */
+  const organizations = user.userOrganizations
+    .map((r) => r.organization)
+    .filter((o) => o.owner.id === userId);
 
   return json({
     userId,
@@ -154,7 +162,8 @@ export default function WorkspacePage() {
                           : org.name,
                       image:
                         org.type === "PERSONAL"
-                          ? user?.profilePicture || "/images/default_pfp.jpg"
+                          ? user?.profilePicture ||
+                            "/static/images/default_pfp.jpg"
                           : org?.imageId || undefined,
                       _count: org._count,
                       type: org.type,
@@ -201,7 +210,7 @@ const OrganizationRow = ({
             <div className="flex size-12 items-center justify-center">
               {isPersonalOrg(item) ? (
                 <img
-                  src={item?.image || "/images/default_pfp.jpg"}
+                  src={item?.image || "/static/images/default_pfp.jpg"}
                   alt={`${item.name}`}
                   className="size-12 rounded-[4px] object-cover"
                 />

@@ -396,23 +396,25 @@ export function SearchIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export const XIcon = (props: SVGProps<SVGSVGElement>) => (
-  <svg
-    width={10}
-    height={10}
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    {...props}
-  >
-    <path
-      d="M9 1 1 9m0-8 8 8"
-      stroke="currentColor"
-      strokeWidth={1.333}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+export function XIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={10}
+      height={10}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M9 1 1 9m0-8 8 8"
+        stroke="currentColor"
+        strokeWidth={1.333}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 export const AssetsIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg

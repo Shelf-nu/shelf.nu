@@ -11,19 +11,9 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 
-import { getAuthSession, sendResetPasswordLink } from "~/modules/auth";
+import { sendResetPasswordLink } from "~/modules/auth";
 import { assertIsPost, isFormProcessing, tw, validEmail } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await getAuthSession(request);
-  const title = "Forgot password?";
-  const subHeading = "No worries, we’ll send you reset instructions.";
-
-  if (authSession) return redirect("/");
-
-  return json({ title, subHeading });
-}
 
 const ForgotPasswordSchema = z.object({
   email: z
@@ -33,6 +23,13 @@ const ForgotPasswordSchema = z.object({
       message: "Please enter a valid email",
     })),
 });
+export async function loader({ context }: LoaderFunctionArgs) {
+  const title = "Forgot password?";
+  const subHeading = "No worries, we’ll send you reset instructions.";
+  if (context.isAuthenticated) return redirect("/assets");
+
+  return json({ title, subHeading });
+}
 
 export async function action({ request }: ActionFunctionArgs) {
   assertIsPost(request);

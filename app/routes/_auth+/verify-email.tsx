@@ -4,18 +4,19 @@ import { json, redirect } from "@remix-run/node";
 import { Link, useSearchParams } from "@remix-run/react";
 import { GreenCheckMarkIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared";
-import { getAuthSession } from "~/modules/auth/session.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await getAuthSession(request);
-
+export async function loader({ context }: LoaderFunctionArgs) {
   const title = "Check your email";
-  const subHeading = " ";
+  const subHeading = "";
+  if (context.isAuthenticated) return redirect("/assets");
 
-  if (authSession) return redirect("/");
   return json({ title, subHeading });
 }
+
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: data ? appendToMetaTitle(data.title) : "" },
+];
 
 export default function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
@@ -89,7 +90,3 @@ export default function VerifyEmailPage() {
     </div>
   );
 }
-
-export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: data ? appendToMetaTitle(data.title) : "" },
-];

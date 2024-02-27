@@ -296,6 +296,7 @@ export const AssetForm = ({
             label={zo.fields.description()}
             name={zo.fields.description()}
             defaultValue={description || ""}
+            hideLabel
             placeholder="Add a description for your asset."
             disabled={disabled}
             data-test-id="assetDescription"

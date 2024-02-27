@@ -6,3 +6,4 @@ export * from "./use-focus-search";
 export * from "./use-position";
 export * from "./use-client-notification";
 export * from "./use-model-filters";
+export * from "./use-pagination";

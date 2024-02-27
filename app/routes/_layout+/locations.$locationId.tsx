@@ -24,11 +24,9 @@ import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
-import { commitAuthSession } from "~/modules/auth";
 import { deleteLocation, getLocation } from "~/modules/location";
 import assetCss from "~/styles/asset.css";
 import {
-  generatePageMeta,
   geolocate,
   getCurrentSearchParams,
   getParamsValues,
@@ -42,12 +40,18 @@ import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { organizationId } = await requirePermision(
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.read,
+  });
   const id = getRequiredParam(params, "locationId");
 
   const searchParams = getCurrentSearchParams(request);
@@ -69,7 +73,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   const totalItems = totalAssetsWithinLocation;
   const totalPages = totalAssetsWithinLocation / perPage;
-  const { prev, next } = generatePageMeta(request);
 
   const header: HeaderData = {
     title: location.name,
@@ -92,8 +95,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       totalItems,
       perPage,
       totalPages,
-      next,
-      prev,
       mapData,
     },
     {
@@ -117,12 +118,14 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
 ];
 
-export async function action({ request, params }: ActionFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.delete,
+  });
   const id = getRequiredParam(params, "locationId");
 
   await deleteLocation({ id });
@@ -134,11 +137,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/locations`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect(`/locations`);
 }
 
 export default function LocationPage() {
@@ -158,7 +157,7 @@ export default function LocationPage() {
             imageId={location?.imageId}
             alt={`${location.name}`}
             className={tw(
-              "block h-auto w-full rounded-lg border object-cover 2xl:h-auto",
+              "block h-auto w-full rounded border object-cover 2xl:h-auto",
               location.description ? "rounded-b-none border-b-0" : ""
             )}
             updatedAt={location.image?.updatedAt}
@@ -173,7 +172,7 @@ export default function LocationPage() {
 
           {location.address ? (
             <>
-              <div className="mt-4 flex items-center justify-between gap-10 rounded-lg border border-gray-200 px-4 py-5">
+              <div className="mt-4 flex items-center justify-between gap-10 rounded border border-gray-200 px-4 py-5">
                 <span className=" text-xs font-medium text-gray-600">
                   Address
                 </span>

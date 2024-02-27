@@ -2,7 +2,7 @@ export function EmptyState({ text }: { text: string }) {
   return (
     <div className="flex size-full min-h-[200px] flex-col items-center justify-center">
       <img
-        src="/images/empty-state.svg"
+        src="/static/images/empty-state.svg"
         alt="Empty state"
         className="h-auto w-[45px]"
       />

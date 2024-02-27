@@ -2,7 +2,6 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 
 export type AllowedModelNames = "asset" | "tag" | "category" | "location";
 
@@ -20,8 +19,9 @@ const ModelFiltersSchema = z.object({
   selectedValues: z.string().optional(),
 });
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
   /** Getting all the query parameters from url */
   const url = new URL(request.url);

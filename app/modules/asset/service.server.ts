@@ -17,7 +17,6 @@ import { db } from "~/database";
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import {
   dateTimeInUnix,
-  generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
   oneDayFromNow,
@@ -341,8 +340,10 @@ export async function getAssets({
 
   /** If the search string exists, add it to the where object */
   if (search) {
-    const words = search.trim().replace(/ +/g, " "); //replace multiple spaces into 1
-    where.title = words;
+    where.title = {
+      contains: search.toLowerCase().trim(),
+      mode: "insensitive",
+    };
   }
 
   if (categoriesIds && categoriesIds.length > 0) {
@@ -364,7 +365,6 @@ export async function getAssets({
     }
   }
   const unavailableBookingStatuses = [
-    BookingStatus.DRAFT,
     BookingStatus.RESERVED,
     BookingStatus.ONGOING,
   ];
@@ -1078,7 +1078,6 @@ export const getPaginatedAndFilterableAssets = async ({
     unhideAssetsBookigIds,
   } = getParamsValues(searchParams);
 
-  const { prev, next } = generatePageMeta(request);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -1133,8 +1132,6 @@ export const getPaginatedAndFilterableAssets = async ({
     perPage,
     search,
     totalAssets,
-    prev,
-    next,
     totalCategories,
     totalTags,
     categories: excludeCategoriesQuery
@@ -1157,7 +1154,7 @@ export const createLocationChangeNote = async ({
   userId,
   isRemoving,
 }: {
-  currentLocation: Location | null;
+  currentLocation: Pick<Location, "id" | "name"> | null;
   newLocation: Location | null;
   firstName: string;
   lastName: string;
@@ -1166,24 +1163,21 @@ export const createLocationChangeNote = async ({
   userId: User["id"];
   isRemoving: boolean;
 }) => {
-  /**
-   * WE have a few cases to handle:
-   * 1. Setting the first location
-   * 2. Updating the location
-   * 3. Removing the location
-   */
-
   let message = "";
   if (currentLocation && newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **${currentLocation.name.trim()}** to **${newLocation.name.trim()}**`; // updating location
+    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **[${currentLocation.name.trim()}](/locations/${
+      currentLocation.id
+    })** to **[${newLocation.name.trim()}](/locations/${newLocation.id})**`; // updating location
   }
 
   if (newLocation && !currentLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **${newLocation.name.trim()}**`; // setting to first location
+    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **[${newLocation.name.trim()}](/locations/${
+      newLocation.id
+    })**`; // setting to first location
   }
 
   if (isRemoving || !newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **${currentLocation?.name.trim()}**`; // removing location
+    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **[${currentLocation?.name.trim()}](/locations/${currentLocation?.id})**`; // removing location
   }
   await createNote({
     content: message,
@@ -1191,6 +1185,78 @@ export const createLocationChangeNote = async ({
     userId,
     assetId,
   });
+};
+
+export const createBulkLocationChangeNotes = async ({
+  modifiedAssets,
+  assetIds,
+  removedAssetIds,
+  userId,
+  location,
+}: {
+  modifiedAssets: Prisma.AssetGetPayload<{
+    select: {
+      title: true;
+      id: true;
+      location: {
+        select: {
+          name: true;
+          id: true;
+        };
+      };
+      user: {
+        select: {
+          firstName: true;
+          lastName: true;
+          id: true;
+        };
+      };
+    };
+  }>[];
+  assetIds: Asset["id"][];
+  removedAssetIds: Asset["id"][];
+  userId: User["id"];
+  location: Location;
+}) => {
+  const user = await db.user.findFirst({
+    where: {
+      id: userId,
+    },
+    select: {
+      firstName: true,
+      lastName: true,
+    },
+  });
+
+  if (!user) {
+    throw new ShelfStackError({
+      message: "User not found",
+      status: 404,
+    });
+  }
+
+  // Iterate over the modified assets
+  for (const asset of modifiedAssets) {
+    const isRemoving = removedAssetIds.includes(asset.id);
+    const isNew = assetIds.includes(asset.id);
+    const newLocation = isRemoving ? null : location;
+    const currentLocation = asset.location
+      ? { name: asset.location.name, id: asset.location.id }
+      : null;
+
+    if (isNew || isRemoving) {
+      await createLocationChangeNote({
+        currentLocation,
+        newLocation,
+        firstName: user?.firstName || "",
+        lastName: user?.lastName || "",
+        assetName: asset.title,
+        assetId: asset.id,
+        userId,
+        isRemoving,
+      });
+    }
+  }
 };
 
 /** Fetches assets with the data needed for exporting to CSV */

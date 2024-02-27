@@ -84,7 +84,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
           ref={ref}
           {...rest}
         />
-        <div className=" rounded-b-lg border border-t-0 border-gray-300 bg-gray-50 px-2 py-1 text-text-xs">
+        <div className=" rounded-b border border-t-0 border-gray-300 bg-gray-50 px-2 py-1 text-text-xs">
           {" "}
           This field supports{" "}
           <Link
@@ -100,7 +100,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
       <TabsContent value="preview">
         <MarkdownViewer
           content={content as string}
-          className="min-h-[210px] rounded-lg border px-[14px] py-2"
+          className="min-h-[210px] rounded border px-[14px] py-2"
         />
       </TabsContent>
     </Tabs>
