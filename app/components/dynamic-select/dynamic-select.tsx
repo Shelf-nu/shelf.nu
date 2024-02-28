@@ -70,7 +70,7 @@ export default function DynamicSelect({
         </SelectTrigger>
 
         <SelectContent
-          align="end"
+          position="popper"
           className={tw(
             "max-h-[400px] w-[290px] overflow-y-auto p-0 md:w-[350px]",
             className
