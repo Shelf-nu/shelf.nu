@@ -118,6 +118,7 @@ export async function getAssetsFromView({
   search,
   categoriesIds,
   tagsIds,
+  status,
   bookingFrom,
   bookingTo,
   hideUnavailable,
@@ -135,6 +136,7 @@ export async function getAssetsFromView({
 
   categoriesIds?: Category["id"][] | null;
   tagsIds?: Tag["id"][] | null;
+  status?: Asset["status"] | null;
   hideUnavailable?: Asset["availableToBook"];
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
@@ -158,6 +160,10 @@ export async function getAssetsFromView({
     where.searchVector = {
       search: words,
     };
+  }
+
+  if (status && where.asset) {
+    where.asset.status = status;
   }
 
   if (categoriesIds && categoriesIds.length > 0 && where.asset) {
@@ -309,6 +315,7 @@ export async function getAssets({
   search,
   categoriesIds,
   tagsIds,
+  status,
   bookingFrom,
   bookingTo,
   hideUnavailable,
@@ -326,6 +333,7 @@ export async function getAssets({
 
   categoriesIds?: Category["id"][] | null;
   tagsIds?: Tag["id"][] | null;
+  status?: Asset["status"] | null;
   hideUnavailable?: Asset["availableToBook"];
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
@@ -343,6 +351,10 @@ export async function getAssets({
       contains: search.toLowerCase().trim(),
       mode: "insensitive",
     };
+  }
+
+  if (status) {
+    where.status = status;
   }
 
   if (categoriesIds && categoriesIds.length > 0) {
@@ -1050,6 +1062,10 @@ export const getPaginatedAndFilterableAssets = async ({
     hideUnavailable,
     unhideAssetsBookigIds,
   } = getParamsValues(searchParams);
+  const status =
+    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
+      ? null
+      : (searchParams.get("status") as AssetStatus | null);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -1066,6 +1082,7 @@ export const getPaginatedAndFilterableAssets = async ({
     search,
     categoriesIds,
     tagsIds,
+    status,
     bookingFrom,
     bookingTo,
     hideUnavailable,

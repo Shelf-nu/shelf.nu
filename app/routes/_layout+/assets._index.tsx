@@ -4,8 +4,13 @@ import {
   type Tag,
   type Custody,
   OrganizationRoles,
+  AssetStatus,
 } from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import type {
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
@@ -14,6 +19,7 @@ import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
+import { StatusFilter } from "~/components/booking/status-filter";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -39,6 +45,7 @@ import {
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset";
 import { getOrganizationTierLimit } from "~/modules/tier";
+import assetCss from "~/styles/assets.css";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
@@ -74,6 +81,9 @@ export interface IndexResponse {
     plural: string;
   };
 }
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: assetCss },
+];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -266,6 +276,7 @@ export default function AssetIndexPage() {
             ) : null}
             <CategoryFilters />
             <TagFilters />
+            <StatusFilter statusItems={AssetStatus} />
           </div>
         </Filters>
         <List
