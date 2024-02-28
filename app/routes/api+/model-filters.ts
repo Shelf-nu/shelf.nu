@@ -8,7 +8,7 @@ export type AllowedModelNames = "asset" | "tag" | "category" | "location";
 
 const ModelFiltersSchema = z.object({
   /** Models that are allowed to filter */
-  model: z.enum(["asset", "tag", "category"]),
+  model: z.enum(["asset", "tag", "category", "location"]),
 
   /** key of field for which we have to filter values */
   queryKey: z.string(),

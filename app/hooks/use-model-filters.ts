@@ -122,10 +122,13 @@ export function useModelFilters({
   const clearFilters = () => {
     setSelectedItems([]);
     resetModelFiltersFetcher();
-    setSearchParams((prev) => {
-      prev.delete(model.name);
-      return prev;
-    });
+
+    if (selectionMode !== "none") {
+      setSearchParams((prev) => {
+        prev.delete(model.name);
+        return prev;
+      });
+    }
   };
 
   return {
