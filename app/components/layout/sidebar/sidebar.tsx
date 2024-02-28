@@ -3,10 +3,10 @@ import { Link, useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ScanQRIcon, ShelfTypography } from "~/components/icons/library";
-import {
-  useMediaStream,
-  useStopMediaStream,
-} from "~/components/scan-qr/media-stream-provider";
+// import {
+//   useMediaStream,
+//   useStopMediaStream,
+// } from "~/components/scan-qr/media-stream-provider";
 import QRScanner from "~/components/scan-qr/qrcode-scanner";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
@@ -26,11 +26,11 @@ export default function Sidebar() {
 
   const [showScanner, setShowScanner] = useState(false);
 
-  const { stopMediaStream } = useMediaStream();
-  useStopMediaStream(stopMediaStream);
+  // const { stopMediaStream } = useMediaStream();
+  // useStopMediaStream(stopMediaStream);
 
   const handleScannerClose = () => {
-    stopMediaStream();
+    // stopMediaStream();
     setShowScanner(false);
   };
 
