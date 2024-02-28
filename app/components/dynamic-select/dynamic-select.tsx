@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
   PopoverContent,
@@ -73,19 +74,19 @@ export default function DynamicSelect({
 
       <Popover>
         <PopoverTrigger disabled={disabled} asChild>
-          <div className="rounded-md border border-gray-300 px-4 py-2 disabled:opacity-50">
+          <div className="flex items-center justify-between rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50">
             {items.find((i) => i.id === selectedValue)?.name ?? placeholder}
+            <ChevronDownIcon />
           </div>
         </PopoverTrigger>
 
         <PopoverContent
           className={tw(
-            "z-[100] max-h-[410px] w-[290px] overflow-y-auto rounded-md border border-gray-300 bg-white md:w-80",
+            "z-[100]  overflow-y-auto rounded-md border border-gray-300 bg-white md:w-80",
             className
           )}
           style={style}
           align="start"
-          sideOffset={5}
         >
           <div className="flex items-center justify-between p-3">
             <div className="text-xs text-gray-500">{label}</div>
@@ -99,7 +100,7 @@ export default function DynamicSelect({
                   clearFilters();
                 }}
               >
-                Clear filter
+                Clear selection
               </Button>
             </When>
           </div>
@@ -159,7 +160,7 @@ export default function DynamicSelect({
           </div>
 
           <When truthy={totalItems > 4}>
-            <div className="p-3 text-gray-500">
+            <div className="border-t p-3 text-gray-500">
               Showing {items.length} out of {totalItems}, type to search for
               more
             </div>

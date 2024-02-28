@@ -19,8 +19,8 @@ import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
-import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { StatusFilter } from "~/components/booking/status-filter";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -304,7 +304,6 @@ export default function AssetIndexPage() {
             </div>
 
             <StatusFilter statusItems={AssetStatus} />
-
           </div>
         </Filters>
         <List

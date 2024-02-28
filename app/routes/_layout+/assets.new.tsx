@@ -189,7 +189,9 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
   if (asset.location) {
     await createNote({
-      content: `**${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}** set the location of **${asset.title?.trim()}** to **${asset.location.name?.trim()}**`,
+      content: `**${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}** set the location of **${asset.title?.trim()}** to *[${asset.location.name.trim()}](/locations/${
+        asset.location.id
+      })**`,
       type: "UPDATE",
       userId: authSession.userId,
       assetId: asset.id,
