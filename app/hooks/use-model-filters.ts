@@ -63,11 +63,15 @@ export function useModelFilters({
       } else {
         /** If item is already there in search params then remove it */
         if (selectedItems.includes(value)) {
+          /** Using Optimistic UI approach */
+          setSelectedItems((prev) => prev.filter((item) => item !== value));
+
           setSearchParams((prev) => {
             prev.delete(model.name, value);
             return prev;
           });
         } else {
+          setSelectedItems((prev) => [...prev, value]);
           /** Otherwise, add the item in search params */
           setSearchParams((prev) => {
             if (selectionMode === "append") {
