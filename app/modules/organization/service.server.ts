@@ -2,6 +2,7 @@ import { OrganizationRoles, OrganizationType } from "@prisma/client";
 import type { Organization, User } from "@prisma/client";
 
 import { db } from "~/database";
+import { ShelfStackError } from "~/utils/error";
 import { defaultUserCategories } from "../category/default-categories";
 
 export const getOrganization = async ({ id }: { id: Organization["id"] }) =>
@@ -15,23 +16,31 @@ export const getOrganizationByUserId = async ({
 }: {
   userId: User["id"];
   orgType: OrganizationType;
-}) =>
-  await db.organization.findFirstOrThrow({
-    where: {
-      owner: {
-        is: {
-          id: userId,
+}) => {
+  try {
+    return await db.organization.findFirstOrThrow({
+      where: {
+        owner: {
+          is: {
+            id: userId,
+          },
         },
+        type: orgType,
       },
-      type: orgType,
-    },
-    select: {
-      id: true,
-      name: true,
-      type: true,
-      currency: true,
-    },
-  });
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        currency: true,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfStackError({
+      message: "Organization not found",
+      cause,
+    });
+  }
+};
 
 export type UserOrganization = Awaited<
   ReturnType<typeof getOrganizationByUserId>
