@@ -12,14 +12,14 @@ export default function CustodiansList() {
       <div className="rounded-t border border-b-0 border-gray-200">
         <div className="flex items-center justify-between">
           <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
-            Custodians
+            Top custodians
           </div>
           <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
             <InfoTooltip
               content={
                 <>
                   <h6>Custodians</h6>
-                  <p>Below listed custodians hold the most assets</p>
+                  <p>Below listed custodians currently hold the most assets</p>
                 </>
               }
             />

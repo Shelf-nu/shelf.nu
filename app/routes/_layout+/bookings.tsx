@@ -1,5 +1,4 @@
-import { OrganizationRoles } from "@prisma/client";
-import type { BookingStatus, Prisma } from "@prisma/client";
+import { type Prisma, BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
@@ -167,7 +166,7 @@ export default function BookingsIndexPage() {
       </Header>
       <ListContentWrapper>
         <Filters>
-          <StatusFilter />
+          <StatusFilter statusItems={BookingStatus} />
         </Filters>
         <List
           ItemComponent={ListAssetContent}
