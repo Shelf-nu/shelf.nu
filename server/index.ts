@@ -243,7 +243,6 @@ serve(
           resolve(null);
         });
       });
-      // @ts-expect-error fixed soon
       broadcastDevReady(build);
     }
   }
