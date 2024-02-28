@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useModelFilters } from "~/hooks";
 import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
 import { tw } from "~/utils";
@@ -40,6 +40,10 @@ export default function DynamicSelect({
   renderItem,
   extraContent,
 }: Props) {
+  const [selectedValue, setSelectedValue] = useState<string | undefined>(
+    defaultValue
+  );
+
   const {
     searchQuery,
     handleSearchQueryChange,
@@ -59,9 +63,14 @@ export default function DynamicSelect({
   return (
     <div className="relative w-full">
       <Select
+        key={selectedValue}
         name={fieldName ?? model.name}
-        defaultValue={defaultValue}
-        onValueChange={handleSelectItemChange}
+        defaultValue={selectedValue}
+        value={selectedValue}
+        onValueChange={(value) => {
+          setSelectedValue(value);
+          handleSelectItemChange(value);
+        }}
       >
         <SelectTrigger>
           <SelectValue placeholder={`Select ${model.name}`} />
@@ -82,14 +91,20 @@ export default function DynamicSelect({
                 as="button"
                 variant="link"
                 className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
-                onClick={clearFilters}
+                onClick={() => {
+                  setSelectedValue(undefined);
+                  clearFilters();
+                }}
               >
                 Clear filter
               </Button>
             </When>
           </div>
           <When truthy={showSearch}>
-            <div className="filters-form relative mx-3">
+            <div
+              className="filters-form relative mx-3"
+              onKeyDown={(e) => e.stopPropagation()}
+            >
               <Input
                 type="text"
                 label={`Search ${label}`}
@@ -106,7 +121,11 @@ export default function DynamicSelect({
                   icon="x"
                   variant="tertiary"
                   disabled={Boolean(searchQuery)}
-                  onClick={resetModelFiltersFetcher}
+                  onClick={() => {
+                    setSelectedValue(undefined);
+
+                    resetModelFiltersFetcher();
+                  }}
                   className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                 />
               </When>

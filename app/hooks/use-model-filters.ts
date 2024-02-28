@@ -88,7 +88,9 @@ export function useModelFilters({
     [selectedItems, model.name, setSearchParams, selectionMode]
   );
 
-  const handleSearchQueryChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleSearchQueryChange = (
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
     if (!e.target.value) {
       resetModelFiltersFetcher();
     } else {
