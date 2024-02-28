@@ -61,9 +61,7 @@ export default function DynamicSelect({
       <Select
         name={fieldName ?? model.name}
         defaultValue={defaultValue}
-        onValueChange={(value) => {
-          handleSelectItemChange(value);
-        }}
+        onValueChange={handleSelectItemChange}
       >
         <SelectTrigger>
           <SelectValue placeholder={`Select ${model.name}`} />
@@ -108,9 +106,7 @@ export default function DynamicSelect({
                   icon="x"
                   variant="tertiary"
                   disabled={Boolean(searchQuery)}
-                  onClick={() => {
-                    resetModelFiltersFetcher();
-                  }}
+                  onClick={resetModelFiltersFetcher}
                   className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                 />
               </When>

@@ -1,8 +1,8 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData, useSearchParams } from "@remix-run/react";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
-import { resetFetcher } from "~/utils/fetcher";
+import useFetcherWithReset from "./use-fetcher-with-reset";
 
 export type ModelFilterItem = {
   id: string;
@@ -42,7 +42,8 @@ export function useModelFilters({
   );
 
   const totalItems = initialData[countKey];
-  const fetcher = useFetcher<Array<ModelFilterItem>>();
+
+  const fetcher = useFetcherWithReset<Array<ModelFilterItem>>();
 
   const items = useMemo(() => {
     if (fetcher.data) {
@@ -88,17 +89,21 @@ export function useModelFilters({
   );
 
   const handleSearchQueryChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setSearchQuery(e.currentTarget.value);
-    if (e.currentTarget.value) {
-      fetcher.submit(
-        {
-          model: model.name,
-          queryKey: model.key as string,
-          queryValue: e.currentTarget.value,
-          selectedValues: selectedItems,
-        },
-        { method: "GET", action: "/api/model-filters" }
-      );
+    if (!e.target.value) {
+      resetModelFiltersFetcher();
+    } else {
+      setSearchQuery(e.currentTarget.value);
+      if (e.currentTarget.value) {
+        fetcher.submit(
+          {
+            model: model.name,
+            queryKey: model.key as string,
+            queryValue: e.currentTarget.value,
+            selectedValues: selectedItems,
+          },
+          { method: "GET", action: "/api/model-filters" }
+        );
+      }
     }
   };
 
@@ -111,7 +116,7 @@ export function useModelFilters({
 
   const resetModelFiltersFetcher = () => {
     setSearchQuery("");
-    resetFetcher(fetcher);
+    fetcher.reset();
   };
 
   const clearFilters = () => {
