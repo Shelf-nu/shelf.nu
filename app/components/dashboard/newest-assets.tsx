@@ -21,7 +21,7 @@ export default function NewestAssets() {
             <InfoTooltip
               content={
                 <>
-                  <h6>Newest Assets</h6>
+                  <h6>Newest assets</h6>
                   <p>Below listed assets were created recently</p>
                 </>
               }
