@@ -25,6 +25,7 @@ import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { LocationSelect } from "../location/location-select";
 import { Button } from "../shared";
+import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
 
@@ -105,169 +106,182 @@ export const AssetForm = ({
   }>();
 
   return (
-    <Form
-      ref={zo.ref}
-      method="post"
-      className="flex w-full flex-col gap-2"
-      encType="multipart/form-data"
-    >
-      {qrId ? (
-        <input type="hidden" name={zo.fields.qrId()} value={qrId} />
-      ) : null}
-      <FormRow
-        rowLabel={"Name"}
-        className="border-b-0 pb-[10px]"
-        required={zodFieldIsRequired(FormSchema.shape.title)}
+    <Card className="w-min">
+      <Form
+        ref={zo.ref}
+        method="post"
+        className="flex w-full flex-col gap-2"
+        encType="multipart/form-data"
       >
-        <Input
-          label="Name"
-          hideLabel
-          name={zo.fields.title()}
-          disabled={disabled}
-          error={
-            actionData?.errors?.title?.message || zo.errors.title()?.message
-          }
-          autoFocus
-          onChange={updateDynamicTitle}
-          className="w-full"
-          defaultValue={title || ""}
-          required={zodFieldIsRequired(FormSchema.shape.title)}
-        />
-      </FormRow>
-
-      <FormRow rowLabel={"Main image"} className="pt-[10px]">
-        <div>
-          <p className="hidden lg:block">Accepts PNG, JPG or JPEG (max.4 MB)</p>
-          <Input
-            disabled={disabled}
-            accept="image/png,.png,image/jpeg,.jpg,.jpeg"
-            name="mainImage"
-            type="file"
-            onChange={validateFile}
-            label={"Main image"}
-            hideLabel
-            error={fileError}
-            className="mt-2"
-            inputClassName="border-0 shadow-none p-0 rounded-none"
-          />
-          <p className="mt-2 lg:hidden">Accepts PNG, JPG or JPEG (max.4 MB)</p>
+        <div className=" border-b pb-5">
+          <h2 className="mb-1 text-[18px] font-semibold">Basic fields</h2>
+          <p>Basic information about your asset.</p>
         </div>
-      </FormRow>
-
-      <FormRow
-        rowLabel={"Category"}
-        subHeading={
-          <p>
-            Make it unique. Each asset can have 1 category. It will show on your
-            index.
-          </p>
-        }
-        className="border-b-0 pb-[10px]"
-        required={zodFieldIsRequired(FormSchema.shape.category)}
-      >
-        <CategorySelect defaultValue={category || "uncategorized"} />
-      </FormRow>
-
-      <FormRow
-        rowLabel={"Tags"}
-        subHeading={
-          <p>
-            Tags can help you organise your database. They can be combined.{" "}
-            <Link to="/tags/new" className="text-gray-600 underline">
-              Create tags
-            </Link>
-          </p>
-        }
-        className="border-b-0 py-[10px]"
-        required={zodFieldIsRequired(FormSchema.shape.tags)}
-      >
-        <TagsAutocomplete existingTags={tags || []} />
-      </FormRow>
-
-      <FormRow
-        rowLabel={"Location"}
-        subHeading={
-          <p>
-            A location is a place where an item is supposed to be located. This
-            is different than the last scanned location{" "}
-            <Link to="/locations/new" className="text-gray-600 underline">
-              Create locations
-            </Link>
-          </p>
-        }
-        className="border-b-0 py-[10px]"
-        required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
-      >
-        <LocationSelect />
-      </FormRow>
-
-      <FormRow
-        rowLabel={"Value"}
-        subHeading={
-          <p>
-            Specify the value of assets to get an idea of the total value of
-            your inventory.
-          </p>
-        }
-        className="border-b-0 py-[10px]"
-        required={zodFieldIsRequired(FormSchema.shape.valuation)}
-      >
-        <div className="relative w-full">
-          <Input
-            type="number"
-            label="value"
-            inputClassName="pl-[70px] valuation-input"
-            hideLabel
-            name={zo.fields.valuation()}
-            disabled={disabled}
-            error={zo.errors.valuation()?.message}
-            step="any"
-            min={0}
-            className="w-full"
-            defaultValue={valuation || ""}
-            required={zodFieldIsRequired(FormSchema.shape.valuation)}
-          />
-          <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
-            {currency}
-          </span>
-        </div>
-      </FormRow>
-
-      <div>
+        {qrId ? (
+          <input type="hidden" name={zo.fields.qrId()} value={qrId} />
+        ) : null}
         <FormRow
-          rowLabel={"Description"}
-          subHeading={
-            <p>
-              This is the initial object description. It will be shown on the
-              asset’s overview page. You can always change it. Maximum 1000
-              characters.
-            </p>
-          }
-          className="border-b-0"
-          required={zodFieldIsRequired(FormSchema.shape.description)}
+          rowLabel={"Name"}
+          className="border-b-0 pb-[10px]"
+          required={zodFieldIsRequired(FormSchema.shape.title)}
         >
           <Input
-            inputType="textarea"
-            maxLength={1000}
-            label={zo.fields.description()}
-            name={zo.fields.description()}
-            defaultValue={description || ""}
-            placeholder="Add a description for your asset."
+            label="Name"
+            hideLabel
+            name={zo.fields.title()}
             disabled={disabled}
-            data-test-id="assetDescription"
+            error={
+              actionData?.errors?.title?.message || zo.errors.title()?.message
+            }
+            autoFocus
+            onChange={updateDynamicTitle}
             className="w-full"
-            required={zodFieldIsRequired(FormSchema.shape.description)}
+            defaultValue={title || ""}
+            required={zodFieldIsRequired(FormSchema.shape.title)}
           />
         </FormRow>
-      </div>
 
-      <AssetCustomFields zo={zo} schema={FormSchema} />
+        <FormRow rowLabel={"Main image"} className="pt-[10px]">
+          <div>
+            <p className="hidden lg:block">
+              Accepts PNG, JPG or JPEG (max.4 MB)
+            </p>
+            <Input
+              disabled={disabled}
+              accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+              name="mainImage"
+              type="file"
+              onChange={validateFile}
+              label={"Main image"}
+              hideLabel
+              error={fileError}
+              className="mt-2"
+              inputClassName="border-0 shadow-none p-0 rounded-none"
+            />
+            <p className="mt-2 lg:hidden">
+              Accepts PNG, JPG or JPEG (max.4 MB)
+            </p>
+          </div>
+        </FormRow>
 
-      <div className="pt-6 text-right">
-        <Button type="submit" disabled={disabled}>
-          {disabled ? <Spinner /> : "Save"}
-        </Button>
-      </div>
-    </Form>
+        <FormRow
+          rowLabel={"Category"}
+          subHeading={
+            <p>
+              Make it unique. Each asset can have 1 category. It will show on
+              your index.
+            </p>
+          }
+          className="border-b-0 pb-[10px]"
+          required={zodFieldIsRequired(FormSchema.shape.category)}
+        >
+          <CategorySelect defaultValue={category || "uncategorized"} />
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Tags"}
+          subHeading={
+            <p>
+              Tags can help you organise your database. They can be combined.{" "}
+              <Link to="/tags/new" className="text-gray-600 underline">
+                Create tags
+              </Link>
+            </p>
+          }
+          className="border-b-0 py-[10px]"
+          required={zodFieldIsRequired(FormSchema.shape.tags)}
+        >
+          <TagsAutocomplete existingTags={tags || []} />
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Location"}
+          subHeading={
+            <p>
+              A location is a place where an item is supposed to be located.
+              This is different than the last scanned location{" "}
+              <Link to="/locations/new" className="text-gray-600 underline">
+                Create locations
+              </Link>
+            </p>
+          }
+          className="border-b-0 py-[10px]"
+          required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
+        >
+          <LocationSelect />
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Value"}
+          subHeading={
+            <p>
+              Specify the value of assets to get an idea of the total value of
+              your inventory.
+            </p>
+          }
+          className="border-b-0 py-[10px]"
+          required={zodFieldIsRequired(FormSchema.shape.valuation)}
+        >
+          <div className="relative w-full">
+            <Input
+              type="number"
+              label="value"
+              inputClassName="pl-[70px] valuation-input"
+              hideLabel
+              name={zo.fields.valuation()}
+              disabled={disabled}
+              error={zo.errors.valuation()?.message}
+              step="any"
+              min={0}
+              className="w-full"
+              defaultValue={valuation || ""}
+              required={zodFieldIsRequired(FormSchema.shape.valuation)}
+            />
+            <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
+              {currency}
+            </span>
+          </div>
+        </FormRow>
+
+        <div>
+          <FormRow
+            rowLabel={"Description"}
+            subHeading={
+              <p>
+                This is the initial object description. It will be shown on the
+                asset’s overview page. You can always change it. Maximum 1000
+                characters.
+              </p>
+            }
+            className="border-b-0"
+            required={zodFieldIsRequired(FormSchema.shape.description)}
+          >
+            <Input
+              inputType="textarea"
+              maxLength={1000}
+              label={zo.fields.description()}
+              name={zo.fields.description()}
+              defaultValue={description || ""}
+              hideLabel
+              placeholder="Add a description for your asset."
+              disabled={disabled}
+              data-test-id="assetDescription"
+              className="w-full"
+              required={zodFieldIsRequired(FormSchema.shape.description)}
+            />
+          </FormRow>
+        </div>
+
+        <AssetCustomFields zo={zo} schema={FormSchema} />
+
+        <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
+          <div className="ml-auto">
+            <Button type="submit" disabled={disabled}>
+              {disabled ? <Spinner /> : "Save"}
+            </Button>
+          </div>
+        </FormRow>
+      </Form>
+    </Card>
   );
 };

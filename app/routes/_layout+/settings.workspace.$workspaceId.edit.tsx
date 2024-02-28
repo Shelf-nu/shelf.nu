@@ -13,7 +13,7 @@ import { useLoaderData } from "@remix-run/react";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/workspace.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
@@ -21,7 +21,6 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { commitAuthSession } from "~/modules/auth";
 import { getOrganization, updateOrganization } from "~/modules/organization";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -30,12 +29,15 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { MAX_SIZE } from "./settings.workspace.new";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermision(
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.workspace,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.workspace,
+    action: PermissionAction.update,
+  });
   const id = getRequiredParam(params, "workspaceId");
 
   const organization = await getOrganization({ id });
@@ -61,13 +63,16 @@ export const handle = {
   breadcrumb: () => <span>Edit</span>,
 };
 
-export async function action({ request, params }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   assertIsPost(request);
-  const { authSession } = await requirePermision(
+  const authSession = context.getSession();
+
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.workspace,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.workspace,
+    action: PermissionAction.update,
+  });
 
   const id = getRequiredParam(params, "workspaceId");
   const clonedRequest = request.clone();
@@ -84,9 +89,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -115,15 +117,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect("/settings/workspace", {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect("/settings/workspace");
 }
 
 export default function WorkspaceEditPage() {
-  const name = useAtomValue(titleAtom);
+  const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "Untitled workspace";
   const { organization } = useLoaderData<typeof loader>();
 

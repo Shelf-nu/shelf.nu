@@ -1,8 +1,9 @@
 import type { User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database";
-import { ENABLE_PREMIUM_FEATURES, STRIPE_SECRET_KEY } from "./env";
+import { STRIPE_SECRET_KEY } from "./env";
 
 export type CustomerWithSubscriptions = Stripe.Customer & {
   subscriptions: {
@@ -17,13 +18,13 @@ let _stripe: Stripe;
 function getStripeServerClient() {
   if (
     !_stripe &&
-    ENABLE_PREMIUM_FEATURES &&
+    config.enablePremiumFeatures &&
     STRIPE_SECRET_KEY !== "" &&
     typeof STRIPE_SECRET_KEY === "string"
   ) {
     // Reference : https://github.com/stripe/stripe-node#usage-with-typescript
     _stripe = new Stripe(STRIPE_SECRET_KEY, {
-      apiVersion: "2022-11-15",
+      apiVersion: "2023-10-16",
     });
   }
   return _stripe;
@@ -128,20 +129,22 @@ export const createStripeCustomer = async ({
   email: User["email"];
   userId: User["id"];
 }) => {
-  const { id: customerId } = await stripe.customers.create({
-    email,
-    name,
-    metadata: {
-      userId,
-    },
-  });
+  if (config.enablePremiumFeatures && stripe) {
+    const { id: customerId } = await stripe.customers.create({
+      email,
+      name,
+      metadata: {
+        userId,
+      },
+    });
 
-  await db.user.update({
-    where: { id: userId },
-    data: { customerId },
-  });
+    await db.user.update({
+      where: { id: userId },
+      data: { customerId },
+    });
 
-  return customerId;
+    return customerId;
+  }
 };
 
 /** Fetches customer based on ID */
@@ -202,9 +205,36 @@ export function getCustomerActiveSubscription({
     customer?.subscriptions?.data.find((sub) => sub.status === "active") || null
   );
 }
+export function getCustomerTrialSubscription({
+  customer,
+}: {
+  customer: CustomerWithSubscriptions | null;
+}) {
+  return (
+    customer?.subscriptions?.data.find((sub) => sub.status === "trialing") ||
+    null
+  );
+}
 
 export async function fetchStripeSubscription(id: string) {
   return await stripe.subscriptions.retrieve(id, {
     expand: ["items.data.plan.product"],
   });
+}
+
+export async function getDataFromStripeEvent(event: Stripe.Event) {
+  // Here we need to update the user's tier in the database based on the subscription they created
+  const subscription = event.data.object as Stripe.Subscription;
+
+  /** Get the product */
+  const productId = subscription.items.data[0].plan.product as string;
+  const product = await stripe.products.retrieve(productId);
+  const customerId = subscription.customer as string;
+  const tierId = product?.metadata?.shelf_tier;
+
+  return {
+    subscription,
+    customerId,
+    tierId,
+  };
 }

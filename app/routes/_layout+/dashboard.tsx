@@ -38,13 +38,16 @@ import { parseMarkdownToReact } from "~/utils/md.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+
   try {
-    const { organizationId, currentOrganization } = await requirePermision(
+    const { organizationId, currentOrganization } = await requirePermision({
+      userId: authSession.userId,
       request,
-      PermissionEntity.dashboard,
-      PermissionAction.read
-    );
+      entity: PermissionEntity.dashboard,
+      action: PermissionAction.read,
+    });
 
     /** This should be updated to use select to only get the data we need */
     const assets = await db.asset.findMany({

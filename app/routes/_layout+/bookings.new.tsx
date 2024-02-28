@@ -12,7 +12,6 @@ import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css";
 import { db } from "~/database";
 
-import { commitAuthSession } from "~/modules/auth";
 import { upsertBooking } from "~/modules/booking";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user";
@@ -29,12 +28,15 @@ import { requirePermision } from "~/utils/roles.server";
  * In the .new route we dont even return any html, we just create a draft booking and directly redirect to the .bookingId route.
  * This way all actions are available and its way easier to manage so in a way this works kind of like a resource route.
  */
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId, role } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId, role } = await requirePermision({
+    userId: authSession?.userId,
     request,
-    PermissionEntity.booking,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.booking,
+    action: PermissionAction.create,
+  });
+
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
   const user = await getUserByID(authSession.userId);
 
@@ -93,21 +95,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     {
       headers: [
-        setCookie(await commitAuthSession(request, { authSession })),
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],
     }
   );
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   const formData = await request.formData();
 
-  const { authSession, organizationId } = await requirePermision(
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession?.userId,
     request,
-    PermissionEntity.booking,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.booking,
+    action: PermissionAction.create,
+  });
 
   const result = await NewBookingFormSchema().safeParseAsync(
     parseFormAny(formData)
@@ -121,9 +124,6 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -178,6 +178,7 @@ export const handle = {
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
+
   return (
     <div>
       <header className="mb-5">

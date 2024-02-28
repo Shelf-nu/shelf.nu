@@ -33,7 +33,6 @@ import { Button } from "~/components/shared";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
-import { commitAuthSession } from "~/modules/auth";
 import { updateOrganization } from "~/modules/organization";
 import { isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -52,12 +51,14 @@ const EditWorkspaceFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
 });
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.generalSettings,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.generalSettings,
+    action: PermissionAction.read,
+  });
   const { userId } = authSession;
 
   const user = await db.user.findUnique({
@@ -132,12 +133,15 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const ErrorBoundary = () => <ErrorContent />;
 
-export async function action({ request }: ActionFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.generalSettings,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.generalSettings,
+    action: PermissionAction.update,
+  });
 
   const clonedRequest = request.clone();
   const formData = await clonedRequest.formData();
@@ -153,9 +157,6 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -183,11 +184,7 @@ export async function action({ request }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect("/settings/general", {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect("/settings/general");
 }
 
 export default function GeneralPage() {

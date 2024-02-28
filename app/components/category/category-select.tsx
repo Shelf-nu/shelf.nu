@@ -36,7 +36,7 @@ export const CategorySelect = ({ defaultValue }: { defaultValue?: string }) => {
 
         <div>
           <SelectContent
-            className=" w-[350px]"
+            className="max-h-[300px] w-[350px] overflow-y-auto"
             position="popper"
             align="end"
             sideOffset={4}

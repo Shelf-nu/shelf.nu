@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { json, redirect } from "@remix-run/node";
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useActionData, useFetcher, useSearchParams } from "@remix-run/react";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
@@ -9,28 +9,30 @@ import { z } from "zod";
 import { Button } from "~/components/shared";
 import { Spinner } from "~/components/shared/spinner";
 import { supabaseClient } from "~/integrations/supabase";
-import {
-  refreshAccessToken,
-  commitAuthSession,
-  getAuthSession,
-} from "~/modules/auth";
+import { refreshAccessToken } from "~/modules/auth";
 import { getOrganizationByUserId } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { tryCreateUser, getUserByEmail } from "~/modules/user";
 import { assertIsPost, randomUsernameFromEmail, safeRedirect } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
+import { ShelfStackError } from "~/utils/error";
 
 // imagine a user go back after OAuth login success or type this URL
 // we don't want him to fall in a black hole 👽
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await getAuthSession(request);
-
-  if (authSession) return redirect("/");
+export async function loader({ context }: LoaderFunctionArgs) {
+  if (context.isAuthenticated) {
+    throw new ShelfStackError({
+      status: 400,
+      title: "Already authenticated",
+      message:
+        "You are already authenticated so we cannot perform the magic link validation. Please log-out of your current account and try again",
+    });
+  }
 
   return json({});
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
 
   const formData = await request.formData();
@@ -72,16 +74,13 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: authSession.userId,
       orgType: "PERSONAL",
     });
+    // Set the session
+    context.setSession(authSession);
 
     return redirect(safeRedirectTo, {
       headers: [
         setCookie(
           await setSelectedOrganizationIdCookie(personalOrganization.id)
-        ),
-        setCookie(
-          await commitAuthSession(request, {
-            authSession,
-          })
         ),
       ],
     });
@@ -94,22 +93,19 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!user) {
     return json(
       {
-        message: "create-user-error",
+        message: "We had trouble creating your account. Please try again.",
       },
       { status: 500 }
     );
   }
 
   const personalOrganization = user.organizations[0];
+  // Set the session
+  context.setSession(authSession);
 
   return redirect(safeRedirectTo, {
     headers: [
       setCookie(await setSelectedOrganizationIdCookie(personalOrganization.id)),
-      setCookie(
-        await commitAuthSession(request, {
-          authSession,
-        })
-      ),
     ],
   });
 }
@@ -174,9 +170,13 @@ export default function LoginCallback() {
     return (
       <div className="text-center">
         <h3 className="font-medium">{clientError}.</h3>
-        <Button variant="link" to="/join?resend">
-          Resend confirmation link
-        </Button>
+        <p>
+          You can use the{" "}
+          <Button variant="link" to="/login">
+            Magic link
+          </Button>{" "}
+          functionality to resend your confirmation email.
+        </p>
         <p>If the issue persists please get in touch with the Shelf</p>
         team.{" "}
       </div>

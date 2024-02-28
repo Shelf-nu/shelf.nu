@@ -46,7 +46,9 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: styles },
   { rel: "stylesheet", href: fontsStylesheetUrl },
   { rel: "stylesheet", href: globalStylesheetUrl },
-  { rel: "manifest", href: "/manifest.json" },
+  { rel: "manifest", href: "/static/manifest.json" },
+  { rel: "apple-touch-icon", href: "/static/favicon.ico" },
+  { rel: "icon", href: "/static/favicon.ico" },
   ...splashScreenLinks,
 ];
 

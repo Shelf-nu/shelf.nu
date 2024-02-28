@@ -24,18 +24,24 @@ import { ShelfStackError, makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
   try {
-    await requirePermision(
+    const { userId } = authSession;
+    await requirePermision({
+      userId,
       request,
-      PermissionEntity.asset,
-      PermissionAction.create
-    );
+      entity: PermissionEntity.asset,
+      action: PermissionAction.create,
+    });
 
     const assetId = params.assetId as string;
     const asset = await db.asset.findUnique({ where: { id: assetId } });
     if (!asset) {
-      // @TODO Solve error handling
       throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
     }
 
@@ -61,15 +67,20 @@ const DuplicateAssetSchema = z.object({
     }),
 });
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
   try {
-    const { authSession, organizationId } = await requirePermision(
-      request,
-      PermissionEntity.asset,
-      PermissionAction.create
-    );
-
     const { userId } = authSession;
+    const { organizationId } = await requirePermision({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.create,
+    });
 
     const assetId = params.assetId as string;
     const asset = await db.asset.findUnique({

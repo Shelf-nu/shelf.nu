@@ -1,13 +1,11 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
-import { getAuthSession } from "~/modules/auth";
 import { ShelfStackError } from "~/utils/error";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const session = await getAuthSession(request);
+export async function loader({ context, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
 
-  if (!session)
-    // @TODO Solve error handling
+  if (!authSession)
     throw new ShelfStackError({
       message: "Unauthorized. You are not allowed to view this resource",
       status: 403,
@@ -20,7 +18,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
 
   const userOrganizations = await db.userOrganization.findMany({
-    where: { userId: session.userId },
+    where: { userId: authSession.userId },
     select: {
       organization: {
         select: { id: true },

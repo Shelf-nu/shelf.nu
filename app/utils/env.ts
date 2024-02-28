@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { ShelfStackError } from "./error";
 import { isBrowser } from "./is-browser";
 
@@ -64,6 +65,25 @@ function getEnv(
   }
 
   return value;
+}
+
+export const EnvSchema = z.object({
+  SESSION_SECRET: z.string().min(1),
+  NODE_ENV: z.enum(["development", "production", "test"]),
+});
+
+type Env = z.infer<typeof EnvSchema>;
+
+const PublicEnvSchema = EnvSchema.pick({
+  NODE_ENV: true,
+});
+
+export const env = (
+  isBrowser ? PublicEnvSchema.parse(window.env) : EnvSchema.parse(process.env)
+) as Env;
+
+export function initEnv() {
+  return env;
 }
 
 /**

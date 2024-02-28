@@ -1,8 +1,6 @@
 import {
   Button,
   Html,
-  Text,
-  Link,
   Head,
   render,
   Container,
@@ -11,6 +9,7 @@ import {
 import type { ClientHint } from "~/modules/booking/types";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
+import { AdminFooter, UserFooter } from "./components/footers";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
 import type { BookingForEmail } from "./types";
@@ -21,6 +20,7 @@ interface Props {
   assetCount: number;
   hints: ClientHint;
   hideViewButton?: boolean;
+  isAdminEmail?: boolean;
 }
 
 export function BookingUpdatesEmailTemplate({
@@ -29,6 +29,7 @@ export function BookingUpdatesEmailTemplate({
   hints,
   assetCount,
   hideViewButton = false,
+  isAdminEmail = false,
 }: Props) {
   const fromDate = getDateTimeFormatFromHints(hints, {
     dateStyle: "short",
@@ -95,34 +96,11 @@ export function BookingUpdatesEmailTemplate({
           </Button>
         )}
 
-        <Text style={{ fontSize: "14px", color: "#344054" }}>
-          This email was sent to{" "}
-          <Link
-            style={{ color: "#EF6820" }}
-            href={`mailto:${booking.custodianUser!.email}`}
-          >
-            {booking.custodianUser!.email}
-          </Link>{" "}
-          because it is part of the workspace{" "}
-          <span style={{ color: "#101828", fontWeight: "600" }}>
-            "{booking.organization.name}"
-          </span>
-          . <br /> If you think you weren’t supposed to have received this email
-          please{" "}
-          <Link
-            style={{ color: "#344054", textDecoration: "underline" }}
-            href={`mailto:${booking.organization.owner.email}`}
-          >
-            contact the owner
-          </Link>{" "}
-          of the workspace.
-        </Text>
-        <Text
-          style={{ marginBottom: "32px", fontSize: "14px", color: "#344054" }}
-        >
-          {" "}
-          © 2024 Shelf.nu
-        </Text>
+        {isAdminEmail ? (
+          <AdminFooter booking={booking} />
+        ) : (
+          <UserFooter booking={booking} />
+        )}
       </Container>
     </Html>
   );
@@ -138,6 +116,7 @@ export const bookingUpdatesTemplateString = ({
   assetCount,
   hints,
   hideViewButton = false,
+  isAdminEmail = false,
 }: Props) =>
   render(
     <BookingUpdatesEmailTemplate
@@ -146,5 +125,6 @@ export const bookingUpdatesTemplateString = ({
       assetCount={assetCount}
       hints={hints}
       hideViewButton={hideViewButton}
+      isAdminEmail={isAdminEmail}
     />
   );

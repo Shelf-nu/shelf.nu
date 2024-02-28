@@ -8,6 +8,7 @@ import {
   Form,
   useActionData,
   useLoaderData,
+  useNavigation,
   useSearchParams,
 } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
@@ -15,14 +16,17 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
+import { config } from "~/config/shelf.config";
+import { onboardingEmailText } from "~/emails/onboarding-email";
 import { getAuthUserByAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user";
 import type { UpdateUserPayload } from "~/modules/user/types";
-import { assertIsPost } from "~/utils";
+import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { sendEmail } from "~/utils/mail.server";
+import { createStripeCustomer } from "~/utils/stripe.server";
 
 function createOnboardingSchema(userSignedUpWithPassword: boolean) {
   return z
@@ -53,8 +57,8 @@ function createOnboardingSchema(userSignedUpWithPassword: boolean) {
     );
 }
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
+export async function loader({ context }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const user = await getUserByID(authSession?.userId);
 
   /** If the user is already onboarded, we assume they finished the process so we send them to the index */
@@ -85,10 +89,10 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
 
-  const authSession = await requireAuthSession(request);
+  const authSession = context.getSession();
   const formData = await request.formData();
 
   const userSignedUpWithPassword =
@@ -116,23 +120,40 @@ export async function action({ request }: ActionFunctionArgs) {
   };
 
   /** Update the user */
-  const updatedUser = await updateUser(updateUserPayload);
+  const { user, errors } = await updateUser(updateUserPayload);
 
-  if (updatedUser.errors) {
-    return json({ errors: updatedUser.errors }, { status: 400 });
+  if (!user && errors) {
+    return json({ errors }, { status: 400 });
+  }
+
+  if (user) {
+    /** We create the stripe customer when the user gets onboarded.
+     * This is to make sure that we have a stripe customer for the user.
+     * We have to do it at this point, as its the first time we have the user's first and last name
+     */
+    if (!user.customerId) {
+      await createStripeCustomer({
+        email: user.email,
+        name: `${user.firstName} ${user.lastName}`,
+        userId: user.id,
+      });
+    }
+
+    if (config.sendOnboardingEmail) {
+      /** Send onboarding email */
+      await sendEmail({
+        from: `"Carlos from shelf.nu" <carlos@shelf.nu>`,
+        to: user.email,
+        subject: "🏷️ Welcome to Shelf.nu",
+        text: onboardingEmailText({ firstName: user.firstName as string }),
+      });
+    }
   }
 
   const organizationIdFromForm =
     (formData.get("organizationId") as string) || null;
 
-  const headers = [
-    setCookie(
-      await commitAuthSession(request, {
-        authSession,
-        flashErrorMessage: null,
-      })
-    ),
-  ];
+  const headers = [];
 
   if (organizationIdFromForm) {
     headers.push(
@@ -159,6 +180,8 @@ export default function Onboarding() {
 
   const zo = useZorm("NewQuestionWizardScreen", OnboardingFormSchema);
   const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
 
   return (
     <div className="p-6 sm:p-8">
@@ -235,7 +258,12 @@ export default function Onboarding() {
           </>
         )}
         <div>
-          <Button data-test-id="onboard" type="submit" width="full">
+          <Button
+            data-test-id="onboard"
+            type="submit"
+            width="full"
+            disabled={disabled}
+          >
             Submit
           </Button>
         </div>

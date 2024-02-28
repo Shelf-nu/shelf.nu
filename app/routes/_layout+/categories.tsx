@@ -16,29 +16,26 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
 import { deleteCategory, getCategories } from "~/modules/category";
-import {
-  generatePageMeta,
-  getCurrentSearchParams,
-  getParamsValues,
-} from "~/utils";
+import { getCurrentSearchParams, getParamsValues } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.category,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.category,
+    action: PermissionAction.read,
+  });
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-  const { prev, next } = generatePageMeta(request);
 
   const { categories, totalCategories } = await getCategories({
     organizationId,
@@ -65,8 +62,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalItems: totalCategories,
       totalPages,
       perPage,
-      prev,
-      next,
       modelName,
     },
     {
@@ -81,13 +76,16 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request }: ActionFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.category,
-    PermissionAction.delete
-  );
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
+
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
+    request,
+    entity: PermissionEntity.category,
+    action: PermissionAction.delete,
+  });
 
   const formData = await request.formData();
   const id = formData.get("id") as string;

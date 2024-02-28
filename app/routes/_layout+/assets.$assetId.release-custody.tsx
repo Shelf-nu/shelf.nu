@@ -14,12 +14,19 @@ import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requirePermision(
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  await requirePermision({
+    userId,
     request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
   const custody = await db.custody.findUnique({
     where: { assetId: params.assetId as string },
     select: {
@@ -46,14 +53,19 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   });
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const {
-    authSession: { userId },
-  } = await requirePermision(
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  await requirePermision({
+    userId,
     request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
   const assetId = params.assetId as string;
   const user = await getUserByID(userId);
 

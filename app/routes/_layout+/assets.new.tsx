@@ -14,14 +14,12 @@ import {
   getAllRelatedEntries,
   updateAssetMainImage,
 } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
 import { getOrganization } from "~/modules/organization";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, error, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
@@ -32,18 +30,21 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 const title = "New Asset";
-
 const header = {
   title,
 };
-export async function loader({ request }: LoaderFunctionArgs) {
+
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   try {
-    const { authSession, organizationId } = await requirePermision(
-      request,
-      PermissionEntity.asset,
-      PermissionAction.create
-    );
     const { userId } = authSession;
+
+    const { organizationId } = await requirePermision({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.create,
+    });
     const organization = await getOrganization({ id: organizationId });
     /**
      * We need to check if the QR code passed in the URL belongs to the current org
@@ -82,12 +83,15 @@ export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export async function action({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+export async function action({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
     request,
-    PermissionEntity.asset,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.asset,
+    action: PermissionAction.create,
+  });
   assertIsPost(request);
 
   /** Here we need to clone the request as we need 2 different streams:
@@ -124,7 +128,6 @@ export async function action({ request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -162,7 +165,6 @@ export async function action({ request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -191,9 +193,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     });
   }
 
-  return redirect(`/assets`, {
-    headers: [setCookie(await commitAuthSession(request, { authSession }))],
-  });
+  return redirect(`/assets`);
 }
 
 export default function NewAssetPage() {

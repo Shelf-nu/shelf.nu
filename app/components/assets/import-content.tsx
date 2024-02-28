@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../shared/modal";
+import { WarningBox } from "../shared/warning-box";
 
 export const ImportBackup = () => (
   <>
@@ -44,6 +45,13 @@ export const ImportContent = () => (
       >
         download our CSV template.
       </Button>{" "}
+      <WarningBox className="my-4">
+        <>
+          <strong>IMPORTANT</strong>: Do not use data exported from asset backup
+          to import assets. You must use the template provided above or you will
+          get corrupted data.
+        </>
+      </WarningBox>
       Some important details about how this works:
     </p>
     <br />
@@ -98,7 +106,6 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const fetcher = useFetcher<typeof action>();
 
   const { data, state } = fetcher;
-  // const isSuccessFull = state === "idle" && data != null && !data?.error;
   const disabled = isFormProcessing(state) || agreed !== "I AGREE";
   const isSuccessful = data?.success;
 
@@ -165,7 +172,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
               </>
             ) : null}
           </AlertDialogHeader>
-          {fetcher.data?.error ? (
+          {fetcher.data?.error?.message && !isSuccessful ? (
             <div>
               <b className="text-red-500">{fetcher.data?.error?.message}</b>
               <p>

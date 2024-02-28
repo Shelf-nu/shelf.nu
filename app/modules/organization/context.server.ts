@@ -15,7 +15,6 @@ import {
 import { ShelfStackError, makeShelfError } from "~/utils/error";
 
 import { getUserOrganizations } from "./service.server";
-import type { AuthSession } from "../auth/types";
 
 const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
   httpOnly: true,
@@ -45,10 +44,13 @@ export function destroySelectedOrganizationIdCookie() {
   return destroyCookie(selectedOrganizationIdCookie);
 }
 
-export async function requireOrganisationId(
-  { userId }: AuthSession,
-  request: Request
-) {
+export async function requireOrganisationId({
+  userId,
+  request,
+}: {
+  userId: string;
+  request: Request;
+}) {
   try {
     const organizationId = await getSelectedOrganizationIdCookie(request);
 

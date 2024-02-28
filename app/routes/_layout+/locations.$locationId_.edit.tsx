@@ -16,23 +16,24 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
-import { commitAuthSession } from "~/modules/auth";
 import { getLocation, updateLocation } from "~/modules/location";
 import { getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { MAX_SIZE } from "./locations.new";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { organizationId } = await requirePermision(
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.update,
+  });
+
   const id = getRequiredParam(params, "locationId");
 
   const { location } = await getLocation({ organizationId, id });
@@ -59,12 +60,14 @@ export const handle = {
   breadcrumb: () => <span>Edit</span>,
 };
 
-export async function action({ request, params }: ActionFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.update,
+  });
   const clonedRequest = request.clone();
 
   const id = getRequiredParam(params, "locationId");
@@ -81,9 +84,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -117,7 +117,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -129,14 +128,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return json(
-    { success: true },
-    {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, { authSession }),
-      },
-    }
-  );
+  return json({ success: true });
 }
 
 export default function LocationEditPage() {

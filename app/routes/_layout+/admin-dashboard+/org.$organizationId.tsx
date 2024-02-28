@@ -8,13 +8,13 @@ import { FileForm } from "~/components/assets/import-content";
 import { Button } from "~/components/shared";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { generateOrphanedCodes } from "~/modules/qr";
 import { ShelfStackError } from "~/utils/error";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  requireAdmin(request);
+export const loader = async ({ context, params }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
 
   const organization = await db.organization.findUnique({
     where: { id: params.organizationId as string },
@@ -35,9 +35,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   return json({ organization });
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  await requireAuthSession(request);
-  await requireAdmin(request);
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
   const organizationId = params.organizationId as string;
   const formData = await request.formData();
 

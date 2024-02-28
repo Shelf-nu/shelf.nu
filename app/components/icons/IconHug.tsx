@@ -38,7 +38,7 @@ export default function IconHug({ size = "sm", children, className }: Props) {
     <div
       className={tw(
         "inline-flex items-center justify-center", //positioning
-        "rounded-lg hover:cursor-pointer hover:bg-[#344054]", //styling
+        "rounded hover:cursor-pointer hover:bg-[#344054]", //styling
         sizeClass,
         className
       )}

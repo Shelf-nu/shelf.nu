@@ -10,11 +10,10 @@ import Sidebar from "~/components/layout/sidebar/sidebar";
 import { useCrisp } from "~/components/marketing/crisp";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
-import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 import {
   initializePerPageCookieOnLayout,
   setCookie,
@@ -31,8 +30,8 @@ import { canUseBookings } from "~/utils/subscription";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
     ? await db.user.findUnique({
@@ -84,7 +83,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
    * In this case what we do is we set the current organization to the first one in the list
    */
   const { organizationId, organizations, currentOrganization } =
-    await requireOrganisationId(authSession, request);
+    await requireOrganisationId({ userId: authSession.userId, request });
 
   return json(
     {
@@ -95,21 +94,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         (userOrg) => userOrg.organization.id === organizationId
       )?.roles,
       subscription,
-      enablePremium: ENABLE_PREMIUM_FEATURES,
+      enablePremium: config.enablePremiumFeatures,
       hideSupportBanner: cookie.hideSupportBanner,
       minimizedSidebar: cookie.minimizedSidebar,
       isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
       canUseBookings: canUseBookings(currentOrganization),
     },
     {
-      headers: [
-        setCookie(await userPrefs.serialize(cookie)),
-        setCookie(
-          await commitAuthSession(request, {
-            authSession,
-          })
-        ),
-      ],
+      headers: [setCookie(await userPrefs.serialize(cookie))],
     }
   );
 };

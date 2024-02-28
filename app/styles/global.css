@@ -108,7 +108,7 @@ p {
 }
 
 .markdown-viewer table {
-  @apply w-full border-collapse rounded-lg text-xs;
+  @apply w-full border-collapse rounded text-xs;
 }
 .markdown-viewer table td,
 .markdown-viewer table th {
@@ -234,4 +234,12 @@ dialog {
 .header-buttons button a,
 .header-buttons button button {
   @apply flex;
+}
+
+.custodian-selector > span {
+  @apply w-full;
+}
+
+.word-break {
+  word-break: break-word;
 }

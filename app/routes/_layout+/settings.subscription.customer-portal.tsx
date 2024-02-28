@@ -4,12 +4,14 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { createBillingPortalSession } from "~/utils/stripe.server";
 
-export async function action({ request }: ActionFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.subscription,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.subscription,
+    action: PermissionAction.update,
+  });
   const user = await db.user.findUnique({
     where: { id: authSession.userId },
     select: { customerId: true },

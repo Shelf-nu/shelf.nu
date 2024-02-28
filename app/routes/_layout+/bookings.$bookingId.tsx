@@ -18,7 +18,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared";
 import { db } from "~/database";
-import { commitAuthSession } from "~/modules/auth";
+import { createNotes } from "~/modules/asset";
 import {
   deleteBooking,
   getBooking,
@@ -28,7 +28,6 @@ import {
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user";
 import {
-  generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
   getRequiredParam,
@@ -47,12 +46,15 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { authSession, organizationId, role } = await requirePermision(
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId, role } = await requirePermision({
+    userId: authSession?.userId,
     request,
-    PermissionEntity.booking,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.booking,
+    action: PermissionAction.create,
+  });
+
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
   const bookingId = getRequiredParam(params, "bookingId");
@@ -150,7 +152,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     singular: "asset",
     plural: "assets",
   };
-  const { prev, next } = generatePageMeta(request);
 
   const header: HeaderData = {
     title: `Edit | ${booking.name}`,
@@ -166,8 +167,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       totalItems: booking.assets.length,
       perPage,
       totalPages: booking.assets.length / perPage,
-      next,
-      prev,
       teamMembers,
     },
     {
@@ -186,7 +185,9 @@ export const handle = {
   breadcrumb: () => <span>Edit</span>,
 };
 
-export async function action({ request, params }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+
   const formData = await request.formData();
   const intent = formData.get("intent") as
     | "save"
@@ -208,12 +209,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
     archive: PermissionAction.update,
     cancel: PermissionAction.update,
   };
-  const { authSession, organizationId, role } = await requirePermision(
+
+  const { organizationId, role } = await requirePermision({
+    userId: authSession?.userId,
     request,
-    PermissionEntity.booking,
-    intent2ActionMap[intent]
-  );
+    entity: PermissionEntity.booking,
+    action: intent2ActionMap[intent],
+  });
   const id = getRequiredParam(params, "bookingId");
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const user = await getUserByID(authSession.userId);
+
+  const headers = [
+    setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+  ];
 
   switch (intent) {
     case "save":
@@ -229,9 +238,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
           },
           {
             status: 400,
-            headers: {
-              "Set-Cookie": await commitAuthSession(request, { authSession }),
-            },
           }
         );
       }
@@ -269,16 +275,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
         { booking },
         {
           status: 200,
-          headers: [
-            setCookie(await commitAuthSession(request, { authSession })),
-            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-          ],
+          headers,
         }
       );
     case "reserve":
       await upsertBooking(
         { id, status: BookingStatus.RESERVED },
-        getClientHint(request)
+        getClientHint(request),
+        isSelfService
       );
       sendNotification({
         title: "Booking reserved",
@@ -289,14 +293,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json(
         { success: true },
         {
-          headers: [
-            setCookie(await commitAuthSession(request, { authSession })),
-            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-          ],
+          headers,
         }
       );
     case "delete":
-      const isSelfService = role === OrganizationRoles.SELF_SERVICE;
       if (isSelfService) {
         /**
          * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
@@ -315,7 +315,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
         }
       }
 
-      await deleteBooking({ id }, getClientHint(request));
+      const deletedBooking = await deleteBooking(
+        { id },
+        getClientHint(request)
+      );
+
+      createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** deleted booking **${
+          deletedBooking.name
+        }**.`,
+        type: "UPDATE",
+        userId: authSession.userId,
+        assetIds: deletedBooking.assets.map((a) => a.id),
+      });
+
       sendNotification({
         title: "Booking deleted",
         message: "Your booking has been deleted successfully",
@@ -323,15 +336,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
         senderId: authSession.userId,
       });
       return redirect("/bookings", {
-        headers: [
-          setCookie(await commitAuthSession(request, { authSession })),
-          setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-        ],
+        headers,
       });
     case "removeAsset":
       const assetId = formData.get("assetId");
-      // @ts-ignore @TODO we need to fix this. Not sure how
-      var booking = await removeAssets({ id, assetIds: [assetId as string] });
+      var b = await removeAssets({
+        booking: { id, assetIds: [assetId as string] },
+        firstName: user?.firstName || "",
+        lastName: user?.lastName || "",
+        userId: authSession.userId,
+      });
       sendNotification({
         title: "Asset removed",
         message: "Your asset has been removed from the booking",
@@ -339,13 +353,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
         senderId: authSession.userId,
       });
       return json(
-        { booking },
+        { booking: b },
         {
           status: 200,
-          headers: [
-            setCookie(await commitAuthSession(request, { authSession })),
-            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-          ],
+          headers,
         }
       );
     case "checkOut":
@@ -353,6 +364,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
         { id, status: BookingStatus.ONGOING },
         getClientHint(request)
       );
+
+      createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
+          booking.name
+        }](/bookings/${booking.id})**.`,
+        type: "UPDATE",
+        userId: authSession.userId,
+        assetIds: booking.assets.map((a) => a.id),
+      });
+
       sendNotification({
         title: "Booking checked-out",
         message: "Your booking has been checked-out successfully",
@@ -362,10 +383,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json(
         { success: true },
         {
-          headers: [
-            setCookie(await commitAuthSession(request, { authSession })),
-            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-          ],
+          headers,
         }
       );
     case "checkIn":
@@ -376,6 +394,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
         },
         getClientHint(request)
       );
+      /** Create check-in notes for all assets */
+      createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
+          booking.name
+        }](/bookings/${booking.id})**.`,
+        type: "UPDATE",
+        userId: authSession.userId,
+        assetIds: booking.assets.map((a) => a.id),
+      });
       sendNotification({
         title: "Booking checked-in",
         message: "Your booking has been checked-in successfully",
@@ -385,10 +412,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json(
         { success: true },
         {
-          headers: [
-            setCookie(await commitAuthSession(request, { authSession })),
-            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-          ],
+          headers,
         }
       );
     case "archive":
@@ -405,17 +429,23 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json(
         { success: true },
         {
-          headers: [
-            setCookie(await commitAuthSession(request, { authSession })),
-            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-          ],
+          headers,
         }
       );
     case "cancel":
-      await upsertBooking(
+      const cancelledBooking = await upsertBooking(
         { id, status: BookingStatus.CANCELLED },
         getClientHint(request)
       );
+
+      createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
+          cancelledBooking.name
+        }](/bookings/${cancelledBooking.id})**.`,
+        type: "UPDATE",
+        userId: authSession.userId,
+        assetIds: cancelledBooking.assets.map((a) => a.id),
+      });
       sendNotification({
         title: "Booking canceled",
         message: "Your booking has been canceled successfully",
@@ -425,10 +455,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json(
         { success: true },
         {
-          headers: [
-            setCookie(await commitAuthSession(request, { authSession })),
-            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-          ],
+          headers,
         }
       );
     default:
@@ -437,16 +464,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export const shouldRevalidate: ShouldRevalidateFunction = ({
-  nextUrl,
   defaultShouldRevalidate,
-}) => {
+}) =>
   /** Dont revalidate on add-assets route */
-  const isAddAssetsRoute = nextUrl.pathname.includes("add-assets");
-  if (isAddAssetsRoute) {
-    return false;
-  }
-  return defaultShouldRevalidate;
-};
+  // const isAddAssetsRoute = nextUrl.pathname.includes("add-assets");
+  // if (isAddAssetsRoute) {
+  //   return false;
+  // }
+  defaultShouldRevalidate;
 
 export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);

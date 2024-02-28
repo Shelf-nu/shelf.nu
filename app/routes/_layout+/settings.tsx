@@ -6,7 +6,6 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useMatchesData } from "~/hooks";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import { requireAuthSession } from "~/modules/auth";
 import { error } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -18,7 +17,6 @@ export const handle = {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    await requireAuthSession(request);
     const title = "Settings";
     const subHeading = "Manage your preferences here.";
     const header = {

@@ -18,6 +18,7 @@ import { Td, Th } from "../table";
 
 export function BookingAssetsColumn() {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
+  const isSelfService = useUserIsSelfService();
 
   const manageAssetsUrl = useMemo(
     () =>
@@ -41,6 +42,10 @@ export function BookingAssetsColumn() {
     [booking.status]
   );
 
+  // Self service can only manage assets for bookings that are DRAFT
+  const canManageAssetsAsSelfService =
+    isSelfService && booking.status !== BookingStatus.DRAFT;
+
   return (
     <div className="flex-1">
       <div className=" w-full">
@@ -55,7 +60,11 @@ export function BookingAssetsColumn() {
             </div>
             <ControlledActionButton
               canUseFeature={
-                !!booking.from && !!booking.to && !isCompleted && !isArchived
+                !!booking.from &&
+                !!booking.to &&
+                !isCompleted &&
+                !isArchived &&
+                !canManageAssetsAsSelfService
               }
               buttonContent={{
                 title: "Manage Assets",

@@ -19,6 +19,12 @@ Shelf's basic setup is based on a Remix stack by [rphlmr](https://github.com/rph
 - Linting with [ESLint](https://eslint.org)
 - Static Types with [TypeScript](https://typescriptlang.org)
 
+## Docker
+
+If you prefer to run shelf locally or host your live app via docker, please check our [Docker](./docker.md) documentation.
+
+_**Note**: Currently we dont have a docker setup that also includes self hositng supabase. Once released the docker documentation will be updated to include it as well._
+
 ## Development
 
 - Create a [Supabase Database](https://supabase.com/) (free tier gives you 2 databases)
@@ -59,6 +65,7 @@ SMTP_USER="you@example.com"
 SMTP_PWD="yourSMTPpassword"
 
 # Set this to false to disable requirement of subscription for premium features. This will make premium features available for all users
+# You can also directly adjust this in remix.config.js and set it to false
 ENABLE_PREMIUM_FEATURES="true"
 
 # The Stripe keys are needed only if you want to enable premium features
@@ -286,7 +293,8 @@ To do that navigate to Authentication > URL configuration and add the following 
 
 ## Premium
 
-Shelf hosted version has some premium features that are locked behind different tiers of subscriptions. By default those features are disabled. To enable them add the env variable:
+Shelf hosted version has some premium features that are locked behind different tiers of subscriptions. By default those features are disabled. To enable them add the env variable.
+Moreover if you don't have different servers and environments, you can directly adjust the value in shelf.config.ts
 
 ```
 ENABLE_PREMIUM_FEATURES="true"

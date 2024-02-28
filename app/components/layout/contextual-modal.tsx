@@ -8,12 +8,16 @@ export default function ContextualModal() {
   const currentRoute = matches[matches.length - 1];
   const data = currentRoute?.data as {
     showModal?: boolean;
+    noScroll?: boolean;
   };
-  const showModal = data?.showModal || false;
+  const showModal = data.showModal || false;
+
+  // Control whether the modal is scrollable or not
+  const noScroll = data.noScroll || false;
 
   return (
     <AnimatePresence>
-      <Dialog open={showModal}>
+      <Dialog open={showModal} noScroll={noScroll}>
         <Outlet />
       </Dialog>
     </AnimatePresence>

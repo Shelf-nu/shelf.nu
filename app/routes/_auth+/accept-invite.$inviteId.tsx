@@ -2,7 +2,7 @@ import { InviteStatuses } from "@prisma/client";
 import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import { Spinner } from "~/components/shared/spinner";
-import { commitAuthSession, signInWithEmail } from "~/modules/auth";
+import { signInWithEmail } from "~/modules/auth";
 import { updateInviteStatus } from "~/modules/invite";
 import { generateRandomCode } from "~/modules/invite/helpers";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -15,8 +15,9 @@ import {
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError, makeShelfError } from "~/utils/error";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   try {
+    // if (context.isAuthenticated) return redirect("/assets");
     const searchParams = getCurrentSearchParams(request);
     const token = searchParams.get("token") as string;
 
@@ -48,33 +49,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       });
     }
 
+    /** If the user is already signed in, we jus redirect them to assets index and set */
+    if (context.isAuthenticated) {
+      return redirect(safeRedirect(`/assets`), {
+        headers: [
+          setCookie(
+            await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
+          ),
+        ],
+      });
+    }
+
     /** Sign in the user */
     const signInResult = await signInWithEmail(
       updatedInvite.inviteeEmail,
       password
     );
-
+    /**
+     * User could already be registered and hence loggin in with our password failed,
+     * redirect to home and let user login or go to home */
     if (signInResult.status === "error") {
-      //user could already be registered and hence loggin in with our password failed, redirect to home and let user login or go to home
       return redirect("/login?acceptedInvite=yes");
     }
 
     // Ensure that user property exists before proceeding
     if (signInResult.status === "success" && signInResult.authSession) {
       const { authSession } = signInResult;
-
+      // Commit the session
+      context.setSession({ ...authSession });
       return redirect(
         safeRedirect(
           `/onboarding?organizationId=${updatedInvite.organizationId}`
         ),
         {
           headers: [
-            setCookie(await setSelectedOrganizationIdCookie(updatedInvite.id)),
             setCookie(
-              await commitAuthSession(request, {
-                authSession,
-                flashErrorMessage: null,
-              })
+              await setSelectedOrganizationIdCookie(
+                updatedInvite.organizationId
+              )
             ),
           ],
         }
