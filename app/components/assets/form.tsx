@@ -195,7 +195,7 @@ export const AssetForm = ({
         </div>
 
         <FormRow
-          rowLabel={"Category"}
+          rowLabel="Category"
           subHeading={
             <p>
               Make it unique. Each asset can have 1 category. It will show on
@@ -206,7 +206,7 @@ export const AssetForm = ({
           required={zodFieldIsRequired(FormSchema.shape.category)}
         >
           <DynamicSelect
-            defaultValue={category || "uncategorized"}
+            defaultValue={category ?? undefined}
             model={{ name: "category", key: "name" }}
             label="Categories"
             initialDataKey="categories"
