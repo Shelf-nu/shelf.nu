@@ -206,6 +206,7 @@ export const AssetForm = ({
           required={zodFieldIsRequired(FormSchema.shape.category)}
         >
           <DynamicSelect
+            disabled={disabled}
             defaultValue={category ?? undefined}
             model={{ name: "category", key: "name" }}
             label="Categories"
@@ -260,6 +261,7 @@ export const AssetForm = ({
             value={location || ""}
           />
           <DynamicSelect
+            disabled={disabled}
             fieldName="newLocationId"
             defaultValue={location || undefined}
             model={{ name: "location", key: "name" }}
