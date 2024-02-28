@@ -994,13 +994,21 @@ export async function duplicateAsset({
 export async function getAllEntriesForCreateAndEdit({
   organizationId,
   request,
+  defaults,
 }: {
   organizationId: Organization["id"];
   request: LoaderFunctionArgs["request"];
+  defaults?: {
+    category?: string | null;
+    tag?: string | null;
+    location?: string | null;
+  };
 }) {
   const searchParams = getCurrentSearchParams(request);
-  const categorySelected = searchParams.get("category") ?? "";
-  const locationSelected = searchParams.get("location") ?? "";
+  const categorySelected =
+    searchParams.get("category") ?? defaults?.category ?? "";
+  const locationSelected =
+    searchParams.get("location") ?? defaults?.location ?? "";
 
   const [
     categoryExcludedSelected,

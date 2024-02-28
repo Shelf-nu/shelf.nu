@@ -62,6 +62,7 @@ interface Props {
 export const AssetForm = ({
   title,
   category,
+  location,
   description,
   valuation,
   qrId,
@@ -213,8 +214,10 @@ export const AssetForm = ({
         className="border-b-0 py-[10px]"
         required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
       >
+        <input type="hidden" name="currentLocationId" value={location || ""} />
         <DynamicSelect
-          defaultValue={category || undefined}
+          fieldName="newLocationId"
+          defaultValue={location || undefined}
           model={{ name: "location", key: "name" }}
           label="Locations"
           initialDataKey="locations"

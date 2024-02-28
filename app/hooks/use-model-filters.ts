@@ -1,5 +1,5 @@
 import type { ChangeEvent } from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { resetFetcher } from "~/utils/fetcher";
@@ -12,6 +12,7 @@ export type ModelFilterItem = {
 };
 
 export type ModelFilterProps = {
+  defaultValues?: string[];
   /** name of key in loader which is used to pass initial data */
   initialDataKey: string;
   /** name of key in loader which passing the total count */
@@ -22,10 +23,12 @@ export type ModelFilterProps = {
     /** name of key for which we have to search the value */
     key: string;
   };
-  selectionMode?: "append" | "set";
+  /** If none is passed then values will not be added in query params */
+  selectionMode?: "append" | "set" | "none";
 };
 
 export function useModelFilters({
+  defaultValues,
   model,
   countKey,
   initialDataKey,
@@ -34,7 +37,10 @@ export function useModelFilters({
   const initialData = useLoaderData<any>();
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchParams, setSearchParams] = useSearchParams();
-  const selectedItems = searchParams.getAll(model.name);
+  const [selectedItems, setSelectedItems] = useState<string[]>(
+    defaultValues ?? []
+  );
+
   const totalItems = initialData[countKey];
   const fetcher = useFetcher<Array<ModelFilterItem>>();
 
@@ -48,22 +54,30 @@ export function useModelFilters({
 
   const handleSelectItemChange = useCallback(
     (value: string) => {
-      /** If item is already there in search params then remove it */
-      if (selectedItems.includes(value)) {
-        setSearchParams((prev) => {
-          prev.delete(model.name, value);
-          return prev;
-        });
+      /**
+       * If item selection mode is none then values are not added in
+       * search params instead they are just updated in state only
+       * */
+      if (selectionMode === "none") {
+        setSelectedItems((prev) => [...prev, value]);
       } else {
-        /** Otherwise, add the item in search params */
-        setSearchParams((prev) => {
-          if (selectionMode === "append") {
-            prev.append(model.name, value);
-          } else {
-            prev.set(model.name, value);
-          }
-          return prev;
-        });
+        /** If item is already there in search params then remove it */
+        if (selectedItems.includes(value)) {
+          setSearchParams((prev) => {
+            prev.delete(model.name, value);
+            return prev;
+          });
+        } else {
+          /** Otherwise, add the item in search params */
+          setSearchParams((prev) => {
+            if (selectionMode === "append") {
+              prev.append(model.name, value);
+            } else {
+              prev.set(model.name, value);
+            }
+            return prev;
+          });
+        }
       }
     },
     [selectedItems, model.name, setSearchParams, selectionMode]
@@ -84,11 +98,20 @@ export function useModelFilters({
     }
   };
 
+  useEffect(
+    function updateSelectedValuesWhenParamsChange() {
+      setSelectedItems(searchParams.getAll(model.name));
+    },
+    [model.name, searchParams]
+  );
+
   const resetModelFiltersFetcher = () => {
+    setSearchQuery("");
     resetFetcher(fetcher);
   };
 
   const clearFilters = () => {
+    setSelectedItems([]);
     resetModelFiltersFetcher();
     setSearchParams((prev) => {
       prev.delete(model.name);

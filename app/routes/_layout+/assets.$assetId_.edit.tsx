@@ -46,6 +46,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
   const organization = await getOrganization({ id: organizationId });
 
+  const id = getRequiredParam(params, "assetId");
+
+  const asset = await getAsset({ organizationId, id });
+  if (!asset) {
+    throw new ShelfStackError({ message: "Not Found", status: 404 });
+  }
+
   const {
     categories,
     totalCategories,
@@ -56,14 +63,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   } = await getAllEntriesForCreateAndEdit({
     request,
     organizationId,
+    defaults: {
+      category: asset.categoryId,
+      location: asset.locationId,
+    },
   });
-
-  const id = getRequiredParam(params, "assetId");
-
-  const asset = await getAsset({ organizationId, id });
-  if (!asset) {
-    throw new ShelfStackError({ message: "Not Found", status: 404 });
-  }
 
   const header: HeaderData = {
     title: `Edit | ${asset.title}`,

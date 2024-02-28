@@ -17,6 +17,7 @@ import When from "../when/when";
 type Props = ModelFilterProps & {
   className?: string;
   style?: React.CSSProperties;
+  fieldName?: string;
   label?: React.ReactNode;
   searchIcon?: Icon;
   showSearch?: boolean;
@@ -28,6 +29,7 @@ type Props = ModelFilterProps & {
 export default function DynamicSelect({
   className,
   style,
+  fieldName,
   label,
   searchIcon = "search",
   showSearch = true,
@@ -40,7 +42,6 @@ export default function DynamicSelect({
 }: Props) {
   const {
     searchQuery,
-    setSearchQuery,
     handleSearchQueryChange,
     items,
     totalItems,
@@ -52,13 +53,13 @@ export default function DynamicSelect({
     model,
     countKey,
     initialDataKey,
-    selectionMode: "set",
+    selectionMode: "none",
   });
 
   return (
     <div className="relative w-full">
       <Select
-        name={model.name}
+        name={fieldName ?? model.name}
         defaultValue={defaultValue}
         onValueChange={(value) => {
           handleSelectItemChange(value);
@@ -109,7 +110,6 @@ export default function DynamicSelect({
                   disabled={Boolean(searchQuery)}
                   onClick={() => {
                     resetModelFiltersFetcher();
-                    setSearchQuery("");
                   }}
                   className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                 />
