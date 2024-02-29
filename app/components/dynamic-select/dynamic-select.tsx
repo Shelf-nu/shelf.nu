@@ -82,14 +82,14 @@ export default function DynamicSelect({
 
         <PopoverContent
           className={tw(
-            "z-[100]  overflow-y-auto rounded-md border border-gray-300 bg-white md:w-80",
+            "z-[100] overflow-y-auto rounded-md border border-gray-300 bg-white md:w-80",
             className
           )}
           style={style}
           align="start"
         >
           <div className="flex items-center justify-between p-3">
-            <div className="text-xs text-gray-500">{label}</div>
+            <div className="text-xs font-semibold text-gray-700">{label}</div>
             <When truthy={selectedItems?.length > 0 && showSearch}>
               <Button
                 as="button"
@@ -104,14 +104,15 @@ export default function DynamicSelect({
               </Button>
             </When>
           </div>
+
           <When truthy={showSearch}>
-            <div className="filters-form relative px-3">
+            <div className="filters-form relative border-y border-y-gray-200 p-3">
               <Input
                 type="text"
                 label={`Search ${label}`}
                 placeholder={`Search ${label}`}
                 hideLabel
-                className="mb-2 text-gray-500"
+                className="text-gray-500"
                 icon={searchIcon}
                 value={searchQuery}
                 onChange={handleSearchQueryChange}
@@ -132,11 +133,14 @@ export default function DynamicSelect({
             </div>
           </When>
 
-          <div className="divide-y">
+          <div className="max-h-[320px] divide-y overflow-y-auto">
             {items.map((item) => (
               <div
                 key={item.id}
-                className="flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+                className={tw(
+                  "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                  item.id === selectedValue && "bg-gray-100"
+                )}
                 onClick={() => {
                   setSelectedValue(item.id);
                   handleSelectItemChange(item.id);
@@ -153,13 +157,13 @@ export default function DynamicSelect({
                 </div>
 
                 <When truthy={item.id === selectedValue}>
-                  <CheckIcon className="size-3.5 text-primary" />
+                  <CheckIcon className="text-primary" />
                 </When>
               </div>
             ))}
           </div>
 
-          <When truthy={totalItems > 4}>
+          <When truthy={totalItems > 6}>
             <div className="border-t p-3 text-gray-500">
               Showing {items.length} out of {totalItems}, type to search for
               more

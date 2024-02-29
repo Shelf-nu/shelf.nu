@@ -64,22 +64,23 @@ export default function DynamicDropdown({
           <div>
             {cloneElement(trigger)}
             <When truthy={selectedItems.length > 0}>
-              <div className="flex size-6 items-center justify-center rounded-full bg-gray-100 px-2 py-[2px] text-xs font-medium text-gray-700">
+              <div className="flex size-6 items-center justify-center rounded-full bg-primary-50 px-2 py-[2px] text-xs font-medium text-primary-700">
                 {selectedItems.length}
               </div>
             </When>
           </div>
         </DropdownMenuTrigger>
+
         <DropdownMenuContent
           align="end"
           className={tw(
-            "max-h-[400px] w-[290px] overflow-y-auto p-0 md:w-[350px]",
+            "w-[290px] overflow-y-hidden p-0 md:w-[350px]",
             className
           )}
           style={style}
         >
-          <div className="mb-[6px] flex items-center justify-between p-3">
-            <div className="text-xs text-gray-500">{label}</div>
+          <div className="flex items-center justify-between p-3">
+            <div className="text-xs font-semibold text-gray-700">{label}</div>
             <When truthy={selectedItems.length > 0 && showSearch}>
               <Button
                 as="button"
@@ -91,14 +92,15 @@ export default function DynamicDropdown({
               </Button>
             </When>
           </div>
+
           <When truthy={showSearch}>
-            <div className="filters-form relative mx-3">
+            <div className="filters-form relative border-y border-y-gray-200 p-3">
               <Input
                 type="text"
                 label={`Search ${label}`}
                 placeholder={`Search ${label}`}
                 hideLabel
-                className="mb-2 text-gray-500"
+                className="text-gray-500"
                 icon={searchIcon}
                 autoFocus
                 value={searchQuery}
@@ -118,7 +120,8 @@ export default function DynamicDropdown({
               </When>
             </div>
           </When>
-          <div className="divide-y">
+
+          <div className="max-h-[320px] divide-y overflow-y-auto">
             {items.map((item) => {
               const checked = selectedItems.includes(item.id);
               if (typeof renderItem === "function") {
@@ -150,7 +153,10 @@ export default function DynamicDropdown({
                 <label
                   key={item.id}
                   htmlFor={item.id}
-                  className="flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100 "
+                  className={tw(
+                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                    checked && "bg-gray-00"
+                  )}
                 >
                   {item.name}
                   <input
@@ -170,7 +176,7 @@ export default function DynamicDropdown({
               );
             })}
           </div>
-          <When truthy={totalItems > 4}>
+          <When truthy={totalItems > 6}>
             <div className="p-3 text-gray-500">
               Showing {items.length} out of {totalItems}, type to search for
               more

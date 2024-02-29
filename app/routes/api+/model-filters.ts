@@ -55,7 +55,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
       ],
     },
-    take: 4,
+    take: 6,
   })) as Array<Record<string, string>>;
 
   return json(
