@@ -26,18 +26,13 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import {
-  clearCategoryFiltersAtom,
-  clearTagFiltersAtom,
-  selectedCategoriesAtom,
-  selectedTagsAtom,
-} from "~/components/list/filters/atoms";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
+import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   getPaginatedAndFilterableAssets,
@@ -226,21 +221,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
+  const hasFiltersToClear = useSearchParamHasValue("category", "tag");
+  const clearFilters = useClearValueFromParams("category", "tag");
   const { canImportAssets } = useLoaderData<typeof loader>();
-  const selectedCategories = useAtomValue(selectedCategoriesAtom);
-  const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
-
-  const selectedTags = useAtomValue(selectedTagsAtom);
-  const [, clearTagFilters] = useAtom(clearTagFiltersAtom);
-
-  const hasFiltersToClear =
-    selectedCategories.items.length > 0 || selectedTags.items.length > 0;
-
-  const handleClearFilters = () => {
-    clearCategoryFilters();
-    clearTagFilters();
-  };
-
   const isSelfService = useUserIsSelfService();
 
   return (
@@ -272,7 +255,7 @@ export default function AssetIndexPage() {
               <div className="hidden gap-6 md:flex">
                 <Button
                   as="button"
-                  onClick={handleClearFilters}
+                  onClick={clearFilters}
                   variant="link"
                   className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
                 >
