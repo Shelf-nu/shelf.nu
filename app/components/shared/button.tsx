@@ -99,7 +99,6 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           {...props}
           title={title}
           ref={ref}
-          type="button"
         >
           {icon && iconsMap[icon]}{" "}
           {children ? (

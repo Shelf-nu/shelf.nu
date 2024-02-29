@@ -250,7 +250,7 @@ export default function AssetIndexPage() {
             "left-of-search": <StatusFilter statusItems={AssetStatus} />,
           }}
         >
-          <div className="flex items-center justify-around gap-6 md:justify-end">
+          <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
             {hasFiltersToClear ? (
               <div className="hidden gap-6 md:flex">
                 <Button
@@ -258,13 +258,15 @@ export default function AssetIndexPage() {
                   onClick={clearFilters}
                   variant="link"
                   className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+                  type="button"
                 >
                   Clear all filters
                 </Button>
                 <div className="text-gray-500"> | </div>
               </div>
             ) : null}
-            <div className="inline-flex justify-end gap-2 p-3 md:p-0 lg:gap-4">
+
+            <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
               <DynamicDropdown
                 trigger={
                   <div className="flex cursor-pointer items-center gap-2">
