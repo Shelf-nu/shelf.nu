@@ -40,7 +40,7 @@ export const OrganizationSelect = () => {
       }}
     >
       <Select name="organizationId" defaultValue={currentOrganizationId}>
-        <SelectTrigger className="w-full p-3">
+        <SelectTrigger className="w-full p-2">
           <SelectValue />
         </SelectTrigger>
         <SelectContent position="popper" className="w-full" align="start">

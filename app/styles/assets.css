@@ -1,11 +1,3 @@
-.select-trigger {
-  @apply border-0 focus:ring-0 focus:border-0 p-0 mt-0 text-gray-500;
-}
-
-.select-trigger svg {
-  @apply hidden lg:block;
-}
-
 .select-trigger span span {
-  @apply text-gray-500 mr-2;
+  @apply text-gray-500;
 }

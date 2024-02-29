@@ -165,9 +165,11 @@ export default function BookingsIndexPage() {
         </Button>
       </Header>
       <ListContentWrapper>
-        <Filters>
-          <StatusFilter statusItems={BookingStatus} />
-        </Filters>
+        <Filters
+          slots={{
+            "left-of-search": <StatusFilter statusItems={BookingStatus} />,
+          }}
+        />
         <List
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(id)}
