@@ -259,7 +259,11 @@ export default function AssetIndexPage() {
         ) : null}
       </Header>
       <ListContentWrapper>
-        <Filters>
+        <Filters
+          slots={{
+            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          }}
+        >
           <div className="flex items-center justify-around gap-6 md:justify-end">
             {hasFiltersToClear ? (
               <div className="hidden gap-6 md:flex">
@@ -276,7 +280,6 @@ export default function AssetIndexPage() {
             ) : null}
             <CategoryFilters />
             <TagFilters />
-            <StatusFilter statusItems={AssetStatus} />
           </div>
         </Filters>
         <List
