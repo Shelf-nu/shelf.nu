@@ -18,9 +18,16 @@ import { SearchForm } from "./search-form";
 export const Filters = ({
   children,
   className,
+  slots,
 }: {
   children?: ReactNode;
   className?: string;
+  /** Slots to render nodes within this component.
+   * Available options are:
+   * - left-of-search
+   * - right-of-search
+   */
+  slots?: Record<string, ReactNode>;
 }) => {
   const { search } = useLoaderData<SearchableIndexResponse>();
   const [searchParams] = useSearchParams();
@@ -74,8 +81,10 @@ export const Filters = ({
           <input type="hidden" name="per_page" value={perPageParam} />
         ) : null}
         <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
-          <div className="flex items-center gap-5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            {slots?.["left-of-search"] || null}
             <SearchForm />
+            {slots?.["right-of-search"] || null}
           </div>
           <div className="flex flex-1 justify-end">{children}</div>
         </div>
