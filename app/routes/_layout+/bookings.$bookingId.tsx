@@ -463,16 +463,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   }
 }
 
-export const shouldRevalidate: ShouldRevalidateFunction = ({
-  defaultShouldRevalidate,
-}) =>
-  /** Dont revalidate on add-assets route */
-  // const isAddAssetsRoute = nextUrl.pathname.includes("add-assets");
-  // if (isAddAssetsRoute) {
-  //   return false;
-  // }
-  defaultShouldRevalidate;
-
 export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";

@@ -70,6 +70,8 @@ export function BookingAssetsColumn() {
                 title: "Manage Assets",
                 message: isCompleted
                   ? "Booking is completed. You cannot change the assets anymore"
+                  : isSelfService
+                  ? "You are unable to manage assets at this point becasue the booking is already reserved. Cancel this booking and create another one if you need to make changes."
                   : "You need to select a start and end date and save your booking before you can add assets to your booking",
               }}
               buttonProps={{
