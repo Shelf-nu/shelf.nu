@@ -38,6 +38,9 @@ export const getOrganizationByUserId = async ({
     throw new ShelfStackError({
       message: "Organization not found",
       cause,
+      metadata: {
+        userId,
+      },
     });
   }
 };
