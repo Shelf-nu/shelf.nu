@@ -8,7 +8,6 @@ import type {
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
