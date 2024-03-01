@@ -57,6 +57,7 @@ export default function DynamicSelect({
     selectedItems,
     resetModelFiltersFetcher,
     handleSelectItemChange,
+    getAllEntries,
   } = useModelFilters({
     model,
     countKey,
@@ -104,6 +105,10 @@ export default function DynamicSelect({
               </Button>
             </When>
           </div>
+
+          <button className="px-3 py-2" onClick={getAllEntries}>
+            Fetch all
+          </button>
 
           <When truthy={showSearch}>
             <div className="filters-form relative border-y border-y-gray-200 p-3">

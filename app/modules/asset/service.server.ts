@@ -1022,6 +1022,8 @@ export async function getAllEntriesForCreateAndEdit({
   const locationSelected =
     searchParams.get("location") ?? defaults?.location ?? "";
 
+  const getAllEntries = searchParams.get("getAll");
+
   const [
     categoryExcludedSelected,
     selectedCategories,
@@ -1035,7 +1037,7 @@ export async function getAllEntriesForCreateAndEdit({
     /** Get the categories */
     db.category.findMany({
       where: { organizationId, id: { not: categorySelected } },
-      take: 6,
+      take: getAllEntries === "true" ? undefined : 6,
     }),
     db.category.findMany({ where: { organizationId, id: categorySelected } }),
     db.category.count({ where: { organizationId } }),
@@ -1046,7 +1048,7 @@ export async function getAllEntriesForCreateAndEdit({
     /** Get the locations */
     db.location.findMany({
       where: { organizationId, id: { not: locationSelected } },
-      take: 6,
+      take: getAllEntries === "true" ? undefined : 6,
     }),
     db.location.findMany({ where: { organizationId, id: locationSelected } }),
     db.location.count({ where: { organizationId } }),
@@ -1102,6 +1104,8 @@ export const getPaginatedAndFilterableAssets = async ({
       ? null
       : (searchParams.get("status") as AssetStatus | null);
 
+  const getAllEntries = searchParams.get("getAll");
+
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
@@ -1115,7 +1119,7 @@ export const getPaginatedAndFilterableAssets = async ({
   ] = await db.$transaction([
     db.category.findMany({
       where: { organizationId, id: { notIn: categoriesIds } },
-      take: 6,
+      take: getAllEntries === "true" ? undefined : 6,
     }),
     db.category.findMany({
       where: { organizationId, id: { in: categoriesIds } },
@@ -1123,11 +1127,11 @@ export const getPaginatedAndFilterableAssets = async ({
     db.category.count({ where: { organizationId } }),
     db.tag.findMany({
       where: { organizationId, id: { notIn: tagsIds } },
-      take: 6,
+      take: getAllEntries === "true" ? undefined : 6,
     }),
     db.tag.findMany({
       where: { organizationId, id: { in: tagsIds } },
-      take: 6,
+      take: getAllEntries === "true" ? undefined : 6,
     }),
     db.tag.count({ where: { organizationId } }),
   ]);

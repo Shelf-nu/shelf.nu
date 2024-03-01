@@ -48,6 +48,7 @@ export default function DynamicDropdown({
     handleSelectItemChange,
     clearFilters,
     resetModelFiltersFetcher,
+    getAllEntries,
   } = useModelFilters({
     model,
     countKey,
@@ -91,6 +92,10 @@ export default function DynamicDropdown({
             </Button>
           </When>
         </div>
+
+        <button className="px-3 py-2" onClick={getAllEntries}>
+          Fetch all
+        </button>
 
         <When truthy={showSearch}>
           <div className="filters-form relative border-y border-y-gray-200 p-3">

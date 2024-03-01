@@ -133,6 +133,13 @@ export function useModelFilters({
     }
   };
 
+  function getAllEntries() {
+    setSearchParams((prev) => {
+      prev.set("getAll", "true");
+      return prev;
+    });
+  }
+
   return {
     searchQuery,
     setSearchQuery,
@@ -143,5 +150,6 @@ export function useModelFilters({
     handleSearchQueryChange,
     resetModelFiltersFetcher,
     clearFilters,
+    getAllEntries,
   };
 }
