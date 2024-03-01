@@ -1,5 +1,6 @@
 import type { User } from "@prisma/client";
-import { redirect, type LoaderFunctionArgs, json } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";

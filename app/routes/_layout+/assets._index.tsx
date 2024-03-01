@@ -1,11 +1,5 @@
-import {
-  type Category,
-  type Asset,
-  type Tag,
-  type Custody,
-  OrganizationRoles,
-  AssetStatus,
-} from "@prisma/client";
+import type { Category, Asset, Tag, Custody } from "@prisma/client";
+import { OrganizationRoles, AssetStatus } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,

@@ -1,4 +1,4 @@
-import { type Note as NoteType } from "@prisma/client";
+import type { Note as NoteType } from "@prisma/client";
 import { MarkdownViewer } from "~/components/markdown";
 import { Switch } from "~/components/shared/switch";
 import { Tag } from "~/components/shared/tag";

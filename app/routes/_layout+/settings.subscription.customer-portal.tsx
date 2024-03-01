@@ -1,4 +1,5 @@
-import { redirect, type ActionFunctionArgs } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
+import type { ActionFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";

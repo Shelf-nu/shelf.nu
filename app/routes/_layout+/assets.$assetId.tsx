@@ -1,4 +1,4 @@
-import { type Location } from "@prisma/client";
+import type { Location } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
