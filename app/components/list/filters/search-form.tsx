@@ -13,10 +13,10 @@ import { SearchFieldTooltip } from "./search-field-tooltip";
 
 export const SearchForm = () => {
   const [_searchParams, setSearchParams] = useSearchParams();
-
   const { search, modelName, searchFieldLabel } =
     useLoaderData<SearchableIndexResponse>();
   const { singular } = modelName;
+
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
@@ -61,12 +61,9 @@ export const SearchForm = () => {
         />
         {search ? (
           <Button
-            to="#"
             icon="x"
             variant="tertiary"
             disabled={isSearching}
-            name="intent"
-            value="clearSearch"
             title="Clear search"
             className="absolute right-3.5 top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
             onClick={clearSearch}

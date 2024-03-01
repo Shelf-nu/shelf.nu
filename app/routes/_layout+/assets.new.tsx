@@ -11,11 +11,10 @@ import Header from "~/components/layout/header";
 import {
   createAsset,
   createNote,
-  getAllRelatedEntries,
+  getAllEntriesForCreateAndEdit,
   updateAssetMainImage,
 } from "~/modules/asset";
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganization } from "~/modules/organization";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
@@ -34,13 +33,25 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId } = await requirePermision({
+  const { organizationId, currentOrganization } = await requirePermision({
     userId,
     request,
     entity: PermissionEntity.asset,
     action: PermissionAction.create,
   });
-  const organization = await getOrganization({ id: organizationId });
+
+  const {
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  } = await getAllEntriesForCreateAndEdit({
+    organizationId,
+    request,
+  });
+
   /**
    * We need to check if the QR code passed in the URL belongs to the current org
    * This is relevant whenever the user is trying to link a new asset with an existing QR code
@@ -50,12 +61,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     organizationId,
   });
 
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
-      organizationId,
-    });
-
   const header = {
     title,
   };
@@ -63,9 +68,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   return json({
     header,
     categories,
+    totalCategories,
     tags,
+    totalTags: tags.length,
     locations,
-    currency: organization?.currency,
+    totalLocations,
+    currency: currentOrganization?.currency,
     customFields,
   });
 }
@@ -181,7 +189,9 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
   if (asset.location) {
     await createNote({
-      content: `**${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}** set the location of **${asset.title?.trim()}** to **${asset.location.name?.trim()}**`,
+      content: `**${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}** set the location of **${asset.title?.trim()}** to *[${asset.location.name.trim()}](/locations/${
+        asset.location.id
+      })**`,
       type: "UPDATE",
       userId: authSession.userId,
       assetId: asset.id,
