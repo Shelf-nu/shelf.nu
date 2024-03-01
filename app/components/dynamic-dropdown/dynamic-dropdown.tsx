@@ -114,7 +114,7 @@ export default function DynamicDropdown({
                   resetModelFiltersFetcher();
                   setSearchQuery("");
                 }}
-                className="z-100 pointer-events-auto absolute right-[14px] top-0 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
+                className="z-100 pointer-events-auto absolute right-[14px] top-0 mr-2 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
               />
             </When>
           </div>
@@ -154,7 +154,7 @@ export default function DynamicDropdown({
                 htmlFor={item.id}
                 className={tw(
                   "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                  checked && "bg-gray-00"
+                  checked && "bg-gray-50"
                 )}
               >
                 {item.name}
@@ -176,7 +176,7 @@ export default function DynamicDropdown({
           })}
         </div>
         <When truthy={totalItems > 6}>
-          <div className="p-3 text-gray-500">
+          <div className="border-t p-3 text-gray-500">
             Showing {items.length} out of {totalItems}, type to search for more
           </div>
         </When>
