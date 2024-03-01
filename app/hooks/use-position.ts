@@ -22,7 +22,10 @@ export const usePosition = () => {
         // Success function
         (position) => setPosition(position.coords),
         // Error function
-        null,
+        (error) =>
+          alert(
+            `We couldn't get your location: ${error.message} \n Please contact support if your issue persists`
+          ),
         // Options. See MDN for details.
         {
           enableHighAccuracy: true,
@@ -31,8 +34,7 @@ export const usePosition = () => {
         }
       );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [scanId, setPosition]);
 
   useEffect(() => {
     if (position && scanId) {
