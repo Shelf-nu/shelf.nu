@@ -93,7 +93,7 @@ export default function DynamicDropdown({
           </When>
         </div>
 
-        <button className="px-3 py-2" onClick={getAllEntries}>
+        <button type="button" className="px-3 py-2" onClick={getAllEntries}>
           Fetch all
         </button>
 

@@ -15,6 +15,7 @@ import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import { getSupabaseAdmin } from "~/integrations/supabase";
+import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import {
   dateTimeInUnix,
   getCurrentSearchParams,
@@ -1022,7 +1023,7 @@ export async function getAllEntriesForCreateAndEdit({
   const locationSelected =
     searchParams.get("location") ?? defaults?.location ?? "";
 
-  const getAllEntries = searchParams.get("getAll");
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
 
   const [
     categoryExcludedSelected,
@@ -1037,7 +1038,7 @@ export async function getAllEntriesForCreateAndEdit({
     /** Get the categories */
     db.category.findMany({
       where: { organizationId, id: { not: categorySelected } },
-      take: getAllEntries === "true" ? undefined : 6,
+      take: getAllEntries.includes("category") ? undefined : 6,
     }),
     db.category.findMany({ where: { organizationId, id: categorySelected } }),
     db.category.count({ where: { organizationId } }),
@@ -1048,7 +1049,7 @@ export async function getAllEntriesForCreateAndEdit({
     /** Get the locations */
     db.location.findMany({
       where: { organizationId, id: { not: locationSelected } },
-      take: getAllEntries === "true" ? undefined : 6,
+      take: getAllEntries.includes("location") ? undefined : 6,
     }),
     db.location.findMany({ where: { organizationId, id: locationSelected } }),
     db.location.count({ where: { organizationId } }),
@@ -1104,7 +1105,7 @@ export const getPaginatedAndFilterableAssets = async ({
       ? null
       : (searchParams.get("status") as AssetStatus | null);
 
-  const getAllEntries = searchParams.get("getAll");
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -1119,7 +1120,7 @@ export const getPaginatedAndFilterableAssets = async ({
   ] = await db.$transaction([
     db.category.findMany({
       where: { organizationId, id: { notIn: categoriesIds } },
-      take: getAllEntries === "true" ? undefined : 6,
+      take: getAllEntries.includes("category") ? undefined : 6,
     }),
     db.category.findMany({
       where: { organizationId, id: { in: categoriesIds } },
@@ -1127,11 +1128,10 @@ export const getPaginatedAndFilterableAssets = async ({
     db.category.count({ where: { organizationId } }),
     db.tag.findMany({
       where: { organizationId, id: { notIn: tagsIds } },
-      take: getAllEntries === "true" ? undefined : 6,
+      take: getAllEntries.includes("tag") ? undefined : 6,
     }),
     db.tag.findMany({
       where: { organizationId, id: { in: tagsIds } },
-      take: getAllEntries === "true" ? undefined : 6,
     }),
     db.tag.count({ where: { organizationId } }),
   ]);
