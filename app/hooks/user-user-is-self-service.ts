@@ -1,4 +1,5 @@
-import { OrganizationRoles, type $Enums } from "@prisma/client";
+import type { $Enums } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import { useMatchesData } from ".";
 
 /**

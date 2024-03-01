@@ -1,4 +1,5 @@
-import { type Prisma, BookingStatus, OrganizationRoles } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";

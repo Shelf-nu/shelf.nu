@@ -3,7 +3,8 @@ import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
 
 import { refreshAccessToken } from "~/modules/auth";
-import { authSessionKey, type FlashData, type SessionData } from "./session";
+import type { FlashData } from "./session";
+import { authSessionKey } from "./session";
 
 /**
  * Protected routes middleware

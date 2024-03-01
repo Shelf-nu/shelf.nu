@@ -1,4 +1,5 @@
-import { TierId, type Organization } from "@prisma/client";
+import { TierId } from "@prisma/client";
+import type { Organization } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
