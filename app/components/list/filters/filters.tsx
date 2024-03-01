@@ -1,4 +1,5 @@
-import { useRef, type ReactNode, useEffect, useMemo } from "react";
+import { useRef, useEffect, useMemo } from "react";
+import type { ReactNode } from "react";
 import { Form, useLoaderData, useSearchParams } from "@remix-run/react";
 
 import type { SearchableIndexResponse } from "~/modules/types";

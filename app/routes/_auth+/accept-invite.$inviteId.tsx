@@ -1,5 +1,6 @@
 import { InviteStatuses } from "@prisma/client";
-import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import { Spinner } from "~/components/shared/spinner";
 import { signInWithEmail } from "~/modules/auth";

@@ -13,7 +13,8 @@ import { ShelfStackError } from "~/utils/error";
 
 import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
-import { authSessionKey, type FlashData, type SessionData } from "./session";
+import { authSessionKey } from "./session";
+import type { FlashData, SessionData } from "./session";
 
 // Server will not start if the env is not valid
 initEnv();

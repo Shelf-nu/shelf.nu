@@ -5,7 +5,6 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
