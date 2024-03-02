@@ -1038,7 +1038,7 @@ export async function getAllEntriesForCreateAndEdit({
     /** Get the categories */
     db.category.findMany({
       where: { organizationId, id: { not: categorySelected } },
-      take: getAllEntries.includes("category") ? undefined : 6,
+      take: getAllEntries.includes("category") ? undefined : 12,
     }),
     db.category.findMany({ where: { organizationId, id: categorySelected } }),
     db.category.count({ where: { organizationId } }),
@@ -1049,7 +1049,7 @@ export async function getAllEntriesForCreateAndEdit({
     /** Get the locations */
     db.location.findMany({
       where: { organizationId, id: { not: locationSelected } },
-      take: getAllEntries.includes("location") ? undefined : 6,
+      take: getAllEntries.includes("location") ? undefined : 12,
     }),
     db.location.findMany({ where: { organizationId, id: locationSelected } }),
     db.location.count({ where: { organizationId } }),
@@ -1120,7 +1120,7 @@ export const getPaginatedAndFilterableAssets = async ({
   ] = await db.$transaction([
     db.category.findMany({
       where: { organizationId, id: { notIn: categoriesIds } },
-      take: getAllEntries.includes("category") ? undefined : 6,
+      take: getAllEntries.includes("category") ? undefined : 12,
     }),
     db.category.findMany({
       where: { organizationId, id: { in: categoriesIds } },
@@ -1128,7 +1128,7 @@ export const getPaginatedAndFilterableAssets = async ({
     db.category.count({ where: { organizationId } }),
     db.tag.findMany({
       where: { organizationId, id: { notIn: tagsIds } },
-      take: getAllEntries.includes("tag") ? undefined : 6,
+      take: getAllEntries.includes("tag") ? undefined : 12,
     }),
     db.tag.findMany({
       where: { organizationId, id: { in: tagsIds } },
