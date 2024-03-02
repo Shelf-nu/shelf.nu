@@ -1,7 +1,9 @@
 import { cloneElement } from "react";
+import { ChevronDownIcon } from "@radix-ui/react-icons";
+import { useNavigation } from "@remix-run/react";
 import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
 import { useModelFilters } from "~/hooks";
-import { tw } from "~/utils";
+import { isFormProcessing, tw } from "~/utils";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons";
 import { Button } from "../shared";
@@ -11,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "../shared/dropdown";
 import type { Icon } from "../shared/icons-map";
+import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
 type Props = ModelFilterProps & {
@@ -38,6 +41,9 @@ export default function DynamicDropdown({
   showSearch = true,
   renderItem,
 }: Props) {
+  const navigation = useNavigation();
+  const isSearching = isFormProcessing(navigation.state);
+
   const {
     selectedItems,
     searchQuery,
@@ -92,10 +98,6 @@ export default function DynamicDropdown({
             </Button>
           </When>
         </div>
-
-        <button type="button" className="px-3 py-2" onClick={getAllEntries}>
-          Fetch all
-        </button>
 
         <When truthy={showSearch}>
           <div className="filters-form relative border-y border-y-gray-200 p-3">
@@ -179,6 +181,23 @@ export default function DynamicDropdown({
               </label>
             );
           })}
+
+          {items.length < totalItems && (
+            <button
+              disabled={isSearching}
+              onClick={getAllEntries}
+              className="flex w-full cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+            >
+              Show all
+              <span>
+                {isSearching ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <ChevronDownIcon className="size-4" />
+                )}
+              </span>
+            </button>
+          )}
         </div>
         <When truthy={totalItems > 6}>
           <div className="border-t p-3 text-gray-500">
