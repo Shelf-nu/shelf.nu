@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -46,6 +46,7 @@ export default function DynamicSelect({
   disabled,
   placeholder = `Select ${model.name}`,
 }: Props) {
+  const triggerRef = useRef<HTMLDivElement>(null);
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
@@ -80,7 +81,10 @@ export default function DynamicSelect({
 
       <Popover>
         <PopoverTrigger disabled={disabled} asChild>
-          <div className="flex items-center justify-between rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50">
+          <div
+            ref={triggerRef}
+            className="flex items-center justify-between rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
+          >
             {items.find((i) => i.id === selectedValue)?.name ?? placeholder}
             <ChevronDownIcon />
           </div>
@@ -88,11 +92,15 @@ export default function DynamicSelect({
 
         <PopoverContent
           className={tw(
-            "z-[100] overflow-y-auto rounded-md border border-gray-300 bg-white md:w-80",
+            "z-[100] overflow-y-auto rounded-md border border-gray-300 bg-white",
             className
           )}
-          style={style}
-          align="start"
+          style={{
+            ...style,
+            width: triggerRef?.current?.clientWidth,
+          }}
+          align="center"
+          sideOffset={5}
         >
           <div className="flex items-center justify-between p-3">
             <div className="text-xs font-semibold text-gray-700">{label}</div>
