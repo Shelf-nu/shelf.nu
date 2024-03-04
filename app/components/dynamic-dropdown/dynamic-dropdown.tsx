@@ -4,6 +4,7 @@ import { useNavigation } from "@remix-run/react";
 import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
 import { useModelFilters } from "~/hooks";
 import { isFormProcessing, tw } from "~/utils";
+import { EmptyState } from "./empty-state";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons";
 import { Button } from "../shared";
@@ -128,6 +129,9 @@ export default function DynamicDropdown({
         </When>
 
         <div className="max-h-[320px] divide-y overflow-y-auto">
+          {searchQuery !== "" && items.length === 0 && (
+            <EmptyState searchQuery={searchQuery} modelName={model.name} />
+          )}
           {items.map((item) => {
             const checked = selectedItems.includes(item.id);
             if (typeof renderItem === "function") {
@@ -182,7 +186,7 @@ export default function DynamicDropdown({
             );
           })}
 
-          {items.length < totalItems && (
+          {items.length < totalItems && searchQuery === "" && (
             <button
               disabled={isSearching}
               onClick={getAllEntries}

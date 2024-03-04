@@ -9,6 +9,7 @@ import { useNavigation } from "@remix-run/react";
 import { useModelFilters } from "~/hooks";
 import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
 import { isFormProcessing, tw } from "~/utils";
+import { EmptyState } from "../dynamic-dropdown/empty-state";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons";
 import { Button } from "../shared";
@@ -148,6 +149,9 @@ export default function DynamicSelect({
           </When>
 
           <div className="max-h-[320px] divide-y overflow-y-auto">
+            {searchQuery !== "" && items.length === 0 && (
+              <EmptyState searchQuery={searchQuery} modelName={model.name} />
+            )}
             {items.map((item) => (
               <div
                 key={item.id}
@@ -176,7 +180,7 @@ export default function DynamicSelect({
               </div>
             ))}
 
-            {items.length < totalItems && (
+            {items.length < totalItems && searchQuery === "" && (
               <button
                 disabled={isSearching}
                 onClick={getAllEntries}
