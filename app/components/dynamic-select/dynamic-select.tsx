@@ -9,13 +9,13 @@ import { useNavigation } from "@remix-run/react";
 import { useModelFilters } from "~/hooks";
 import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
 import { isFormProcessing, tw } from "~/utils";
+import { EmptyState } from "../dynamic-dropdown/empty-state";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons";
 import { Button } from "../shared";
 import type { Icon } from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
-import { EmptyState } from "../dynamic-dropdown/empty-state";
 
 type Props = ModelFilterProps & {
   className?: string;
