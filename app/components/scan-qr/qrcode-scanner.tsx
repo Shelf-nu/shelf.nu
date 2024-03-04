@@ -35,97 +35,108 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
   const navigate = useNavigate();
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState("");
+  const [currentStream, setCurrentStream] = useState<MediaStream | undefined>();
 
-  const decodeQRCodes = useCallback(() => {
-    const codeReader = new BrowserMultiFormatReader();
-    const hints = new Map<DecodeHintType, any>();
-    hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
-    hints.set(DecodeHintType.TRY_HARDER, true);
-    codeReader.hints = hints;
+  // const decodeQRCodes = useCallback(() => {
+  //   const codeReader = new BrowserMultiFormatReader();
+  //   const hints = new Map<DecodeHintType, any>();
+  //   hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE]);
+  //   hints.set(DecodeHintType.TRY_HARDER, true);
+  //   codeReader.hints = hints;
 
-    if (videoRef.current) {
-      codeReader.decodeFromVideoDevice(null, videoRef.current, (result) => {
-        if (result) {
-          const scannedData = result.getText();
+  //   if (videoRef.current) {
+  //
 
-          if (scannedData != null) {
-            // Check if the new scanned data is same as the last one
-            if (lastScannedData.current !== scannedData) {
-              lastScannedData.current = scannedData; // Update the lastScannedData
+  //     codeReader.decodeFromVideoDevice(null, videoRef.current, (result) => {
+  //       if (result) {
+  //         const scannedData = result.getText();
 
-              const regex =
-                /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
-              const match = scannedData.match(regex);
+  //         if (scannedData != null) {
+  //           // Check if the new scanned data is same as the last one
+  //           if (lastScannedData.current !== scannedData) {
+  //             lastScannedData.current = scannedData; // Update the lastScannedData
 
-              if (match) {
-                // stopMediaStream();
-                const qrId = match[4]; // Get the last segment of the URL as the QR id
+  //             const regex =
+  //               /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
+  //             const match = scannedData.match(regex);
 
-                setScanCompleted(true); // Set the scanCompleted state to true
-                // window.location.href = scannedData;
+  //             if (match) {
+  //               // stopMediaStream();
+  //               const qrId = match[4]; // Get the last segment of the URL as the QR id
 
-                navigate(`/qr/${qrId}`);
-              } else {
-                sendNotification({
-                  title: "QR Code Not Valid",
-                  message: "Please Scan valid asset QR",
-                  icon: { name: "trash", variant: "error" },
-                });
-              }
-            }
-          }
-        }
-      });
+  //               setScanCompleted(true); // Set the scanCompleted state to true
+  //               // window.location.href = scannedData;
+
+  //               navigate(`/qr/${qrId}`);
+  //             } else {
+  //               sendNotification({
+  //                 title: "QR Code Not Valid",
+  //                 message: "Please Scan valid asset QR",
+  //                 icon: { name: "trash", variant: "error" },
+  //               });
+  //             }
+  //           }
+  //         }
+  //       }
+  //     });
+  //   }
+  // }, [navigate, sendNotification]);
+
+  const startVideoStream = async (stream: MediaStream) => {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+
+    const videoDevices = devices.filter(
+      (device) => device.kind === "videoinput"
+    );
+    setDevices(videoDevices);
+    if (videoRef.current && stream) {
+      videoRef.current.muted = true;
+      videoRef.current.volume = 0;
+      videoRef.current.setAttribute("playsinline", "playsinline");
+      videoRef.current.srcObject = stream;
+      // videoRef.current
+      //   .play()
+      //   .then(() => console.log("playing"))
+      //   .catch((err) => console.log(err));
+      // decodeQRCodes();
     }
-  }, [navigate, sendNotification]);
+  };
 
-  const startVideoStream = useCallback(
-    async (stream: MediaStream) => {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(
-        (device) => device.kind === "videoinput"
-      );
-      setDevices(videoDevices);
-      if (videoRef.current && stream) {
-        videoRef.current.muted = true;
-        videoRef.current.volume = 0;
-        videoRef.current.setAttribute("playsinline", "playsinline");
-        videoRef.current.srcObject = stream;
-        // videoRef.current
-        //   .play()
-        //   .then(() => console.log("playing"))
-        //   .catch((err) => console.log(err));
-        decodeQRCodes();
-      }
-    },
-    [decodeQRCodes]
-  );
+  const closeVideoStream = () => {
+    currentStream?.getTracks().forEach((track) => track.stop());
+  };
+
   const changeUserMedia = async (deviceId: string) => {
     try {
+      closeVideoStream();
       setSelectedDevice(deviceId);
       const constraints = { video: { deviceId: { exact: deviceId } } };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      startVideoStream(stream);
+      setCurrentStream(stream);
+      await startVideoStream(stream);
+    } catch (err) {
+      console.error("Error accessing media devices.", err);
+    }
+  };
+
+  const getMediaDevices = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: true,
+      });
+      setCurrentStream(stream);
+      await setPreferredDeviceAsSelected();
+      await startVideoStream(stream);
     } catch (err) {
       console.error("Error accessing media devices.", err);
     }
   };
 
   useEffect(() => {
-    const getMediaDevices = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: true,
-        });
-        setPreferredDeviceAsSelected();
-        startVideoStream(stream);
-      } catch (err) {
-        console.error("Error accessing media devices.", err);
-      }
-    };
-
-    getMediaDevices();
+    if (!currentStream) {
+      getMediaDevices();
+    }
   }, []);
 
   const setPreferredDeviceAsSelected = async () => {
@@ -235,13 +246,15 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
       {!scanCompleted && (
         <div className="relative">
           <video ref={videoRef} width="100%" height="720px" autoPlay={true} />
+          {selectedDevice}
+          {currentStream ? JSON.stringify(currentStream) : null}
           <select
             name="devices"
             onChange={(e) => {
               changeUserMedia(e.currentTarget.value);
             }}
+            defaultValue={selectedDevice}
           >
-            <option value="">select</option>
             {devices.map((device) => (
               <option
                 key={device.deviceId}
@@ -254,7 +267,10 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
           </select>
           <button
             className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-full bg-red-500 text-white"
-            onClick={onClose}
+            onClick={() => {
+              closeVideoStream();
+              onClose();
+            }}
             title="Close Scanner"
           >
             <XIcon />
