@@ -73,6 +73,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     subscription = getCustomerActiveSubscription({ customer });
   }
 
+  /** This checks if the perPage value in the user-prefs cookie exists. If it doesnt it sets it to the default value of 20 */
   const cookie = await initializePerPageCookieOnLayout(request);
 
   if (!user?.onboarded) {
