@@ -1,17 +1,19 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import { useNavigation } from "@remix-run/react";
 import { useModelFilters } from "~/hooks";
 import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
-import { tw } from "~/utils";
+import { isFormProcessing, tw } from "~/utils";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons";
 import { Button } from "../shared";
 import type { Icon } from "../shared/icons-map";
+import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
 type Props = ModelFilterProps & {
@@ -44,6 +46,10 @@ export default function DynamicSelect({
   disabled,
   placeholder = `Select ${model.name}`,
 }: Props) {
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const navigation = useNavigation();
+  const isSearching = isFormProcessing(navigation.state);
+
   const [selectedValue, setSelectedValue] = useState<string | undefined>(
     defaultValue
   );
@@ -57,6 +63,7 @@ export default function DynamicSelect({
     selectedItems,
     resetModelFiltersFetcher,
     handleSelectItemChange,
+    getAllEntries,
   } = useModelFilters({
     model,
     countKey,
@@ -74,7 +81,10 @@ export default function DynamicSelect({
 
       <Popover>
         <PopoverTrigger disabled={disabled} asChild>
-          <div className="flex items-center justify-between rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50">
+          <div
+            ref={triggerRef}
+            className="flex items-center justify-between rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
+          >
             {items.find((i) => i.id === selectedValue)?.name ?? placeholder}
             <ChevronDownIcon />
           </div>
@@ -82,11 +92,15 @@ export default function DynamicSelect({
 
         <PopoverContent
           className={tw(
-            "z-[100] overflow-y-auto rounded-md border border-gray-300 bg-white md:w-80",
+            "z-[100] overflow-y-auto rounded-md border border-gray-300 bg-white",
             className
           )}
-          style={style}
-          align="start"
+          style={{
+            ...style,
+            width: triggerRef?.current?.clientWidth,
+          }}
+          align="center"
+          sideOffset={5}
         >
           <div className="flex items-center justify-between p-3">
             <div className="text-xs font-semibold text-gray-700">{label}</div>
@@ -161,6 +175,23 @@ export default function DynamicSelect({
                 </When>
               </div>
             ))}
+
+            {items.length < totalItems && (
+              <button
+                disabled={isSearching}
+                onClick={getAllEntries}
+                className=" flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-gray-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+              >
+                Show all
+                <span>
+                  {isSearching ? (
+                    <Spinner className="size-4" />
+                  ) : (
+                    <ChevronDownIcon className="size-4" />
+                  )}
+                </span>
+              </button>
+            )}
           </div>
 
           <When truthy={totalItems > 6}>

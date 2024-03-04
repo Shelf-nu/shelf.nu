@@ -27,6 +27,8 @@ export type ModelFilterProps = {
   selectionMode?: "append" | "set" | "none";
 };
 
+const GET_ALL_KEY = "getAll";
+
 export function useModelFilters({
   defaultValues,
   model,
@@ -133,6 +135,23 @@ export function useModelFilters({
     }
   };
 
+  function getAllEntries() {
+    const value = model.name;
+
+    /** Remove in case if the value already exists */
+    if (searchParams.has(GET_ALL_KEY, value)) {
+      setSearchParams((prev) => {
+        prev.delete(GET_ALL_KEY, value);
+        return prev;
+      });
+    } else {
+      setSearchParams((prev) => {
+        prev.append(GET_ALL_KEY, value);
+        return prev;
+      });
+    }
+  }
+
   return {
     searchQuery,
     setSearchQuery,
@@ -143,5 +162,6 @@ export function useModelFilters({
     handleSearchQueryChange,
     resetModelFiltersFetcher,
     clearFilters,
+    getAllEntries,
   };
 }
