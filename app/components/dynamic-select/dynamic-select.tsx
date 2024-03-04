@@ -15,6 +15,7 @@ import { Button } from "../shared";
 import type { Icon } from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
+import { EmptyState } from "../dynamic-dropdown/empty-state";
 
 type Props = ModelFilterProps & {
   className?: string;
@@ -148,6 +149,9 @@ export default function DynamicSelect({
           </When>
 
           <div className="max-h-[320px] divide-y overflow-y-auto">
+            {searchQuery !== "" && items.length === 0 && (
+              <EmptyState searchQuery={searchQuery} modelName={model.name} />
+            )}
             {items.map((item) => (
               <div
                 key={item.id}
@@ -176,7 +180,7 @@ export default function DynamicSelect({
               </div>
             ))}
 
-            {items.length < totalItems && (
+            {items.length < totalItems && searchQuery === "" && (
               <button
                 disabled={isSearching}
                 onClick={getAllEntries}

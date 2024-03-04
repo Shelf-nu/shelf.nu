@@ -387,7 +387,7 @@ export function SearchIcon(props: SVGProps<SVGSVGElement>) {
     >
       <path
         d="m16.5 16.5-3.625-3.625m1.958-4.708a6.667 6.667 0 1 1-13.333 0 6.667 6.667 0 0 1 13.333 0Z"
-        stroke="#344054"
+        stroke="currentColor"
         strokeWidth={1.667}
         strokeLinecap="round"
         strokeLinejoin="round"
