@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  type Asset,
-  type Booking,
-  type Category,
-  type Custody,
-} from "@prisma/client";
+import type { Asset, Booking, Category, Custody } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,

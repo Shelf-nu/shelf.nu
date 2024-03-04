@@ -1,6 +1,8 @@
-// import type { Asset } from "@prisma/client";
-
 import type { Custody, Prisma } from "@prisma/client";
+import {
+  assetStatusColorMap,
+  userFriendlyAssetStatus,
+} from "~/components/assets/asset-status-badge";
 import { db } from "~/database";
 import type { TeamMemberWithUser } from "~/modules/team-member/types";
 import { defaultUserCategories } from "~/modules/user";
@@ -275,35 +277,33 @@ export async function getMostScannedAssetsCategories({
  * Assets grouped per status
  */
 export async function groupAssetsByStatus({ assets }: { assets: Asset[] }) {
-  const assetsByStatus: Record<string, { status: string; assets: Asset[] }> =
-    {};
+  const assetsByStatus: Record<
+    string,
+    { status: string; assets: Asset[]; color: string }
+  > = {};
 
   for (let asset of assets) {
     let status = asset.status;
     if (!assetsByStatus[status]) {
       assetsByStatus[status] = {
-        status,
+        status: userFriendlyAssetStatus(status),
         assets: [],
+        color: assetStatusColorMap(status),
       };
     }
     assetsByStatus[status].assets.push(asset);
   }
 
   const assetsByStatusArray = Object.values(assetsByStatus);
-  const FORMAT_STATUS: { [key: string]: string } = {
-    AVAILABLE: "Available",
-    IN_CUSTODY: "In Custody",
-  };
 
   const chartData = assetsByStatusArray.map((cd) => ({
-    status: FORMAT_STATUS[cd.status],
+    status: cd.status,
     assets: cd.assets.length,
+    color: cd.color,
   }));
+
   return {
     chartData,
-    availableAssets: chartData.find((obj) => obj.status == "Available")?.assets,
-    inCustodyAssets: chartData.find((obj) => obj.status == "In Custody")
-      ?.assets,
   };
 }
 

@@ -1,4 +1,5 @@
-import { AssetStatus, type Asset } from "@prisma/client";
+import type { Asset } from "@prisma/client";
+import { AssetStatus } from "@prisma/client";
 import { db } from "~/database";
 
 export const releaseCustody = async ({ assetId }: { assetId: Asset["id"] }) => {

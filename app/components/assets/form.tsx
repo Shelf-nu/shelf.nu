@@ -13,19 +13,18 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing, tw } from "~/utils";
 
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
-
-import { CategorySelect } from "../category/category-select";
+import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
-import { LocationSelect } from "../location/location-select";
 import { Button } from "../shared";
 import { Card } from "../shared/card";
+import { Image } from "../shared/image";
 import { Spinner } from "../shared/spinner";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
 
@@ -64,6 +63,7 @@ interface Props {
 export const AssetForm = ({
   title,
   category,
+  location,
   description,
   valuation,
   qrId,
@@ -113,13 +113,14 @@ export const AssetForm = ({
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
       >
+        {qrId ? (
+          <input type="hidden" name={zo.fields.qrId()} value={qrId} />
+        ) : null}
         <div className=" border-b pb-5">
           <h2 className="mb-1 text-[18px] font-semibold">Basic fields</h2>
           <p>Basic information about your asset.</p>
         </div>
-        {qrId ? (
-          <input type="hidden" name={zo.fields.qrId()} value={qrId} />
-        ) : null}
+
         <FormRow
           rowLabel={"Name"}
           className="border-b-0 pb-[10px]"
@@ -164,8 +165,37 @@ export const AssetForm = ({
           </div>
         </FormRow>
 
+        <div>
+          <FormRow
+            rowLabel={"Description"}
+            subHeading={
+              <p>
+                This is the initial object description. It will be shown on the
+                asset’s overview page. You can always change it. Maximum 1000
+                characters.
+              </p>
+            }
+            className="border-b-0"
+            required={zodFieldIsRequired(FormSchema.shape.description)}
+          >
+            <Input
+              inputType="textarea"
+              maxLength={1000}
+              label={zo.fields.description()}
+              name={zo.fields.description()}
+              defaultValue={description || ""}
+              hideLabel
+              placeholder="Add a description for your asset."
+              disabled={disabled}
+              data-test-id="assetDescription"
+              className="w-full"
+              required={zodFieldIsRequired(FormSchema.shape.description)}
+            />
+          </FormRow>
+        </div>
+
         <FormRow
-          rowLabel={"Category"}
+          rowLabel="Category"
           subHeading={
             <p>
               Make it unique. Each asset can have 1 category. It will show on
@@ -175,11 +205,28 @@ export const AssetForm = ({
           className="border-b-0 pb-[10px]"
           required={zodFieldIsRequired(FormSchema.shape.category)}
         >
-          <CategorySelect defaultValue={category || "uncategorized"} />
+          <DynamicSelect
+            disabled={disabled}
+            defaultValue={category ?? undefined}
+            model={{ name: "category", key: "name" }}
+            label="Categories"
+            initialDataKey="categories"
+            countKey="totalCategories"
+            extraContent={
+              <Button
+                to="/categories/new"
+                variant="link"
+                icon="plus"
+                className="w-full justify-start pt-4"
+              >
+                Create new category
+              </Button>
+            }
+          />
         </FormRow>
 
         <FormRow
-          rowLabel={"Tags"}
+          rowLabel="Tags"
           subHeading={
             <p>
               Tags can help you organise your database. They can be combined.{" "}
@@ -191,11 +238,11 @@ export const AssetForm = ({
           className="border-b-0 py-[10px]"
           required={zodFieldIsRequired(FormSchema.shape.tags)}
         >
-          <TagsAutocomplete existingTags={tags || []} />
+          <TagsAutocomplete existingTags={tags ?? []} />
         </FormRow>
 
         <FormRow
-          rowLabel={"Location"}
+          rowLabel="Location"
           subHeading={
             <p>
               A location is a place where an item is supposed to be located.
@@ -208,7 +255,43 @@ export const AssetForm = ({
           className="border-b-0 py-[10px]"
           required={zodFieldIsRequired(FormSchema.shape.newLocationId)}
         >
-          <LocationSelect />
+          <input
+            type="hidden"
+            name="currentLocationId"
+            value={location || ""}
+          />
+          <DynamicSelect
+            disabled={disabled}
+            fieldName="newLocationId"
+            defaultValue={location || undefined}
+            model={{ name: "location", key: "name" }}
+            label="Locations"
+            initialDataKey="locations"
+            countKey="totalLocations"
+            extraContent={
+              <Button
+                to="/locations/new"
+                variant="link"
+                icon="plus"
+                className="w-full justify-start pt-4"
+              >
+                Create new location
+              </Button>
+            }
+            renderItem={({ name, metadata }) => (
+              <div className="flex items-center gap-2">
+                <Image
+                  imageId={metadata.imageId}
+                  alt="img"
+                  className={tw(
+                    "size-6 rounded-[2px] object-cover",
+                    metadata.description ? "rounded-b-none border-b-0" : ""
+                  )}
+                />
+                <div>{name}</div>
+              </div>
+            )}
+          />
         </FormRow>
 
         <FormRow
@@ -242,35 +325,6 @@ export const AssetForm = ({
             </span>
           </div>
         </FormRow>
-
-        <div>
-          <FormRow
-            rowLabel={"Description"}
-            subHeading={
-              <p>
-                This is the initial object description. It will be shown on the
-                asset’s overview page. You can always change it. Maximum 1000
-                characters.
-              </p>
-            }
-            className="border-b-0"
-            required={zodFieldIsRequired(FormSchema.shape.description)}
-          >
-            <Input
-              inputType="textarea"
-              maxLength={1000}
-              label={zo.fields.description()}
-              name={zo.fields.description()}
-              defaultValue={description || ""}
-              hideLabel
-              placeholder="Add a description for your asset."
-              disabled={disabled}
-              data-test-id="assetDescription"
-              className="w-full"
-              required={zodFieldIsRequired(FormSchema.shape.description)}
-            />
-          </FormRow>
-        </div>
 
         <AssetCustomFields zo={zo} schema={FormSchema} />
 

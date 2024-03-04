@@ -61,8 +61,7 @@ export default function CustodianSelect(
         <SelectTrigger
           className={tw(
             disabled ? "cursor-not-allowed" : "",
-            "custodian-selector",
-            "text-left",
+            "custodian-selector text-left",
             className
           )}
         >
@@ -87,9 +86,10 @@ export default function CustodianSelect(
                       name: member.name,
                       userId: member?.userId,
                     })}`}
+                    className="py-3"
                   >
                     {member.user ? (
-                      <div className="flex items-center gap-3 truncate py-3.5 pr-1">
+                      <div className="flex items-center gap-3 truncate pr-1">
                         <img
                           src={
                             member.user.profilePicture ||
@@ -108,7 +108,7 @@ export default function CustodianSelect(
                         ) : null}
                       </div>
                     ) : (
-                      <div className="flex items-center gap-3 py-3.5">
+                      <div className="flex items-center gap-3">
                         <i>
                           <UserIcon />
                         </i>

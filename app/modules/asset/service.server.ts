@@ -9,13 +9,13 @@ import type {
   Tag,
   Organization,
   TeamMember,
-  CustomField,
   Booking,
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
-import { type LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import { getSupabaseAdmin } from "~/integrations/supabase";
+import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import {
   dateTimeInUnix,
   getCurrentSearchParams,
@@ -29,13 +29,15 @@ import {
 } from "~/utils/custom-fields";
 import { ShelfStackError, handleUniqueConstraintError } from "~/utils/error";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+
 import type {
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
-import { createCategoriesIfNotExists, getAllCategories } from "../category";
+import { createCategoriesIfNotExists } from "../category";
+
 import {
   createCustomFieldsIfNotExists,
   upsertCustomField,
@@ -43,7 +45,7 @@ import {
 import type { CustomFieldDraftPayload } from "../custom-field/types";
 import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
-import { createTagsIfNotExists, getAllTags } from "../tag";
+import { createTagsIfNotExists } from "../tag";
 import { createTeamMemberIfNotExists } from "../team-member";
 
 export async function getAsset({
@@ -118,6 +120,7 @@ export async function getAssetsFromView({
   search,
   categoriesIds,
   tagsIds,
+  status,
   bookingFrom,
   bookingTo,
   hideUnavailable,
@@ -135,6 +138,7 @@ export async function getAssetsFromView({
 
   categoriesIds?: Category["id"][] | null;
   tagsIds?: Tag["id"][] | null;
+  status?: Asset["status"] | null;
   hideUnavailable?: Asset["availableToBook"];
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
@@ -158,6 +162,10 @@ export async function getAssetsFromView({
     where.searchVector = {
       search: words,
     };
+  }
+
+  if (status && where.asset) {
+    where.asset.status = status;
   }
 
   if (categoriesIds && categoriesIds.length > 0 && where.asset) {
@@ -309,6 +317,7 @@ export async function getAssets({
   search,
   categoriesIds,
   tagsIds,
+  status,
   bookingFrom,
   bookingTo,
   hideUnavailable,
@@ -326,6 +335,7 @@ export async function getAssets({
 
   categoriesIds?: Category["id"][] | null;
   tagsIds?: Tag["id"][] | null;
+  status?: Asset["status"] | null;
   hideUnavailable?: Asset["availableToBook"];
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
@@ -343,6 +353,10 @@ export async function getAssets({
       contains: search.toLowerCase().trim(),
       mode: "insensitive",
     };
+  }
+
+  if (status) {
+    where.status = status;
   }
 
   if (categoriesIds && categoriesIds.length > 0) {
@@ -991,34 +1005,70 @@ export async function duplicateAsset({
   return duplicatedAssets;
 }
 
-/** Fetches all related entries required for creating a new asset */
-export async function getAllRelatedEntries({
+export async function getAllEntriesForCreateAndEdit({
   organizationId,
+  request,
+  defaults,
 }: {
-  userId: User["id"];
   organizationId: Organization["id"];
-}): Promise<{
-  categories: Category[];
-  tags: Tag[];
-  locations: Location[];
-  customFields: CustomField[];
-}> {
-  const [categories, tags, locations, customFields] = await db.$transaction([
+  request: LoaderFunctionArgs["request"];
+  defaults?: {
+    category?: string | null;
+    tag?: string | null;
+    location?: string | null;
+  };
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const categorySelected =
+    searchParams.get("category") ?? defaults?.category ?? "";
+  const locationSelected =
+    searchParams.get("location") ?? defaults?.location ?? "";
+
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
+  const [
+    categoryExcludedSelected,
+    selectedCategories,
+    totalCategories,
+    tags,
+    locationExcludedSelected,
+    selectedLocation,
+    totalLocations,
+    customFields,
+  ] = await db.$transaction([
     /** Get the categories */
-    db.category.findMany({ where: { organizationId } }),
+    db.category.findMany({
+      where: { organizationId, id: { not: categorySelected } },
+      take: getAllEntries.includes("category") ? undefined : 12,
+    }),
+    db.category.findMany({ where: { organizationId, id: categorySelected } }),
+    db.category.count({ where: { organizationId } }),
 
     /** Get the tags */
     db.tag.findMany({ where: { organizationId } }),
 
     /** Get the locations */
-    db.location.findMany({ where: { organizationId } }),
+    db.location.findMany({
+      where: { organizationId, id: { not: locationSelected } },
+      take: getAllEntries.includes("location") ? undefined : 12,
+    }),
+    db.location.findMany({ where: { organizationId, id: locationSelected } }),
+    db.location.count({ where: { organizationId } }),
 
     /** Get the custom fields */
     db.customField.findMany({
       where: { organizationId, active: { equals: true } },
     }),
   ]);
-  return { categories, tags, locations, customFields };
+
+  return {
+    categories: [...selectedCategories, ...categoryExcludedSelected],
+    totalCategories,
+    tags,
+    locations: [...selectedLocation, ...locationExcludedSelected],
+    totalLocations,
+    customFields,
+  };
 }
 
 export const getPaginatedAndFilterableAssets = async ({
@@ -1051,9 +1101,41 @@ export const getPaginatedAndFilterableAssets = async ({
     hideUnavailable,
     unhideAssetsBookigIds,
   } = getParamsValues(searchParams);
+  const status =
+    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
+      ? null
+      : (searchParams.get("status") as AssetStatus | null);
+
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
+
+  const [
+    categoryExcludedSelected,
+    selectedCategories,
+    totalCategories,
+    tagsExcludedSelected,
+    selectedTags,
+    totalTags,
+  ] = await db.$transaction([
+    db.category.findMany({
+      where: { organizationId, id: { notIn: categoriesIds } },
+      take: getAllEntries.includes("category") ? undefined : 12,
+    }),
+    db.category.findMany({
+      where: { organizationId, id: { in: categoriesIds } },
+    }),
+    db.category.count({ where: { organizationId } }),
+    db.tag.findMany({
+      where: { organizationId, id: { notIn: tagsIds } },
+      take: getAllEntries.includes("tag") ? undefined : 12,
+    }),
+    db.tag.findMany({
+      where: { organizationId, id: { in: tagsIds } },
+    }),
+    db.tag.count({ where: { organizationId } }),
+  ]);
 
   let getFunction = getAssetsFromView;
   if (excludeSearchFromView) {
@@ -1067,6 +1149,7 @@ export const getPaginatedAndFilterableAssets = async ({
     search,
     categoriesIds,
     tagsIds,
+    status,
     bookingFrom,
     bookingTo,
     hideUnavailable,
@@ -1079,16 +1162,12 @@ export const getPaginatedAndFilterableAssets = async ({
     perPage,
     search,
     totalAssets,
+    totalCategories,
+    totalTags,
     categories: excludeCategoriesQuery
       ? []
-      : await getAllCategories({
-          organizationId,
-        }),
-    tags: excludeTagsQuery
-      ? []
-      : await getAllTags({
-          organizationId,
-        }),
+      : [...selectedCategories, ...categoryExcludedSelected],
+    tags: excludeTagsQuery ? [] : [...selectedTags, ...tagsExcludedSelected],
     assets,
     totalPages,
     cookie,

@@ -1,44 +1,38 @@
-import {
-  type Category,
-  type Asset,
-  type Tag,
-  type Custody,
-  OrganizationRoles,
-} from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import type { Category, Asset, Tag, Custody } from "@prisma/client";
+import { OrganizationRoles, AssetStatus } from "@prisma/client";
+import type {
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
+import { StatusFilter } from "~/components/booking/status-filter";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import {
-  clearCategoryFiltersAtom,
-  clearTagFiltersAtom,
-  selectedCategoriesAtom,
-  selectedTagsAtom,
-} from "~/components/list/filters/atoms";
-import { CategoryFilters } from "~/components/list/filters/category";
-import { TagFilters } from "~/components/list/filters/tag";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
+import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset";
 import { getOrganizationTierLimit } from "~/modules/tier";
+import assetCss from "~/styles/assets.css";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
@@ -74,6 +68,9 @@ export interface IndexResponse {
     plural: string;
   };
 }
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: assetCss },
+];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -133,6 +130,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     assets,
     totalPages,
     cookie,
+    totalCategories,
+    totalTags,
   } = await getPaginatedAndFilterableAssets({
     request,
     organizationId,
@@ -186,6 +185,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         title: "Search your asset database",
         text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
       },
+      totalCategories,
+      totalTags,
     },
     {
       headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
@@ -214,21 +215,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
+  const hasFiltersToClear = useSearchParamHasValue("category", "tag");
+  const clearFilters = useClearValueFromParams("category", "tag");
   const { canImportAssets } = useLoaderData<typeof loader>();
-  const selectedCategories = useAtomValue(selectedCategoriesAtom);
-  const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
-
-  const selectedTags = useAtomValue(selectedTagsAtom);
-  const [, clearTagFilters] = useAtom(clearTagFiltersAtom);
-
-  const hasFiltersToClear =
-    selectedCategories.items.length > 0 || selectedTags.items.length > 0;
-
-  const handleClearFilters = () => {
-    clearCategoryFilters();
-    clearTagFilters();
-  };
-
   const isSelfService = useUserIsSelfService();
 
   return (
@@ -250,23 +239,52 @@ export default function AssetIndexPage() {
         ) : null}
       </Header>
       <ListContentWrapper>
-        <Filters>
-          <div className="flex items-center justify-around gap-6 md:justify-end">
+        <Filters
+          slots={{
+            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          }}
+        >
+          <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
             {hasFiltersToClear ? (
               <div className="hidden gap-6 md:flex">
                 <Button
                   as="button"
-                  onClick={handleClearFilters}
+                  onClick={clearFilters}
                   variant="link"
                   className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+                  type="button"
                 >
                   Clear all filters
                 </Button>
                 <div className="text-gray-500"> | </div>
               </div>
             ) : null}
-            <CategoryFilters />
-            <TagFilters />
+
+            <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Categories{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "category", key: "name" }}
+                label="Filter by category"
+                initialDataKey="categories"
+                countKey="totalCategories"
+              />
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "tag", key: "name" }}
+                label="Filter by tags"
+                initialDataKey="tags"
+                countKey="totalTags"
+              />
+            </div>
           </div>
         </Filters>
         <List
@@ -402,7 +420,7 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   return tags && tags?.length > 0 ? (
     <div className="">
       {visibleTags?.map((tag) => (
-        <TagBadge key={tag.name} className="mr-2">
+        <TagBadge key={tag.id} className="mr-2">
           {tag.name}
         </TagBadge>
       ))}

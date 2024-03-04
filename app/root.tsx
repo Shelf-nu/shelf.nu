@@ -1,4 +1,4 @@
-import { type PropsWithChildren } from "react";
+import type { PropsWithChildren } from "react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,

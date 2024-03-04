@@ -92,7 +92,7 @@
   /* match the font styles */
   font-size: inherit;
   line-height: inherit;
-  min-width: 64px;
+  min-width: 74px;
 }
 .react-tags__combobox-input:focus {
   box-shadow: none;
@@ -121,7 +121,7 @@
 }
 
 .react-tags__listbox-option {
-  padding: 0.375rem 0.5rem;
+  @apply px-6 py-4 focus:bg-gray-100 hover:bg-gray-100 rounded-lg text-sm font-medium outline-none;
 }
 
 .react-tags__listbox-option:hover {

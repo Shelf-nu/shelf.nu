@@ -5,7 +5,6 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
@@ -462,16 +461,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       return null;
   }
 }
-
-export const shouldRevalidate: ShouldRevalidateFunction = ({
-  defaultShouldRevalidate,
-}) =>
-  /** Dont revalidate on add-assets route */
-  // const isAddAssetsRoute = nextUrl.pathname.includes("add-assets");
-  // if (isAddAssetsRoute) {
-  //   return false;
-  // }
-  defaultShouldRevalidate;
 
 export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);

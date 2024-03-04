@@ -363,7 +363,10 @@ function TooltipContent() {
       <p className="text-sm">
         Create a Team workspace to fully customize them and enjoy extra
         features. Check out{" "}
-        <Link className="font-bold text-primary-400" to="settings/subscription">
+        <Link
+          className="font-bold text-primary-400"
+          to="/settings/subscription"
+        >
           Subscriptions
         </Link>{" "}
         to learn more.

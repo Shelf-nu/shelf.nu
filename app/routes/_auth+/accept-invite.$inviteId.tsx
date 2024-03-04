@@ -1,5 +1,6 @@
 import { InviteStatuses } from "@prisma/client";
-import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import jwt from "jsonwebtoken";
 import { Spinner } from "~/components/shared/spinner";
 import { signInWithEmail } from "~/modules/auth";
@@ -9,23 +10,19 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import {
   INVITE_TOKEN_SECRET,
   error,
-  getCurrentSearchParams,
   safeRedirect,
 } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError, makeShelfError } from "~/utils/error";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  // if (context.isAuthenticated) return redirect("/assets");
   try {
-    // if (context.isAuthenticated) return redirect("/assets");
-    const searchParams = getCurrentSearchParams(request);
+    const searchParams = new URL(decodeURIComponent(request.url)).searchParams;
     const token = searchParams.get("token") as string;
 
     if (!token) {
-      // @TODO Solve error handling
-
       throw new ShelfStackError({
-        title: "No invite token provided",
         message:
           "The invitation link doesn't have a token provided. Please try clicking the link in your email again or request a new invite. If the issue persists, feel free to contact support",
       });
@@ -33,7 +30,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET) as {
       id: string;
     };
-
     const password = generateRandomCode(10);
     const updatedInvite = await updateInviteStatus({
       id: decodedInvite.id,
@@ -43,6 +39,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 
     if (updatedInvite?.status !== InviteStatuses.ACCEPTED) {
       // @TODO Solve error handling
+
       throw new ShelfStackError({
         message:
           "Something went wrong with updating your invite. Please try again",

@@ -4,7 +4,11 @@ import { Form, useNavigation } from "@remix-run/react";
 import { LocationMarkerIcon } from "~/components/icons";
 import { LocationSelect } from "~/components/location";
 import { Button } from "~/components/shared/button";
-import { getAllRelatedEntries, getAsset, updateAsset } from "~/modules/asset";
+import {
+  getAllEntriesForCreateAndEdit,
+  getAsset,
+  updateAsset,
+} from "~/modules/asset";
 import styles from "~/styles/layout/custom-modal.css";
 import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -25,9 +29,9 @@ export const loader = async ({
     action: PermissionAction.update,
   });
 
-  const { locations } = await getAllRelatedEntries({
-    userId,
+  const { locations } = await getAllEntriesForCreateAndEdit({
     organizationId,
+    request,
   });
 
   const id = getRequiredParam(params, "assetId");

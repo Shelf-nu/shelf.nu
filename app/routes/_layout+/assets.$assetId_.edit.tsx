@@ -15,7 +15,7 @@ import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
-  getAllRelatedEntries,
+  getAllEntriesForCreateAndEdit,
   getAsset,
   updateAsset,
   updateAssetMainImage,
@@ -46,12 +46,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
   const organization = await getOrganization({ id: organizationId });
 
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
-      organizationId,
-    });
-
   const id = getRequiredParam(params, "assetId");
 
   const asset = await getAsset({ organizationId, id });
@@ -59,6 +53,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // @TODO Solve error handling
     throw new ShelfStackError({ message: "Not Found", status: 404 });
   }
+
+  const {
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  } = await getAllEntriesForCreateAndEdit({
+    request,
+    organizationId,
+    defaults: {
+      category: asset.categoryId,
+      location: asset.locationId,
+    },
+  });
 
   const header: HeaderData = {
     title: `Edit | ${asset.title}`,
@@ -69,8 +79,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     asset,
     header,
     categories,
+    totalCategories,
     tags,
+    totalTags: tags.length,
     locations,
+    totalLocations,
     currency: organization?.currency,
     customFields,
   });
