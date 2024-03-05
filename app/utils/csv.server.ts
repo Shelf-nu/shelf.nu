@@ -21,9 +21,13 @@ export const parseCsv = (csvData: string) => {
       relax_quotes: true, // Allow quotes to be ignored if the character inside the quotes is not a quote
     })
       .on("data", (data) => {
+        // Remove quotes at the beginning and end of each column
+        const trimmedData = data.map((column: string) =>
+          column.replace(/^"(.*)"$/, "$1")
+        );
         // Process each row of data as it is parsed
         // @ts-ignore
-        results.push(data);
+        results.push(trimmedData);
       })
       .on("error", (error) => {
         reject(error);

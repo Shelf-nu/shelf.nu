@@ -1,4 +1,4 @@
-import { installGlobals } from "@remix-run/node";
+// import { installGlobals } from "@remix-run/node";
 import "@testing-library/jest-dom/extend-expect";
 import { server } from "mocks";
 
@@ -13,7 +13,7 @@ if (typeof window !== "undefined") {
   window.happyDOM.settings.enableFileSystemHttpRequests = true;
 }
 
-installGlobals();
+// installGlobals();
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
