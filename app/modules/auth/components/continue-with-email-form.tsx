@@ -13,8 +13,8 @@ export function ContinueWithEmailForm() {
   const isSuccessFull = state === "idle" && data != null && !data?.error;
   const isLoading = state === "submitting" || state === "loading";
   const buttonLabel = isLoading
-    ? "Sending you a link..."
-    : "Continue with Magic Link";
+    ? "Sending you a one time password..."
+    : "Continue with OTP";
 
   React.useEffect(() => {
     if (isSuccessFull) {

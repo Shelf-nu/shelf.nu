@@ -100,6 +100,7 @@ app.use(
       "/join",
       "/login",
       "/logout",
+      "/otp",
       "/oauth/callback",
       "/resend-email-confirmation",
       "/reset-password",

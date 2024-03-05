@@ -193,7 +193,7 @@ export default function Join() {
             </div>
             <div className="relative flex justify-center text-sm">
               <span className="bg-white px-2 text-gray-500">
-                {"Or use a Magic Link"}
+                {"Or use a One Time Password"}
               </span>
             </div>
           </div>

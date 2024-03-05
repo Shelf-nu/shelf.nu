@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 
@@ -48,5 +48,5 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  return json({ error: null });
+  return redirect(`/otp?email=${result.data.email}`);
 }
