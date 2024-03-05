@@ -14,7 +14,7 @@ import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import { isFormProcessing, tw } from "~/utils";
 import type { BookingFormData } from ".";
 import { ActionsDropdown } from "./actions-dropdown";
-import CustodianSelect from "../custody/custodian-select";
+import CustodianUserSelect from "../custody/custodian-user-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Button } from "../shared";
@@ -276,8 +276,8 @@ export function BookingForm({
                 <label className="mb-2.5 block font-medium text-gray-700">
                   <span className="required-input-label">Custodian</span>
                 </label>
-                <CustodianSelect
-                  defaultTeamMemberId={custodianUserId}
+                <CustodianUserSelect
+                  defaultUserId={custodianUserId}
                   disabled={inputFieldIsDisabled}
                   className={
                     isSelfService
