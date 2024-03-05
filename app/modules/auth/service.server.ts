@@ -162,3 +162,34 @@ export async function verifyAuthSession(authSession: AuthSession) {
 
   return Boolean(authAccount);
 }
+
+export async function verifyOtpAndSignin(email: string, otp: string) {
+  const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
+    email,
+    token: otp,
+    type: "email",
+  });
+
+  if (error) {
+    return { status: "error", message: error.message };
+  }
+  if (!data.session) {
+    return {
+      status: "error",
+      message: "Something went wrong, please try again!",
+    };
+  }
+
+  const mappedSession = await mapAuthSession(data.session);
+  if (!mappedSession) {
+    return {
+      status: "error",
+      message: "Something went wrong, please try again!",
+    };
+  }
+
+  return {
+    status: "success",
+    authSession: mappedSession,
+  };
+}

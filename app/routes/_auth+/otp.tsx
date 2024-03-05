@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -14,15 +12,21 @@ import {
 } from "@remix-run/react";
 import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
-
 import Input from "~/components/forms/input";
-import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { supabaseClient } from "~/integrations/supabase";
-
-import { refreshAccessToken, updateAccountPassword } from "~/modules/auth";
-import { assertIsPost, isFormProcessing, tw, validEmail } from "~/utils";
+import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import { getOrganizationByUserId } from "~/modules/organization";
+import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getUserByEmail, tryCreateUser } from "~/modules/user";
+import {
+  assertIsPost,
+  isFormProcessing,
+  randomUsernameFromEmail,
+  safeRedirect,
+  validEmail,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const title = "One time password";
@@ -43,13 +47,14 @@ const OtpSchema = z.object({
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
+  assertIsPost(request);
   const formData = await request.formData();
   const result = await OtpSchema.safeParseAsync(parseFormAny(formData));
 
   if (!result.success) {
     return json(
       {
-        message:
+        error:
           "Invalid request. Please try again. If the issue persists, contact support.",
       },
       { status: 400 }
@@ -58,13 +63,66 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
   const { email, otp } = result.data;
 
-  console.log("email", email);
-  console.log("otp", otp);
+  const otpVerifyResult = await verifyOtpAndSignin(email, otp);
+  if (otpVerifyResult.status === "error") {
+    return json({ error: otpVerifyResult.message }, { status: 400 });
+  }
 
-  // Commit the session and redirect
-  // context.setSession({ ...authSession });
-  // return redirect("/", {});
-  return null;
+  if (otpVerifyResult.status === "success" && otpVerifyResult.authSession) {
+    const { authSession } = otpVerifyResult;
+
+    // Case 1. If the user exists, then skip creation and just commit the session
+    if (await getUserByEmail(authSession.email)) {
+      const personalOrganization = await getOrganizationByUserId({
+        userId: authSession.userId,
+        orgType: "PERSONAL",
+      });
+
+      // Setting the auth session and redirecting user to assets page
+      context.setSession(authSession);
+
+      return redirect(safeRedirect("/assets"), {
+        headers: [
+          setCookie(
+            await setSelectedOrganizationIdCookie(personalOrganization.id)
+          ),
+        ],
+      });
+    }
+    // Case 2. First time sign in, let's create a brand-new User in supabase
+    else {
+      const username = randomUsernameFromEmail(authSession.email);
+
+      const user = await tryCreateUser({ ...authSession, username });
+      if (!user) {
+        return json(
+          {
+            error:
+              "We had trouble while creating your account. Please try again.",
+          },
+          { status: 500 }
+        );
+      }
+
+      const personalOrganization = user.organizations[0];
+      // setting the session
+      context.setSession(authSession);
+
+      return redirect(safeRedirect("/assets"), {
+        headers: [
+          setCookie(
+            await setSelectedOrganizationIdCookie(personalOrganization.id)
+          ),
+        ],
+      });
+    }
+  }
+
+  // handling unexpected scenarios
+  return json(
+    { error: "Something went wrong. Please try again later." },
+    { status: 500 }
+  );
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -72,6 +130,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function ResetPassword() {
+  const data = useActionData<typeof action>();
+
   const zo = useZorm("otpForm", OtpSchema);
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
@@ -81,21 +141,30 @@ export default function ResetPassword() {
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full max-w-md px-8">
         <Form ref={zo.ref} method="post" className="space-y-6">
-          <Input name="otp" label={"One time password"} />
+          <Input name="otp" label="Code" />
           <input
             type="hidden"
             name="email"
             value={searchParams.get("email") || ""}
           />
+          {data?.error && (
+            <div className="text-sm text-error-500">{data.error}</div>
+          )}
+
           <Button
-            data-test-id="change-password"
+            data-test-id="create-account"
             type="submit"
             className="w-full "
             disabled={disabled}
           >
-            Submit
+            Create Account
           </Button>
         </Form>
+
+        <button className="mt-6 w-full text-center text-sm font-semibold">
+          Did not receive a code?{" "}
+          <span className="text-primary-500">Send again</span>
+        </button>
       </div>
     </div>
   );
