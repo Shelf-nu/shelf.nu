@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -23,6 +24,7 @@ import {
   isFormProcessing,
   randomUsernameFromEmail,
   safeRedirect,
+  tw,
   validEmail,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -133,6 +135,10 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function ResetPassword() {
+  const [message, setMessage] = useState<{
+    message: string;
+    type: "success" | "error";
+  }>();
   const data = useActionData<typeof action>();
   const [searchParams] = useSearchParams();
 
@@ -143,6 +149,36 @@ export default function ResetPassword() {
   const email = searchParams.get("email") || "";
   const mode = searchParams.get("mode") as OtpVerifyMode;
   const pageData = getOtpPageData(mode);
+
+  async function handleResendOtp() {
+    const formData = new FormData();
+    formData.append("email", email);
+
+    try {
+      const response = await fetch("/resend-email-confirmation", {
+        method: "post",
+        body: formData,
+      });
+
+      if (response.status === 200) {
+        setMessage({
+          message: "Email send successfully. Please check your inbox.",
+          type: "success",
+        });
+      } else {
+        const data = await response.json();
+        setMessage({
+          message: data.error ?? "Something went wrong. Please try again!",
+          type: "error",
+        });
+      }
+    } catch {
+      setMessage({
+        message: "Something went wrong. Please try again.",
+        type: "error",
+      });
+    }
+  }
 
   return (
     <>
@@ -157,8 +193,23 @@ export default function ResetPassword() {
               name="email"
               value={searchParams.get("email") || ""}
             />
+
             {data?.error && (
-              <div className="text-sm text-error-500">{data.error}</div>
+              <p className="text-center text-sm text-error-500">
+                {data?.error}
+              </p>
+            )}
+            {message?.message && (
+              <p
+                className={tw(
+                  "text-center text-sm",
+                  message.type === "error"
+                    ? "text-error-500"
+                    : "text-success-500"
+                )}
+              >
+                {message.message}
+              </p>
             )}
 
             <Button
@@ -171,7 +222,10 @@ export default function ResetPassword() {
             </Button>
           </Form>
 
-          <button className="mt-6 w-full text-center text-sm font-semibold">
+          <button
+            className="mt-6 w-full text-center text-sm font-semibold"
+            onClick={handleResendOtp}
+          >
             Did not receive a code?{" "}
             <span className="text-primary-500">Send again</span>
           </button>
