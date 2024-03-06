@@ -28,7 +28,9 @@ export default function App() {
             </Link>
 
             <h1>{title}</h1>
-            <SubHeading className="max-w-md">{subHeading}</SubHeading>
+            {!subHeading && (
+              <SubHeading className="max-w-md">{subHeading}</SubHeading>
+            )}
           </div>
           <div className=" w-[360px]">
             <Outlet />

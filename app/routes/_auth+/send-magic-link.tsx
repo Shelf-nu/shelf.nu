@@ -25,6 +25,7 @@ export async function action({ request }: ActionFunctionArgs) {
         .refine(validEmail, () => ({
           message: "Please enter a valid email",
         })),
+      mode: z.enum(["login", "signup"]),
     })
     .safeParseAsync(parseFormAny(formData));
 
@@ -48,5 +49,5 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  return redirect(`/otp?email=${result.data.email}`);
+  return redirect(`/otp?email=${result.data.email}&mode=${result.data.mode}`);
 }

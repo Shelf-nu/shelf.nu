@@ -14,6 +14,7 @@ import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import SubHeading from "~/components/shared/sub-heading";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
 import { getOrganizationByUserId } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -28,12 +29,47 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 
-export async function loader({ context }: LoaderFunctionArgs) {
-  const title = "One time password";
-  const subHeading = "Enter your one time password";
+type OtpVerifyMode = "login" | "signup" | "confirm_signup";
+
+const MODE_TITLE_MAP: Record<OtpVerifyMode, string> = {
+  login: "Full your code",
+  signup: "Create an account",
+  confirm_signup: "Confirm your email",
+};
+
+const MODE_SUBHEADING_MAP: Record<
+  OtpVerifyMode,
+  React.FC<{ email: string }>
+> = {
+  login: ({ email }) => (
+    <SubHeading className="-mt-4 text-center">
+      We have sent a code to{" "}
+      <span className="font-bold text-gray-900">{email}</span>. Fill the code
+      below to log in.
+    </SubHeading>
+  ),
+  signup: () => (
+    <SubHeading className="-mt-4 text-center">
+      Start your journey with Shelf.
+    </SubHeading>
+  ),
+  confirm_signup: ({ email }) => (
+    <SubHeading className="-mt-4 text-center">
+      We have sent a code to{" "}
+      <span className="font-bold text-gray-900">{email}</span>. Fill the code
+      below to confirm you email.
+    </SubHeading>
+  ),
+};
+
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const { searchParams } = new URL(request.url);
+  const mode = searchParams.get("mode") as OtpVerifyMode;
+
+  const title = MODE_TITLE_MAP[mode] ?? "One time password";
   if (context.isAuthenticated) return redirect("/assets");
 
-  return json({ title, subHeading });
+  return json({ title });
 }
 
 const OtpSchema = z.object({
@@ -131,41 +167,50 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function ResetPassword() {
   const data = useActionData<typeof action>();
+  const [searchParams] = useSearchParams();
 
   const zo = useZorm("otpForm", OtpSchema);
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  const [searchParams] = useSearchParams();
+
+  const email = searchParams.get("email") || "";
+  const mode = searchParams.get("mode") as OtpVerifyMode;
+
+  const SubHeadingComponent = MODE_SUBHEADING_MAP[mode];
 
   return (
-    <div className="flex min-h-full flex-col justify-center">
-      <div className="mx-auto w-full max-w-md px-8">
-        <Form ref={zo.ref} method="post" className="space-y-6">
-          <Input name="otp" label="Code" />
-          <input
-            type="hidden"
-            name="email"
-            value={searchParams.get("email") || ""}
-          />
-          {data?.error && (
-            <div className="text-sm text-error-500">{data.error}</div>
-          )}
+    <>
+      {!!SubHeadingComponent && email && <SubHeadingComponent email={email} />}
 
-          <Button
-            data-test-id="create-account"
-            type="submit"
-            className="w-full "
-            disabled={disabled}
-          >
-            Create Account
-          </Button>
-        </Form>
+      <div className="mt-2 flex min-h-full flex-col justify-center">
+        <div className="mx-auto w-full max-w-md px-8">
+          <Form ref={zo.ref} method="post" className="space-y-6">
+            <Input name="otp" label="Code" required />
+            <input
+              type="hidden"
+              name="email"
+              value={searchParams.get("email") || ""}
+            />
+            {data?.error && (
+              <div className="text-sm text-error-500">{data.error}</div>
+            )}
 
-        <button className="mt-6 w-full text-center text-sm font-semibold">
-          Did not receive a code?{" "}
-          <span className="text-primary-500">Send again</span>
-        </button>
+            <Button
+              data-test-id="create-account"
+              type="submit"
+              className="w-full "
+              disabled={disabled}
+            >
+              Create Account
+            </Button>
+          </Form>
+
+          <button className="mt-6 w-full text-center text-sm font-semibold">
+            Did not receive a code?{" "}
+            <span className="text-primary-500">Send again</span>
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -100,7 +100,9 @@ export async function action({ request }: ActionFunctionArgs) {
     signUpResult.status === "Email verification_required"
   ) {
     // Redirect to the email verification page using Remix's redirect function
-    return redirect(`/verify-email?email=${encodeURIComponent(email)}`);
+    return redirect(
+      `/otp?email=${encodeURIComponent(email)}&mode=confirm_signup`
+    );
   }
 
   return json(
@@ -198,7 +200,7 @@ export default function Join() {
             </div>
           </div>
           <div className="mt-6">
-            <ContinueWithEmailForm />
+            <ContinueWithEmailForm mode="signup" />
           </div>
         </div>
         <div className="flex items-center justify-center pt-5">

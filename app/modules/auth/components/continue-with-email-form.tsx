@@ -5,7 +5,7 @@ import { Button } from "~/components/shared/button";
 
 import type { action } from "~/routes/_auth+/send-magic-link";
 
-export function ContinueWithEmailForm() {
+export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
   const sendMagicLink = useFetcher<typeof action>();
   const { data, state } = sendMagicLink;
 
@@ -16,6 +16,7 @@ export function ContinueWithEmailForm() {
 
   return (
     <sendMagicLink.Form method="post" action="/send-magic-link">
+      <input type="hidden" value={mode} />
       <Input
         label="Email"
         hideLabel={true}
