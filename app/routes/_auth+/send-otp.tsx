@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 
-import { sendMagicLink } from "~/modules/auth";
+import { sendOTP } from "~/modules/auth";
 import { validEmail } from "~/utils";
 import { assertIsPost } from "~/utils/http.server";
 
@@ -38,7 +38,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  const { error } = await sendMagicLink(result.data.email);
+  const { error } = await sendOTP(result.data.email);
 
   if (error) {
     return json(
@@ -49,5 +49,9 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  return redirect(`/otp?email=${result.data.email}&mode=${result.data.mode}`);
+  return redirect(
+    `/otp?email=${encodeURIComponent(result.data.email)}&mode=${
+      result.data.mode
+    }`
+  );
 }

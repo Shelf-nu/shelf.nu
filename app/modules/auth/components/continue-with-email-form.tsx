@@ -2,11 +2,11 @@ import { useFetcher } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
-import type { action } from "~/routes/_auth+/send-magic-link";
+import type { action } from "~/routes/_auth+/send-otp";
 
 export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
-  const sendMagicLink = useFetcher<typeof action>();
-  const { data, state } = sendMagicLink;
+  const sendOTP = useFetcher<typeof action>();
+  const { data, state } = sendOTP;
 
   const isLoading = state === "submitting" || state === "loading";
   const buttonLabel = isLoading
@@ -14,7 +14,7 @@ export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
     : "Continue with OTP";
 
   return (
-    <sendMagicLink.Form method="post" action="/send-magic-link">
+    <sendOTP.Form method="post" action="/send-otp">
       <input type="hidden" name="mode" value={mode} />
       <Input
         label="Email"
@@ -35,9 +35,10 @@ export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
         variant="secondary"
         className="mt-3"
         data-test-id="continueWithMagicLink"
+        title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email."
       >
         {buttonLabel}
       </Button>
-    </sendMagicLink.Form>
+    </sendOTP.Form>
   );
 }

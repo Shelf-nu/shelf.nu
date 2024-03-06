@@ -134,7 +134,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
-export default function ResetPassword() {
+export default function OtpPage() {
   const [message, setMessage] = useState<{
     message: string;
     type: "success" | "error";
@@ -155,7 +155,7 @@ export default function ResetPassword() {
     formData.append("email", email);
 
     try {
-      const response = await fetch("/resend-email-confirmation", {
+      const response = await fetch("/resend-otp", {
         method: "post",
         body: formData,
       });
@@ -187,7 +187,7 @@ export default function ResetPassword() {
       <div className="mt-2 flex min-h-full flex-col justify-center">
         <div className="mx-auto w-full max-w-md px-8">
           <Form ref={zo.ref} method="post" className="space-y-6">
-            <Input name="otp" label="Code" required />
+            <Input name="otp" label="Code" required placeholder="133734" />
             <input
               type="hidden"
               name="email"
