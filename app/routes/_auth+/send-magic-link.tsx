@@ -25,7 +25,7 @@ export async function action({ request }: ActionFunctionArgs) {
         .refine(validEmail, () => ({
           message: "Please enter a valid email",
         })),
-      mode: z.enum(["login", "signup"]),
+      mode: z.enum(["login", "signup", "confirm_signup"]).optional(),
     })
     .safeParseAsync(parseFormAny(formData));
 
