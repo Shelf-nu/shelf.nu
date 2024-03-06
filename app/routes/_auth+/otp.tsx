@@ -153,16 +153,17 @@ export default function OtpPage() {
   async function handleResendOtp() {
     const formData = new FormData();
     formData.append("email", email);
+    formData.append("mode", mode);
 
     try {
-      const response = await fetch("/resend-otp", {
+      const response = await fetch("/send-otp", {
         method: "post",
         body: formData,
       });
 
       if (response.status === 200) {
         setMessage({
-          message: "Email send successfully. Please check your inbox.",
+          message: "Email sent successfully. Please check your inbox.",
           type: "success",
         });
       } else {
