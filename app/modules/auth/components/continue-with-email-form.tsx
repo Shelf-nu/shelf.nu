@@ -1,4 +1,3 @@
-import React from "react";
 import { useFetcher } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -16,7 +15,7 @@ export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
 
   return (
     <sendMagicLink.Form method="post" action="/send-magic-link">
-      <input type="hidden" value={mode} />
+      <input type="hidden" name="mode" value={mode} />
       <Input
         label="Email"
         hideLabel={true}

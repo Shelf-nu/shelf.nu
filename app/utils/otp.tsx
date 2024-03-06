@@ -49,7 +49,9 @@ export const DEFAULT_PAGE_DATA: OtpPageData["login"] = {
   title: "One Time Password",
   buttonTitle: "Continue",
   SubHeading: () => (
-    <SubHeading>Please confirm your OTP to continue</SubHeading>
+    <SubHeading className="-mt-4 text-center">
+      Please confirm your OTP to continue
+    </SubHeading>
   ),
 };
 
