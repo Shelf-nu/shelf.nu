@@ -52,7 +52,7 @@ export async function resendVerificationEmail(email: string) {
     };
   }
 
-  return { status: "error", error: "Somthing went wring please try again" };
+  return { status: "error", error: "Something went wrong please try again" };
 }
 
 export async function signInWithEmail(email: string, password: string) {
@@ -77,13 +77,8 @@ export async function signInWithEmail(email: string, password: string) {
   return { status: "success", authSession: mappedSession };
 }
 
-export async function sendMagicLink(email: string) {
-  return getSupabaseAdmin().auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: `${SERVER_URL}/oauth/callback`,
-    },
-  });
+export async function sendOTP(email: string) {
+  return getSupabaseAdmin().auth.signInWithOtp({ email });
 }
 
 export async function sendResetPasswordLink(email: string) {
@@ -161,4 +156,35 @@ export async function verifyAuthSession(authSession: AuthSession) {
   );
 
   return Boolean(authAccount);
+}
+
+export async function verifyOtpAndSignin(email: string, otp: string) {
+  const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
+    email,
+    token: otp,
+    type: "email",
+  });
+
+  if (error) {
+    return { status: "error", message: error.message };
+  }
+  if (!data.session) {
+    return {
+      status: "error",
+      message: "Something went wrong, please try again!",
+    };
+  }
+
+  const mappedSession = await mapAuthSession(data.session);
+  if (!mappedSession) {
+    return {
+      status: "error",
+      message: "Something went wrong, please try again!",
+    };
+  }
+
+  return {
+    status: "success",
+    authSession: mappedSession,
+  };
 }

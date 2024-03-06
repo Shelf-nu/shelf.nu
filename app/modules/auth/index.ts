@@ -2,7 +2,7 @@ export {
   createEmailAuthAccount,
   deleteAuthAccount,
   signInWithEmail,
-  sendMagicLink,
+  sendOTP,
   refreshAccessToken,
   updateAccountPassword,
   sendResetPasswordLink,

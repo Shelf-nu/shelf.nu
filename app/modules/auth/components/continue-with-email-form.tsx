@@ -1,35 +1,27 @@
-import React from "react";
 import { useFetcher } from "@remix-run/react";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
-import type { action } from "~/routes/_auth+/send-magic-link";
+import type { action } from "~/routes/_auth+/send-otp";
 
-export function ContinueWithEmailForm() {
-  const ref = React.useRef<HTMLFormElement>(null);
+export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
+  const sendOTP = useFetcher<typeof action>();
+  const { data, state } = sendOTP;
 
-  const sendMagicLink = useFetcher<typeof action>();
-  const { data, state } = sendMagicLink;
-  const isSuccessFull = state === "idle" && data != null && !data?.error;
   const isLoading = state === "submitting" || state === "loading";
   const buttonLabel = isLoading
     ? "Sending you a one time password..."
     : "Continue with OTP";
 
-  React.useEffect(() => {
-    if (isSuccessFull) {
-      ref.current?.reset();
-    }
-  }, [isSuccessFull]);
-
   return (
-    <sendMagicLink.Form method="post" action="/send-magic-link" ref={ref}>
+    <sendOTP.Form method="post" action="/send-otp">
+      <input type="hidden" name="mode" value={mode} />
       <Input
-        label="Magic link"
+        label="Email"
         hideLabel={true}
         type="email"
         name="email"
-        id="magic-link"
+        id="email"
         inputClassName="w-full"
         placeholder="zaans@huisje.com"
         disabled={isLoading}
@@ -43,18 +35,10 @@ export function ContinueWithEmailForm() {
         variant="secondary"
         className="mt-3"
         data-test-id="continueWithMagicLink"
+        title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email."
       >
         {buttonLabel}
       </Button>
-
-      {isSuccessFull && (
-        <div
-          className={`mb-2 h-6 text-center text-green-600`}
-          data-test-id="magicLinkSuccessMessage"
-        >
-          Check your emails
-        </div>
-      )}
-    </sendMagicLink.Form>
+    </sendOTP.Form>
   );
 }
