@@ -108,7 +108,7 @@ export async function action({ request }: ActionFunctionArgs) {
   return json(
     {
       errors: {
-        email: "Somthing Went Wrong, refresh page and try to signup again ",
+        email: "Something Went Wrong, refresh page and try to signup again ",
         password: null,
       },
     },

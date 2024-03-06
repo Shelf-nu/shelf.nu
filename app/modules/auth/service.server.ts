@@ -52,7 +52,7 @@ export async function resendVerificationEmail(email: string) {
     };
   }
 
-  return { status: "error", error: "Something went wring please try again" };
+  return { status: "error", error: "Something went wrong please try again" };
 }
 
 export async function signInWithEmail(email: string, password: string) {
@@ -78,12 +78,7 @@ export async function signInWithEmail(email: string, password: string) {
 }
 
 export async function sendOTP(email: string) {
-  return getSupabaseAdmin().auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: `${SERVER_URL}/oauth/callback`,
-    },
-  });
+  return getSupabaseAdmin().auth.signInWithOtp({ email });
 }
 
 export async function sendResetPasswordLink(email: string) {

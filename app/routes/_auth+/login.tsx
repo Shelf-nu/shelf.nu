@@ -1,5 +1,3 @@
-import * as React from "react";
-
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -217,7 +215,10 @@ export default function IndexLoginForm() {
           </div>
           <div className="relative flex justify-center text-sm">
             <span className="bg-white px-2 text-gray-500">
-              Or use a <strong>One Time Password</strong>
+              Or use a{" "}
+              <strong title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email.">
+                One Time Password
+              </strong>
             </span>
           </div>
         </div>
