@@ -72,7 +72,7 @@ export const loader = async ({
     plural: "assets",
   };
 
-  const booking = await getBooking({ id });
+  const booking = await getBooking({ id, organizationId });
   if (!booking) {
     throw new ShelfStackError({ message: "Booking not found" });
   }

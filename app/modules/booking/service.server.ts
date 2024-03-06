@@ -641,8 +641,10 @@ export const deleteBooking = async (
   return b;
 };
 
-export const getBooking = async (booking: Pick<Booking, "id">) => {
-  const { id } = booking;
+export const getBooking = async (
+  booking: Pick<Booking, "id" | "organizationId">
+) => {
+  const { id, organizationId } = booking;
 
   /**
    * On the booking page, we need some data related to the assets added, so we know what actions are possible
@@ -652,7 +654,7 @@ export const getBooking = async (booking: Pick<Booking, "id">) => {
    */
 
   return db.booking.findFirst({
-    where: { id },
+    where: { id, organizationId },
     include: {
       ...commonInclude,
       assets: {

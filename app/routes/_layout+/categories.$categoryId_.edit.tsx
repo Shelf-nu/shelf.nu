@@ -31,7 +31,7 @@ const title = "Edit category";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
+  const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.category,
@@ -39,7 +39,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   const id = getRequiredParam(params, "categoryId");
-  const category = await getCategory({ id });
+  const category = await getCategory({ id, organizationId });
 
   const colorFromServer = category?.color;
 
@@ -56,7 +56,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function action({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
+  const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.category,
@@ -83,6 +83,7 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
   const rsp = await updateCategory({
     ...result.data,
     id,
+    organizationId,
   });
 
   // Handle response error when creating. Mostly due to duplicate name
