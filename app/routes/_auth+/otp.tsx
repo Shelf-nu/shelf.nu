@@ -14,7 +14,6 @@ import { parseFormAny, useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import SubHeading from "~/components/shared/sub-heading";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
 import { getOrganizationByUserId } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -28,45 +27,13 @@ import {
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
-
-type OtpVerifyMode = "login" | "signup" | "confirm_signup";
-
-const MODE_TITLE_MAP: Record<OtpVerifyMode, string> = {
-  login: "Full your code",
-  signup: "Create an account",
-  confirm_signup: "Confirm your email",
-};
-
-const MODE_SUBHEADING_MAP: Record<
-  OtpVerifyMode,
-  React.FC<{ email: string }>
-> = {
-  login: ({ email }) => (
-    <SubHeading className="-mt-4 text-center">
-      We have sent a code to{" "}
-      <span className="font-bold text-gray-900">{email}</span>. Fill the code
-      below to log in.
-    </SubHeading>
-  ),
-  signup: () => (
-    <SubHeading className="-mt-4 text-center">
-      Start your journey with Shelf.
-    </SubHeading>
-  ),
-  confirm_signup: ({ email }) => (
-    <SubHeading className="-mt-4 text-center">
-      We have sent a code to{" "}
-      <span className="font-bold text-gray-900">{email}</span>. Fill the code
-      below to confirm you email.
-    </SubHeading>
-  ),
-};
+import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode") as OtpVerifyMode;
 
-  const title = MODE_TITLE_MAP[mode] ?? "One time password";
+  const title = getOtpPageData(mode).title;
   if (context.isAuthenticated) return redirect("/assets");
 
   return json({ title });
@@ -175,12 +142,11 @@ export default function ResetPassword() {
 
   const email = searchParams.get("email") || "";
   const mode = searchParams.get("mode") as OtpVerifyMode;
-
-  const SubHeadingComponent = MODE_SUBHEADING_MAP[mode];
+  const pageData = getOtpPageData(mode);
 
   return (
     <>
-      {!!SubHeadingComponent && email && <SubHeadingComponent email={email} />}
+      <pageData.SubHeading email={email} />
 
       <div className="mt-2 flex min-h-full flex-col justify-center">
         <div className="mx-auto w-full max-w-md px-8">
@@ -201,7 +167,7 @@ export default function ResetPassword() {
               className="w-full "
               disabled={disabled}
             >
-              Create Account
+              {pageData.buttonTitle}
             </Button>
           </Form>
 
