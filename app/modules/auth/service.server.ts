@@ -77,7 +77,7 @@ export async function signInWithEmail(email: string, password: string) {
   return { status: "success", authSession: mappedSession };
 }
 
-export async function sendMagicLink(email: string) {
+export async function sendOTP(email: string) {
   return getSupabaseAdmin().auth.signInWithOtp({
     email,
     options: {

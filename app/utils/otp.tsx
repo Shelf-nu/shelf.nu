@@ -13,7 +13,7 @@ export type OtpPageData = Record<
 
 export const OTP_PAGE_MAP: OtpPageData = {
   login: {
-    title: "Full your code",
+    title: "Fill your code",
     SubHeading: ({ email }) => (
       <SubHeading className="-mt-4 text-center">
         We have sent a code to{" "}

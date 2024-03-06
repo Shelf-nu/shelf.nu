@@ -28,7 +28,7 @@ export default function VerifyEmailPage() {
     formData.append("email", email);
 
     try {
-      const response = await fetch("/resend-email-confirmation", {
+      const response = await fetch("/resend-otp", {
         method: "POST",
         body: formData,
       });
