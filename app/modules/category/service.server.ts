@@ -157,24 +157,30 @@ export async function createCategoriesIfNotExists({
 
   return Object.fromEntries(Array.from(categories));
 }
-export async function getCategory({ id }: Pick<Category, "id">) {
+export async function getCategory({
+  id,
+  organizationId,
+}: Pick<Category, "id" | "organizationId">) {
   return db.category.findUnique({
     where: {
       id,
+      organizationId,
     },
   });
 }
 
 export async function updateCategory({
   id,
+  organizationId,
   name,
   description,
   color,
-}: Pick<Category, "id" | "description" | "name" | "color">) {
+}: Pick<Category, "id" | "organizationId" | "description" | "name" | "color">) {
   try {
     const category = await db.category.update({
       where: {
         id,
+        organizationId,
       },
       data: {
         name,
