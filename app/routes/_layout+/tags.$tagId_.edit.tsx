@@ -17,6 +17,7 @@ import { getRequiredParam, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -30,7 +31,7 @@ const title = "Edit Tag";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
+  const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.tag,
@@ -38,7 +39,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   const id = getRequiredParam(params, "tagId");
-  const tag = await getTag({ id });
+  const tag = await getTag({ id, organizationId });
+
+  if (!tag) {
+    throw new ShelfStackError({
+      status: 404,
+      message: "Tag not found",
+    });
+  }
 
   const header = {
     title,
@@ -53,7 +61,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function action({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
+  const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.tag,
@@ -80,6 +88,7 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
   const rsp = await updateTag({
     ...result.data,
     id,
+    organizationId,
   });
 
   if (rsp?.error) {

@@ -53,11 +53,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     entity: PermissionEntity.booking,
     action: PermissionAction.create,
   });
+  const bookingId = getRequiredParam(params, "bookingId");
+  const searchParams = getCurrentSearchParams(request);
+
+  /**
+   * If the org id in the params is different than the current organization id,
+   * we need to redirect and set the organization id in the cookie
+   * This is useful when the user is viewing a booking from a different organization that they are part of after clicking link in email
+   */
+  const orgId = searchParams.get("orgId");
+  if (orgId && orgId !== organizationId) {
+    return redirect(`/bookings/${bookingId}`, {
+      headers: [setCookie(await setSelectedOrganizationIdCookie(orgId))],
+    });
+  }
 
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
   const booking = await getBooking({
-    id: getRequiredParam(params, "bookingId"),
+    id: bookingId,
+    organizationId: organizationId,
   });
+
   if (!booking) {
     throw new ShelfStackError({ message: "Booking not found", status: 404 });
   }
@@ -155,7 +171,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
   }
 
-  const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -193,7 +208,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => <span>Edit</span>,
+  breadcrumb: () => "single",
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -314,7 +329,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * They have delete permissions but shouldnt be able to delete other people's bookings
          * Practically they should not be able to even view/access another booking but this is just an extra security measure
          */
-        const b = await getBooking({ id });
+        const b = await getBooking({ id, organizationId });
         if (
           b?.creatorId !== authSession.userId &&
           b?.custodianUserId !== authSession.userId
