@@ -56,7 +56,7 @@ export async function getAsset({
   organizationId?: Organization["id"];
   userId?: User["id"];
 }) {
-  const asset = await db.asset.findFirst({
+  return db.asset.findFirst({
     where: { id, organizationId, userId },
     include: {
       category: true,
@@ -105,8 +105,6 @@ export async function getAsset({
       },
     },
   });
-
-  return asset;
 }
 
 /**

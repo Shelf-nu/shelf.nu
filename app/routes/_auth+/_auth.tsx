@@ -19,7 +19,7 @@ export default function App() {
       <main className="flex size-full">
         <div className="flex size-full flex-col items-center justify-center p-6 lg:p-10">
           <div className=" mb-8 text-center">
-            <Link to="/">
+            <Link to="/" reloadDocument>
               <img
                 src="/static/images/shelf-symbol.png"
                 alt="Shelf symbol"

@@ -40,7 +40,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
   const id = getRequiredParam(params, "workspaceId");
 
-  const organization = await getOrganization({ id });
+  const organization = await getOrganization({
+    id,
+    userId: authSession.userId,
+  });
   if (!organization) {
     throw new Response("Not Found", { status: 404 });
   }

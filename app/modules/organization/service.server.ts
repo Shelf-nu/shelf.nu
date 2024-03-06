@@ -5,9 +5,22 @@ import { db } from "~/database";
 import { ShelfStackError } from "~/utils/error";
 import { defaultUserCategories } from "../category/default-categories";
 
-export const getOrganization = async ({ id }: { id: Organization["id"] }) =>
+export const getOrganization = async ({
+  id,
+  userId,
+}: {
+  id: Organization["id"];
+  userId: User["id"];
+}) =>
   db.organization.findUnique({
-    where: { id },
+    where: {
+      id,
+      owner: {
+        is: {
+          id: userId,
+        },
+      },
+    },
   });
 
 export const getOrganizationByUserId = async ({

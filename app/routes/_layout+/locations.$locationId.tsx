@@ -68,8 +68,7 @@ export const loader = async ({
   });
 
   if (!location) {
-    // @TODO Solve error handling
-    throw new ShelfStackError({ message: "Not Found", status: 404 });
+    throw new ShelfStackError({ message: "Location not found", status: 404 });
   }
 
   const totalItems = totalAssetsWithinLocation;

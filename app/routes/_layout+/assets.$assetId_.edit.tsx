@@ -44,7 +44,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
   });
-  const organization = await getOrganization({ id: organizationId });
+  const organization = await getOrganization({ id: organizationId, userId });
 
   const id = getRequiredParam(params, "assetId");
 
