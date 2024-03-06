@@ -52,7 +52,7 @@ export async function resendVerificationEmail(email: string) {
     };
   }
 
-  return { status: "error", error: "Somthing went wring please try again" };
+  return { status: "error", error: "Something went wring please try again" };
 }
 
 export async function signInWithEmail(email: string, password: string) {
