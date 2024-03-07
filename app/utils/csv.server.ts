@@ -25,10 +25,10 @@ export const parseCsv = (csvData: ArrayBuffer) => {
       encoding: "utf-8", // Set encoding to utf-8
       bom: true, // Handle BOM
       delimiter: ";", // Set delimiter to ; as this allows for commas in the data
-      // quote: '"', // Set quote to " as this allows for commas in the data
-      escape: "\\", // Set escape to \ as this allows for commas in the data
+      quote: '"', // Set quote to " as this allows for commas in the data
+      escape: '"', // Set escape to \ as this allows for commas in the data
       ltrim: true, // Trim whitespace from left side of cell
-      relax_quotes: true, // Allow quotes to be ignored if the character inside the quotes is not a quote
+      relax_column_count: true, // Ignore inconsistent column count
     })
       .on("data", (data) => {
         // Process each row of data as it is parsed
