@@ -22,6 +22,7 @@ import { db } from "~/database";
 import { getUserByID } from "~/modules/user";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
@@ -33,6 +34,7 @@ import {
   getStripeCustomer,
   getActiveProduct,
   getCustomerActiveSubscription,
+  getCustomerTrialSubscription,
 } from "~/utils/stripe.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -52,19 +54,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? ((await getStripeCustomer(user.customerId)) as CustomerWithSubscriptions)
     : null;
 
+  let subscription = getCustomerActiveSubscription({ customer });
   /** Check if the customer has an active subscription */
-  const activeSubscription = getCustomerActiveSubscription({ customer });
+
+  if (!subscription) {
+    subscription = getCustomerTrialSubscription({ customer });
+  }
 
   /* Get the prices and products from Stripe */
   const prices = await getStripePricesAndProducts();
 
   let activeProduct = null;
-  if (customer && activeSubscription) {
+  if (customer && subscription) {
     /** Get the active subscription ID */
 
     activeProduct = getActiveProduct({
       prices,
-      priceId: activeSubscription?.items.data[0].plan.id,
+      priceId: subscription?.items.data[0].plan.id || null,
     });
   }
 
@@ -73,16 +79,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     subTitle: "Pick an account plan that fits your workflow.",
     prices,
     customer,
-    activeSubscription,
+    subscription,
     activeProduct,
     expiration: {
       date: new Date(
-        (activeSubscription?.current_period_end as number) * 1000
+        (subscription?.current_period_end as number) * 1000
       ).toLocaleDateString(),
       time: new Date(
-        (activeSubscription?.current_period_end as number) * 1000
+        (subscription?.current_period_end as number) * 1000
       ).toLocaleTimeString(),
     },
+    isTrialSubscription: !!subscription?.trial_end,
   });
 }
 
@@ -104,6 +111,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (!user) throw new Error("User not found");
 
+  /**
+   * We create the stripe customer on onboarding,
+   * however we keep this to double check in case something went wrong
+   */
   const customerId = user.customerId
     ? user.customerId
     : await createStripeCustomer({
@@ -111,6 +122,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         name: `${user.firstName} ${user.lastName}`,
         userId,
       });
+
+  if (!customerId) throw new ShelfStackError({ message: "Customer not found" });
 
   const stripeRedirectUrl = await createStripeCheckoutSession({
     userId,
@@ -130,7 +143,7 @@ export const handle = {
 };
 
 export default function UserPage() {
-  const { title, subTitle, prices, activeSubscription } =
+  const { title, subTitle, prices, subscription } =
     useLoaderData<typeof loader>();
 
   return (
@@ -140,7 +153,7 @@ export default function UserPage() {
           <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
             <InfoIcon />
           </div>
-          {!activeSubscription ? (
+          {!subscription ? (
             <p className="text-[14px] font-medium text-gray-700">
               You’re currently using the{" "}
               <span className="font-semibold">FREE</span> version of Shelf
@@ -155,13 +168,11 @@ export default function UserPage() {
             <h3 className="text-text-lg font-semibold">{title}</h3>
             <p className="text-sm text-gray-600">{subTitle}</p>
           </div>
-          {activeSubscription && <CustomerPortalForm />}
+          {subscription && <CustomerPortalForm />}
         </div>
 
         <Tabs
-          defaultValue={
-            activeSubscription?.items.data[0]?.plan.interval || "month"
-          }
+          defaultValue={subscription?.items.data[0]?.plan.interval || "month"}
           className="flex w-full flex-col"
         >
           <TabsList className="center mx-auto mb-8">

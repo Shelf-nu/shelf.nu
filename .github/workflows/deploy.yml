@@ -1,9 +1,11 @@
 name: 🚀 Deploy
+
 on:
   push:
     branches:
       - main
       - dev
+
 permissions:
   actions: write
   contents: read
@@ -22,7 +24,7 @@ jobs:
   build:
     name: 🐳 Build
     # only build/deploy main branch on pushes
-    if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'}}
+    if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
     runs-on: ubuntu-latest
     steps:
       - name: 🛑 Cancel Previous Runs

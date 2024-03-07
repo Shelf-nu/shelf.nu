@@ -9,6 +9,7 @@ export const sendEmail = async ({
   text,
   html,
   attachments,
+  from,
 }: {
   /** Email address of recipient */
   to: string;
@@ -23,6 +24,9 @@ export const sendEmail = async ({
   html?: string;
 
   attachments?: Attachment[];
+
+  /** Override the default sender */
+  from?: string;
 }) => {
   // Generate test SMTP service account from ethereal.email
 
@@ -43,9 +47,20 @@ export const sendEmail = async ({
     },
   });
 
+  // verify connection configuration
+  transporter.verify(function (error) {
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.log(error);
+    } else {
+      // eslint-disable-next-line no-console
+      console.log("Server is ready to take our messages");
+    }
+  });
+
   // send mail with defined transport object
   await transporter.sendMail({
-    from: `"Shelf" <no-reply@shelf.nu>`, // sender address
+    from: from || `"Shelf" <no-reply@shelf.nu>`, // sender address
     to, // list of receivers
     subject, // Subject line
     text, // plain text body
