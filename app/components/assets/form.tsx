@@ -22,10 +22,18 @@ import AssetCustomFields from "./custom-fields-inputs";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared";
+import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { Image } from "../shared/image";
-import { Spinner } from "../shared/spinner";
+
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../shared/tooltip";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
 
 export const NewAssetFormSchema = z.object({
@@ -47,6 +55,10 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val ? +val : null)),
+  addAnother: z
+    .string()
+    .optional()
+    .transform((val) => val === "true"),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -113,12 +125,21 @@ export const AssetForm = ({
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
       >
+        <AbsolutePositionedHeaderActions className="hidden md:flex">
+          <Actions disabled={disabled} />
+        </AbsolutePositionedHeaderActions>
         {qrId ? (
           <input type="hidden" name={zo.fields.qrId()} value={qrId} />
         ) : null}
-        <div className=" border-b pb-5">
-          <h2 className="mb-1 text-[18px] font-semibold">Basic fields</h2>
-          <p>Basic information about your asset.</p>
+
+        <div className="flex items-start justify-between border-b pb-5">
+          <div className=" ">
+            <h2 className="mb-1 text-[18px] font-semibold">Basic fields</h2>
+            <p>Basic information about your asset.</p>
+          </div>
+          <div className="hidden flex-1 justify-end gap-2 md:flex">
+            <Actions disabled={disabled} />
+          </div>
         </div>
 
         <FormRow
@@ -331,7 +352,7 @@ export const AssetForm = ({
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="ml-auto">
             <Button type="submit" disabled={disabled}>
-              {disabled ? <Spinner /> : "Save"}
+              Save
             </Button>
           </div>
         </FormRow>
@@ -339,3 +360,39 @@ export const AssetForm = ({
     </Card>
   );
 };
+
+const Actions = ({ disabled }: { disabled: boolean }) => (
+  <>
+    <ButtonGroup>
+      <Button to=".." variant="secondary" disabled={disabled}>
+        Cancel
+      </Button>
+      <AddAnother disabled={disabled} />
+    </ButtonGroup>
+
+    <Button type="submit" disabled={disabled}>
+      Save
+    </Button>
+  </>
+);
+
+const AddAnother = ({ disabled }: { disabled: boolean }) => (
+  <TooltipProvider delayDuration={100}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="submit"
+          variant="secondary"
+          disabled={disabled}
+          name="addAnother"
+          value="true"
+        >
+          Add another
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p className="text-sm">Save the asset and add a new one</p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);

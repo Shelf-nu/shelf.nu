@@ -6,6 +6,7 @@ import type {
 import {
   json,
   redirect,
+  redirectDocument,
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
@@ -84,7 +85,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
   }
 
-  const { name, description, address } = result.data;
+  const { name, description, address, addAnother } = result.data;
   /** This checks if tags are passed and build the  */
 
   const formDataFile = await unstable_parseMultipartFormData(
@@ -126,6 +127,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
+  /** If the user clicked add-another, reload the document to clear the form */
+  if (addAnother) {
+    return redirectDocument("/locations/new");
+  }
   return redirect(`/locations/${location.id}`);
 }
 
