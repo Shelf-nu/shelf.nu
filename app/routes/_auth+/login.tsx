@@ -1,5 +1,3 @@
-import * as React from "react";
-
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -74,7 +72,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     signInResult.status === "error" &&
     signInResult.message === "Email not confirmed"
   ) {
-    return redirect(`/verify-email?email=${encodeURIComponent(email)}`);
+    return redirect(`/otp?email=${encodeURIComponent(email)}&mode=login`);
   }
 
   if (
@@ -217,12 +215,15 @@ export default function IndexLoginForm() {
           </div>
           <div className="relative flex justify-center text-sm">
             <span className="bg-white px-2 text-gray-500">
-              Or use a <strong>Magic Link</strong>
+              Or use a{" "}
+              <strong title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email.">
+                One Time Password
+              </strong>
             </span>
           </div>
         </div>
         <div className="mt-6">
-          <ContinueWithEmailForm />
+          <ContinueWithEmailForm mode="login" />
         </div>
         <div className="mt-6 text-center text-sm text-gray-500">
           Don't have an account?{" "}
