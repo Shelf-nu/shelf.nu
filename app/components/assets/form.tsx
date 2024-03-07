@@ -106,7 +106,7 @@ export const AssetForm = ({
   }>();
 
   return (
-    <Card className="w-min">
+    <Card className="md:w-min">
       <Form
         ref={zo.ref}
         method="post"

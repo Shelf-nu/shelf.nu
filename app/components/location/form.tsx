@@ -43,7 +43,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
   }>();
 
   return (
-    <Card className="w-min">
+    <Card className="md:w-min">
       <Form
         ref={zo.ref}
         method="post"
