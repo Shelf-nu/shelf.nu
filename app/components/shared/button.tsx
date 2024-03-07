@@ -28,7 +28,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       className = "",
       variant = "primary",
       width = "auto",
-      size = "md",
+      size = "sm",
       attachToInput = false,
       icon,
       disabled = undefined,
