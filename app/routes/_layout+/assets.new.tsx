@@ -38,13 +38,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     const { userId } = authSession;
 
-    const { organizationId } = await requirePermision({
+    const { organizationId, currentOrganization } = await requirePermision({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.create,
     });
-    const organization = await getOrganization({ id: organizationId });
     /**
      * We need to check if the QR code passed in the URL belongs to the current org
      * This is relevant whenever the user is trying to link a new asset with an existing QR code
@@ -65,7 +64,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
       request,
     });
-
 
     return json({
       header,

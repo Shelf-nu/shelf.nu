@@ -7,11 +7,7 @@ import { signInWithEmail } from "~/modules/auth";
 import { updateInviteStatus } from "~/modules/invite";
 import { generateRandomCode } from "~/modules/invite/helpers";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import {
-  INVITE_TOKEN_SECRET,
-  error,
-  safeRedirect,
-} from "~/utils";
+import { INVITE_TOKEN_SECRET, error, safeRedirect } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError, makeShelfError } from "~/utils/error";
 
