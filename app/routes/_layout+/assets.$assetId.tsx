@@ -58,7 +58,7 @@ export const AvailabilityForBookingFormSchema = z.object({
 });
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { userId } = authSession;
 
   const { organizationId } = await requirePermision({
@@ -126,7 +126,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { userId } = authSession;
 
   const formData = await request.formData();

@@ -111,7 +111,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     // Set the auth session and redirect to the assets page
-    context.setSession({ ...authSession });
+    // context.setSession({ ...authSession });
 
     return redirect(safeRedirect(redirectTo || "/assets"), {
       headers: [

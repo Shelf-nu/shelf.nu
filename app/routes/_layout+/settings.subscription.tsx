@@ -39,7 +39,7 @@ import {
 } from "~/utils/stripe.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   if (!ENABLE_PREMIUM_FEATURES) {
     return redirect("/settings/account");
   }
@@ -102,7 +102,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
 
   await requirePermision({
     userId: authSession.userId,

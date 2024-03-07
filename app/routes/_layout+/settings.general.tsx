@@ -51,7 +51,7 @@ const EditWorkspaceFormSchema = z.object({
 });
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
@@ -133,7 +133,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
 
   await requirePermision({
     userId: authSession.userId,

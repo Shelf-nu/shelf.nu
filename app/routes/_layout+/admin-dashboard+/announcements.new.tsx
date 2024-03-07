@@ -9,14 +9,14 @@ import { db } from "~/database";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   await requireAdmin(authSession.userId);
 
   return json({});
 };
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   await requireAdmin(authSession.userId);
 
   const formData = await request.formData();

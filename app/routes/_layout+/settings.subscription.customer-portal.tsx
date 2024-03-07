@@ -6,7 +6,7 @@ import { requirePermision } from "~/utils/roles.server";
 import { createBillingPortalSession } from "~/utils/stripe.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   await requirePermision({
     userId: authSession.userId,
     request,

@@ -16,7 +16,7 @@ import { requirePermision } from "~/utils/roles.server";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { userId } = authSession;
   const { organizationId } = await requirePermision({
     userId,

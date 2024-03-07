@@ -46,7 +46,7 @@ import { requirePermision } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { organizationId, role } = await requirePermision({
     userId: authSession?.userId,
     request,
@@ -212,7 +212,7 @@ export const handle = {
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
 
   const formData = await request.formData();
   const intent = formData.get("intent") as

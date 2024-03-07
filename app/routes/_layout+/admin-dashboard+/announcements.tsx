@@ -10,7 +10,7 @@ import { parseMarkdownToReact } from "~/utils/md.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   await requireAdmin(authSession.userId);
 
   const announcements = await db.announcement.findMany({
@@ -28,7 +28,7 @@ export const loader = async ({ context }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   await requireAdmin(authSession.userId);
   const formData = await request.formData();
   const published = formData.get("published") === "on";

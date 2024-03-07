@@ -1,12 +1,25 @@
+import { createCookieSessionStorage } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
 
 import {
   SUPABASE_SERVICE_ROLE,
   SUPABASE_URL,
   SUPABASE_ANON_PUBLIC,
+  env,
 } from "~/utils/env";
 import { ShelfStackError } from "~/utils/error";
 import { isBrowser } from "~/utils/is-browser";
+
+const sessionStorage = createCookieSessionStorage({
+  cookie: {
+    name: "__authSession",
+    httpOnly: true,
+    path: "/",
+    sameSite: "lax",
+    secrets: [env.SESSION_SECRET],
+    secure: env.NODE_ENV === "production",
+  },
+});
 
 // ⚠️ cloudflare needs you define fetch option : https://github.com/supabase/supabase-js#custom-fetch-implementation
 // Use Remix fetch polyfill for node (See https://remix.run/docs/en/v1/other-api/node)
@@ -23,8 +36,8 @@ function getSupabaseClient(supabaseKey: string, accessToken?: string) {
 
   return createClient(SUPABASE_URL, supabaseKey, {
     auth: {
-      autoRefreshToken: false,
-      persistSession: false,
+      // autoRefreshToken: false,
+      // persistSession: false,
     },
     ...global,
   });

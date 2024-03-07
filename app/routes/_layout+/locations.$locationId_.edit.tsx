@@ -26,7 +26,7 @@ import { requirePermision } from "~/utils/roles.server";
 import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
@@ -60,7 +60,7 @@ export const handle = {
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,

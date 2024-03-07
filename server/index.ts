@@ -2,19 +2,20 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import * as serverBuild from "@remix-run/dev/server-build";
 import type { AppLoadContext, ServerBuild } from "@remix-run/node";
-import { createCookieSessionStorage, installGlobals } from "@remix-run/node";
+import { createCookieSessionStorage } from "@remix-run/node";
 import { broadcastDevReady } from "@remix-run/server-runtime";
 import { Hono } from "hono";
 import { remix } from "remix-hono/handler";
-import { getSession, session } from "remix-hono/session";
+import { session } from "remix-hono/session";
 
+import { supabaseClient } from "~/integrations/supabase";
+import { mapAuthSession } from "~/modules/auth/mappers.server";
 import { initEnv, env } from "~/utils/env";
 import { ShelfStackError } from "~/utils/error";
 
 import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
-import { authSessionKey } from "./session";
-import type { FlashData, SessionData } from "./session";
+import type { SessionData } from "./session";
 
 /** For some reason the globals like File only work on production build
  * In development, we need to install them manually
@@ -134,21 +135,29 @@ app.use(
     // @ts-ignore
     build,
     mode,
-    getLoadContext(context) {
-      const session = getSession<SessionData, FlashData>(context);
+    async getLoadContext(context) {
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession();
+
+      // const session = getSession<SessionData, FlashData>(context);
 
       return {
         // Nice to have if you want to display the app version or do something in the app when deploying a new version
         // Exemple: on navigate, check if the app version is the same as the one in the build assets and if not, display a toast to the user to refresh the page
         // Prevent the user to use an old version of the client side code (it is only downloaded on document request)
         appVersion: build.assets.version,
-        isAuthenticated: session.has(authSessionKey),
+        isAuthenticated: Boolean(session),
         // we could ensure that session.get() match a specific shape
         // let's trust our system for now
-        getSession: () => {
-          const auth = session.get(authSessionKey);
+        getSession: async () => {
+          const {
+            data: { session },
+          } = await supabaseClient.auth.getSession();
+          const mappedSession = await mapAuthSession(session);
+          // const auth = session.get(authSessionKey);
 
-          if (!auth) {
+          if (!mappedSession) {
             throw new ShelfStackError({
               cause: null,
               message:
@@ -157,15 +166,16 @@ app.use(
             });
           }
 
-          return auth;
+          return mappedSession;
         },
-        setSession: (auth: any) => {
-          session.set(authSessionKey, auth);
+        setSession: () => {
+          // session.set(authSessionKey, auth);
         },
-        destroySession: () => {
-          session.unset(authSessionKey);
+        destroySession: async () => {
+          await supabaseClient.auth.signOut();
+          // session.unset(authSessionKey);
         },
-        errorMessage: session.get("errorMessage") || null,
+        errorMessage: null,
       } satisfies AppLoadContext;
     },
   })
@@ -191,7 +201,7 @@ declare module "@remix-run/node" {
      *
      * @returns The session
      */
-    getSession(): SessionData["auth"];
+    getSession(): Promise<SessionData["auth"]>;
     /**
      * Set the session to the session storage
      *
@@ -205,7 +215,7 @@ declare module "@remix-run/node" {
      *
      * It will then be automatically handled by the session middleware
      */
-    destroySession(): void;
+    destroySession(): Promise<void>;
     /**
      * The flash error message related to session
      */

@@ -30,7 +30,7 @@ export const UpdateTagFormSchema = z.object({
 const title = "Edit Tag";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
@@ -60,7 +60,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,

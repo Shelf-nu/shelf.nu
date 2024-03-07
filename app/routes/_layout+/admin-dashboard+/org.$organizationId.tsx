@@ -13,7 +13,7 @@ import { ShelfStackError } from "~/utils/error";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   await requireAdmin(authSession.userId);
 
   const organization = await db.organization.findUnique({
@@ -39,7 +39,7 @@ export const action = async ({
   request,
   params,
 }: ActionFunctionArgs) => {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   await requireAdmin(authSession.userId);
   const organizationId = params.organizationId as string;
   const formData = await request.formData();

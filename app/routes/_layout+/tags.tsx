@@ -29,7 +29,7 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
@@ -80,7 +80,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { userId } = authSession;
 
   const { organizationId } = await requirePermision({

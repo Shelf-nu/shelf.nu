@@ -3,7 +3,7 @@ import { eventStream } from "remix-utils/sse/server";
 import { emitter } from "~/utils/emitter/emitter.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
 
   return eventStream(request.signal, function setup(send) {
     /** Notification is a strigified json object with the shape {@link Notification} */

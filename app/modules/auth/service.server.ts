@@ -1,5 +1,5 @@
 import type { AuthSession } from "server/session";
-import { getSupabaseAdmin } from "~/integrations/supabase";
+import { getSupabaseAdmin, supabaseClient } from "~/integrations/supabase";
 import { SERVER_URL } from "~/utils/env";
 
 import { ShelfStackError } from "~/utils/error";
@@ -66,6 +66,8 @@ export async function signInWithEmail(email: string, password: string) {
   if (!data.session) {
     return { status: "error", message: "something went wrong try login again" };
   }
+
+  await supabaseClient.auth.setSession(data.session);
 
   const mappedSession = await mapAuthSession(data.session);
 

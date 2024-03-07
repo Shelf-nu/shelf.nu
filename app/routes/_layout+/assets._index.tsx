@@ -73,7 +73,7 @@ export const links: LinksFunction = () => [
 ];
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   const { userId } = authSession;
 
   const { organizationId, organizations, currentOrganization, role } =

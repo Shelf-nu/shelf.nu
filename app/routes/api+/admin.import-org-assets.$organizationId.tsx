@@ -12,7 +12,7 @@ export const action = async ({
   request,
   params,
 }: ActionFunctionArgs) => {
-  const authSession = context.getSession();
+  const authSession = await context.getSession();
   try {
     await requireAdmin(authSession.userId);
     const organizationId = getRequiredParam(params, "organizationId");

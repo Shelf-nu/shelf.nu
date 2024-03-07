@@ -5,7 +5,7 @@ import { assertIsPost } from "~/utils";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
-  context.destroySession();
+  await context.destroySession();
   return redirect("/login");
 }
 

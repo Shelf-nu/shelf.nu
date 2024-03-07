@@ -2,6 +2,7 @@ import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
 
+import { supabaseClient } from "~/integrations/supabase";
 import { refreshAccessToken } from "~/modules/auth";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
@@ -25,15 +26,23 @@ export function protect({
     if (isPublic) {
       return next();
     }
-    //@ts-expect-error fixed soon
-    const session = getSession<SessionData, FlashData>(c);
-    const auth = session.get(authSessionKey);
 
-    if (!auth) {
-      session.flash(
-        "errorMessage",
-        "This content is only available to logged in users."
-      );
+    // const session = getSession<SessionData, FlashData>(c);
+    // const auth = session.get(authSessionKey);
+    console.log("Time Start ================");
+    console.time("session");
+    const {
+      data: { user },
+    } = await supabaseClient.auth.getUser();
+
+    console.log("Time end ================");
+    console.timeEnd("session");
+
+    if (!user) {
+      // session.flash(
+      //   "errorMessage",
+      //   "This content is only available to logged in users."
+      // );
 
       return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);
     }
