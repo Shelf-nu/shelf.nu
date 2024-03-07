@@ -101,7 +101,6 @@ app.use(
       "/login",
       "/logout",
       "/otp",
-      "/oauth/callback",
       "/resend-otp",
       "/reset-password",
       "/send-otp",

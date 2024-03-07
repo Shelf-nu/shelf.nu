@@ -22,7 +22,6 @@ export async function signUpWithEmailPass(email: string, password: string) {
     email: email,
     password: password,
     options: {
-      emailRedirectTo: `${SERVER_URL}/oauth/callback`,
       data: {
         signup_method: "email-password",
       },

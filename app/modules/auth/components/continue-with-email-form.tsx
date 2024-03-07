@@ -34,7 +34,7 @@ export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
         width="full"
         variant="secondary"
         className="mt-3"
-        data-test-id="continueWithMagicLink"
+        data-test-id="continueWithOtpButton"
         title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email."
       >
         {buttonLabel}
