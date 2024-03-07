@@ -109,7 +109,7 @@ The database seed script creates a new user with some data you can use to get st
 
 For authentication to work in your Project, you need so setup some settings related to One Time Passwords in Supabase.
 
-In order for OTP to work you need to make your OTP emails. Go to your Supabase dashboard, select your project and navigate to `Authentication > Email Templates`. Replace the `{{ .ConfirmationURL }}` with `{{ .Token }}`. This will make sure that Supabase sends your Users a one time password instead of a magic link.
+In order for OTP to work you need to make your OTP emails. Go to your Supabase dashboard, select your project and navigate to `Authentication > Email Templates`. Replace the `{{ .ConfirmationURL }}` with `{{ .Token }}`. This will make sure that Supabase sends your Users a one time password instead of a magic link. You need to do this both for "Confirm signup" and "Magic link".
 
 ## Deployment
 
