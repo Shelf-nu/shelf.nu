@@ -41,7 +41,7 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
   return (
-    <Card className="w-min">
+    <Card className="md:w-min">
       <Form
         ref={zo.ref}
         method="post"
