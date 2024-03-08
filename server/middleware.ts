@@ -25,9 +25,14 @@ export function protect({
     if (isPublic) {
       return next();
     }
+    console.log("Timer start >>>>>>>>>>>>>>>>");
+    console.time("session");
+
     //@ts-expect-error fixed soon
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
+    console.log("Timer end >>>>>>>>>>>>>>>>>>>>>>>");
+    console.timeEnd("session");
 
     if (!auth) {
       session.flash(

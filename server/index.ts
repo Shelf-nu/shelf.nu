@@ -13,7 +13,7 @@ import { ShelfStackError } from "~/utils/error";
 
 import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
-import { authSessionKey } from "./session";
+import { authSessionKey, createDatabaseSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 
 /** For some reason the globals like File only work on production build
@@ -64,9 +64,19 @@ app.use(
   session({
     autoCommit: true,
     createSessionStorage() {
-      const sessionStorage = createCookieSessionStorage({
+      // const sessionStorage = createCookieSessionStorage({
+      //   cookie: {
+      //     name: "__authSession",
+      //     httpOnly: true,
+      //     path: "/",
+      //     sameSite: "lax",
+      //     secrets: [env.SESSION_SECRET],
+      //     secure: env.NODE_ENV === "production",
+      //   },
+      // });
+      const sessionStorage = createDatabaseSessionStorage({
         cookie: {
-          name: "__authSession",
+          name: "__authenticationSession",
           httpOnly: true,
           path: "/",
           sameSite: "lax",

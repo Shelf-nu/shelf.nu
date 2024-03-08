@@ -11,6 +11,7 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
+import { db } from "~/database";
 
 import { useUserData } from "~/hooks";
 import { sendResetPasswordLink } from "~/modules/auth";
@@ -48,22 +49,33 @@ export async function action({ context, request }: ActionFunctionArgs) {
   if (formData.get("intent") === "resetPassword") {
     const email = formData.get("email") as string;
 
-    const { error } = await sendResetPasswordLink(email);
+    const data = await db.session.findMany({
+      where: { userId: authSession.userId },
+    });
 
-    if (error) {
-      return json(
-        {
-          message: "Unable to send password reset link",
-          email: null,
-        },
-        { status: 500 }
-      );
-    }
+    const updatedData = await db.session.updateMany({
+      where: { id: { in: data.map((item) => item.id) } },
+      data: { data: {}, userId: null, expires: null },
+    });
+
+    console.log(updatedData);
+
+    // const { error } = await sendResetPasswordLink(email);
+
+    // if (error) {
+    //   return json(
+    //     {
+    //       message: "Unable to send password reset link",
+    //       email: null,
+    //     },
+    //     { status: 500 }
+    //   );
+    // }
 
     /** Logout user after 3 seconds */
-    await delay(2000);
-    context.destroySession();
-    return redirect("/login");
+    // await delay(2000);
+    // context.destroySession();
+    return redirect("/settings/account");
   }
 
   /** Handle the use update */
