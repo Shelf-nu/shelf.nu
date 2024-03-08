@@ -1,13 +1,13 @@
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { UnlinkIcon } from "~/components/icons";
+import ContextualModal from "~/components/layout/contextual-modal";
 import { Button } from "~/components/shared";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
-import type { RouteHandleWithName } from "../_layout+/bookings";
 
 export const loader = async ({
   context,
@@ -35,19 +35,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function QrLink() {
   const { qrId } = useLoaderData<typeof loader>();
-  const matches = useMatches();
 
-  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
-  /**
-   * We have 2 cases when we should render index:
-   * 1. When we are on the index route
-   * 2. When we are on the .new route - the reason we do this is because we want to have the .new modal overlaying the index.
-   */
-  const shouldRenderOutlet = currentRoute?.pathname.includes("existing-asset");
-
-  return shouldRenderOutlet ? (
-    <Outlet />
-  ) : (
+  return (
     <>
       <div className="flex flex-1 justify-center py-8">
         <div className="my-auto">
@@ -82,6 +71,7 @@ export default function QrLink() {
           </div>
         </div>
       </div>
+      <ContextualModal />
     </>
   );
 }

@@ -1,11 +1,28 @@
-import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
+import { AssetStatus, type Asset } from "@prisma/client";
+import { json, redirect } from "@remix-run/node";
+import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
+import {
+  Form,
+  useLoaderData,
+  useNavigation,
+  useSearchParams,
+} from "@remix-run/react";
+import { AssetImage } from "~/components/assets/asset-image";
+import { StatusFilter } from "~/components/booking/status-filter";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
+import { ChevronRight } from "~/components/icons";
+import { Filters, List } from "~/components/list";
+import { Button } from "~/components/shared";
+import { Td } from "~/components/table";
+import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset";
+import { isFormProcessing } from "~/utils";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
-import AssetIndexPage from "../_layout+/assets._index";
 
 export const loader = async ({
   context,
@@ -57,6 +74,11 @@ export const loader = async ({
 
   return json(
     {
+      header: {
+        title: "Link QR with asset",
+        subHeading: "Choose an item to link this QR with",
+      },
+      showModal: true,
       qrId,
       items: assets,
       categories,
@@ -81,7 +103,125 @@ export const loader = async ({
   );
 };
 
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data?.header.title) },
+];
+
 export default function QrLinkExisting() {
-  // const { qrId } = useLoaderData<typeof loader>();
-  return <AssetIndexPage rowAction={(itemId) => console.log(itemId)} />;
+  const { header } = useLoaderData<typeof loader>();
+  const hasFiltersToClear = useSearchParamHasValue("category", "tag");
+  const clearFilters = useClearValueFromParams("category", "tag");
+  return (
+    <>
+      <div className="flex max-h-full flex-col">
+        <header className="mb-3 text-left">
+          <h2>{header.title}</h2>
+          <p>{header.subHeading}</p>
+        </header>
+
+        <Filters
+          slots={{
+            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          }}
+        >
+          <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
+            {hasFiltersToClear ? (
+              <div className="hidden gap-6 md:flex">
+                <Button
+                  as="button"
+                  onClick={clearFilters}
+                  variant="link"
+                  className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+                  type="button"
+                >
+                  Clear all filters
+                </Button>
+                <div className="text-gray-500"> | </div>
+              </div>
+            ) : null}
+
+            <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Categories{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "category", key: "name" }}
+                label="Filter by category"
+                initialDataKey="categories"
+                countKey="totalCategories"
+              />
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "tag", key: "name" }}
+                label="Filter by tags"
+                initialDataKey="tags"
+                countKey="totalTags"
+              />
+            </div>
+          </div>
+        </Filters>
+
+        {/* Body of the modal*/}
+        <div className="mt-4 flex-1 overflow-y-auto pb-4">
+          <List
+            ItemComponent={RowComponent}
+            /** Clicking on the row will add the current asset to the atom of selected assets */
+            navigate={(assetId) => console.log(assetId)}
+            customEmptyStateContent={{
+              title: "You haven't added any assets yet.",
+              text: "What are you waiting for? Create your first asset now!",
+              newButtonRoute: "/assets/new",
+              newButtonContent: "New asset",
+            }}
+          />
+        </div>
+        {/* Footer of the modal */}
+        <footer className="flex justify-between border-t pt-3">
+          <div className="flex gap-3">
+            <Button variant="secondary" to={".."} width="full">
+              Close
+            </Button>
+          </div>
+        </footer>
+      </div>
+    </>
+  );
 }
+
+const RowComponent = ({ item }: { item: Asset }) => (
+  <>
+    <Td className="w-full p-0 md:p-0">
+      <div className="flex justify-between gap-3 p-4 md:px-6">
+        <div className="flex items-center gap-3">
+          <div className="flex size-12 shrink-0 items-center justify-center">
+            <AssetImage
+              asset={{
+                assetId: item.id,
+                mainImage: item.mainImage,
+                mainImageExpiration: item.mainImageExpiration,
+                alt: item.title,
+              }}
+              className="size-full rounded-[4px] border object-cover"
+            />
+          </div>
+          <div className="flex flex-col">
+            <p className="word-break whitespace-break-spaces font-medium">
+              {item.title}
+            </p>
+          </div>
+        </div>
+      </div>
+    </Td>
+
+    <Td>
+      <ChevronRight />
+    </Td>
+  </>
+);

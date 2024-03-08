@@ -215,12 +215,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data.header.title) },
 ];
 
-export default function AssetIndexPage({
-  rowAction,
-}: {
-  /** Custom function to replace default navigate action when clicking a row */
-  rowAction?: ((id: string) => void) | undefined;
-}) {
+export default function AssetIndexPage() {
   const navigate = useNavigate();
 
   const hasFiltersToClear = useSearchParamHasValue("category", "tag");
@@ -297,10 +292,7 @@ export default function AssetIndexPage({
         </Filters>
         <List
           ItemComponent={ListAssetContent}
-          navigate={(itemId) =>
-            /** If the row action is passed, use that */
-            rowAction ? rowAction(itemId) : navigate(itemId)
-          }
+          navigate={(itemId) => navigate(itemId)}
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
