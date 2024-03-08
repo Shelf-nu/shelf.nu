@@ -5,12 +5,12 @@ import { useMediaDevices } from "react-media-devices";
 import { useZxing } from "react-zxing";
 import { ErrorBoundryComponent } from "~/components/errors";
 import Header from "~/components/layout/header";
+import type { HeaderData } from "~/components/layout/header/types";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
-import { HeaderData } from "~/components/layout/header/types";
-import { ShelfStackError } from "~/utils/error";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
