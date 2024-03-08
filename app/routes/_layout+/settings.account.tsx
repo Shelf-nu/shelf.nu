@@ -39,7 +39,7 @@ export const UpdateFormSchema = z.object({
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
 
   const clonedRequest = request.clone();
   const formData = await clonedRequest.formData();
@@ -62,7 +62,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     /** Logout user after 3 seconds */
     await delay(2000);
-    await context.destroySession();
+    context.destroySession();
     return redirect("/login");
   }
 

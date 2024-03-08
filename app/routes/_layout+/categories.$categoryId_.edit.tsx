@@ -30,7 +30,7 @@ export const UpdateCategoryFormSchema = z.object({
 const title = "Edit category";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
@@ -55,7 +55,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,

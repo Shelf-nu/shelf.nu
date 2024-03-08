@@ -26,7 +26,7 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   const { organizationId, organizations } = await requirePermision({
@@ -88,7 +88,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 };
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   const { organizationId, organizations } = await requirePermision({

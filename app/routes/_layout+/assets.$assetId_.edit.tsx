@@ -36,7 +36,7 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
   const { organizationId } = await requirePermision({
     userId,
@@ -98,7 +98,7 @@ export const handle = {
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   assertIsPost(request);
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   const { organizationId } = await requirePermision({

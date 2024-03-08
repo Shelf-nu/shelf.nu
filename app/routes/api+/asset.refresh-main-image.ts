@@ -4,7 +4,7 @@ import { oneDayFromNow } from "~/utils";
 import { createSignedUrl } from "~/utils/storage.server";
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
 
   const { userId } = authSession;
   const formData = await request.formData();

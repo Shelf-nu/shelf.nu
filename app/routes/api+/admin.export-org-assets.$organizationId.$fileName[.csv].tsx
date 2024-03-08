@@ -4,7 +4,7 @@ import { exportAssetsToCsv } from "~/utils/csv.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   await requireAdmin(authSession.userId);
   const organizationId = getRequiredParam(params, "organizationId");
 

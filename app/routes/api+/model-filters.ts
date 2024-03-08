@@ -21,7 +21,7 @@ const ModelFiltersSchema = z.object({
 });
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   const { organizationId } = await requireOrganisationId({ userId, request });

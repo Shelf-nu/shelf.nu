@@ -11,7 +11,7 @@ export const ClientNotificationSchema = z.object({
 });
 
 export async function action({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
 
   const formData = await request.formData();
   const result = await ClientNotificationSchema.safeParseAsync(

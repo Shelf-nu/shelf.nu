@@ -21,7 +21,7 @@ export async function requireAdmin(userId: string) {
 }
 
 export async function isAdmin(context: Record<string, any>) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
 
   const user = await db.user.findFirst({
     where: {

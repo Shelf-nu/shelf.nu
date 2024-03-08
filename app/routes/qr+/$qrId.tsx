@@ -51,7 +51,7 @@ export const loader = async ({
   if (!context.isAuthenticated) {
     return redirect(`not-logged-in?scanId=${scan.id}&redirectTo=/qr/${id}`);
   }
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
 
   if (authSession) {
     updateScan({

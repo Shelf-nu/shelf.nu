@@ -30,7 +30,7 @@ import { requirePermision } from "~/utils/roles.server";
 const title = "New Asset";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   const { organizationId, currentOrganization } = await requirePermision({
@@ -87,7 +87,7 @@ export const handle = {
 };
 
 export async function action({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
   const { organizationId } = await requirePermision({
     userId,

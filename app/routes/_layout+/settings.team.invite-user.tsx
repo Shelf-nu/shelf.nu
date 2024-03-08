@@ -45,7 +45,7 @@ const InviteUserFormSchema = z.object({
 });
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   const { organizationId } = await requirePermision({
@@ -61,7 +61,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   const { organizationId } = await requirePermision({

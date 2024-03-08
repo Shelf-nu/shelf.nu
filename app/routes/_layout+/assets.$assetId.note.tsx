@@ -17,7 +17,7 @@ export const action = async ({
   request,
   params,
 }: ActionFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   await requirePermision({

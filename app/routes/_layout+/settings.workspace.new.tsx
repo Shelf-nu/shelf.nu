@@ -27,7 +27,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { organizationId } = await requireOrganisationId({
     userId: authSession.userId,
     request,
@@ -45,7 +45,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   assertIsPost(request);
   assertUserCanCreateMoreOrganizations(authSession.userId);
 

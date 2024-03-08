@@ -11,7 +11,7 @@ import { getPaginatedAndFilterableUsers } from "~/modules/user";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   await requireAdmin(authSession.userId);
   const { search, totalUsers, perPage, page, users, totalPages } =
     await getPaginatedAndFilterableUsers({

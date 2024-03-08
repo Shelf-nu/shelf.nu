@@ -5,7 +5,7 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
 
   const { organizationId, organizations } = await requirePermision({
     userId: authSession.userId,

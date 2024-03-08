@@ -11,7 +11,7 @@ export const loader = async ({
   request,
   params,
 }: LoaderFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   await requirePermision({
     userId: authSession.userId,
     request,

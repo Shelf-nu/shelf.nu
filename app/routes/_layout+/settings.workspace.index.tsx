@@ -23,7 +23,7 @@ import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   // permissions here?
   // Every user can see this view for themseleves, so we dont have to manage any permissions here
   const { organizationId } = await requireOrganisationId({

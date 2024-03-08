@@ -12,7 +12,7 @@ import {
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   assertIsPost(request);
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   const user = await getUserByID(userId);

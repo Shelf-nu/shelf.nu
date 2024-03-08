@@ -28,7 +28,7 @@ import { requirePermision } from "~/utils/roles.server";
  * This way all actions are available and its way easier to manage so in a way this works kind of like a resource route.
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { organizationId, role } = await requirePermision({
     userId: authSession?.userId,
     request,
@@ -114,7 +114,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 export async function action({ context, request }: ActionFunctionArgs) {
   const formData = await request.formData();
 
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession?.userId,
     request,

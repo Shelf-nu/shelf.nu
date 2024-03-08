@@ -58,7 +58,7 @@ function createOnboardingSchema(userSignedUpWithPassword: boolean) {
 }
 
 export async function loader({ context }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const user = await getUserByID(authSession?.userId);
 
   /** If the user is already onboarded, we assume they finished the process so we send them to the index */
@@ -92,7 +92,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
 
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const formData = await request.formData();
 
   const userSignedUpWithPassword =

@@ -58,7 +58,7 @@ type InviteWithTeamMember = Pick<
 };
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   await requirePermision({
     userId: authSession.userId,
     request,
@@ -187,7 +187,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { userId } = authSession;
 
   const { organizationId } = await requirePermision({

@@ -10,7 +10,7 @@ export const loader = async ({
   request,
   params,
 }: LoaderFunctionArgs) => {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
 
   requireAdmin(authSession.userId);
   const { organizationId } = params;

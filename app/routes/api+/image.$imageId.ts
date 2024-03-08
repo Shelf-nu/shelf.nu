@@ -3,7 +3,7 @@ import { db } from "~/database";
 import { ShelfStackError } from "~/utils/error";
 
 export async function loader({ context, params }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
 
   if (!authSession)
     throw new ShelfStackError({

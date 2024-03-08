@@ -30,7 +30,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { organizationId, organizations } = await requirePermision({
     userId: authSession.userId,
     request,

@@ -30,7 +30,7 @@ export const NewCategoryFormSchema = z.object({
 const title = "New category";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   await requirePermision({
     userId: authSession.userId,
     request,
@@ -52,7 +52,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export async function action({ context, request }: LoaderFunctionArgs) {
-  const authSession = await context.getSession();
+  const authSession = context.getSession();
   const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
