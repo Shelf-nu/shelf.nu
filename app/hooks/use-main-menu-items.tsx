@@ -4,6 +4,7 @@ import {
   CategoriesIcon,
   GraphIcon,
   LocationMarkerIcon,
+  ScanQRIcon,
   SettingsIcon,
   TagsIcon,
 } from "~/components/icons";
@@ -48,6 +49,12 @@ export function useMainMenuItems() {
       icon: <SettingsIcon />,
       to: "settings",
       label: "Settings",
+      end: true,
+    },
+    {
+      icon: <ScanQRIcon />,
+      to: "scanner",
+      label: "QR scanner",
       end: true,
     },
   ];
