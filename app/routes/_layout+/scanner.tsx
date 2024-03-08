@@ -64,68 +64,6 @@ const QRScanner = () => {
     },
   });
 
-  // const qrReader = new QrcodeDecoder();
-  // qrReader.decodeFromCamera(videoRef.current).then((res: any) => {
-  //   decodeQRCodes(res.data);
-  // });
-
-  // const startVideoStream = async (stream: MediaStream) => {
-  //   const devices = await navigator.mediaDevices.enumerateDevices();
-
-  //   const videoDevices = devices.filter(
-  //     (device) => device.kind === "videoinput"
-  //   );
-  //   setDevices(videoDevices);
-  //   const video = videoRef.current;
-  //   if (video && stream && videoDevices) {
-  //     video.muted = true;
-  //     video.volume = 0;
-  //     video.setAttribute("playsinline", "playsinline");
-  //     video.srcObject = stream;
-  //   }
-  // };
-
-  // const closeVideoStream = () => {
-  //   currentStream?.getTracks().forEach((track) => track.stop());
-  // };
-
-  // const startVideoWithDefaultSettings = async () => {
-  //   try {
-  //     const stream = await navigator.mediaDevices.getUserMedia({
-  //       audio: false,
-  //       video: true,
-  //     });
-
-  //     setCurrentStream(stream);
-  //     startVideoStream(stream);
-  //     setPreferredDeviceAsSelected();
-  //   } catch (err) {
-  //     console.error("Error accessing media devices.", err);
-  //   }
-  // };
-
-  // useEffect(() => {
-  //   // if (!currentStream) {
-  //   //   startVideoWithDefaultSettings();
-  //   // }
-
-  //   if (videoRef.current) {
-  //     navigator.mediaDevices.enumerateDevices().then((devices) => {
-  //       const videoDevices = devices.filter(
-  //         (device) => device.kind === "videoinput"
-  //       );
-  //       setDevices(videoDevices);
-  //       setSelectedDevice(videoDevices[0].deviceId);
-  //       console.log(selectedDevice);
-  //     });
-  //   }
-
-  //   //   const videoDevices = devices.filter(
-  //   //     (device) => device.kind === "videoinput"
-  //   //   );
-  //   //   setDevices(videoDevices);
-  // }, [videoRef]);
-
   const decodeQRCodes = (result: string) => {
     if (result != null) {
       const regex = /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
@@ -149,29 +87,6 @@ const QRScanner = () => {
     }
   };
 
-  // const changeUserMedia = async (deviceId: string) => {
-  //   try {
-  //     closeVideoStream();
-  //     setSelectedDevice(deviceId);
-  //     const constraints = { video: { deviceId: { exact: deviceId } } };
-  //     const stream = await navigator.mediaDevices.getUserMedia(constraints);
-  //     setCurrentStream(stream);
-  //     await startVideoStream(stream);
-  //   } catch (err) {
-  //     console.error("Error accessing media devices.", err);
-  //   }
-  // };
-
-  // const setPreferredDeviceAsSelected = async () => {
-  //   const mediaStream = videoRef.current?.srcObject as MediaStream;
-  //   const videoTrack = mediaStream?.getVideoTracks()[0];
-
-  //   if (!videoTrack) return;
-
-  //   await videoTrack?.applyConstraints();
-  //   setSelectedDevice(videoTrack?.getSettings().deviceId || "");
-  // };
-
   return (
     <>
       <Header title="QR code scanner" />
@@ -182,11 +97,12 @@ const QRScanner = () => {
               ref={videoRef}
               width="100%"
               autoPlay={true}
-              className={`h-full object-cover`}
+              controls={false}
+              className={`pointer-events-none h-full object-cover`}
             />
             {videoMediaDevices.length > 0 && (
               <select
-                className="absolute bottom-3 left-3 w-[calc(100%-24px)] rounded border-0"
+                className="absolute bottom-3 left-3 z-10 w-[calc(100%-24px)] rounded border-0"
                 name="devices"
                 onChange={(e) => {
                   setSelectedDevice(e.currentTarget.value);
@@ -201,16 +117,6 @@ const QRScanner = () => {
               </select>
             )}
           </div>
-
-          {/* <div
-            className={`flex h-full items-center justify-center text-center ${
-              currentStream && "hidden"
-            }`}
-          >
-            <p className="text-[18px] font-medium">
-              Awaiting camera access....
-            </p>
-          </div> */}
         </div>
       </div>
     </>
