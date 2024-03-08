@@ -134,7 +134,7 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   return defaultShouldRevalidate;
 };
 
-type RouteHandleWithName = {
+export type RouteHandleWithName = {
   name?: string;
   [key: string]: any;
 };

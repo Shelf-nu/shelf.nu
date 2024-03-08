@@ -1,10 +1,11 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { UnlinkIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
+import type { RouteHandleWithName } from "../_layout+/bookings";
 
 export const loader = async ({
   context,
@@ -24,7 +25,19 @@ export const loader = async ({
 
 export default function QrLink() {
   const { qrId } = useLoaderData<typeof loader>();
-  return (
+  const matches = useMatches();
+
+  const currentRoute: RouteHandleWithName = matches[matches.length - 1];
+  /**
+   * We have 2 cases when we should render index:
+   * 1. When we are on the index route
+   * 2. When we are on the .new route - the reason we do this is because we want to have the .new modal overlaying the index.
+   */
+  const shouldRenderOutlet = currentRoute?.pathname.includes("existing-asset");
+
+  return shouldRenderOutlet ? (
+    <Outlet />
+  ) : (
     <>
       <div className="flex flex-1 justify-center py-8">
         <div className="my-auto">
@@ -38,13 +51,20 @@ export default function QrLink() {
               an asset. Would you like to link it?
             </p>
           </div>
-          <div className="flex flex-col justify-center">
+          <div className="flex flex-col justify-center gap-2">
             <Button
               variant="primary"
-              className="mb-4 max-w-full"
+              className=" max-w-full"
               to={`/assets/new?qrId=${qrId}`}
             >
               Create a new asset and link
+            </Button>
+            <Button
+              variant="secondary"
+              className=" max-w-full"
+              to={`/assets?linkQrId=${qrId}`}
+            >
+              Link to existing asset
             </Button>
             <Button variant="secondary" className="max-w-full" to={"/"}>
               Cancel

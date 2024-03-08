@@ -7,7 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData, useNavigate, useSearchParams } from "@remix-run/react";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -33,6 +33,7 @@ import {
 } from "~/modules/asset";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import assetCss from "~/styles/assets.css";
+import { getCurrentSearchParams, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
@@ -75,6 +76,9 @@ export const links: LinksFunction = () => [
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const searchParams = getCurrentSearchParams(request);
+  /** If this is present, that means the current purpose of the view is to link an asset to a qr */
+  const linkQrId = searchParams.get("linkQrId");
 
   const { organizationId, organizations, currentOrganization, role } =
     await requirePermision({
@@ -120,6 +124,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     organizationId,
     organizations,
   });
+
   let {
     search,
     totalAssets,
@@ -136,6 +141,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     request,
     organizationId,
   });
+
   if (totalPages !== 0 && page > totalPages) {
     return redirect("/assets");
   }
@@ -154,14 +160,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
   assets = await updateAssetsWithBookingCustodians(assets);
   const header: HeaderData = {
-    title: isPersonalOrg(currentOrganization)
+    title: linkQrId
+      ? "Link QR with asset"
+      : isPersonalOrg(currentOrganization)
       ? user?.firstName
         ? `${user.firstName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`
       : "Your inventory",
+    subHeading: linkQrId ? "Choose an item to link this QR with" : undefined,
   };
+
   const modelName = {
     singular: "asset",
     plural: "assets",
@@ -212,8 +222,16 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data.header.title) },
 ];
 
-export default function AssetIndexPage() {
+export default function AssetIndexPage({
+  rowAction,
+}: {
+  /** Custom function to replace default navigate action when clicking a row */
+  rowAction?: ((id: string) => void) | undefined;
+}) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const linkQrId = searchParams.get("linkQrId");
+
   const hasFiltersToClear = useSearchParamHasValue("category", "tag");
   const clearFilters = useClearValueFromParams("category", "tag");
   const { canImportAssets } = useLoaderData<typeof loader>();
@@ -222,7 +240,7 @@ export default function AssetIndexPage() {
   return (
     <>
       <Header>
-        {!isSelfService ? (
+        {!isSelfService && !linkQrId ? (
           <>
             <ImportButton canImportAssets={canImportAssets} />
             <Button
@@ -288,7 +306,10 @@ export default function AssetIndexPage() {
         </Filters>
         <List
           ItemComponent={ListAssetContent}
-          navigate={(itemId) => navigate(itemId)}
+          navigate={(itemId) =>
+            /** If the row action is passed, use that */
+            linkQrId ? navigate(itemId) : navigate(itemId)
+          }
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
@@ -302,6 +323,13 @@ export default function AssetIndexPage() {
           }
         />
       </ListContentWrapper>
+      {linkQrId ? (
+        <div className="fixed inset-x-0 bottom-0 p-2">
+          <Button variant="secondary" to={`/qr/${linkQrId}/link`} width="full">
+            Cancel
+          </Button>
+        </div>
+      ) : null}
     </>
   );
 }
