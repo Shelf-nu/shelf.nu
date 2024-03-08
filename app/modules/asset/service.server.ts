@@ -1721,3 +1721,42 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
   }
   return assets;
 }
+
+export async function updateAssetQrCode({
+  assetId,
+  newQrId,
+  organizationId,
+}: {
+  organizationId: string;
+  assetId: string;
+  newQrId: string;
+}) {
+  // Disconnect all existing QR codes
+  const assetWithQrCodes = await db.asset.findUnique({
+    where: { id: assetId, organizationId },
+    include: { qrCodes: true },
+  });
+
+  if (assetWithQrCodes) {
+    for (const qrCode of assetWithQrCodes.qrCodes) {
+      await db.asset.update({
+        where: { id: assetId },
+        data: {
+          qrCodes: {
+            disconnect: { id: qrCode.id },
+          },
+        },
+      });
+    }
+  }
+
+  // Connect the new QR code
+  return await db.asset.update({
+    where: { id: assetId },
+    data: {
+      qrCodes: {
+        connect: { id: newQrId },
+      },
+    },
+  });
+}

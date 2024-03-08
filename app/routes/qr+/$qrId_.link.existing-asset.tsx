@@ -3,20 +3,28 @@ import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import {
   Form,
+  useFetcher,
   useLoaderData,
   useNavigation,
+  useParams,
   useSearchParams,
 } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons";
 import { Filters, List } from "~/components/list";
 import { Button } from "~/components/shared";
 import { Td } from "~/components/table";
+import { db } from "~/database";
 import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { isFormProcessing } from "~/utils";
+import {
+  getAsset,
+  getPaginatedAndFilterableAssets,
+  updateAssetQrCode,
+} from "~/modules/asset";
+import { getRequiredParam, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
@@ -103,6 +111,54 @@ export const loader = async ({
   );
 };
 
+export const action = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
+    request,
+    entity: PermissionEntity.qr,
+    action: PermissionAction.update,
+  });
+  const formData = await request.formData();
+  const assetId = formData.get("assetId") as string;
+  const qrId = getRequiredParam(params, "qrId");
+  const asset = await db.asset.findUnique({
+    where: {
+      id: assetId,
+      organizationId,
+    },
+    select: {
+      id: true,
+      qrCodes: {
+        select: {
+          id: true,
+        },
+      },
+    },
+  });
+
+  if (!asset) {
+    throw new ShelfStackError({
+      title: "Hey!",
+      message: `No asset found with id ${assetId}`,
+      status: 404,
+    });
+  }
+
+  const updatedAsset = await updateAssetQrCode({
+    newQrId: qrId,
+    assetId,
+    organizationId,
+  });
+  console.log("updatedAsset", updatedAsset);
+
+  return null;
+};
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
@@ -111,6 +167,19 @@ export default function QrLinkExisting() {
   const { header } = useLoaderData<typeof loader>();
   const hasFiltersToClear = useSearchParamHasValue("category", "tag");
   const clearFilters = useClearValueFromParams("category", "tag");
+  const fetcher = useFetcher();
+
+  function handleSelectAsset(assetId: string) {
+    fetcher.submit(
+      {
+        assetId,
+      },
+      {
+        method: "POST",
+      }
+    );
+  }
+
   return (
     <>
       <div className="flex max-h-full flex-col">
@@ -169,26 +238,29 @@ export default function QrLinkExisting() {
         </Filters>
 
         {/* Body of the modal*/}
-        <div className="mt-4 flex-1 overflow-y-auto pb-4">
-          <List
-            ItemComponent={RowComponent}
-            /** Clicking on the row will add the current asset to the atom of selected assets */
-            navigate={(assetId) => console.log(assetId)}
-            customEmptyStateContent={{
-              title: "You haven't added any assets yet.",
-              text: "What are you waiting for? Create your first asset now!",
-              newButtonRoute: "/assets/new",
-              newButtonContent: "New asset",
-            }}
-          />
+        <div
+        // className="mx-[-24px]"
+        >
+          <div className="flex-1 overflow-y-auto pb-4">
+            <List
+              ItemComponent={RowComponent}
+              /** Clicking on the row will add the current asset to the atom of selected assets */
+              navigate={handleSelectAsset}
+              customEmptyStateContent={{
+                title: "You haven't added any assets yet.",
+                text: "What are you waiting for? Create your first asset now!",
+                newButtonRoute: "/assets/new",
+                newButtonContent: "New asset",
+              }}
+            />
+          </div>
         </div>
+
         {/* Footer of the modal */}
         <footer className="flex justify-between border-t pt-3">
-          <div className="flex gap-3">
-            <Button variant="secondary" to={".."} width="full">
-              Close
-            </Button>
-          </div>
+          <Button variant="secondary" to={".."} width="full">
+            Close
+          </Button>
         </footer>
       </div>
     </>
@@ -212,9 +284,15 @@ const RowComponent = ({ item }: { item: Asset }) => (
             />
           </div>
           <div className="flex flex-col">
-            <p className="word-break whitespace-break-spaces font-medium">
+            <p className="word-break whitespace-break-spaces text-left font-medium">
               {item.title}
             </p>
+            <div>
+              <AssetStatusBadge
+                status={item.status}
+                availableToBook={item.availableToBook}
+              />
+            </div>
           </div>
         </div>
       </div>

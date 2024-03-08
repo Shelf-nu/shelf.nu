@@ -22,6 +22,8 @@ export const loader = async ({
     action: PermissionAction.update,
   });
   const { qrId } = params;
+  /** @TODO here we have to double check if the QR is orpaned, and if its not, redirect */
+
   return json({
     header: {
       title: "Link QR with asset",
