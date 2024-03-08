@@ -1,8 +1,10 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { UnlinkIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import type { RouteHandleWithName } from "../_layout+/bookings";
@@ -20,8 +22,16 @@ export const loader = async ({
     action: PermissionAction.update,
   });
   const { qrId } = params;
-  return json({ qrId });
+  return json({
+    header: {
+      title: "Link QR with asset",
+    },
+    qrId,
+  });
 };
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data?.header.title) },
+];
 
 export default function QrLink() {
   const { qrId } = useLoaderData<typeof loader>();
@@ -62,7 +72,7 @@ export default function QrLink() {
             <Button
               variant="secondary"
               className=" max-w-full"
-              to={`/assets?linkQrId=${qrId}`}
+              to={`existing-asset?linkQrId=${qrId}`}
             >
               Link to existing asset
             </Button>

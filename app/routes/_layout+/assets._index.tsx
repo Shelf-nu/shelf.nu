@@ -7,7 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useLoaderData, useNavigate, useSearchParams } from "@remix-run/react";
+import { useLoaderData, useNavigate } from "@remix-run/react";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -33,7 +33,6 @@ import {
 } from "~/modules/asset";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import assetCss from "~/styles/assets.css";
-import { getCurrentSearchParams, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
@@ -76,9 +75,6 @@ export const links: LinksFunction = () => [
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const searchParams = getCurrentSearchParams(request);
-  /** If this is present, that means the current purpose of the view is to link an asset to a qr */
-  const linkQrId = searchParams.get("linkQrId");
 
   const { organizationId, organizations, currentOrganization, role } =
     await requirePermision({
@@ -160,16 +156,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
   assets = await updateAssetsWithBookingCustodians(assets);
   const header: HeaderData = {
-    title: linkQrId
-      ? "Link QR with asset"
-      : isPersonalOrg(currentOrganization)
+    title: isPersonalOrg(currentOrganization)
       ? user?.firstName
         ? `${user.firstName}'s inventory`
         : `Your inventory`
       : currentOrganization?.name
       ? `${currentOrganization?.name}'s inventory`
       : "Your inventory",
-    subHeading: linkQrId ? "Choose an item to link this QR with" : undefined,
   };
 
   const modelName = {
@@ -229,8 +222,6 @@ export default function AssetIndexPage({
   rowAction?: ((id: string) => void) | undefined;
 }) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const linkQrId = searchParams.get("linkQrId");
 
   const hasFiltersToClear = useSearchParamHasValue("category", "tag");
   const clearFilters = useClearValueFromParams("category", "tag");
@@ -240,7 +231,7 @@ export default function AssetIndexPage({
   return (
     <>
       <Header>
-        {!isSelfService && !linkQrId ? (
+        {!isSelfService ? (
           <>
             <ImportButton canImportAssets={canImportAssets} />
             <Button
@@ -308,7 +299,7 @@ export default function AssetIndexPage({
           ItemComponent={ListAssetContent}
           navigate={(itemId) =>
             /** If the row action is passed, use that */
-            linkQrId ? navigate(itemId) : navigate(itemId)
+            rowAction ? rowAction(itemId) : navigate(itemId)
           }
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
@@ -323,13 +314,6 @@ export default function AssetIndexPage({
           }
         />
       </ListContentWrapper>
-      {linkQrId ? (
-        <div className="fixed inset-x-0 bottom-0 p-2">
-          <Button variant="secondary" to={`/qr/${linkQrId}/link`} width="full">
-            Cancel
-          </Button>
-        </div>
-      ) : null}
     </>
   );
 }
