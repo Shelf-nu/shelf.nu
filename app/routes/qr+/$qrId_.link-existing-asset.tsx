@@ -154,9 +154,9 @@ export const action = async ({
     assetId,
     organizationId,
   });
-  console.log("updatedAsset", updatedAsset);
+  // console.log("updatedAsset", updatedAsset);
 
-  return null;
+  return json({ success: true });
 };
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -165,6 +165,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function QrLinkExisting() {
   const { header } = useLoaderData<typeof loader>();
+  const { qrId } = useParams();
   const hasFiltersToClear = useSearchParamHasValue("category", "tag");
   const clearFilters = useClearValueFromParams("category", "tag");
   const fetcher = useFetcher();
@@ -258,7 +259,7 @@ export default function QrLinkExisting() {
 
         {/* Footer of the modal */}
         <footer className="flex justify-between border-t pt-3">
-          <Button variant="secondary" to={".."} width="full">
+          <Button variant="secondary" to={`/qr/${qrId}/link`} width="full">
             Close
           </Button>
         </footer>

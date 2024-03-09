@@ -1,11 +1,13 @@
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { UnlinkIcon } from "~/components/icons";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { Button } from "~/components/shared";
+import { db } from "~/database";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
@@ -15,7 +17,7 @@ export const loader = async ({
   params,
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  await requirePermision({
+  const { organizationId } = await requirePermision({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.qr,
@@ -23,6 +25,26 @@ export const loader = async ({
   });
   const { qrId } = params;
   /** @TODO here we have to double check if the QR is orpaned, and if its not, redirect */
+
+  const qr = await db.qr.findUnique({
+    where: {
+      id: qrId,
+      organizationId,
+    },
+  });
+
+  if (!qr) {
+    throw new ShelfStackError({
+      message: "This QR code doesn't belong to your current organization.",
+      title: "Not allowed",
+      status: 403,
+    });
+  }
+
+  /** we check if its linked and if it was we just redirect back to qr page and let it handle the logic */
+  if (qr.assetId) {
+    return redirect(`/qr/${qrId}`);
+  }
 
   return json({
     header: {
@@ -63,7 +85,7 @@ export default function QrLink() {
             <Button
               variant="secondary"
               className=" max-w-full"
-              to={`existing-asset?linkQrId=${qrId}`}
+              to={`/qr/${qrId}/link-existing-asset`}
             >
               Link to existing asset
             </Button>
