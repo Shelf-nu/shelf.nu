@@ -235,7 +235,7 @@ export async function getAssetsFromView({
     };
   }
 
-  const [assetSearch, totalAssets] = await db.$transaction([
+  const [assetSearch, totalAssets] = await Promise.all([
     /** Get the assets */
     db.assetSearchView.findMany({
       skip,
@@ -425,7 +425,7 @@ export async function getAssets({
     };
   }
 
-  const [assets, totalAssets] = await db.$transaction([
+  const [assets, totalAssets] = await Promise.all([
     /** Get the assets */
     db.asset.findMany({
       skip,
@@ -1022,7 +1022,6 @@ export async function getAllEntriesForCreateAndEdit({
     searchParams.get("location") ?? defaults?.location ?? "";
 
   const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
-
   const [
     categoryExcludedSelected,
     selectedCategories,
@@ -1032,7 +1031,7 @@ export async function getAllEntriesForCreateAndEdit({
     selectedLocation,
     totalLocations,
     customFields,
-  ] = await db.$transaction([
+  ] = await Promise.all([
     /** Get the categories */
     db.category.findMany({
       where: { organizationId, id: { not: categorySelected } },
@@ -1115,7 +1114,7 @@ export const getPaginatedAndFilterableAssets = async ({
     tagsExcludedSelected,
     selectedTags,
     totalTags,
-  ] = await db.$transaction([
+  ] = await Promise.all([
     db.category.findMany({
       where: { organizationId, id: { notIn: categoriesIds } },
       take: getAllEntries.includes("category") ? undefined : 12,
