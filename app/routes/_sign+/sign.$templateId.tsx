@@ -77,7 +77,8 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     throw new ShelfStackError({
       message: "Unauthorized",
       status: 401,
-      title: "Unauthorized",
+      title:
+        "You are not authorized to view this page and sign this template. Please make sure you are logged in with the correct account.",
     });
   }
 

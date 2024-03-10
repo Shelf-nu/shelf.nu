@@ -240,34 +240,60 @@ export const action = async ({
   }
 
   // If the template was specified, and signature was required
-  if (addTemplateEnabled && templateObj!.signatureRequired) {
-    /** We create the note */
-    await createNote({
-      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateObj!.name?.trim()}** template before receiving custody.`,
-      type: "UPDATE",
-      userId: userId,
-      assetId: asset.id,
-    });
-
-    sendNotification({
-      title: `‘${asset.title}’ would go in custody of ${custodianName}`,
-      message:
-        "This asset will stay available until the custodian signs the PDF template. After that, the asset will be unavailable until custody is manually released.",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
-    });
-
-    sendEmail({
-      to: custodianEmail,
-      subject: `You have been assigned custody over ${asset.title}.`,
-      text: assetCustodyAssignedWithTemplateEmailText({
-        assetName: asset.title,
-        assignerName: user.firstName + " " + user.lastName,
+  if (addTemplateEnabled && templateObj) {
+    if (templateObj.signatureRequired) {
+      await createNote({
+        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateObj!.name?.trim()}** template before receiving custody.`,
+        type: "UPDATE",
+        userId: userId,
         assetId: asset.id,
-        templateId: templateObj!.id,
-        assigneeId: custodianUserId,
-      }),
-    });
+      });
+
+      sendNotification({
+        title: `‘${asset.title}’ would go in custody of ${custodianName}`,
+        message:
+          "This asset will stay available until the custodian signs the PDF template. After that, the asset will be unavailable until custody is manually released.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      sendEmail({
+        to: custodianEmail,
+        subject: `You have been assigned custody over ${asset.title}.`,
+        text: assetCustodyAssignedWithTemplateEmailText({
+          assetName: asset.title,
+          assignerName: user.firstName + " " + user.lastName,
+          assetId: asset.id,
+          templateId: templateObj!.id,
+          assigneeId: custodianUserId,
+        }),
+      });
+    } else {
+      await createNote({
+        content: `**${user.firstName} ${user.lastName}** has given **${custodianName}** custody over **${asset.title}**`,
+        type: "UPDATE",
+        userId: userId,
+        assetId: asset.id,
+      });
+
+      sendNotification({
+        title: `‘${asset.title}’ is now in custody of ${custodianName}`,
+        message:
+          "Remember, this asset will be unavailable until custody is manually released.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      sendEmail({
+        to: custodianEmail,
+        subject: `You have been assigned custody over ${asset.title}`,
+        text: assetCustodyAssignedEmailText({
+          assetName: asset.title,
+          assignerName: user.firstName + " " + user.lastName,
+          assetId: asset.id,
+        }),
+      });
+    }
   } else {
     // If the template was not specified
     await createNote({
