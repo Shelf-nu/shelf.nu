@@ -16,56 +16,78 @@ import { ControlledActionButton } from "~/components/shared/controlled-action-bu
 import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
 import { db } from "~/database";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { makeActive, makeDefault, makeInactive } from "~/modules/template";
 import { assertIsPost } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 import { canCreateMoreTemplates } from "~/utils/subscription";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
-
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      templates: {
-        where: { organizationId },
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          createdAt: true,
-          updatedAt: true,
-          type: true,
-          isActive: true,
-          isDefault: true,
-          pdfSize: true,
-          pdfUrl: true,
-        },
-      },
-    },
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.template,
+    action: PermissionAction.read,
   });
 
-  if (!user) throw new ShelfStackError({ message: "User not found" });
+  // const user = await db.user.findUnique({
+  //   where: {
+  //     id: userId,
+  //   },
+  //   select: {
+  //     firstName: true,
+  //     tier: {
+  //       include: { tierLimit: true },
+  //     },
+  //     templates: {
+  //       where: { organizationId },
+  //       orderBy: { createdAt: "desc" },
+  //       select: {
+  //         id: true,
+  //         name: true,
+  //         description: true,
+  //         createdAt: true,
+  //         updatedAt: true,
+  //         type: true,
+  //         isActive: true,
+  //         isDefault: true,
+  //         pdfSize: true,
+  //         pdfUrl: true,
+  //       },
+  //     },
+  //   },
+  // });
+
+  if (!userId) throw new ShelfStackError({ message: "User not found" });
 
   const modelName = {
     singular: "Template",
     plural: "Templates",
   };
 
-  const templates = user.templates;
+  const templates = await db.template.findMany({
+    where: {
+      organizationId,
+    },
+  });
+
+  const userTier = (await db.user.findUnique({
+    where: {
+      id: userId,
+    },
+    select: {
+      tier: {
+        include: {
+          tierLimit: true,
+        },
+      },
+    },
+  }))!.tier;
 
   const defaultTemplates: { [key: string]: TTemplate } = {};
   templates.forEach((template) => {
@@ -74,10 +96,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return json({
     userId,
-    tier: user.tier,
+    tier: userTier,
     modelName,
     canCreateMoreTemplates: canCreateMoreTemplates({
-      tierLimit: user.tier.tierLimit,
+      tierLimit: userTier?.tierLimit,
       totalTemplates: templates.length,
     }),
     items: templates,
@@ -87,10 +109,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 };
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.template,
+    action: PermissionAction.read,
+  });
 
   const formData = await request.clone().formData();
   const intent = formData.get("intent") as "toggleActive" | "makeDefault";
@@ -119,11 +147,7 @@ export async function action({ request }: ActionFunctionArgs) {
         senderId: authSession.userId,
       });
 
-      return redirect(`/settings/template`, {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      });
+      return redirect(`/settings/template`);
     }
     case "makeDefault": {
       const templateId = formData.get("templateId") as string;
@@ -142,11 +166,7 @@ export async function action({ request }: ActionFunctionArgs) {
         senderId: authSession.userId,
       });
 
-      return redirect(`/settings/template`, {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      });
+      return redirect(`/settings/template`);
     }
   }
 }

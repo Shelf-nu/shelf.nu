@@ -23,6 +23,7 @@ export enum PermissionEntity {
   dashboard = "dashboard",
   generalSettings = "generalSettings",
   subscription = "subscription",
+  template = "template",
 }
 
 export interface PermissionCheckProps {

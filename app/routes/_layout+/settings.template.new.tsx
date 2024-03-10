@@ -10,8 +10,6 @@ import {
   NewTemplateFormSchema,
   TemplateForm,
 } from "~/components/templates/form";
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { createTemplate, updateTemplatePDF } from "~/modules/template";
 import { assertUserCanCreateMoreTemplates } from "~/modules/tier";
 
@@ -19,11 +17,14 @@ import { assertIsPost } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
 const title = "New Template";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { userId } = await requireAuthSession(request);
+export async function loader({ context }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
   await assertUserCanCreateMoreTemplates({ userId });
 
@@ -44,9 +45,15 @@ export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export async function action({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export async function action({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.template,
+    action: PermissionAction.create,
+  });
   assertIsPost(request);
   await assertUserCanCreateMoreTemplates({ userId: authSession.userId });
 
@@ -57,37 +64,21 @@ export async function action({ request }: LoaderFunctionArgs) {
   );
 
   if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-      },
-      {
-        status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
-    );
+    return json({
+      errors: result.error,
+    });
   }
   const { name, type, description, signatureRequired, pdf } = result.data;
 
   if (pdf.type === "application/octet-stream") {
-    return json(
-      {
-        errors: [
-          {
-            code: "custom",
-            message: "File is required.",
-          },
-        ],
-      },
-      {
-        status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
+    return json({
+      errors: [
+        {
+          code: "custom",
+          message: "File is required.",
         },
-      }
-    );
+      ],
+    });
   }
 
   const { id } = await createTemplate({
@@ -114,11 +105,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/settings/template`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect(`/settings/template`);
 }
 
 export default function AddTemplatePage() {

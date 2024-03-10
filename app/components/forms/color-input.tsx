@@ -1,4 +1,5 @@
-import { useState, type ChangeEvent, useEffect } from "react";
+import type { ChangeEvent } from "react";
+import { useState, useEffect } from "react";
 import { getRandomColor } from "~/utils";
 import Input from "./input";
 

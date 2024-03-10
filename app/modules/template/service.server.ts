@@ -143,7 +143,7 @@ export async function updateTemplatePDF({
 
   if (!pdf) return null;
 
-  const publicUrl = getPublicFileURL({
+  const publicUrl = await getPublicFileURL({
     bucketName: "templates",
     filename: newFileName,
   });
@@ -226,7 +226,7 @@ export async function getTemplates({
     organizationId,
   };
 
-  const [templates, totalTemplates] = await Promise.all([
+  const [templates, totalTemplates] = await db.$transaction([
     db.template.findMany({
       where,
       orderBy: { updatedAt: "desc" },

@@ -33,7 +33,7 @@ export const EmptyState = ({ customContent, modelName }: CustomEmptyState) => {
     <div className="flex h-full flex-col justify-center gap-[32px] px-4 py-[100px] text-center">
       <div className="flex flex-col items-center">
         <img
-          src="/images/empty-state.svg"
+          src="/static/images/empty-state.svg"
           alt="Empty state"
           className="h-auto w-[172px]"
         />

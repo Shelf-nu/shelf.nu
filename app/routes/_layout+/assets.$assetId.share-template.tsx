@@ -6,17 +6,27 @@ import Input from "~/components/forms/input";
 import { SendRotatedIcon, ShareAssetIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
 
   const assetId = params.assetId as string;
   const asset = await db.asset.findUnique({
@@ -74,8 +84,13 @@ export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
   const formData = await request.formData();
   const assetId = params.assetId as string;
   const assetName = formData.get("assetName") as string;
@@ -86,7 +101,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     title: "Sending email...",
     message: "Sending a link to the custodian to sign the template.",
     icon: { name: "spinner", variant: "primary" },
-    senderId: authSession.userId,
+    senderId: userId,
   });
 
   await sendEmail({
@@ -99,7 +114,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     title: "Asset shared",
     message: "An email has been sent to the custodian.",
     icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
+    senderId: userId,
   });
 
   return redirect(`/assets/${assetId}`);

@@ -7,7 +7,7 @@ import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { validateFileAtom } from "~/atoms/file";
+import { MAX_SIZE, validateFileAtom } from "~/atoms/file";
 import { Badge, Button } from "~/components/shared";
 import { formatBytes, isFormProcessing } from "~/utils";
 import FormRow from "../forms/form-row";
@@ -23,8 +23,6 @@ import { Switch } from "../forms/switch";
 import { Card } from "../shared/card";
 import iconsMap from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
-
-const MAX_FILE_SIZE = 5_000_000;
 
 export const base = z.object({
   name: z.string().min(2, "Name is required"),
@@ -46,10 +44,7 @@ export const NewTemplateFormSchema = z.discriminatedUnion("isEdit", [
           (val: File) => val.type !== "application/octet-stream",
           "A file is required"
         )
-        .refine(
-          (val: File) => val.size <= MAX_FILE_SIZE,
-          "File size is too big"
-        )
+        .refine((val: File) => val.size <= MAX_SIZE, "File size is too big")
         .refine(
           (val: File) => val.type === "application/pdf",
           "Only .pdf is accepted"
@@ -63,8 +58,7 @@ export const NewTemplateFormSchema = z.discriminatedUnion("isEdit", [
         .any()
         .refine(
           (val: File) =>
-            val.type !== "application/octet-stream" ||
-            val.size <= MAX_FILE_SIZE,
+            val.type !== "application/octet-stream" || val.size <= MAX_SIZE,
           "File size is too big"
         )
         .refine(
@@ -118,7 +112,7 @@ export const TemplateForm = ({
 
       // We don't want to update the state if the file is
       // more than 5 MB
-      if (file.size > MAX_FILE_SIZE) return;
+      if (file.size > MAX_SIZE) return;
 
       setPdf(files[0]);
       validateFile(e);

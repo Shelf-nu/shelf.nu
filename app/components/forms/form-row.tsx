@@ -25,7 +25,7 @@ export default function FormRow({
         className
       )}
     >
-      <div className="hidden lg:block lg:basis-[280px]">
+      <div className="hidden lg:block lg:min-w-[280px] lg:basis-[280px]">
         <div
           className={tw(
             "text-text-sm font-medium text-gray-700",

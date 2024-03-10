@@ -10,7 +10,7 @@ export const MapPlaceholder = ({
 }) => (
   <div className="relative">
     <img
-      src="/images/no-location-image.jpg"
+      src="/static/images/no-location-image.jpg"
       alt="No scanned location"
       className="w-full rounded-none"
     />

@@ -4,12 +4,15 @@ import { exportAssetsToCsv } from "~/utils/csv.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { organizationId, organizations } = await requirePermision(
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+
+  const { organizationId, organizations } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.asset,
-    PermissionAction.export
-  );
+    entity: PermissionEntity.asset,
+    action: PermissionAction.export,
+  });
   await assertUserCanExportAssets({ organizationId, organizations });
 
   /** Join the rows with a new line */

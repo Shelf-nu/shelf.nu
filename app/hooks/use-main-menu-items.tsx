@@ -46,7 +46,7 @@ export function useMainMenuItems() {
   const menuItemsBottom = [
     {
       icon: <SettingsIcon />,
-      to: "settings/account",
+      to: "settings",
       label: "Settings",
       end: true,
     },

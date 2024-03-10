@@ -5,7 +5,6 @@ import { useLoaderData, Link } from "@remix-run/react";
 import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { deleteUser } from "~/modules/user";
 import { isDelete } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -21,8 +20,9 @@ export type UserWithQrCodes = User & {
   qrCodes: QrCodeWithAsset[];
 };
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  requireAdmin(request);
+export const loader = async ({ context, params }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
   const userId = params.userId as string;
   const user = (await db.user.findUnique({
     where: { id: userId },
@@ -55,9 +55,13 @@ export const handle = {
   breadcrumb: () => "User details",
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  await requireAdmin(request);
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
   /** ID of the target user we are generating codes for */
   const userId = params.userId as string;
 

@@ -1,11 +1,7 @@
 import type { Organization, Prisma, TeamMember } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
-import {
-  generatePageMeta,
-  getCurrentSearchParams,
-  getParamsValues,
-} from "~/utils";
+import { getCurrentSearchParams, getParamsValues } from "~/utils";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -137,7 +133,6 @@ export const getPaginatedAndFilterableTeamMembers = async ({
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
-  const { prev, next } = generatePageMeta(request);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -154,8 +149,6 @@ export const getPaginatedAndFilterableTeamMembers = async ({
     page,
     perPage,
     search,
-    prev,
-    next,
     teamMembers,
     totalPages,
     totalTeamMembers,

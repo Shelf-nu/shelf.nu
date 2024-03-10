@@ -1,4 +1,4 @@
-import { type Location } from "@prisma/client";
+import type { Location } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -40,7 +40,6 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import { commitAuthSession } from "~/modules/auth";
 import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
@@ -48,7 +47,6 @@ import { getRequiredParam, tw, isLink, isFormProcessing } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
-import { setCookie } from "~/utils/cookies.server";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
@@ -61,14 +59,17 @@ export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z.string().transform((val) => val === "on"),
 });
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.read
-  );
-
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
+
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.read,
+  });
+
   const locale = getLocale(request);
   const id = getRequiredParam(params, "assetId");
 
@@ -126,7 +127,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   });
 }
 
-export async function action({ request, params }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
   const formData = await request.formData();
   const intent = formData.get("intent") as "delete" | "toggle";
   const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
@@ -134,11 +138,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
     toggle: PermissionAction.update,
   };
 
-  const { authSession, organizationId } = await requirePermision(
+  const { organizationId } = await requirePermision({
+    userId,
     request,
-    PermissionEntity.asset,
-    intent2ActionMap[intent]
-  );
+    entity: PermissionEntity.asset,
+    action: intent2ActionMap[intent],
+  });
+
   const id = getRequiredParam(params, "assetId");
   switch (intent) {
     case "delete":
@@ -157,11 +163,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         senderId: authSession.userId,
       });
 
-      return redirect(`/assets`, {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      });
+      return redirect(`/assets`);
     case "toggle":
       const availableToBook = formData.get("availableToBook") === "on";
       const rsp = await updateAssetBookingAvailability(id, availableToBook);
@@ -174,9 +176,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
           },
           {
             status: 400,
-            headers: [
-              setCookie(await commitAuthSession(request, { authSession })),
-            ],
           }
         );
       }
@@ -188,14 +187,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         senderId: authSession.userId,
       });
 
-      return json(
-        { success: true },
-        {
-          headers: {
-            "Set-Cookie": await commitAuthSession(request, { authSession }),
-          },
-        }
-      );
+      return json({ success: true });
     default:
       return null;
   }
@@ -296,7 +288,7 @@ export default function AssetDetailsPage() {
           mainImageExpiration: asset.mainImageExpiration,
           alt: asset.title,
         }}
-        className="mx-auto my-8 h-[240px] w-full rounded-lg object-cover sm:w-[343px] md:hidden"
+        className="mx-auto my-8 h-[240px] w-full rounded object-cover sm:w-[343px] md:hidden"
       />
       <ContextualModal />
       <div className="mt-8 block lg:flex">
@@ -309,7 +301,7 @@ export default function AssetDetailsPage() {
               alt: asset.title,
             }}
             className={tw(
-              "mb-8 hidden h-auto w-[343px] rounded-lg border object-cover md:block lg:w-full",
+              "mb-8 hidden h-auto w-[343px] rounded border object-cover md:block lg:w-full",
               asset.description ? "rounded-b-none border-b-0" : ""
             )}
           />
@@ -356,7 +348,7 @@ export default function AssetDetailsPage() {
             <Card>
               <div className="flex items-center gap-3">
                 <img
-                  src="/images/default_pfp.jpg"
+                  src="/static/images/default_pfp.jpg"
                   alt="custodian"
                   className="size-10 rounded"
                 />

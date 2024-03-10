@@ -56,7 +56,7 @@ export default function Sidebar() {
       >
         <Link to="." title="Home" className="block h-[32px]">
           <img
-            src="/images/logo-full-color(x2).png"
+            src="/static/images/logo-full-color(x2).png"
             alt="logo"
             className="h-full"
           />
@@ -95,7 +95,7 @@ export default function Sidebar() {
               onClick={toggleMobileNav}
             >
               <img
-                src="/images/shelf-symbol.png"
+                src="/static/images/shelf-symbol.png"
                 alt="Shelf Logo"
                 className="mx-1.5 inline h-[32px]"
               />

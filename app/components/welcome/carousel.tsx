@@ -41,7 +41,7 @@ function Carousel() {
             <div>
               <figure className="mb-6">
                 <img
-                  src="/images/shelf-visual1.jpg"
+                  src="/static/images/shelf-visual1.jpg"
                   alt="img"
                   className=" object-cover"
                 />
@@ -59,7 +59,7 @@ function Carousel() {
             <div>
               <figure className="mb-6">
                 <img
-                  src="/images/shelf-visual2.jpg"
+                  src="/static/images/shelf-visual2.jpg"
                   alt="img"
                   className=" object-cover"
                 />
@@ -78,7 +78,7 @@ function Carousel() {
             <div>
               <figure className="mb-6">
                 <img
-                  src="/images/shelf-visual3.jpg"
+                  src="/static/images/shelf-visual3.jpg"
                   alt="img"
                   className=" object-cover"
                 />

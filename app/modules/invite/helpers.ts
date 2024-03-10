@@ -51,15 +51,22 @@ export const assetCustodyAssignedEmailText = ({
   assetName,
   assignerName,
   assetId,
+  templateUrl,
 }: {
   assetName: string;
   assignerName: string;
   assetId: string;
+  templateUrl?: string;
 }) => `Howdy,
 
 ${assignerName} has assigned you as custodian for ${assetName}.
 Please click the link below to view the asset:
 ${SERVER_URL}/assets/${assetId}
+
+${
+  templateUrl &&
+  `To view the signing template, please click the link: ${templateUrl}`
+}
 
 Thanks,
 The Shelf Team

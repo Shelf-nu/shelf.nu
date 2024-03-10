@@ -3,7 +3,6 @@ import { json, redirect } from "@remix-run/node";
 import { parseFormAny } from "react-zorm";
 import { NewNoteSchema } from "~/components/assets/notes/new";
 import { createNote, deleteNote } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
 import { assertIsDelete, assertIsPost, isDelete, isPost } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
@@ -13,12 +12,20 @@ export const loader = async ({ params }: LoaderFunctionArgs) =>
   /** makes sure that if the user navigates to that url, it redirects back to asset */
   redirect(`/assets/${params.assetId}`);
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { authSession } = await requirePermision(
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  await requirePermision({
+    userId,
     request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
   const formData = await request.formData();
 
   /* Create note */
@@ -33,9 +40,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         },
         {
           status: 400,
-          headers: {
-            "Set-Cookie": await commitAuthSession(request, { authSession }),
-          },
         }
       );
     }
@@ -55,14 +59,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       userId: authSession.userId,
     });
 
-    return json(
-      { note },
-      {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
-    );
+    return json({ note });
   }
 
   /* Delete note */
@@ -82,13 +79,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       id: noteId,
       userId: authSession.userId,
     });
-    return json(
-      { deleted },
-      {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
-    );
+    return json({ deleted });
   }
 };

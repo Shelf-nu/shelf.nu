@@ -9,16 +9,15 @@ import type {
   Tag,
   Organization,
   TeamMember,
-  CustomField,
   Booking,
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
-import { type LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import { getSupabaseAdmin } from "~/integrations/supabase";
+import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import {
   dateTimeInUnix,
-  generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
   oneDayFromNow,
@@ -30,13 +29,15 @@ import {
 } from "~/utils/custom-fields";
 import { ShelfStackError, handleUniqueConstraintError } from "~/utils/error";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+
 import type {
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
-import { createCategoriesIfNotExists, getAllCategories } from "../category";
+import { createCategoriesIfNotExists } from "../category";
+
 import {
   createCustomFieldsIfNotExists,
   upsertCustomField,
@@ -44,7 +45,7 @@ import {
 import type { CustomFieldDraftPayload } from "../custom-field/types";
 import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
-import { createTagsIfNotExists, getAllTags } from "../tag";
+import { createTagsIfNotExists } from "../tag";
 import { createTeamMemberIfNotExists } from "../team-member";
 
 export async function getAsset({
@@ -55,7 +56,7 @@ export async function getAsset({
   organizationId?: Organization["id"];
   userId?: User["id"];
 }) {
-  const asset = await db.asset.findFirst({
+  return db.asset.findFirst({
     where: { id, organizationId, userId },
     include: {
       category: true,
@@ -106,8 +107,6 @@ export async function getAsset({
       },
     },
   });
-
-  return asset;
 }
 
 /**
@@ -121,6 +120,7 @@ export async function getAssetsFromView({
   search,
   categoriesIds,
   tagsIds,
+  status,
   bookingFrom,
   bookingTo,
   hideUnavailable,
@@ -138,6 +138,7 @@ export async function getAssetsFromView({
 
   categoriesIds?: Category["id"][] | null;
   tagsIds?: Tag["id"][] | null;
+  status?: Asset["status"] | null;
   hideUnavailable?: Asset["availableToBook"];
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
@@ -161,6 +162,10 @@ export async function getAssetsFromView({
     where.searchVector = {
       search: words,
     };
+  }
+
+  if (status && where.asset) {
+    where.asset.status = status;
   }
 
   if (categoriesIds && categoriesIds.length > 0 && where.asset) {
@@ -318,6 +323,7 @@ export async function getAssets({
   search,
   categoriesIds,
   tagsIds,
+  status,
   bookingFrom,
   bookingTo,
   hideUnavailable,
@@ -335,6 +341,7 @@ export async function getAssets({
 
   categoriesIds?: Category["id"][] | null;
   tagsIds?: Tag["id"][] | null;
+  status?: Asset["status"] | null;
   hideUnavailable?: Asset["availableToBook"];
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
@@ -348,8 +355,14 @@ export async function getAssets({
 
   /** If the search string exists, add it to the where object */
   if (search) {
-    const words = search.trim().replace(/ +/g, " "); //replace multiple spaces into 1
-    where.title = words;
+    where.title = {
+      contains: search.toLowerCase().trim(),
+      mode: "insensitive",
+    };
+  }
+
+  if (status) {
+    where.status = status;
   }
 
   if (categoriesIds && categoriesIds.length > 0) {
@@ -371,7 +384,6 @@ export async function getAssets({
     }
   }
   const unavailableBookingStatuses = [
-    BookingStatus.DRAFT,
     BookingStatus.RESERVED,
     BookingStatus.ONGOING,
   ];
@@ -846,6 +858,7 @@ export async function updateAssetMainImage({
   });
 }
 
+/** Creates a singular note */
 export async function createNote({
   content,
   type,
@@ -872,6 +885,29 @@ export async function createNote({
   };
 
   return db.note.create({
+    data,
+  });
+}
+
+/** Creates multiple notes with the same content */
+export async function createNotes({
+  content,
+  type,
+  userId,
+  assetIds,
+}: Pick<Note, "content"> & {
+  type?: Note["type"];
+  userId: User["id"];
+  assetIds: Asset["id"][];
+}) {
+  const data = assetIds.map((id) => ({
+    content,
+    type: type || "COMMENT",
+    userId,
+    assetId: id,
+  }));
+
+  return db.note.createMany({
     data,
   });
 }
@@ -974,34 +1010,70 @@ export async function duplicateAsset({
   return duplicatedAssets;
 }
 
-/** Fetches all related entries required for creating a new asset */
-export async function getAllRelatedEntries({
+export async function getAllEntriesForCreateAndEdit({
   organizationId,
+  request,
+  defaults,
 }: {
-  userId: User["id"];
   organizationId: Organization["id"];
-}): Promise<{
-  categories: Category[];
-  tags: Tag[];
-  locations: Location[];
-  customFields: CustomField[];
-}> {
-  const [categories, tags, locations, customFields] = await db.$transaction([
+  request: LoaderFunctionArgs["request"];
+  defaults?: {
+    category?: string | null;
+    tag?: string | null;
+    location?: string | null;
+  };
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const categorySelected =
+    searchParams.get("category") ?? defaults?.category ?? "";
+  const locationSelected =
+    searchParams.get("location") ?? defaults?.location ?? "";
+
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
+  const [
+    categoryExcludedSelected,
+    selectedCategories,
+    totalCategories,
+    tags,
+    locationExcludedSelected,
+    selectedLocation,
+    totalLocations,
+    customFields,
+  ] = await db.$transaction([
     /** Get the categories */
-    db.category.findMany({ where: { organizationId } }),
+    db.category.findMany({
+      where: { organizationId, id: { not: categorySelected } },
+      take: getAllEntries.includes("category") ? undefined : 12,
+    }),
+    db.category.findMany({ where: { organizationId, id: categorySelected } }),
+    db.category.count({ where: { organizationId } }),
 
     /** Get the tags */
     db.tag.findMany({ where: { organizationId } }),
 
     /** Get the locations */
-    db.location.findMany({ where: { organizationId } }),
+    db.location.findMany({
+      where: { organizationId, id: { not: locationSelected } },
+      take: getAllEntries.includes("location") ? undefined : 12,
+    }),
+    db.location.findMany({ where: { organizationId, id: locationSelected } }),
+    db.location.count({ where: { organizationId } }),
 
     /** Get the custom fields */
     db.customField.findMany({
       where: { organizationId, active: { equals: true } },
     }),
   ]);
-  return { categories, tags, locations, customFields };
+
+  return {
+    categories: [...selectedCategories, ...categoryExcludedSelected],
+    totalCategories,
+    tags,
+    locations: [...selectedLocation, ...locationExcludedSelected],
+    totalLocations,
+    customFields,
+  };
 }
 
 export const getPaginatedAndFilterableAssets = async ({
@@ -1034,13 +1106,45 @@ export const getPaginatedAndFilterableAssets = async ({
     hideUnavailable,
     unhideAssetsBookigIds,
   } = getParamsValues(searchParams);
+  const status =
+    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
+      ? null
+      : (searchParams.get("status") as AssetStatus | null);
 
-  const { prev, next } = generatePageMeta(request);
+  const getAllEntries = searchParams.getAll("getAll") as AllowedModelNames[];
+
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
+  const [
+    categoryExcludedSelected,
+    selectedCategories,
+    totalCategories,
+    tagsExcludedSelected,
+    selectedTags,
+    totalTags,
+  ] = await db.$transaction([
+    db.category.findMany({
+      where: { organizationId, id: { notIn: categoriesIds } },
+      take: getAllEntries.includes("category") ? undefined : 12,
+    }),
+    db.category.findMany({
+      where: { organizationId, id: { in: categoriesIds } },
+    }),
+    db.category.count({ where: { organizationId } }),
+    db.tag.findMany({
+      where: { organizationId, id: { notIn: tagsIds } },
+      take: getAllEntries.includes("tag") ? undefined : 12,
+    }),
+    db.tag.findMany({
+      where: { organizationId, id: { in: tagsIds } },
+    }),
+    db.tag.count({ where: { organizationId } }),
+  ]);
+
   let getFunction = getAssetsFromView;
   if (excludeSearchFromView) {
+    // @ts-ignore
     getFunction = getAssets;
   }
 
@@ -1051,6 +1155,7 @@ export const getPaginatedAndFilterableAssets = async ({
     search,
     categoriesIds,
     tagsIds,
+    status,
     bookingFrom,
     bookingTo,
     hideUnavailable,
@@ -1063,18 +1168,12 @@ export const getPaginatedAndFilterableAssets = async ({
     perPage,
     search,
     totalAssets,
-    prev,
-    next,
+    totalCategories,
+    totalTags,
     categories: excludeCategoriesQuery
       ? []
-      : await getAllCategories({
-          organizationId,
-        }),
-    tags: excludeTagsQuery
-      ? []
-      : await getAllTags({
-          organizationId,
-        }),
+      : [...selectedCategories, ...categoryExcludedSelected],
+    tags: excludeTagsQuery ? [] : [...selectedTags, ...tagsExcludedSelected],
     assets,
     totalPages,
     cookie,
@@ -1091,7 +1190,7 @@ export const createLocationChangeNote = async ({
   userId,
   isRemoving,
 }: {
-  currentLocation: Location | null;
+  currentLocation: Pick<Location, "id" | "name"> | null;
   newLocation: Location | null;
   firstName: string;
   lastName: string;
@@ -1100,24 +1199,21 @@ export const createLocationChangeNote = async ({
   userId: User["id"];
   isRemoving: boolean;
 }) => {
-  /**
-   * WE have a few cases to handle:
-   * 1. Setting the first location
-   * 2. Updating the location
-   * 3. Removing the location
-   */
-
   let message = "";
   if (currentLocation && newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **${currentLocation.name.trim()}** to **${newLocation.name.trim()}**`; // updating location
+    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **[${currentLocation.name.trim()}](/locations/${
+      currentLocation.id
+    })** to **[${newLocation.name.trim()}](/locations/${newLocation.id})**`; // updating location
   }
 
   if (newLocation && !currentLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **${newLocation.name.trim()}**`; // setting to first location
+    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **[${newLocation.name.trim()}](/locations/${
+      newLocation.id
+    })**`; // setting to first location
   }
 
   if (isRemoving || !newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **${currentLocation?.name.trim()}**`; // removing location
+    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **[${currentLocation?.name.trim()}](/locations/${currentLocation?.id})**`; // removing location
   }
   await createNote({
     content: message,
@@ -1125,6 +1221,78 @@ export const createLocationChangeNote = async ({
     userId,
     assetId,
   });
+};
+
+export const createBulkLocationChangeNotes = async ({
+  modifiedAssets,
+  assetIds,
+  removedAssetIds,
+  userId,
+  location,
+}: {
+  modifiedAssets: Prisma.AssetGetPayload<{
+    select: {
+      title: true;
+      id: true;
+      location: {
+        select: {
+          name: true;
+          id: true;
+        };
+      };
+      user: {
+        select: {
+          firstName: true;
+          lastName: true;
+          id: true;
+        };
+      };
+    };
+  }>[];
+  assetIds: Asset["id"][];
+  removedAssetIds: Asset["id"][];
+  userId: User["id"];
+  location: Location;
+}) => {
+  const user = await db.user.findFirst({
+    where: {
+      id: userId,
+    },
+    select: {
+      firstName: true,
+      lastName: true,
+    },
+  });
+
+  if (!user) {
+    throw new ShelfStackError({
+      message: "User not found",
+      status: 404,
+    });
+  }
+
+  // Iterate over the modified assets
+  for (const asset of modifiedAssets) {
+    const isRemoving = removedAssetIds.includes(asset.id);
+    const isNew = assetIds.includes(asset.id);
+    const newLocation = isRemoving ? null : location;
+    const currentLocation = asset.location
+      ? { name: asset.location.name, id: asset.location.id }
+      : null;
+
+    if (isNew || isRemoving) {
+      await createLocationChangeNote({
+        currentLocation,
+        newLocation,
+        firstName: user?.firstName || "",
+        lastName: user?.lastName || "",
+        assetName: asset.title,
+        assetId: asset.id,
+        userId,
+        isRemoving,
+      });
+    }
+  }
 };
 
 /** Fetches assets with the data needed for exporting to CSV */

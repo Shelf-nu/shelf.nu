@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { forwardRef } from "react";
 
 import { tw } from "~/utils";
@@ -95,18 +96,21 @@ const Input = forwardRef(function Input(
     ref,
     ...rest,
   };
-  // @TODO dont know how to fix that.
-  // @ts-ignore
-  let input = <input {...inputProps} />;
+
+  let input = (
+    <input
+      {...inputProps}
+      ref={ref as RefObject<HTMLInputElement> | undefined}
+    />
+  );
 
   if (inputType === "textarea") {
     input = (
-      // @TODO dont know how to fix that.
-      // @ts-ignore
       <textarea
         {...inputProps}
         maxLength={rest.maxLength || 250}
         rows={rest.rows || 8}
+        ref={ref as RefObject<HTMLTextAreaElement> | undefined}
       />
     );
   }

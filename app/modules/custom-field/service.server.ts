@@ -1,9 +1,4 @@
-import {
-  type CustomField,
-  type Organization,
-  type Prisma,
-  type User,
-} from "@prisma/client";
+import type { CustomField, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database";
 import { badRequest } from "~/utils";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";

@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json, redirect, redirectDocument } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
@@ -11,17 +11,14 @@ import Header from "~/components/layout/header";
 import {
   createAsset,
   createNote,
-  getAllRelatedEntries,
+  getAllEntriesForCreateAndEdit,
   updateAssetMainImage,
 } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganization } from "~/modules/organization";
 import { assertWhetherQrBelongsToCurrentOrganization } from "~/modules/qr";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
@@ -32,14 +29,29 @@ import { requirePermision } from "~/utils/roles.server";
 
 const title = "New Asset";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.create
-  );
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
-  const organization = await getOrganization({ id: organizationId });
+
+  const { organizationId, currentOrganization } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.create,
+  });
+
+  const {
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  } = await getAllEntriesForCreateAndEdit({
+    organizationId,
+    request,
+  });
+
   /**
    * We need to check if the QR code passed in the URL belongs to the current org
    * This is relevant whenever the user is trying to link a new asset with an existing QR code
@@ -49,12 +61,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     organizationId,
   });
 
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
-      organizationId,
-    });
-
   const header = {
     title,
   };
@@ -62,9 +68,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return json({
     header,
     categories,
+    totalCategories,
     tags,
+    totalTags: tags.length,
     locations,
-    currency: organization?.currency,
+    totalLocations,
+    currency: currentOrganization?.currency,
     customFields,
   });
 }
@@ -77,12 +86,15 @@ export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export async function action({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+export async function action({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
     request,
-    PermissionEntity.asset,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.asset,
+    action: PermissionAction.create,
+  });
   assertIsPost(request);
 
   /** Here we need to clone the request as we need 2 different streams:
@@ -119,13 +131,19 @@ export async function action({ request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
 
-  const { title, description, category, qrId, newLocationId, valuation } =
-    result.data;
+  const {
+    title,
+    description,
+    category,
+    qrId,
+    newLocationId,
+    valuation,
+    addAnother,
+  } = result.data;
 
   const customFieldsValues = extractCustomFieldValuesFromResults({
     result,
@@ -157,7 +175,6 @@ export async function action({ request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -179,16 +196,20 @@ export async function action({ request }: LoaderFunctionArgs) {
 
   if (asset.location) {
     await createNote({
-      content: `**${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}** set the location of **${asset.title?.trim()}** to **${asset.location.name?.trim()}**`,
+      content: `**${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}** set the location of **${asset.title?.trim()}** to *[${asset.location.name.trim()}](/locations/${
+        asset.location.id
+      })**`,
       type: "UPDATE",
       userId: authSession.userId,
       assetId: asset.id,
     });
   }
 
-  return redirect(`/assets`, {
-    headers: [setCookie(await commitAuthSession(request, { authSession }))],
-  });
+  /** If the user used the add-another button, we reload the document to reset the form */
+  if (addAnother) {
+    return redirectDocument(`/assets/new?`);
+  }
+  return redirect(`/assets`);
 }
 
 export default function NewAssetPage() {

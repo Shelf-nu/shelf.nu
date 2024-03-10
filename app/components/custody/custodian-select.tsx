@@ -70,7 +70,11 @@ export default function CustodianSelect(
         defaultValue={defaultValue}
       >
         <SelectTrigger
-          className={tw(disabled ? "cursor-not-allowed" : "", className)}
+          className={tw(
+            disabled ? "cursor-not-allowed" : "",
+            "custodian-selector text-left",
+            className
+          )}
         >
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>
@@ -94,18 +98,19 @@ export default function CustodianSelect(
                       userId: member?.userId,
                       email: member.user?.email,
                     })}
+                    className="py-3"
                   >
                     {member.user ? (
-                      <div className="flex items-center gap-3 truncate py-3.5 pr-1">
+                      <div className="flex items-center gap-3 truncate pr-1">
                         <img
                           src={
                             member.user.profilePicture ||
-                            "/images/default_pfp.jpg"
+                            "/static/images/default_pfp.jpg"
                           }
                           className={"w-[20px] rounded-[4px]"}
                           alt={`${member.user.firstName} ${member.user.lastName}'s profile`}
                         />
-                        <span className=" flex-1 whitespace-nowrap font-medium text-gray-900">
+                        <span className=" whitespace-nowrap text-left font-medium text-gray-900">
                           {member.user.firstName} {member.user.lastName}
                         </span>
                         {showEmail ? (
@@ -115,7 +120,7 @@ export default function CustodianSelect(
                         ) : null}
                       </div>
                     ) : (
-                      <div className="flex items-center gap-3 py-3.5">
+                      <div className="flex items-center gap-3">
                         <i>
                           <UserIcon />
                         </i>

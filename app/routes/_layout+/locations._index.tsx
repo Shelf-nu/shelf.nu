@@ -11,29 +11,24 @@ import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
 import { getLocations } from "~/modules/location";
-import {
-  generatePageMeta,
-  getCurrentSearchParams,
-  getParamsValues,
-  tw,
-} from "~/utils";
+import { getCurrentSearchParams, getParamsValues, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.location,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.location,
+    action: PermissionAction.read,
+  });
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-
-  const { prev, next } = generatePageMeta(request);
 
   const { locations, totalLocations } = await getLocations({
     organizationId,
@@ -59,8 +54,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalItems: totalLocations,
       totalPages,
       perPage,
-      prev,
-      next,
+
       modelName,
     },
     {

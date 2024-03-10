@@ -21,6 +21,8 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
+import { createNotes } from "../asset";
+import { getOrganizationAdminsEmails } from "../organization";
 
 /** Includes needed for booking to have all data required for emails */
 export const bookingIncludeForEmails = {
@@ -96,7 +98,8 @@ export const upsertBooking = async (
       | "custodianUserId"
     > & { assetIds: Asset["id"][] }
   >,
-  hints: ClientHint
+  hints: ClientHint,
+  isSelfService: boolean = false
 ) => {
   const {
     assetIds,
@@ -247,10 +250,36 @@ export const upsertBooking = async (
           });
           let html = bookingUpdatesTemplateString({
             booking: res,
-            heading: `Booking confirmation for ${custodian}`,
+            heading: `Booking reservation for ${custodian}`,
             assetCount: res.assets.length,
             hints,
           });
+
+          /** Here we need to check if the custodian is different than the admin and send email to the admin in case they are different */
+          if (isSelfService) {
+            const adminsEmails = await getOrganizationAdminsEmails({
+              organizationId: res.organizationId,
+            });
+
+            const adminSubject = `Booking reservation request (${res.name}) by ${custodian} - shelf.nu`;
+
+            /** Pushing admins emails to promises */
+            promises.push(
+              sendEmail({
+                to: adminsEmails.join(","),
+                subject: adminSubject,
+                text,
+                /** We need to invoke this function separately for the admin email as the footer of emails is different */
+                html: bookingUpdatesTemplateString({
+                  booking: res,
+                  heading: `Booking reservation request for ${custodian}`,
+                  assetCount: res.assets.length,
+                  hints,
+                  isAdminEmail: true,
+                }),
+              })
+            );
+          }
 
           if (data.status === BookingStatus.COMPLETE) {
             subject = `Booking completed (${res.name}) - shelf.nu`;
@@ -437,7 +466,6 @@ export async function getBookings({
         },
       },
     };
-    // @TODO if status of the booking is ONGOING, the assets added should have their status updated to CHECKED_OUT
   }
 
   if (excludeBookingIds?.length) {
@@ -487,9 +515,19 @@ export async function getBookings({
   return { bookings, bookingCount };
 }
 
-export const removeAssets = async (
-  booking: Pick<Booking, "id"> & { assetIds: Asset["id"][] }
-) => {
+export const removeAssets = async ({
+  booking,
+  firstName,
+  lastName,
+  userId,
+}: {
+  booking: Pick<Booking, "id"> & {
+    assetIds: Asset["id"][];
+  };
+  firstName: string;
+  lastName: string;
+  userId: string;
+}) => {
   const { assetIds, id } = booking;
   const b = await db.booking.update({
     // First, disconnect the assets from the booking
@@ -521,6 +559,15 @@ export const removeAssets = async (
     });
   }
 
+  createNotes({
+    content: `**${firstName?.trim()} ${lastName?.trim()}** removed asset from booking **[${
+      b.name
+    }](/bookings/${b.id})**.`,
+    type: "UPDATE",
+    userId,
+    assetIds,
+  });
+
   return b;
 };
 
@@ -547,6 +594,11 @@ export const deleteBooking = async (
     include: {
       ...commonInclude,
       ...bookingIncludeForEmails,
+      assets: {
+        select: {
+          id: true,
+        },
+      },
     },
   });
 
@@ -589,8 +641,10 @@ export const deleteBooking = async (
   return b;
 };
 
-export const getBooking = async (booking: Pick<Booking, "id">) => {
-  const { id } = booking;
+export const getBooking = async (
+  booking: Pick<Booking, "id" | "organizationId">
+) => {
+  const { id, organizationId } = booking;
 
   /**
    * On the booking page, we need some data related to the assets added, so we know what actions are possible
@@ -600,7 +654,7 @@ export const getBooking = async (booking: Pick<Booking, "id">) => {
    */
 
   return db.booking.findFirst({
-    where: { id },
+    where: { id, organizationId },
     include: {
       ...commonInclude,
       assets: {

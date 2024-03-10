@@ -3,7 +3,6 @@ import { redirect, json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { QrNotFound } from "~/components/qr/not-found";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { getUserOrganizations } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getQr } from "~/modules/qr";
@@ -12,10 +11,13 @@ import { assertIsPost } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfStackError } from "~/utils/error";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
   /* Get the ID of the QR from the params */
   const id = params.qrId as string;
-
   /* Find the QR in the database */
   const qr = await getQr(id);
 
@@ -46,10 +48,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
    *  - If not, redirect to the login page, which will automatically then redirect back to here so all checks are performed again
    *  - If so, continue
    */
-  const authSession = await requireAuthSession(request, {
-    onFailRedirectTo: `not-logged-in?scanId=${scan.id}`,
-    verify: false,
-  });
+  if (!context.isAuthenticated) {
+    return redirect(`not-logged-in?scanId=${scan.id}&redirectTo=/qr/${id}`);
+  }
+  const authSession = context.getSession();
 
   if (authSession) {
     updateScan({
@@ -82,6 +84,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const personalOrganization = userOrganizations.find(
     (org) => org.type === "PERSONAL"
   ) as Organization;
+
   if (!userOrganizationIds.includes(qr.organizationId)) {
     return redirect(`contact-owner?scanId=${scan.id}`);
   }
@@ -93,22 +96,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
           personalOrganization.id
       )
     ),
-    setCookie(
-      await commitAuthSession(request, {
-        authSession,
-        flashErrorMessage: null,
-      })
-    ),
   ];
 
   /**
    * When there is no assetId that means that the asset was deleted so the QR code is orphaned.
    * Here we redirect to a page where the user has the option to link to existing asset or create a new one.
    */
-  if (!qr.assetId)
+  if (!qr.assetId) {
     return redirect(`link?scanId=${scan.id}`, {
       headers,
     });
+  }
 
   return redirect(
     `/assets/${qr.assetId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,

@@ -5,8 +5,14 @@ import QRCode from "qrcode-generator";
 import { db } from "~/database";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  requireAdmin(request);
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+
+  requireAdmin(authSession.userId);
   const { organizationId } = params;
   const url = new URL(request.url);
   const onlyOrphaned = url.searchParams.get("orphaned");

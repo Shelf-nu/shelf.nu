@@ -1,11 +1,7 @@
 import { useMemo } from "react";
-import {
-  OrganizationRoles,
-  type Custody,
-  type Invite,
-  InviteStatuses,
-  type TeamMember,
-} from "@prisma/client";
+import { OrganizationRoles, InviteStatuses } from "@prisma/client";
+import type { Custody, Invite, TeamMember } from "@prisma/client";
+
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -19,7 +15,6 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { TeamMembersTable } from "~/components/workspace/team-members-table";
 import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { requireOrganisationId } from "~/modules/organization/context.server";
@@ -32,7 +27,12 @@ import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-type ActionIntent = "delete" | "revoke" | "resend" | "invite";
+type ActionIntent =
+  | "delete"
+  | "revokeAccess"
+  | "resend"
+  | "invite"
+  | "cancelInvite";
 export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
@@ -57,14 +57,19 @@ type InviteWithTeamMember = Pick<
   };
 };
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.teamMember,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.read,
+  });
 
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const { organizationId } = await requireOrganisationId({
+    userId: authSession.userId,
+    request,
+  });
   const [organization, userMembers, invites, teamMembers] =
     await db.$transaction([
       /** Get the org */
@@ -152,7 +157,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       name: `${um.user.firstName ? um.user.firstName : ""} ${
         um.user.lastName ? um.user.lastName : ""
       }`,
-      img: um.user.profilePicture || "/images/default_pfp.jpg",
+      img: um.user.profilePicture || "/static/images/default_pfp.jpg",
       email: um.user.email,
       status: "ACCEPTED",
       role: organizationRolesMap[um.roles[0]],
@@ -163,7 +168,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   for (const invite of invites as InviteWithTeamMember[]) {
     teamMembersWithUserOrInvite.push({
       name: invite.inviteeTeamMember.name,
-      img: "/images/default_pfp.jpg",
+      img: "/static/images/default_pfp.jpg",
       email: invite.inviteeEmail,
       status: invite.status,
       role: organizationRolesMap[invite?.roles[0]],
@@ -181,10 +186,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
+
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.update,
+  });
 
   const formData = await request.formData();
   const intent = formData.get("intent") as ActionIntent;
@@ -201,7 +212,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
       return redirect(`/settings/team`);
-    case "revoke":
+    case "revokeAccess":
       const targetUserId = formData.get("userId") as string;
       const user = await revokeAccessToOrganization({
         userId: targetUserId,
@@ -242,6 +253,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         senderId: userId,
       });
       return redirect("/settings/team");
+    case "cancelInvite":
+      await db.invite.updateMany({
+        where: {
+          inviteeEmail: formData.get("email") as string,
+          organizationId,
+          status: InviteStatuses.PENDING,
+        },
+        data: {
+          status: InviteStatuses.INVALIDATED,
+        },
+      });
+      sendNotification({
+        title: "Invitation cancelled",
+        message: "The invitation has successfully been cancelled.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+      return null;
+
     case "resend":
       const invite = await createInvite({
         organizationId,
@@ -268,7 +298,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export const handle = {
-  breadcrumb: () => "single",
+  breadcrumb: () => "Team",
 };
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

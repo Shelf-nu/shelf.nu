@@ -12,12 +12,12 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { commitAuthSession } from "~/modules/auth";
 import { getTag, updateTag } from "~/modules/tag";
 import { getRequiredParam, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
+
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -29,15 +29,24 @@ export const UpdateTagFormSchema = z.object({
 
 const title = "Edit Tag";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermision(
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.tag,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.tag,
+    action: PermissionAction.update,
+  });
 
   const id = getRequiredParam(params, "tagId");
-  const tag = await getTag({ id });
+  const tag = await getTag({ id, organizationId });
+
+  if (!tag) {
+    throw new ShelfStackError({
+      status: 404,
+      message: "Tag not found",
+    });
+  }
 
   const header = {
     title,
@@ -50,12 +59,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request, params }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function action({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.tag,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.tag,
+    action: PermissionAction.update,
+  });
   const formData = await request.formData();
   const result = await UpdateTagFormSchema.safeParseAsync(
     parseFormAny(formData)
@@ -70,7 +81,6 @@ export async function action({ request, params }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -78,6 +88,7 @@ export async function action({ request, params }: LoaderFunctionArgs) {
   const rsp = await updateTag({
     ...result.data,
     id,
+    organizationId,
   });
 
   if (rsp?.error) {
@@ -87,7 +98,6 @@ export async function action({ request, params }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -99,9 +109,7 @@ export async function action({ request, params }: LoaderFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/tags`, {
-    headers: [setCookie(await commitAuthSession(request, { authSession }))],
-  });
+  return redirect(`/tags`, {});
 }
 
 export default function EditTag() {

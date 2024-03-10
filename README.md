@@ -1,7 +1,7 @@
 # Shelf.nu
 
 <a href="https://www.shelf.nu/" target="_blank">
-<img width="100%" src="https://cdn.discordapp.com/attachments/1143882281069592658/1143949082017153044/Frame_102.jpg" />
+<img width="100%" src="./public/static/images/readme-cover.jpg" />
 </a>
 <h4 align="center">
 ✨ Open Source Asset Management Infrastructure for everyone. ✨
@@ -48,4 +48,4 @@ With Shelf, you can take a picture of any item you own and store it in your own 
 
 ### Looking for contributing in Shelf?
 
-- check out our [contributing guidelines](https://github.com/hrutik7/shelf.nu/blob/docs_improvement/docs/get-started.md)
+- check out our [contributing guidelines](./CONTRIBUTING.md)

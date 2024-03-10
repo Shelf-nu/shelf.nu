@@ -12,10 +12,8 @@ import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css";
 import { db } from "~/database";
 
-import { commitAuthSession } from "~/modules/auth";
 import { upsertBooking } from "~/modules/booking";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getUserByID } from "~/modules/user";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
@@ -29,14 +27,16 @@ import { requirePermision } from "~/utils/roles.server";
  * In the .new route we dont even return any html, we just create a draft booking and directly redirect to the .bookingId route.
  * This way all actions are available and its way easier to manage so in a way this works kind of like a resource route.
  */
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId, role } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId, role } = await requirePermision({
+    userId: authSession?.userId,
     request,
-    PermissionEntity.booking,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.booking,
+    action: PermissionAction.create,
+  });
+
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-  const user = await getUserByID(authSession.userId);
 
   const booking = await upsertBooking(
     {
@@ -51,39 +51,51 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getClientHint(request)
   );
 
-  /**
-   * We need to fetch the team members to be able to display them in the custodian dropdown.
-   */
-  const teamMembers = await db.teamMember.findMany({
-    where: {
-      deletedAt: null,
-      organizationId,
-      userId: {
-        not: null,
+  const [teamMembers, org] = await db.$transaction([
+    /**
+     * We need to fetch the team members to be able to display them in the custodian dropdown.
+     */
+    db.teamMember.findMany({
+      where: {
+        deletedAt: null,
+        organizationId,
+        userId: {
+          not: null,
+        },
       },
-    },
-    include: {
-      user: true,
-    },
-    orderBy: {
-      userId: "asc",
-    },
-  });
+      include: {
+        user: true,
+      },
+      orderBy: {
+        userId: "asc",
+      },
+    }),
+    /** We create a teamMember entry to represent the org owner.
+     * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
+     * assigning custody to users, not NRM.
+     */
+    db.organization.findUnique({
+      where: {
+        id: organizationId,
+      },
+      select: {
+        owner: true,
+      },
+    }),
+  ]);
 
-  /** We create a teamMember entry to represent the org owner.
-   * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
-   * assigning custody to users, not NRM.
-   */
-  teamMembers.push({
-    id: "owner",
-    name: "owner",
-    user: user,
-    userId: user?.id as string,
-    organizationId,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    deletedAt: null,
-  });
+  if (org?.owner) {
+    teamMembers.push({
+      id: "owner",
+      name: "owner",
+      user: org.owner,
+      userId: org.owner.id as string,
+      organizationId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: null,
+    });
+  }
 
   return json(
     {
@@ -93,21 +105,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     {
       headers: [
-        setCookie(await commitAuthSession(request, { authSession })),
         setCookie(await setSelectedOrganizationIdCookie(organizationId)),
       ],
     }
   );
 }
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   const formData = await request.formData();
 
-  const { authSession, organizationId } = await requirePermision(
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession?.userId,
     request,
-    PermissionEntity.booking,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.booking,
+    action: PermissionAction.create,
+  });
 
   const result = await NewBookingFormSchema().safeParseAsync(
     parseFormAny(formData)
@@ -121,9 +134,6 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -178,6 +188,7 @@ export const handle = {
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
+
   return (
     <div>
       <header className="mb-5">

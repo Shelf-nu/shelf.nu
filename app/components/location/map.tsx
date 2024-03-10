@@ -23,7 +23,7 @@ export const ShelfMap = ({
         mapStyle={`https://api.maptiler.com/maps/streets-v2/style.json?key=${window.env.MAPTILER_TOKEN}`}
       >
         <Marker longitude={longitude} latitude={latitude} anchor="bottom">
-          <img src="/images/map-marker.png" width={30} alt="img" />
+          <img src="/static/images/map-marker.png" width={30} alt="img" />
         </Marker>
         <ScaleControl />
       </Map>

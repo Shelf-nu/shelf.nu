@@ -40,7 +40,7 @@ export const OrganizationSelect = () => {
       }}
     >
       <Select name="organizationId" defaultValue={currentOrganizationId}>
-        <SelectTrigger className="w-full p-3">
+        <SelectTrigger className="w-full px-3 py-2">
           <SelectValue />
         </SelectTrigger>
         <SelectContent position="popper" className="w-full" align="start">
@@ -70,7 +70,7 @@ export const OrganizationSelect = () => {
               to="/settings/workspace"
               icon="settings"
               variant="link"
-              className=" w-full select-none justify-start rounded-lg p-2 text-left font-medium text-gray-900 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-50 hover:text-gray-800 "
+              className=" w-full select-none justify-start rounded p-2 text-left font-medium text-gray-900 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-50 hover:text-gray-800 "
             >
               Manage account
             </Button>

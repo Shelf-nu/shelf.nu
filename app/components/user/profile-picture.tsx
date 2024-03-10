@@ -20,7 +20,7 @@ export default function ProfilePicture({
 
   return user ? (
     <img
-      src={user.profilePicture || "/images/default_pfp.jpg"}
+      src={user.profilePicture || "/static/images/default_pfp.jpg"}
       alt={`${user.username}`}
       className={styles}
     />

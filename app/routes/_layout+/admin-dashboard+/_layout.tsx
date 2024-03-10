@@ -5,8 +5,9 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 
 import { requireAdmin } from "~/utils/roles.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAdmin(request);
+export async function loader({ context }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
 
   return null;
 }

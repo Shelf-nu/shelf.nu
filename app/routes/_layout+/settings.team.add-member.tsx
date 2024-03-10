@@ -12,25 +12,31 @@ import { handleUniqueConstraintError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await requirePermision(
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.teamMember,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.create,
+  });
 
   return json({
     showModal: true,
   });
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.teamMember,
-    PermissionAction.create
-  );
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
+
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.create,
+  });
   const formData = await request.formData();
 
   try {

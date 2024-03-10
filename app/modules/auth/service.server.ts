@@ -1,8 +1,9 @@
+import type { AuthSession } from "server/session";
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { SERVER_URL } from "~/utils/env";
 
+import { ShelfStackError } from "~/utils/error";
 import { mapAuthSession } from "./mappers.server";
-import type { AuthSession } from "./types";
 
 export async function createEmailAuthAccount(email: string, password: string) {
   const { data, error } = await getSupabaseAdmin().auth.admin.createUser({
@@ -21,7 +22,6 @@ export async function signUpWithEmailPass(email: string, password: string) {
     email: email,
     password: password,
     options: {
-      emailRedirectTo: `${SERVER_URL}/oauth/callback`,
       data: {
         signup_method: "email-password",
       },
@@ -51,7 +51,7 @@ export async function resendVerificationEmail(email: string) {
     };
   }
 
-  return { status: "error", error: "Somthing went wring please try again" };
+  return { status: "error", error: "Something went wrong please try again" };
 }
 
 export async function signInWithEmail(email: string, password: string) {
@@ -76,13 +76,8 @@ export async function signInWithEmail(email: string, password: string) {
   return { status: "success", authSession: mappedSession };
 }
 
-export async function sendMagicLink(email: string) {
-  return getSupabaseAdmin().auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: `${SERVER_URL}/oauth/callback`,
-    },
-  });
+export async function sendOTP(email: string) {
+  return getSupabaseAdmin().auth.signInWithOtp({ email });
 }
 
 export async function sendResetPasswordLink(email: string) {
@@ -121,18 +116,37 @@ export async function getAuthUserByAccessToken(accessToken: string) {
 export async function getAuthResponseByAccessToken(accessToken: string) {
   return await getSupabaseAdmin().auth.getUser(accessToken);
 }
+
 export async function refreshAccessToken(
   refreshToken?: string
-): Promise<AuthSession | null> {
-  if (!refreshToken) return null;
+): Promise<AuthSession> {
+  try {
+    if (!refreshToken) {
+      throw new ShelfStackError({ message: "Refresh token is required" });
+    }
 
-  const { data, error } = await getSupabaseAdmin().auth.refreshSession({
-    refresh_token: refreshToken,
-  });
+    const { data, error } = await getSupabaseAdmin().auth.refreshSession({
+      refresh_token: refreshToken,
+    });
 
-  if (!data.session || error) return null;
+    if (error) {
+      throw error;
+    }
 
-  return await mapAuthSession(data.session);
+    const { session } = data;
+    if (!session) {
+      throw new ShelfStackError({
+        message: "Session returned by Supabase is null",
+      });
+    }
+
+    return await mapAuthSession(data.session);
+  } catch (cause) {
+    throw new ShelfStackError({
+      message: "Unable to refresh access token",
+      cause,
+    });
+  }
 }
 
 export async function verifyAuthSession(authSession: AuthSession) {
@@ -141,4 +155,35 @@ export async function verifyAuthSession(authSession: AuthSession) {
   );
 
   return Boolean(authAccount);
+}
+
+export async function verifyOtpAndSignin(email: string, otp: string) {
+  const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
+    email,
+    token: otp,
+    type: "email",
+  });
+
+  if (error) {
+    return { status: "error", message: error.message };
+  }
+  if (!data.session) {
+    return {
+      status: "error",
+      message: "Something went wrong, please try again!",
+    };
+  }
+
+  const mappedSession = await mapAuthSession(data.session);
+  if (!mappedSession) {
+    return {
+      status: "error",
+      message: "Something went wrong, please try again!",
+    };
+  }
+
+  return {
+    status: "success",
+    authSession: mappedSession,
+  };
 }

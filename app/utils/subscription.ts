@@ -58,7 +58,7 @@ export const canCreateMoreTemplates = ({
   tierLimit: { maxTemplates: number } | null | undefined;
   totalTemplates: number;
 }) => {
-  if (!premiumIsEnabled()) return true;
+  if (!premiumIsEnabled) return true;
   if (!tierLimit?.maxTemplates) return false;
 
   return totalTemplates < tierLimit?.maxTemplates;

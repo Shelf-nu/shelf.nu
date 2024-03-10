@@ -15,15 +15,15 @@ import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.qr,
-    PermissionAction.read
-  );
-
-  // Here we are reading the
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.qr,
+    action: PermissionAction.read,
+  });
 
   const { assetId } = params as { assetId: string };
   const searchParams = getCurrentSearchParams(request);

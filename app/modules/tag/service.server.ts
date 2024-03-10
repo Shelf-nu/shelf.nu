@@ -161,23 +161,29 @@ export async function createTagsIfNotExists({
   }
   return tags;
 }
-export async function getTag({ id }: Pick<Tag, "id">) {
+export async function getTag({
+  id,
+  organizationId,
+}: Pick<Tag, "id" | "organizationId">) {
   return db.tag.findUnique({
     where: {
       id,
+      organizationId,
     },
   });
 }
 
 export async function updateTag({
   id,
+  organizationId,
   name,
   description,
-}: Pick<Tag, "id" | "name" | "description">) {
+}: Pick<Tag, "id" | "organizationId" | "name" | "description">) {
   try {
     const tag = await db.tag.update({
       where: {
         id,
+        organizationId,
       },
       data: {
         name,

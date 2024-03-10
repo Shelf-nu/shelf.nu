@@ -8,7 +8,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/workspace.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
@@ -16,16 +16,22 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createOrganization } from "~/modules/organization";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import {
+  requireOrganisationId,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreOrganizations } from "~/modules/tier";
 import { assertIsPost } from "~/utils";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requireOrganisationId({
+    userId: authSession.userId,
+    request,
+  });
   const { userId } = authSession;
   assertUserCanCreateMoreOrganizations(userId);
 
@@ -38,8 +44,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
-export async function action({ request }: ActionFunctionArgs) {
-  const authSession = await requireAuthSession(request);
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
   assertIsPost(request);
   assertUserCanCreateMoreOrganizations(authSession.userId);
 
@@ -64,9 +70,6 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
       }
     );
   }
@@ -82,7 +85,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const file = formDataFile.get("image") as File | null;
   invariant(file instanceof File, "file not the right type");
 
-  await createOrganization({
+  const newOrg = await createOrganization({
     name,
     userId: authSession.userId,
     image: file || null,
@@ -97,9 +100,7 @@ export async function action({ request }: ActionFunctionArgs) {
   });
 
   return redirect(`/settings/workspace/`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
+    headers: [setCookie(await setSelectedOrganizationIdCookie(newOrg.id))],
   });
 }
 
@@ -108,7 +109,7 @@ export const handle = {
 };
 
 export default function NewWorkspace() {
-  const title = useAtomValue(titleAtom);
+  const title = useAtomValue(dynamicTitleAtom);
 
   return (
     <div>

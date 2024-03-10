@@ -6,20 +6,19 @@ import {
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase";
-import { requireAuthSession } from "~/modules/auth";
 import { cropImage, extractImageNameFromSupabaseUrl } from ".";
 import { SUPABASE_URL } from "./env";
 import { ShelfStackError } from "./error";
 import { getFileArrayBuffer } from "./getFileArrayBuffer";
 
-export function getPublicFileURL({
+export async function getPublicFileURL({
   filename,
   bucketName = "profile-pictures",
 }: {
   filename: string;
   bucketName?: string;
 }) {
-  bucketExists(bucketName);
+  await bucketExists(bucketName);
 
   const { data } = getSupabaseAdmin()
     .storage.from(bucketName)
@@ -124,7 +123,6 @@ export async function parseFileFormData({
   resizeOptions?: ResizeOptions;
   updateExisting?: boolean;
 }) {
-  await requireAuthSession(request);
   await bucketExists(bucketName);
 
   const uploadHandler = unstable_composeUploadHandlers(

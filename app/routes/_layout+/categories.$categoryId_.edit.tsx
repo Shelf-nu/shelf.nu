@@ -13,11 +13,9 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { commitAuthSession } from "~/modules/auth";
 import { getCategory, updateCategory } from "~/modules/category";
 import { isFormProcessing, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
@@ -31,15 +29,17 @@ export const UpdateCategoryFormSchema = z.object({
 
 const title = "Edit category";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermision(
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.category,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.category,
+    action: PermissionAction.update,
+  });
 
   const id = getRequiredParam(params, "categoryId");
-  const category = await getCategory({ id });
+  const category = await getCategory({ id, organizationId });
 
   const colorFromServer = category?.color;
 
@@ -54,12 +54,15 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request, params }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function action({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.category,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.category,
+    action: PermissionAction.update,
+  });
+
   const formData = await request.formData();
   const result = await UpdateCategoryFormSchema.safeParseAsync(
     parseFormAny(formData)
@@ -73,7 +76,6 @@ export async function action({ request, params }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -81,6 +83,7 @@ export async function action({ request, params }: LoaderFunctionArgs) {
   const rsp = await updateCategory({
     ...result.data,
     id,
+    organizationId,
   });
 
   // Handle response error when creating. Mostly due to duplicate name
@@ -91,7 +94,6 @@ export async function action({ request, params }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -103,9 +105,7 @@ export async function action({ request, params }: LoaderFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/categories`, {
-    headers: [setCookie(await commitAuthSession(request, { authSession }))],
-  });
+  return redirect(`/categories`);
 }
 
 export default function EditCategory() {
