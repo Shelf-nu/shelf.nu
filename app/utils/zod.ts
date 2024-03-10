@@ -1,4 +1,5 @@
-import { z, type ZodCustomIssue, type ZodIssue } from "zod";
+import type { ZodCustomIssue, ZodIssue } from "zod";
+import { z } from "zod";
 
 type ZodCustomIssueWithMessage = ZodCustomIssue & { message: string };
 

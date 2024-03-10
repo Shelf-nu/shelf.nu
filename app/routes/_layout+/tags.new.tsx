@@ -7,11 +7,9 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { commitAuthSession } from "~/modules/auth";
 import { createTag } from "~/modules/tag";
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
@@ -24,12 +22,14 @@ export const NewTagFormSchema = z.object({
 
 const title = "New Tag";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.tag,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.tag,
+    action: PermissionAction.create,
+  });
 
   const header = {
     title,
@@ -42,12 +42,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
+export async function action({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.tag,
-    PermissionAction.create
-  );
+    entity: PermissionEntity.tag,
+    action: PermissionAction.create,
+  });
   assertIsPost(request);
   const formData = await request.formData();
   const result = await NewTagFormSchema.safeParseAsync(parseFormAny(formData));
@@ -74,7 +76,6 @@ export async function action({ request }: LoaderFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -86,9 +87,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/tags`, {
-    headers: [setCookie(await commitAuthSession(request, { authSession }))],
-  });
+  return redirect(`/tags`, {});
 }
 
 export default function NewTag() {

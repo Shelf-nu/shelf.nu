@@ -20,6 +20,7 @@ import SuccessfulSubscriptionModal from "~/components/subscription/successful-su
 import { db } from "~/database";
 
 import { getUserByID } from "~/modules/user";
+import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfStackError } from "~/utils/error";
@@ -37,12 +38,18 @@ import {
   getCustomerTrialSubscription,
 } from "~/utils/stripe.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  if (!ENABLE_PREMIUM_FEATURES) {
+    return redirect("/settings/account");
+  }
+
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.subscription,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.subscription,
+    action: PermissionAction.read,
+  });
 
   const { userId } = authSession;
   const user = await getUserByID(userId);
@@ -54,11 +61,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? ((await getStripeCustomer(user.customerId)) as CustomerWithSubscriptions)
     : null;
 
-  let subscription = getCustomerActiveSubscription({ customer });
-  /** Check if the customer has an active subscription */
+  /** Check if the customer has an trial subscription */
+  let subscription = getCustomerTrialSubscription({ customer });
 
+  /** If no tial, check if they have an active one */
   if (!subscription) {
-    subscription = getCustomerTrialSubscription({ customer });
+    subscription = getCustomerActiveSubscription({ customer });
   }
 
   /* Get the prices and products from Stripe */
@@ -93,12 +101,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { authSession } = await requirePermision(
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+
+  await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.subscription,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.subscription,
+    action: PermissionAction.update,
+  });
 
   const { userId, email } = authSession;
   const formData = await request.formData();
@@ -149,7 +160,7 @@ export default function UserPage() {
   return (
     <>
       <div className=" flex flex-col">
-        <div className="mb-8 mt-3 flex items-center gap-3 rounded-lg border border-gray-300 p-4">
+        <div className="mb-8 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
           <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
             <InfoIcon />
           </div>

@@ -14,8 +14,6 @@ import {
   NewTemplateFormSchema,
   TemplateForm,
 } from "~/components/templates/form";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import {
   getTemplateById,
   updateTemplate,
@@ -24,9 +22,10 @@ import {
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermision } from "~/utils/roles.server";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+export async function loader({ params }: LoaderFunctionArgs) {
   const id = getRequiredParam(params, "templateId");
 
   const template = await getTemplateById({ id });
@@ -52,10 +51,16 @@ export const handle = {
   breadcrumb: () => "Edit",
 };
 
-export async function action({ request, params }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   assertIsPost(request);
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.template,
+    action: PermissionAction.update,
+  });
 
   const id = getRequiredParam(params, "templateId");
   const clonedData = request.clone();
@@ -65,18 +70,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   );
 
   if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-        success: false,
-      },
-      {
-        status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
-    );
+    return json({
+      errors: result.error,
+      success: false,
+    });
   }
 
   const { name, description, signatureRequired, pdf } = result.data;
@@ -104,11 +101,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect("/settings/template", {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect("/settings/template");
 }
 
 export default function TemplateEditPage() {

@@ -97,7 +97,7 @@ const UserRow = ({
     <Td className="w-full">
       <div className="flex items-center gap-3">
         <img
-          src={img || "/images/default_pfp.jpg"}
+          src={img || "/static/images/default_pfp.jpg"}
           className={"size-10 rounded-[4px]"}
           alt={`${name}'s profile`}
         />

@@ -1,25 +1,22 @@
-import { useMemo } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { ChevronRight, ChevronLeftDoubleIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
+import { usePagination } from "~/hooks";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils";
 import PerPageItemsSelect from "./per-page-items-select";
 
 export const Pagination = () => {
-  const { page, totalItems, totalPages, perPage, next, prev, modelName } =
-    useLoaderData<IndexResponse>();
-
-  const { prevDisabled, nextDisabled } = useMemo(
-    () => ({
-      prevDisabled: totalPages <= 1 || page <= 1,
-      nextDisabled: totalPages <= 1 || page * perPage >= totalItems,
-    }),
-    [page, totalPages, perPage, totalItems]
-  );
-
-  const firstPage = "?page=1";
-  const lastPage = `?page=${totalPages}`;
+  const { modelName } = useLoaderData<IndexResponse>();
+  const {
+    page,
+    totalPages,
+    totalItems,
+    perPage,
+    goToPage,
+    prevDisabled,
+    nextDisabled,
+  } = usePagination();
 
   return (
     <div className="flex flex-wrap items-center justify-center gap-3 px-6 pb-4 pt-3">
@@ -27,7 +24,7 @@ export const Pagination = () => {
         <Button
           variant="secondary"
           size="sm"
-          to={firstPage}
+          onClick={() => goToPage(1)}
           disabled={prevDisabled}
           className={tw(
             "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
@@ -40,7 +37,7 @@ export const Pagination = () => {
         <Button
           variant="secondary"
           size="sm"
-          to={prev}
+          onClick={() => goToPage(page - 1)}
           disabled={prevDisabled}
           className={tw(
             "h-9 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
@@ -64,7 +61,7 @@ export const Pagination = () => {
         <Button
           variant="secondary"
           size="sm"
-          to={next}
+          onClick={() => goToPage(page + 1)}
           disabled={nextDisabled}
           className={tw(
             "h-9 w-10 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
@@ -77,7 +74,7 @@ export const Pagination = () => {
         <Button
           variant="secondary"
           size="sm"
-          to={lastPage}
+          onClick={() => goToPage(totalPages)}
           disabled={nextDisabled}
           className={tw(
             "rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",

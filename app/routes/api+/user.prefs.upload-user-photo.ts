@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "react-router";
 import sharp from "sharp";
-import { requireAuthSession } from "~/modules/auth";
 import { getUserByID, updateUser } from "~/modules/user";
 
 import { assertIsPost, dateTimeInUnix } from "~/utils";
@@ -11,9 +10,10 @@ import {
   parseFileFormData,
 } from "~/utils/storage.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+export const action = async ({ context, request }: ActionFunctionArgs) => {
   assertIsPost(request);
-  const { userId } = await requireAuthSession(request);
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
   const user = await getUserByID(userId);
 

@@ -17,20 +17,17 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { getAuthSession, ContinueWithEmailForm } from "~/modules/auth";
+import { ContinueWithEmailForm } from "~/modules/auth";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { getUserByEmail } from "~/modules/user";
 import { assertIsPost, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await getAuthSession(request);
-
+export async function loader({ context }: LoaderFunctionArgs) {
   const title = "Create an account";
-
   const subHeading = "Start your journey with Shelf";
 
-  if (authSession) return redirect("/");
+  if (context.isAuthenticated) redirect("/assets");
 
   return json({ title, subHeading });
 }
@@ -41,8 +38,12 @@ const JoinFormSchema = z
       .string()
       .email("invalid-email")
       .transform((email) => email.toLowerCase()),
-    password: z.string().min(8, "password-too-short"),
-    confirmPassword: z.string().min(8, "password-too-short"),
+    password: z
+      .string()
+      .min(8, "Your password is too short. Min 8 characters are required."),
+    confirmPassword: z
+      .string()
+      .min(8, "Your password is too short. Min 8 characters are required."),
     redirectTo: z.string().optional(),
   })
   .superRefine(({ password, confirmPassword }, ctx) => {
@@ -99,13 +100,15 @@ export async function action({ request }: ActionFunctionArgs) {
     signUpResult.status === "Email verification_required"
   ) {
     // Redirect to the email verification page using Remix's redirect function
-    return redirect(`/verify-email?email=${encodeURIComponent(email)}`);
+    return redirect(
+      `/otp?email=${encodeURIComponent(email)}&mode=confirm_signup`
+    );
   }
 
   return json(
     {
       errors: {
-        email: "Somthing Went Wrong, refresh page and try to signup again ",
+        email: "Something Went Wrong, refresh page and try to signup again ",
         password: null,
       },
     },
@@ -192,12 +195,12 @@ export default function Join() {
             </div>
             <div className="relative flex justify-center text-sm">
               <span className="bg-white px-2 text-gray-500">
-                {"Or use a Magic Link"}
+                {"Or use a One Time Password"}
               </span>
             </div>
           </div>
           <div className="mt-6">
-            <ContinueWithEmailForm />
+            <ContinueWithEmailForm mode="signup" />
           </div>
         </div>
         <div className="flex items-center justify-center pt-5">

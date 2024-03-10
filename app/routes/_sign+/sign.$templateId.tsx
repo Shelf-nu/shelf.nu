@@ -12,51 +12,46 @@ import AgreementPopup, {
 } from "~/components/sign/agreement-popup";
 import { db } from "~/database";
 import { createNote, getAsset } from "~/modules/asset";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { ENABLE_PREMIUM_FEATURES, assertIsPost } from "~/utils";
-import {
-  initializePerPageCookieOnLayout,
-  setCookie,
-  userPrefs,
-} from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import tailwindConfig from "../../../tailwind.config";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // const authSession = await requireAuthSession(request);
-  const { authSession, organizationId } = await requirePermision(
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
     request,
-    PermissionEntity.asset,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.template,
+    action: PermissionAction.read,
+  });
+
   // @TODO - we need to look into doing a select as we dont want to expose all data always
-  const user = authSession
-    ? await db.user.findUnique({
-        where: { email: authSession.email.toLowerCase() },
-        include: {
-          roles: true,
-          organizations: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              imageId: true,
-            },
-          },
-          userOrganizations: {
-            where: {
-              userId: authSession.userId,
-            },
-            select: {
-              organization: true,
-            },
-          },
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    include: {
+      roles: true,
+      organizations: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          imageId: true,
         },
-      })
-    : undefined;
+      },
+      userOrganizations: {
+        where: {
+          userId,
+        },
+        select: {
+          organization: true,
+        },
+      },
+    },
+  });
 
   if (!user) {
     return redirect("/login");
@@ -66,12 +61,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return redirect("onboarding");
   }
 
-  const cookie = await initializePerPageCookieOnLayout(request);
-
   const assigneeId = new URL(request.url).searchParams.get("assigneeId");
   const assetId = new URL(request.url).searchParams.get("assetId");
   // const templateId = params.templateId;
-  const userId = user?.id;
 
   if (!assetId || !assigneeId) {
     throw new ShelfStackError({
@@ -125,32 +117,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
-  return json(
-    {
-      user,
-      currentOrganizationId: organizationId,
-      enablePremium: ENABLE_PREMIUM_FEATURES,
-      custody,
-      template,
-      isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
-    },
-    {
-      headers: [
-        setCookie(await userPrefs.serialize(cookie)),
-        setCookie(
-          await commitAuthSession(request, {
-            authSession,
-          })
-        ),
-      ],
-    }
-  );
+  return json({
+    user,
+    currentOrganizationId: organizationId,
+    enablePremium: ENABLE_PREMIUM_FEATURES,
+    custody,
+    template,
+    isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
+  });
 };
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
-  const authSession = await requireAuthSession(request);
-  const userId = authSession.userId;
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
   const user = await db.user.findUnique({
     where: {
@@ -223,11 +203,7 @@ export async function action({ request }: ActionFunctionArgs) {
     assetId: assetId,
   });
 
-  return redirect(`/assets/${assetId}`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  return redirect(`/assets/${assetId}`);
 }
 
 export default function Sign() {

@@ -15,19 +15,17 @@ import { ErrorBoundryComponent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
-  getAllRelatedEntries,
+  getAllEntriesForCreateAndEdit,
   getAsset,
   updateAsset,
   updateAssetMainImage,
 } from "~/modules/asset";
 
-import { commitAuthSession } from "~/modules/auth";
 import { getActiveCustomFields } from "~/modules/custom-field";
 import { getOrganization } from "~/modules/organization";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import {
   extractCustomFieldValuesFromResults,
   mergedSchema,
@@ -37,20 +35,16 @@ import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
-  const organization = await getOrganization({ id: organizationId });
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
-
-  const { categories, tags, locations, customFields } =
-    await getAllRelatedEntries({
-      userId,
-      organizationId,
-    });
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
+  const organization = await getOrganization({ id: organizationId, userId });
 
   const id = getRequiredParam(params, "assetId");
 
@@ -58,6 +52,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!asset) {
     throw new ShelfStackError({ message: "Not Found", status: 404 });
   }
+
+  const {
+    categories,
+    totalCategories,
+    tags,
+    locations,
+    totalLocations,
+    customFields,
+  } = await getAllEntriesForCreateAndEdit({
+    request,
+    organizationId,
+    defaults: {
+      category: asset.categoryId,
+      location: asset.locationId,
+    },
+  });
 
   const header: HeaderData = {
     title: `Edit | ${asset.title}`,
@@ -68,8 +78,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     asset,
     header,
     categories,
+    totalCategories,
     tags,
+    totalTags: tags.length,
     locations,
+    totalLocations,
     currency: organization?.currency,
     customFields,
   });
@@ -83,13 +96,17 @@ export const handle = {
   breadcrumb: () => "single",
 };
 
-export async function action({ request, params }: ActionFunctionArgs) {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   assertIsPost(request);
-  const { authSession, organizationId } = await requirePermision(
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  const { organizationId } = await requirePermision({
+    userId,
     request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
 
   const id = getRequiredParam(params, "assetId");
   const clonedRequest = request.clone();
@@ -124,7 +141,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -169,7 +185,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
       },
       {
         status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
       }
     );
   }
@@ -181,9 +196,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/assets/${id}`, {
-    headers: [setCookie(await commitAuthSession(request, { authSession }))],
-  });
+  return redirect(`/assets/${id}`, {});
 }
 
 export default function AssetEditPage() {

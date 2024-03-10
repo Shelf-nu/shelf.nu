@@ -1,23 +1,9 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, useMatches } from "@remix-run/react";
-import { Outlet, redirect } from "react-router";
+import { Outlet } from "react-router";
 import { ErrorBoundryComponent } from "~/components/errors";
 import SubHeading from "~/components/shared/sub-heading";
-import { getAuthSession } from "~/modules/auth";
-import { getUserByEmail } from "~/modules/user";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await getAuthSession(request);
-
-  const user = authSession
-    ? await getUserByEmail(authSession?.email)
-    : undefined;
-
-  if (user && user.onboarded) {
-    return redirect("assets");
-  }
-  return null;
-};
+export const loader = () => null;
 
 export default function App() {
   const matches = useMatches();
@@ -33,16 +19,18 @@ export default function App() {
       <main className="flex size-full">
         <div className="flex size-full flex-col items-center justify-center p-6 lg:p-10">
           <div className=" mb-8 text-center">
-            <Link to="/">
+            <Link to="/" reloadDocument>
               <img
-                src="/images/shelf-symbol.png"
+                src="/static/images/shelf-symbol.png"
                 alt="Shelf symbol"
                 className=" mx-auto mb-2 size-12"
               />
             </Link>
 
             <h1>{title}</h1>
-            <SubHeading className="max-w-md">{subHeading}</SubHeading>
+            {subHeading && (
+              <SubHeading className="max-w-md">{subHeading}</SubHeading>
+            )}
           </div>
           <div className=" w-[360px]">
             <Outlet />
@@ -60,7 +48,7 @@ export default function App() {
           </a>
           <img
             className="absolute inset-0 size-full max-w-none object-cover"
-            src="/images/auth-cover.jpg"
+            src="/static/images/auth-cover.jpg"
             alt="John Singer Sargent - A Corner of the Library in Venice, 1904/1907 "
           />
         </aside>

@@ -6,7 +6,6 @@ import {
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase";
-import { requireAuthSession } from "~/modules/auth";
 import { cropImage, extractImageNameFromSupabaseUrl } from ".";
 import { SUPABASE_URL } from "./env";
 import { ShelfStackError } from "./error";
@@ -124,7 +123,6 @@ export async function parseFileFormData({
   resizeOptions?: ResizeOptions;
   updateExisting?: boolean;
 }) {
-  await requireAuthSession(request);
   await bucketExists(bucketName);
 
   const uploadHandler = unstable_composeUploadHandlers(

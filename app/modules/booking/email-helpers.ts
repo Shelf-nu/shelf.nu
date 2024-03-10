@@ -83,7 +83,7 @@ export const assetReservedEmailContent = ({
     to,
     bookingId,
     assetsCount,
-    emailContent: `Booking confirmation for ${custodian}.`,
+    emailContent: `Booking reservation for ${custodian}.`,
   });
 
 /**
@@ -179,7 +179,7 @@ export const sendCheckinReminder = async (
       heading: `Your booking is due for checkin in ${getTimeRemainingMessage(
         new Date(booking.to!),
         new Date()
-      )} minutes.`,
+      )}.`,
       assetCount,
       hints,
     }),

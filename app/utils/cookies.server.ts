@@ -81,6 +81,8 @@ export async function updateCookieWithPerPage(
 export async function initializePerPageCookieOnLayout(request: Request) {
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
-  cookie.perPage = 20;
+  if (!cookie.perPage) {
+    cookie.perPage = 20;
+  }
   return cookie;
 }

@@ -466,7 +466,7 @@ export function SearchIcon(props: SVGProps<SVGSVGElement>) {
     >
       <path
         d="m16.5 16.5-3.625-3.625m1.958-4.708a6.667 6.667 0 1 1-13.333 0 6.667 6.667 0 0 1 13.333 0Z"
-        stroke="#344054"
+        stroke="currentColor"
         strokeWidth={1.667}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -475,23 +475,25 @@ export function SearchIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export const XIcon = (props: SVGProps<SVGSVGElement>) => (
-  <svg
-    width={10}
-    height={10}
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    {...props}
-  >
-    <path
-      d="M9 1 1 9m0-8 8 8"
-      stroke="currentColor"
-      strokeWidth={1.333}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
+export function XIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={10}
+      height={10}
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M9 1 1 9m0-8 8 8"
+        stroke="currentColor"
+        strokeWidth={1.333}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 export const AssetsIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg

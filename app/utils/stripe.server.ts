@@ -24,7 +24,7 @@ function getStripeServerClient() {
   ) {
     // Reference : https://github.com/stripe/stripe-node#usage-with-typescript
     _stripe = new Stripe(STRIPE_SECRET_KEY, {
-      apiVersion: "2022-11-15",
+      apiVersion: "2023-10-16",
     });
   }
   return _stripe;

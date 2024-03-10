@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import {
@@ -28,16 +28,37 @@ const ConditionalActionsDropdown = () => {
   const refIsQrScan = searchParams.get("ref") === "qr";
   const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
   const [open, setOpen] = useState(defaultOpen);
+  const [defaultApplied, setDefaultApplied] = useState(false);
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
+
+  useEffect(() => {
+    if (defaultOpen && !defaultApplied) {
+      setOpen(true);
+      setDefaultApplied(true);
+    }
+  }, [defaultOpen, defaultApplied]);
 
   return (
     <>
+      {open && (
+        <div
+          className={tw(
+            "fixed right-0 top-0 z-10 h-screen w-screen cursor-pointer bg-gray-700/50  transition duration-300 ease-in-out md:hidden"
+          )}
+        />
+      )}
       <DropdownMenu
         modal={false}
-        onOpenChange={(open) => setOpen(open)}
+        onOpenChange={(open) => {
+          if (defaultApplied && window.innerWidth <= 640) setOpen(open);
+        }}
         open={open}
+        defaultOpen={defaultOpen}
       >
-        <DropdownMenuTrigger className="asset-actions hidden sm:flex">
+        <DropdownMenuTrigger
+          className="asset-actions hidden sm:flex"
+          onClick={() => setOpen(!open)}
+        >
           <Button variant="secondary" data-test-id="assetActionsButton">
             <span className="flex items-center gap-2">
               Actions <ChevronRight className="chev" />
@@ -185,14 +206,6 @@ const ConditionalActionsDropdown = () => {
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      {/* overlay on mobile */}
-      <div
-        className={tw(
-          "size-screen fixed right-0 top-0 z-50 cursor-pointer bg-[#344054]/50 transition duration-300 ease-in-out md:hidden",
-          open ? "visible" : "invisible opacity-0"
-        )}
-      ></div>
     </>
   );
 };

@@ -1,4 +1,4 @@
-import { type CustomField } from "@prisma/client";
+import type { CustomField } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
@@ -15,11 +15,7 @@ import {
 } from "~/modules/custom-field";
 import { getOrganizationTierLimit } from "~/modules/tier";
 
-import {
-  getCurrentSearchParams,
-  getParamsValues,
-  generatePageMeta,
-} from "~/utils";
+import { getCurrentSearchParams, getParamsValues } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
@@ -33,18 +29,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId, organizations } = await requirePermision(
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { organizationId, organizations } = await requirePermision({
+    userId: authSession.userId,
     request,
-    PermissionEntity.customField,
-    PermissionAction.read
-  );
+    entity: PermissionEntity.customField,
+    action: PermissionAction.read,
+  });
 
   const searchParams = getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
-  const { prev, next } = generatePageMeta(request);
 
   const { customFields, totalCustomFields } =
     await getFilteredAndPaginatedCustomFields({
@@ -78,8 +75,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalItems: totalCustomFields,
       totalPages,
       perPage,
-      prev,
-      next,
       modelName,
       canCreateMoreCustomFields: canCreateMoreCustomFields({
         tierLimit,
@@ -154,9 +149,13 @@ function TeamMemberRow({ item }: { item: CustomField }) {
         </span>
       </Td>
       <Td>
-        {!item.active && (
+        {!item.active ? (
           <Badge color="#dc2626" withDot={false}>
             Inactive
+          </Badge>
+        ) : (
+          <Badge color="#059669" withDot={false}>
+            Active
           </Badge>
         )}
       </Td>

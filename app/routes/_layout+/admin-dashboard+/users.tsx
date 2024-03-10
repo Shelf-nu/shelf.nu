@@ -1,5 +1,6 @@
 import type { User } from "@prisma/client";
-import { redirect, type LoaderFunctionArgs, json } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -9,9 +10,10 @@ import { Td } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await requireAdmin(request);
-  const { search, totalUsers, perPage, page, prev, next, users, totalPages } =
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  await requireAdmin(authSession.userId);
+  const { search, totalUsers, perPage, page, users, totalPages } =
     await getPaginatedAndFilterableUsers({
       request,
     });
@@ -37,8 +39,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     totalItems: totalUsers,
     perPage,
     totalPages,
-    next,
-    prev,
     modelName,
   });
 };

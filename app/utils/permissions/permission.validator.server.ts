@@ -16,6 +16,12 @@ const Role2PermisionMap: {
       PermissionAction.update,
       PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
     ],
+    [PermissionEntity.template]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
     [PermissionEntity.qr]: [],
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],

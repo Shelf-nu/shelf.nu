@@ -1,15 +1,17 @@
-import type { PrismaClient, Organization, User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import sharp from "sharp";
+import type { AuthSession } from "server/session";
+import type { ExtendedPrismaClient } from "~/database";
 import { db } from "~/database";
 
 import {
   deleteAuthAccount,
-  type AuthSession,
   createEmailAuthAccount,
   signInWithEmail,
   updateAccountPassword,
@@ -17,7 +19,6 @@ import {
 
 import {
   dateTimeInUnix,
-  generatePageMeta,
   getCurrentSearchParams,
   getParamsValues,
   randomUsernameFromEmail,
@@ -36,7 +37,14 @@ export async function getUserByEmail(email: User["email"]) {
 }
 
 export async function getUserByID(id: User["id"]) {
-  return db.user.findUnique({ where: { id } });
+  try {
+    return db.user.findUnique({ where: { id } });
+  } catch (cause) {
+    throw new ShelfStackError({
+      message: "Failed to get user",
+      cause,
+    });
+  }
 }
 
 export async function getUserByIDWithOrg(id: User["id"]) {
@@ -47,7 +55,7 @@ export async function getUserByIDWithOrg(id: User["id"]) {
 }
 
 async function createUserOrgAssociation(
-  tx: Omit<PrismaClient, ITXClientDenyList>,
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
   {
     organizationIds,
     userId,
@@ -98,13 +106,16 @@ export async function createUserOrAttachOrg({
 
   /**
    * If user does not exist, create a new user and attach the org to it
+   * WE have a case where a user registers which only creates an auth account and before confirming their email they try to accept an invite
+   * This will always fail because we need them to confirm their email before we create a user in shelf
    */
   if (!shelfUser?.id) {
     authAccount = await createEmailAuthAccount(email, password);
     if (!authAccount) {
       throw new ShelfStackError({
         status: 500,
-        message: "failed to create auth account",
+        message:
+          "We are facing some issue with your account. Most likely you are trying to accept an invite, before you have confirmed your account's email. Please try again after confirming your email. If the issue persists, feel free to contact support.",
       });
     }
 
@@ -119,6 +130,7 @@ export async function createUserOrAttachOrg({
     return user;
   }
 
+  /** If the user already exists, we just attach the new org to it */
   await createUserOrgAssociation(db, {
     userId: shelfUser.id,
     organizationIds: [organizationId],
@@ -289,7 +301,6 @@ export const getPaginatedAndFilterableUsers = async ({
 }) => {
   const searchParams = getCurrentSearchParams(request);
   const { page, search } = getParamsValues(searchParams);
-  const { prev, next } = generatePageMeta(request);
 
   const { users, totalUsers } = await getUsers({
     page,
@@ -303,8 +314,6 @@ export const getPaginatedAndFilterableUsers = async ({
     perPage: 25,
     search,
     totalUsers,
-    prev,
-    next,
     users,
     totalPages,
   };
@@ -473,7 +482,7 @@ export async function revokeAccessToOrganization({
   organizationId: Organization["id"];
 }) {
   /**
-   * if I want to revoke access, i simply need to:
+   * if I want to revokeAccess access, i simply need to:
    * 1. Remove relation between user and team member
    * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
    */
