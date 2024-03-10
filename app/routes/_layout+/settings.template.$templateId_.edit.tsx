@@ -14,21 +14,28 @@ import {
   NewTemplateFormSchema,
   TemplateForm,
 } from "~/components/templates/form";
-import {
-  getTemplateById,
-  updateTemplate,
-  updateTemplatePDF,
-} from "~/modules/template";
+import { db } from "~/database";
+import { updateTemplate, updateTemplatePDF } from "~/modules/template";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
-export async function loader({ params }: LoaderFunctionArgs) {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const id = getRequiredParam(params, "templateId");
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = await requirePermision({
+    userId,
+    request,
+    entity: PermissionEntity.template,
+    action: PermissionAction.update,
+  });
 
-  const template = await getTemplateById({ id });
+  const template = await db.template.findFirst({
+    where: { id, organizationId },
+  });
   if (!template) {
     throw new Response("Not Found", { status: 404 });
   }
