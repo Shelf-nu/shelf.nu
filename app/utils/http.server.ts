@@ -1,4 +1,6 @@
-import { ShelfStackError } from "./error";
+import type { ShelfError } from "./error";
+import { badRequest, notAllowedMethod } from "./error";
+import { Logger } from "./logger";
 
 export function getCurrentPath(request: Request) {
   return new URL(request.url).pathname;
@@ -29,18 +31,6 @@ export function isDelete(request: Request) {
   return request.method.toLowerCase() === "delete";
 }
 
-export function notFound(message: string) {
-  return new ShelfStackError({ message, status: 404 });
-}
-
-function notAllowedMethod(message: string) {
-  return new ShelfStackError({ message, status: 405 });
-}
-
-export function badRequest(message: string) {
-  return new ShelfStackError({ message, status: 400 });
-}
-
 export function getRequiredParam(
   params: Record<string, string | undefined>,
   key: string
@@ -54,18 +44,15 @@ export function getRequiredParam(
   return value;
 }
 
-export function assertIsPost(request: Request, message = "Method not allowed") {
+export function assertIsPost(request: Request, message?: string) {
   if (!isPost(request)) {
-    throw notAllowedMethod(message);
+    throw notAllowedMethod("POST", message);
   }
 }
 
-export function assertIsDelete(
-  request: Request,
-  message = "Method not allowed"
-) {
+export function assertIsDelete(request: Request, message?: string) {
   if (!isDelete(request)) {
-    throw notAllowedMethod(message);
+    throw notAllowedMethod("DELETE", message);
   }
 }
 
@@ -92,6 +79,23 @@ export function safeRedirect(
   return to;
 }
 
+export type ResponsePayload = Record<string, unknown> | null;
+
+/**
+ * Create a data response payload.
+ *
+ * Normalize the data to return to help type inference.
+ *
+ * @param data - The data to return
+ * @returns The normalized data with `error` key set to `null`
+ */
+export function data<T extends ResponsePayload>(data: T) {
+  return { error: null, ...data };
+}
+
+export type DataResponse<T extends ResponsePayload = ResponsePayload> =
+  ReturnType<typeof data<T>>;
+
 /**
  * Create an error response payload.
  *
@@ -100,15 +104,25 @@ export function safeRedirect(
  * @param cause - The error that has been catch
  * @returns The normalized error with `error` key set to the error
  */
-export function error(cause: ShelfStackError) {
+export function error(cause: ShelfError) {
+  Logger.error(cause);
+
   return {
     error: {
       message: cause.message,
-      title: cause.title,
-      status: cause.status,
-      isShelfError: cause.isShelfError,
+      label: cause.label,
+      // FIXME: clean this after getting the reason for this line
+      // isShelfError: cause.isShelfError,
+      ...(cause.additionalData && {
+        additionalData: cause.additionalData,
+      }),
+      ...(cause.traceId && { traceId: cause.traceId }),
     },
   };
 }
 
 export type ErrorResponse = ReturnType<typeof error>;
+
+export type DataOrErrorResponse<T extends ResponsePayload = ResponsePayload> =
+  | ErrorResponse
+  | DataResponse<T>;

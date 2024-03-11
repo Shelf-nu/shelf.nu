@@ -1,15 +1,25 @@
+import type { FailureReason } from "./error";
+import { ShelfError } from "./error";
 import {
   isGet,
   getCurrentPath,
   getRedirectTo,
   makeRedirectToFromHere,
-  notFound,
   isPost,
   safeRedirect,
+  data,
+  error,
 } from "./http.server";
+import { Logger } from "./logger";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
+
+vitest.mock("./logger", () => ({
+  Logger: {
+    error: vitest.fn(),
+  },
+}));
 
 const BASE_URL = "https://my-app.com";
 
@@ -71,18 +81,6 @@ describe(isPost.name, () => {
   });
 });
 
-describe(notFound.name, () => {
-  it("should return 404 status", () => {
-    expect(notFound("").status).toBe(404);
-  });
-
-  it("should return message", async () => {
-    expect(await notFound("not-found-message").message).toBe(
-      "not-found-message"
-    );
-  });
-});
-
 describe(safeRedirect.name, () => {
   it("should return root path if invalid destination", () => {
     expect(safeRedirect(null)).toBe("/");
@@ -97,5 +95,69 @@ describe(safeRedirect.name, () => {
 
   it("should return destination path", () => {
     expect(safeRedirect("/items")).toBe("/items");
+  });
+});
+
+describe(data.name, () => {
+  it("should return data with error set to null", () => {
+    const responseData = { name: "John" };
+    const result = data(responseData);
+
+    expect(result).toEqual({
+      ...responseData,
+      error: null,
+    });
+  });
+});
+
+describe(error.name, () => {
+  it("should return an error object", () => {
+    const reason: FailureReason = {
+      cause: null,
+      message: "An error occurred",
+      label: "Unknown",
+    };
+
+    const result = error(new ShelfError(reason));
+
+    expect(result).toEqual({
+      error: {
+        message: reason.message,
+        label: reason.label,
+        traceId: expect.any(String),
+      },
+    });
+  });
+
+  it("should forward additionalData", () => {
+    const reason: FailureReason = {
+      cause: null,
+      message: "An error occurred",
+      label: "Unknown",
+      additionalData: { key: "value" },
+    };
+
+    const result = error(new ShelfError(reason));
+
+    expect(result).toEqual({
+      error: {
+        message: reason.message,
+        label: reason.label,
+        traceId: expect.any(String),
+        additionalData: reason.additionalData,
+      },
+    });
+  });
+
+  it("should log the cause", () => {
+    const cause = new ShelfError({
+      cause: null,
+      message: "An error occurred",
+      label: "Unknown",
+    });
+
+    error(cause);
+
+    expect(Logger.error).toBeCalledWith(cause);
   });
 });
