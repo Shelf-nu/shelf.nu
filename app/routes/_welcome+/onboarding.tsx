@@ -144,7 +144,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       await sendEmail({
         from: `"Carlos from shelf.nu" <carlos@shelf.nu>`,
         to: user.email,
-        subject: "🏷️ Welcome to Shelf.nu",
+        subject: "🏷️ Welcome to Shelf - can I ask you a question?",
         text: onboardingEmailText({ firstName: user.firstName as string }),
       });
     }

@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json, redirect, redirectDocument } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
@@ -139,8 +139,15 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     );
   }
 
-  const { title, description, category, qrId, newLocationId, valuation } =
-    result.data;
+  const {
+    title,
+    description,
+    category,
+    qrId,
+    newLocationId,
+    valuation,
+    addAnother,
+  } = result.data;
 
   const customFieldsValues = extractCustomFieldValuesFromResults({
     result,
@@ -202,6 +209,10 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     });
   }
 
+  /** If the user used the add-another button, we reload the document to reset the form */
+  if (addAnother) {
+    return redirectDocument(`/assets/new?`);
+  }
   return redirect(`/assets`);
 }
 

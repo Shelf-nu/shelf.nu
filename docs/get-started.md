@@ -8,7 +8,7 @@ Shelf's basic setup is based on a Remix stack by [rphlmr](https://github.com/rph
 - Production-ready [Supabase Database](https://supabase.com/)
 - Healthcheck endpoint for [Fly backups region fallbacks](https://fly.io/docs/reference/configuration/#services-http_checks)
 - [GitHub Actions](https://github.com/features/actions) to deploy on merge to production and staging environments
-- Email/Password Authentication / Magic Link, with [cookie-based sessions](https://remix.run/docs/en/v1/api/remix#createcookiesessionstorage)
+- Email/Password Authentication / OTP, with [cookie-based sessions](https://remix.run/docs/en/v1/api/remix#createcookiesessionstorage)
 - Database ORM with [Prisma](https://prisma.io)
 - Forms Schema (client and server sides !) validation with [Remix Params Helper](https://github.com/kiliman/remix-params-helper)
 - Styling with [Tailwind](https://tailwindcss.com/)
@@ -40,7 +40,7 @@ _**Note**: Currently we dont have a docker setup that also includes self hositng
 - Go to https://app.supabase.io/project/{PROJECT}/settings/api to find your secrets
 - "Project API keys"
 - Add your `MAPTILER_TOKEN`, `SUPABASE_URL`, `SERVER_URL`, `SUPABASE_SERVICE_ROLE` (aka `service_role` `secret`), `SUPABASE_ANON_PUBLIC` (aka `anon` `public`) and `DATABASE_URL` in the `.env` file
-  > **Note:** `SERVER_URL` is your localhost on dev. It'll work for magic link login
+  > **Note:** `SERVER_URL` is your localhost on dev.
 - Make sure to set the database connection mode in Supabase to "transaction"
 
 ```shell
@@ -105,12 +105,11 @@ The database seed script creates a new user with some data you can use to get st
 - Email: `hello@supabase.com`
 - Password: `supabase`
 
-### Relevant code:
+## Authentication
 
-This is a pretty simple note-taking app, but it's a good example of how you can build a full-stack app with Prisma, Supabase, and Remix. The main functionality is creating users, logging in and out (handling access and refresh tokens + refresh on expiration), and creating and deleting notes.
+For authentication to work in your Project, you need so setup some settings related to One Time Passwords in Supabase.
 
-- auth / session [./app/modules/auth](./app/modules/auth)
-- creating, and deleting notes [./app/modules/note](./app/modules/note)
+In order for OTP to work you need to make your OTP emails. Go to your Supabase dashboard, select your project and navigate to `Authentication > Email Templates`. Replace the `{{ .ConfirmationURL }}` with `{{ .Token }}`. This will make sure that Supabase sends your Users a one time password instead of a magic link. You need to do this both for "Confirm signup" and "Magic link".
 
 ## Deployment
 
@@ -276,19 +275,16 @@ Using Supabase SDK server side to query your database (for those using RLS featu
 
 In my benchmark, it makes my pages twice slower. (~+200ms compared to a direct query with Prisma)
 
-## Supabase login with magic link
+## Supabase url configuration
 
-In order to make the register/login with magic link work, you will need to add some configuration to your Supabase.
-You need to add the site url as well as the redirect urls of your local, test and live app that will be used for oauth
+In order to make the reset password work, you will need to add some configuration to your Supabase.
+You need to add the site url as well as the redirect urls of your local, test and live app that will be used for resetting password.
 To do that navigate to Authentication > URL configuration and add the following values:
 
-- https://localhost:3000/oauth/callback
 - https://localhost:3000/reset-password
 
-- https://staging-domain.com/oauth/callback
 - https://staging-domain.com/reset-password
 
-- https://live-domain.com/oauth/callback
 - https://live-domain.com/reset-password
 
 ## Premium

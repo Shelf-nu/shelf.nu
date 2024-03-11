@@ -306,7 +306,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 };
 
 export const handle = {
-  breadcrumb: () => "single",
+  breadcrumb: () => "Team",
 };
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

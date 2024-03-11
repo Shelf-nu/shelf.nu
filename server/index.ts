@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import * as serverBuild from "@remix-run/dev/server-build";
 import type { AppLoadContext, ServerBuild } from "@remix-run/node";
-import { createCookieSessionStorage } from "@remix-run/node";
+import { createCookieSessionStorage, installGlobals } from "@remix-run/node";
 import { broadcastDevReady } from "@remix-run/server-runtime";
 import { Hono } from "hono";
 import { remix } from "remix-hono/handler";
@@ -15,6 +15,14 @@ import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey } from "./session";
 import type { FlashData, SessionData } from "./session";
+
+/** For some reason the globals like File only work on production build
+ * In development, we need to install them manually
+ */
+if (env.NODE_ENV !== "production") {
+  var webFetch = require("@remix-run/web-fetch");
+  global.File = webFetch.File;
+}
 
 // Server will not start if the env is not valid
 initEnv();
@@ -100,10 +108,10 @@ app.use(
       "/join",
       "/login",
       "/logout",
-      "/oauth/callback",
-      "/resend-email-confirmation",
+      "/otp",
+      "/resend-otp",
       "/reset-password",
-      "/send-magic-link",
+      "/send-otp",
       "/verify-email",
       "/healthcheck",
       "/api/public-stats",
