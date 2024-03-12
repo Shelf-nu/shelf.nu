@@ -29,6 +29,7 @@ export type FailureReason = {
     | "Auth"
     | "Booking"
     | "CSV"
+    | "Healthcheck"
     | "Image"
     | "Invite"
     | "Location"

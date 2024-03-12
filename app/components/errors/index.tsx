@@ -13,7 +13,7 @@ export const ErrorContent = () => {
 
   if (isRouteError(response)) {
     message = response.data.error.message;
-    title = response.data.error?.title || "Oops, something went wrong";
+    title = response.data.error.title || "Oops, something went wrong";
   }
 
   return (
