@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ShelfStackError } from "./error";
+import { ShelfError } from "./error";
 import { isBrowser } from "./is-browser";
 
 declare global {
@@ -60,8 +60,12 @@ function getEnv(
   const value = source[name as keyof typeof source];
 
   if (!value && isRequired) {
-    // @TODO Solve error handling
-    throw new ShelfStackError({ message: `${name} is not set` });
+    // FIXME: @TODO Solve error handling
+    throw new ShelfError({
+      message: `${name} is not set`,
+      cause: null,
+      label: "Environment",
+    });
   }
 
   return value;

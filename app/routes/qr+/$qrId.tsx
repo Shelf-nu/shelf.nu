@@ -9,7 +9,7 @@ import { getQr } from "~/modules/qr";
 import { createScan, updateScan } from "~/modules/scan";
 import { assertIsPost, error } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
-import { ShelfStackError, makeShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 
 export const loader = async ({
   context,
@@ -43,7 +43,7 @@ export const loader = async ({
      * that is still there. Will we allow someone to claim it?
      */
     if (!qr) {
-      throw new ShelfStackError({ message: "Not found" });
+      throw new ShelfError({ cause: null, message: "Not found", label: "QR" });
     }
 
     /**

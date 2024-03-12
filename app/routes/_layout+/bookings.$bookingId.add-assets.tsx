@@ -29,7 +29,7 @@ import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
 import { getUserByID } from "~/modules/user";
 import { getRequiredParam, isFormProcessing } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
@@ -74,7 +74,11 @@ export const loader = async ({
 
   const booking = await getBooking({ id, organizationId });
   if (!booking) {
-    throw new ShelfStackError({ message: "Booking not found" });
+    throw new ShelfError({
+      cause: null,
+      message: "Booking not found",
+      label: "Booking",
+    });
   }
 
   return json({
@@ -114,7 +118,11 @@ export const action = async ({
 
   const user = await getUserByID(authSession.userId);
   if (!user) {
-    throw new ShelfStackError({ message: "User not found" });
+    throw new ShelfError({
+      cause: null,
+      message: "User not found",
+      label: "Booking",
+    });
   }
 
   /** We only update the booking if there are assets to add */

@@ -2,14 +2,14 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import * as serverBuild from "@remix-run/dev/server-build";
 import type { AppLoadContext, ServerBuild } from "@remix-run/node";
-import { createCookieSessionStorage, installGlobals } from "@remix-run/node";
+import { createCookieSessionStorage } from "@remix-run/node";
 import { broadcastDevReady } from "@remix-run/server-runtime";
 import { Hono } from "hono";
 import { remix } from "remix-hono/handler";
 import { getSession, session } from "remix-hono/session";
 
 import { initEnv, env } from "~/utils/env";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
@@ -149,11 +149,12 @@ app.use(
           const auth = session.get(authSessionKey);
 
           if (!auth) {
-            throw new ShelfStackError({
+            throw new ShelfError({
               cause: null,
               message:
                 "There is no session here. This should not happen because if you require it, this route should be mark as protected and catch by the protect middleware.",
               status: 403,
+              label: "Dev error",
             });
           }
 

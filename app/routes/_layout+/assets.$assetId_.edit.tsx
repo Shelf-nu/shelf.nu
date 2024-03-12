@@ -31,7 +31,7 @@ import {
   mergedSchema,
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
@@ -51,7 +51,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const asset = await getAsset({ organizationId, id });
   if (!asset) {
     // @TODO Solve error handling
-    throw new ShelfStackError({ message: "Not Found", status: 404 });
+    throw new ShelfError({
+      cause: null,
+      message: "Not Found",
+      status: 404,
+      label: "Asset",
+    });
   }
 
   const {

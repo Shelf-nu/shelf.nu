@@ -9,7 +9,7 @@ import { Button } from "~/components/shared";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database";
 import { generateOrphanedCodes } from "~/modules/qr";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
@@ -29,7 +29,11 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   });
   if (!organization) {
     // @TODO Solve error handling
-    throw new ShelfStackError({ message: "Organization not found" });
+    throw new ShelfError({
+      cause: null,
+      message: "Organization not found",
+      label: "Organization",
+    });
   }
 
   return json({ organization });

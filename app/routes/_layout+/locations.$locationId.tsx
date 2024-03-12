@@ -36,7 +36,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
@@ -68,7 +68,12 @@ export const loader = async ({
   });
 
   if (!location) {
-    throw new ShelfStackError({ message: "Location not found", status: 404 });
+    throw new ShelfError({
+      cause: null,
+      message: "Location not found",
+      status: 404,
+      label: "Location",
+    });
   }
 
   const totalItems = totalAssetsWithinLocation;

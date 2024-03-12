@@ -17,7 +17,7 @@ import {
 } from "~/modules/asset";
 
 import { isFormProcessing } from "~/utils";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
@@ -46,9 +46,11 @@ export const loader = async ({
     },
   });
   if (!location) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message: "Location not found",
       status: 404,
+      label: "Location",
     });
   }
 
@@ -117,7 +119,12 @@ export const action = async ({
   });
   if (!location) {
     // @TODO Solve error handling
-    throw new ShelfStackError({ message: "Location not found", status: 404 });
+    throw new ShelfError({
+      cause: null,
+      message: "Location not found",
+      status: 404,
+      label: "Location",
+    });
   }
 
   /**

@@ -129,6 +129,26 @@ describe(error.name, () => {
     });
   });
 
+  it("should forward title", () => {
+    const reason: FailureReason = {
+      cause: null,
+      message: "An error occurred",
+      label: "Unknown",
+      title: "Oops!",
+    };
+
+    const result = error(new ShelfError(reason));
+
+    expect(result).toEqual({
+      error: {
+        message: reason.message,
+        title: reason.title,
+        label: reason.label,
+        traceId: expect.any(String),
+      },
+    });
+  });
+
   it("should forward additionalData", () => {
     const reason: FailureReason = {
       cause: null,

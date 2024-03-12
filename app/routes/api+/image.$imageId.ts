@@ -1,21 +1,24 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 export async function loader({ context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
 
-  if (!authSession)
-    throw new ShelfStackError({
-      message: "Unauthorized. You are not allowed to view this resource",
-      status: 403,
-    });
   const image = await db.image.findUnique({
     where: { id: params.imageId },
     select: { ownerOrgId: true, contentType: true, blob: true, userId: true },
   });
+
   // @TODO Solve error handling
-  if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
+  if (!image) {
+    throw new ShelfError({
+      cause: null,
+      message: "Not found",
+      status: 404,
+      label: "Image",
+    });
+  }
 
   const userOrganizations = await db.userOrganization.findMany({
     where: { userId: authSession.userId },
@@ -29,13 +32,13 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
 
   if (!orgIds.includes(image.ownerOrgId)) {
     // @TODO Solve error handling
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message: "Unauthorized. This resource doesn't belong to you.",
       status: 403,
+      label: "Image",
     });
   }
-  // @TODO Solve error handling
-  if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
 
   return new Response(image.blob, {
     headers: {

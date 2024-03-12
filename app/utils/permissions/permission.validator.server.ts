@@ -2,7 +2,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database";
 import type { PermissionCheckProps } from "./types";
 import { PermissionAction, PermissionEntity } from "./types";
-import { ShelfStackError } from "../error";
+import { ShelfError } from "../error";
 
 //this will come from DB eventually
 const Role2PermisionMap: {
@@ -41,10 +41,12 @@ export const hasPermission = async ({
       where: { userId, organizationId },
     });
     if (!userOrg) {
-      throw new ShelfStackError({
+      throw new ShelfError({
+        cause: null,
         message: `User doesn't belong to organization`,
         status: 403,
         additionalData: { userId, organizationId },
+        label: "Permission",
       });
     }
     roles = userOrg.roles;
@@ -69,11 +71,13 @@ export const hasPermission = async ({
 export const validatePermission = async (props: PermissionCheckProps) => {
   const res = await hasPermission(props);
   if (!res) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       title: "Unauthorized",
       // message: `You are not authorised to ${props.action} the ${props.entity}`,
       message: `You are not authorised to access this view.`,
       status: 403,
+      label: "Permission",
     });
   }
 };

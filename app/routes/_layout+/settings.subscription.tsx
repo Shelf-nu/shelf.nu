@@ -23,7 +23,7 @@ import { getUserByID } from "~/modules/user";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
@@ -134,7 +134,13 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         userId,
       });
 
-  if (!customerId) throw new ShelfStackError({ message: "Customer not found" });
+  if (!customerId) {
+    throw new ShelfError({
+      cause: null,
+      message: "Customer not found",
+      label: "Subscription",
+    });
+  }
 
   const stripeRedirectUrl = await createStripeCheckoutSession({
     userId,

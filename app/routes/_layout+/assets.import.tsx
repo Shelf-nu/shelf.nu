@@ -20,7 +20,7 @@ import { createAssetsFromContentImport } from "~/modules/asset";
 import { assertUserCanImportAssets } from "~/modules/tier";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
@@ -55,8 +55,10 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 
     switch (intent) {
       case "backup":
-        throw new ShelfStackError({
+        throw new ShelfError({
+          cause: null,
           message: "This feature is not available for you",
+          label: "Asset",
         });
       case "content":
         const contentData = extractCSVDataFromContentImport(csvData);

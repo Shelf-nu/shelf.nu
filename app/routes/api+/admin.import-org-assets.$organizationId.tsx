@@ -3,7 +3,7 @@ import { db } from "~/database";
 import { createAssetsFromBackupImport } from "~/modules/asset";
 import { getRequiredParam } from "~/utils";
 import { csvDataFromRequest } from "~/utils/csv.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { extractCSVDataFromBackupImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 
@@ -25,13 +25,21 @@ export const action = async ({
 
     if (!organization) {
       // @TODO Solve error handling
-      throw new ShelfStackError({ message: "Organization not found" });
+      throw new ShelfError({
+        cause: null,
+        message: "Organization not found",
+        label: "Organization",
+      });
     }
 
     const csvData = await csvDataFromRequest({ request });
     if (csvData.length < 2) {
       // @TODO Solve error handling
-      throw new ShelfStackError({ message: "CSV file is empty" });
+      throw new ShelfError({
+        cause: null,
+        message: "CSV file is empty",
+        label: "CSV",
+      });
     }
 
     const backupData = extractCSVDataFromBackupImport(csvData);

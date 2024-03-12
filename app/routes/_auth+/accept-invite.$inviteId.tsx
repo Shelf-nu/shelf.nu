@@ -9,7 +9,7 @@ import { generateRandomCode } from "~/modules/invite/helpers";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { INVITE_TOKEN_SECRET, error, safeRedirect } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
-import { ShelfStackError, makeShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   // if (context.isAuthenticated) return redirect("/assets");
@@ -18,9 +18,11 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     const token = searchParams.get("token") as string;
 
     if (!token) {
-      throw new ShelfStackError({
+      throw new ShelfError({
+        cause: null,
         message:
           "The invitation link doesn't have a token provided. Please try clicking the link in your email again or request a new invite. If the issue persists, feel free to contact support",
+        label: "Invite",
       });
     }
     const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET) as {
@@ -35,10 +37,11 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 
     if (updatedInvite?.status !== InviteStatuses.ACCEPTED) {
       // @TODO Solve error handling
-
-      throw new ShelfStackError({
+      throw new ShelfError({
+        cause: null,
         message:
           "Something went wrong with updating your invite. Please try again",
+        label: "Invite",
       });
     }
 

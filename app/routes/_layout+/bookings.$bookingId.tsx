@@ -40,7 +40,7 @@ import {
 } from "~/utils/cookies.server";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings";
@@ -75,7 +75,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   if (!booking) {
-    throw new ShelfStackError({ message: "Booking not found", status: 404 });
+    throw new ShelfError({
+      cause: null,
+      message: "Booking not found",
+      status: 404,
+      label: "Booking",
+    });
   }
 
   const [teamMembers, org, assets] = await db.$transaction([
@@ -165,9 +170,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   /** For self service users, we only allow them to read their own bookings */
   if (isSelfService && booking.custodianUserId !== authSession.userId) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message: "You are not authorized to view this booking",
       status: 403,
+      label: "Booking",
     });
   }
 
@@ -334,9 +341,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           b?.creatorId !== authSession.userId &&
           b?.custodianUserId !== authSession.userId
         ) {
-          throw new ShelfStackError({
+          throw new ShelfError({
+            cause: null,
             message: "You are not authorized to delete this booking",
             status: 403,
+            label: "Booking",
           });
         }
       }

@@ -2,8 +2,11 @@ import type { AuthSession } from "server/session";
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { SERVER_URL } from "~/utils/env";
 
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { mapAuthSession } from "./mappers.server";
+
+const label: ErrorLabel = "Auth";
 
 export async function createEmailAuthAccount(email: string, password: string) {
   const { data, error } = await getSupabaseAdmin().auth.admin.createUser({
@@ -69,10 +72,6 @@ export async function signInWithEmail(email: string, password: string) {
 
   const mappedSession = await mapAuthSession(data.session);
 
-  if (!mappedSession) {
-    return { status: "error", message: "something went wrong try login again" };
-  }
-
   return { status: "success", authSession: mappedSession };
 }
 
@@ -122,7 +121,11 @@ export async function refreshAccessToken(
 ): Promise<AuthSession> {
   try {
     if (!refreshToken) {
-      throw new ShelfStackError({ message: "Refresh token is required" });
+      throw new ShelfError({
+        cause: null,
+        message: "Refresh token is required",
+        label,
+      });
     }
 
     const { data, error } = await getSupabaseAdmin().auth.refreshSession({
@@ -135,16 +138,19 @@ export async function refreshAccessToken(
 
     const { session } = data;
     if (!session) {
-      throw new ShelfStackError({
+      throw new ShelfError({
+        cause: null,
         message: "Session returned by Supabase is null",
+        label,
       });
     }
 
     return await mapAuthSession(data.session);
   } catch (cause) {
-    throw new ShelfStackError({
-      message: "Unable to refresh access token",
+    throw new ShelfError({
       cause,
+      message: "Unable to refresh access token",
+      label,
     });
   }
 }

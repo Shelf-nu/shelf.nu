@@ -1,14 +1,19 @@
 import { type ActionFunctionArgs, redirect } from "@remix-run/node";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { setCookie } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const organizationId = formData.get("organizationId");
-  if (!organizationId)
+  if (!organizationId) {
     // @TODO Solve error handling
-    throw new ShelfStackError({ message: "Organization ID is required" });
+    throw new ShelfError({
+      cause: null,
+      message: "Organization ID is required",
+      label: "Organization",
+    });
+  }
 
   return redirect("/", {
     headers: [

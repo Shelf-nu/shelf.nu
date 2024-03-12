@@ -9,7 +9,8 @@ import {
 import { db } from "~/database";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { calcTimeDifference } from "~/utils/date-fns";
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
 import { schedulerKeys } from "./constants";
@@ -23,6 +24,8 @@ import {
 import type { ClientHint, SchedulerData } from "./types";
 import { createNotes } from "../asset";
 import { getOrganizationAdminsEmails } from "../organization";
+
+const label: ErrorLabel = "Booking";
 
 /** Includes needed for booking to have all data required for emails */
 export const bookingIncludeForEmails = {
@@ -144,7 +147,11 @@ export const upsertBooking = async (
     });
 
     if (!custodianUser) {
-      throw new ShelfStackError({ message: "Cannot find team member" });
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot find team member",
+        label,
+      });
     }
 
     data.custodianTeamMember = {
@@ -632,6 +639,7 @@ export const deleteBooking = async (
     });
   }
 
+  // FIXME: if sendEmail fails updateBookinAssetStates will not be called
   /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
   if (activeBooking) {
     await updateBookinAssetStates(activeBooking, AssetStatus.AVAILABLE);

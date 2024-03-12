@@ -4,7 +4,7 @@ import { json } from "@remix-run/node";
 import type Stripe from "stripe";
 import { db } from "~/database";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import {
   fetchStripeSubscription,
@@ -134,7 +134,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const { customerId, tierId, subscription } =
           await getDataFromStripeEvent(event);
 
-        if (!tierId) throw new ShelfStackError({ message: "No tier ID found" });
+        if (!tierId) {
+          throw new ShelfError({
+            cause: null,
+            message: "No tier ID found",
+            label: "Stripe",
+          });
+        }
         /** Check if its a trial subscription */
         const isTrialSubscription =
           subscription.trial_end && subscription.trial_start;
@@ -143,7 +149,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           const user = await db.user.findUnique({
             where: { customerId },
           });
-          if (!user) throw new ShelfStackError({ message: "No user found" });
+          if (!user) {
+            throw new ShelfError({
+              cause: null,
+              message: "No user found",
+              label: "Stripe",
+            });
+          }
 
           await sendEmail({
             to: user.email,

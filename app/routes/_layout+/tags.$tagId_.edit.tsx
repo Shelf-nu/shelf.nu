@@ -17,7 +17,7 @@ import { getRequiredParam, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -42,9 +42,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const tag = await getTag({ id, organizationId });
 
   if (!tag) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       status: 404,
       message: "Tag not found",
+      label: "Tag",
     });
   }
 

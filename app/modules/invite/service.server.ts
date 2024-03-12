@@ -6,11 +6,14 @@ import { invitationTemplateString } from "~/emails/invite-template";
 import { INVITE_TOKEN_SECRET } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { generateRandomCode, inviteEmailText } from "./helpers";
 import { createTeamMember } from "../team-member";
 import { createUserOrAttachOrg } from "../user";
+
+const label: ErrorLabel = "Invite";
 
 //can be used in ui when user enters email so that we can tell invitee is already invited
 export async function getExisitingActiveInvite({
@@ -182,10 +185,11 @@ export async function updateInviteStatus({
     },
   });
   if (!invite) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message: `The invitation you are trying to accept is either not found or expired`,
       title: "Invite not found",
-      status: 404,
+      label,
     });
   }
 
@@ -199,10 +203,13 @@ export async function updateInviteStatus({
       firstName: invite.inviteeTeamMember.name,
     });
 
+    // FIXME: should not be able to have a null user here
     if (!user) {
-      throw new ShelfStackError({
+      throw new ShelfError({
+        cause: null,
         message: `There was an issue with creating/attaching user with email: ${invite.inviteeEmail}`,
         status: 401,
+        label,
       });
     }
     Object.assign(data, {

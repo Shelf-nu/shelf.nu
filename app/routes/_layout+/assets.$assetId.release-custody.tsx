@@ -10,7 +10,7 @@ import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
@@ -71,9 +71,11 @@ export const action = async ({
 
   if (!user)
     // @TODO Solve error handling
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message:
         "User not found. Please refresh and if the issue persists contact support.",
+      label: "Asset",
     });
 
   const asset = await releaseCustody({ assetId });

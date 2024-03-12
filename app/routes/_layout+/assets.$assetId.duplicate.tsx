@@ -20,7 +20,7 @@ import styles from "~/styles/layout/custom-modal.css";
 import { error, isFormProcessing } from "~/utils";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError, makeShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 
@@ -42,7 +42,12 @@ export const loader = async ({
     const assetId = params.assetId as string;
     const asset = await db.asset.findUnique({ where: { id: assetId } });
     if (!asset) {
-      throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
+      throw new ShelfError({
+        cause: null,
+        message: "Asset Not Found",
+        status: 404,
+        label: "Asset",
+      });
     }
 
     return json({
@@ -89,7 +94,12 @@ export const action = async ({
     });
     if (!asset) {
       // @TODO Solve error handling
-      throw new ShelfStackError({ message: "Asset Not Found", status: 404 });
+      throw new ShelfError({
+        cause: null,
+        message: "Asset Not Found",
+        status: 404,
+        label: "Asset",
+      });
     }
 
     const formData = await request.formData();

@@ -8,7 +8,7 @@ import type { ResizeOptions } from "sharp";
 import { getSupabaseAdmin } from "~/integrations/supabase";
 import { cropImage, extractImageNameFromSupabaseUrl } from ".";
 import { SUPABASE_URL } from "./env";
-import { ShelfStackError } from "./error";
+import { ShelfError } from "./error";
 
 export function getPublicFileURL({
   filename,
@@ -43,11 +43,13 @@ export async function createSignedUrl({
     if (error) throw error;
 
     return data.signedUrl;
-  } catch (error) {
+  } catch (cause) {
     // @TODO Solve error handling
-    return new ShelfStackError({
+    return new ShelfError({
+      cause,
       message:
         "Something went wrong with updating your image. Please refresh the page. If the issue persists contact support.",
+      label: "File storage",
     });
   }
 }
@@ -130,7 +132,11 @@ export async function deleteProfilePicture({
       url === ""
     ) {
       // @TODO Solve error handling
-      throw new ShelfStackError({ message: "Wrong url" });
+      throw new ShelfError({
+        cause: null,
+        message: "Wrong url",
+        label: "File storage",
+      });
     }
 
     const { error } = await getSupabaseAdmin()
@@ -157,7 +163,11 @@ export async function deleteAssetImage({
 
     if (!path) {
       // @TODO Solve error handling
-      throw new ShelfStackError({ message: "Cannot find image" });
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot find image",
+        label: "File storage",
+      });
     }
 
     const { error } = await getSupabaseAdmin()

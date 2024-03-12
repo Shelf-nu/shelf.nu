@@ -37,7 +37,7 @@ import { updateOrganization } from "~/modules/organization";
 import { isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
 import { canExportAssets } from "~/utils/subscription";
@@ -100,14 +100,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   });
 
   if (!user || user.userOrganizations?.length < 1)
-    throw new ShelfStackError({ message: "Organization not found" });
+    throw new ShelfError({
+      cause: null,
+      message: "Organization not found",
+      label: "Settings",
+    });
 
   const currentOrganization = user.userOrganizations.find(
     (userOrg) => userOrg.organizationId === organizationId
   );
 
-  if (!currentOrganization)
-    throw new ShelfStackError({ message: "Organization not found" });
+  if (!currentOrganization) {
+    throw new ShelfError({
+      cause: null,
+      message: "Organization not found",
+      label: "Settings",
+    });
+  }
 
   const header: HeaderData = {
     title: "General",

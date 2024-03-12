@@ -47,7 +47,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError, makeShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
@@ -74,10 +74,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const asset = await getAsset({ organizationId, id });
     if (!asset) {
-      throw new ShelfStackError({
+      throw new ShelfError({
+        cause: null,
         title: "Asset Not Found",
-        message: "We couldn't find the assset you were looking for.",
+        message: "We couldn't find the asset you were looking for.",
         status: 404,
+        label: "Asset",
       });
     }
     /** We get the first QR code(for now we can only have 1)

@@ -1,11 +1,10 @@
 import type { Organization } from "@prisma/client";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { useMatchesData } from "./use-matches-data";
 
 /**
  * This base hook is used to access the organization from within the _layout route
- * @param {string} id The route id
- * @returns {JSON|undefined} The router data or undefined if not found
+ * @returns The organization data or undefined if not found
  */
 export function useCurrentOrganization(): Organization | undefined {
   const layoutData = useMatchesData<{
@@ -13,10 +12,13 @@ export function useCurrentOrganization(): Organization | undefined {
     currentOrganizationId: string;
   }>("routes/_layout+/_layout");
 
+  // FIXME: check what throwing in frontend implies
   if (!layoutData) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message:
         "Something went wrong with fetching your organization details. If the issue persists, please contact support",
+      label: "Organization",
     });
   }
 

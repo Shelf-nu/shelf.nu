@@ -27,7 +27,8 @@ import {
   buildCustomFieldValue,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
-import { ShelfStackError, handleUniqueConstraintError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError, handleUniqueConstraintError } from "~/utils/error";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
 import type {
@@ -47,6 +48,8 @@ import { createLocationsIfNotExists } from "../location";
 import { getQr } from "../qr";
 import { createTagsIfNotExists } from "../tag";
 import { createTeamMemberIfNotExists } from "../team-member";
+
+const label: ErrorLabel = "Asset";
 
 export async function getAsset({
   organizationId,
@@ -217,8 +220,10 @@ export async function getAssetsFromView({
     }
   }
   if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message: "booking dates are needed to hide unavailable assets",
+      label,
     });
   }
   if (bookingFrom && bookingTo && where.asset) {
@@ -407,8 +412,10 @@ export async function getAssets({
     }
   }
   if (hideUnavailable === true && (!bookingFrom || !bookingTo)) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message: "booking dates are needed to hide unavailable assets",
+      label,
     });
   }
   if (bookingFrom && bookingTo) {
@@ -935,10 +942,11 @@ async function uploadDuplicateAssetMainImage(
     );
 
   if (!data?.path || error) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: error,
       title: "Oops, duplicating failed",
       message: "Something went wrong while uploading the image",
-      status: 500,
+      label,
     });
   }
 
@@ -1256,9 +1264,10 @@ export const createBulkLocationChangeNotes = async ({
   });
 
   if (!user) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message: "User not found",
-      status: 404,
+      label,
     });
   }
 

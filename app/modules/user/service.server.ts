@@ -23,7 +23,8 @@ import {
   getParamsValues,
   randomUsernameFromEmail,
 } from "~/utils";
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import {
   deleteProfilePicture,
   getPublicFileURL,
@@ -32,17 +33,21 @@ import {
 import type { UpdateUserPayload, UpdateUserResponse } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
 
+const label: ErrorLabel = "User";
+
 export async function getUserByEmail(email: User["email"]) {
   return db.user.findUnique({ where: { email: email.toLowerCase() } });
 }
 
+// FIXME: not awaited so will never fall into catch block
 export async function getUserByID(id: User["id"]) {
   try {
     return db.user.findUnique({ where: { id } });
   } catch (cause) {
-    throw new ShelfStackError({
-      message: "Failed to get user",
+    throw new ShelfError({
       cause,
+      message: "Failed to get user",
+      label,
     });
   }
 }
@@ -113,10 +118,11 @@ export async function createUserOrAttachOrg({
     authAccount = await createEmailAuthAccount(email, password);
     if (!authAccount) {
       // @TODO Solve error handling
-      throw new ShelfStackError({
-        status: 500,
+      throw new ShelfError({
+        cause: null,
         message:
           "We are facing some issue with your account. Most likely you are trying to accept an invite, before you have confirmed your account's email. Please try again after confirming your email. If the issue persists, feel free to contact support.",
+        label,
       });
     }
 
@@ -411,8 +417,11 @@ export async function updateProfilePicture({
 export async function deleteUser(id: User["id"]) {
   if (!id) {
     // @TODO Solve error handling
-
-    throw new ShelfStackError({ message: "User ID is required" });
+    throw new ShelfError({
+      cause: null,
+      message: "User ID is required",
+      label,
+    });
   }
 
   try {

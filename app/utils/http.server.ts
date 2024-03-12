@@ -38,7 +38,10 @@ export function getRequiredParam(
   const value = params[key];
 
   if (!value) {
-    throw badRequest(`Missing required request param "${key}"`);
+    throw badRequest(`Missing required request param "${key}"`, {
+      params,
+      key,
+    });
   }
 
   return value;
@@ -113,6 +116,7 @@ export function error(cause: ShelfError) {
       label: cause.label,
       // FIXME: clean this after getting the reason for this line
       // isShelfError: cause.isShelfError,
+      ...(cause.title && { title: cause.title }),
       ...(cause.additionalData && {
         additionalData: cause.additionalData,
       }),

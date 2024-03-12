@@ -35,7 +35,7 @@ import { getOrganizationTierLimit } from "~/modules/tier";
 import assetCss from "~/styles/assets.css";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermision } from "~/utils/roles.server";
@@ -141,10 +141,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
   if (!assets) {
     // @TODO Solve error handling
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       title: "Hey!",
       message: `No assets found`,
       status: 404,
+      label: "Unknown",
     });
   }
   if (role === OrganizationRoles.SELF_SERVICE) {

@@ -2,7 +2,8 @@ import type { Organization, OrganizationType, User } from "@prisma/client";
 import { json } from "@remix-run/node";
 import { db } from "~/database";
 import { error } from "~/utils";
-import { ShelfStackError, makeShelfError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   canCreateMoreCustomFields,
@@ -11,6 +12,9 @@ import {
   canImportAssets,
 } from "~/utils/subscription";
 import { countAcviteCustomFields } from "../custom-field";
+
+const label: ErrorLabel = "Tier";
+
 export async function getUserTierLimit(id: User["id"]) {
   try {
     const { tier } = await db.user.findUniqueOrThrow({
@@ -103,7 +107,11 @@ export const assertUserCanCreateMoreCustomFields = async ({
   });
 
   if (!canCreateMore) {
-    throw new Error("Your user cannot create more custom fields");
+    throw new ShelfError({
+      cause: null,
+      message: "Your user cannot create more custom fields",
+      label,
+    });
   }
 };
 
@@ -128,16 +136,22 @@ export async function assertUserCanInviteUsersToWorkspace({
 
     if (!org) {
       // @TODO Solve error
-      throw new ShelfStackError({ message: "Organization not found" });
+      throw new ShelfError({
+        cause: null,
+        message: "Organization not found",
+        label,
+      });
     }
 
     if (isPersonalOrg(org)) {
       // @TODO Solve error
-      throw new ShelfStackError({
+      throw new ShelfError({
+        cause: null,
         title: "Cannot invite users",
         message:
           "You cannot invite other users to a personal workspace. Please create a Team workspace.",
         status: 403,
+        label,
       });
     }
     return true;
@@ -182,8 +196,10 @@ export const assertUserCanCreateMoreOrganizations = async (userId: string) => {
       totalOrganizations: organizations?.length || 1,
     })
   ) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message: "You cannot create workspaces with your current plan.",
+      label,
     });
   }
   return true;

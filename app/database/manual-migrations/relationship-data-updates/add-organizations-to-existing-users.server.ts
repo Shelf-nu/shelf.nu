@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import { OrganizationType, PrismaClient } from "@prisma/client";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 const prisma = new PrismaClient();
 
@@ -49,7 +49,11 @@ async function seed() {
     );
     console.log(`Database has been seeded. 🌱\n`);
   } catch (cause) {
-    throw new ShelfStackError({ message: "Seed failed 🥲", cause });
+    throw new ShelfError({
+      cause,
+      message: "Seed failed 🥲",
+      label: "Unknown",
+    });
   }
 }
 

@@ -22,7 +22,7 @@ import { revokeAccessToOrganization } from "~/modules/user";
 import { error } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError, makeShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
@@ -224,8 +224,10 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         });
 
         if (!user) {
-          throw new ShelfStackError({
+          throw new ShelfError({
+            cause: null,
             message: "User not found",
+            label: "Team",
           });
         }
 
@@ -239,8 +241,10 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         });
 
         if (!org) {
-          throw new ShelfStackError({
+          throw new ShelfError({
+            cause: null,
             message: "Organization not found",
+            label: "Team",
           });
         }
 
@@ -296,8 +300,13 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
           });
         }
         return null;
-      default:
-        throw new ShelfStackError({ message: "Invalid action" });
+      default: {
+        throw new ShelfError({
+          cause: null,
+          message: "Invalid action",
+          label: "Team",
+        });
+      }
     }
   } catch (cause) {
     const reason = makeShelfError(cause);

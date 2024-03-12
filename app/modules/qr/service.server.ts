@@ -2,7 +2,10 @@ import type { Organization, Qr, User } from "@prisma/client";
 import QRCode from "qrcode-generator";
 import { db } from "~/database";
 import { getCurrentSearchParams, gifToPng } from "~/utils";
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
+
+const label: ErrorLabel = "QR";
 
 export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
   return db.qr.findFirst({
@@ -116,11 +119,13 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
       },
     });
     if (!qr) {
-      throw new ShelfStackError({
+      throw new ShelfError({
+        cause: null,
         message:
           "This QR code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
         title: "QR code not found",
         status: 403,
+        label,
       });
     }
   }

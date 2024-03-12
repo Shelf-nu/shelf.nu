@@ -12,9 +12,12 @@ import {
   serializeCookie,
   setCookie,
 } from "~/utils/cookies.server";
-import { ShelfStackError, makeShelfError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 
 import { getUserOrganizations } from "./service.server";
+
+const label: ErrorLabel = "Organization";
 
 const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
   httpOnly: true,
@@ -68,12 +71,12 @@ export async function requireOrganisationId({
     );
 
     if (!personalOrganization) {
-      throw new ShelfStackError({
+      throw new ShelfError({
         cause: null,
         title: "No organization found",
         message:
           "You do not have a personal organization. This should not happen. Please contact support.",
-        status: 500,
+        label,
       });
     }
 
@@ -92,10 +95,11 @@ export async function requireOrganisationId({
       }
 
       // Other methods should throw an error (mostly for actions)
-      throw new ShelfStackError({
+      throw new ShelfError({
         cause: null,
         message: "You do not have access to this organization",
         status: 401,
+        label,
       });
     }
 
@@ -112,10 +116,11 @@ export async function requireOrganisationId({
       }
 
       // Other methods should throw an error (mostly for actions)
-      throw new ShelfStackError({
+      throw new ShelfError({
         cause: null,
         message: "You do not have access to this organization",
         status: 401,
+        label,
       });
     }
 

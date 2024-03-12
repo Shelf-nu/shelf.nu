@@ -1,13 +1,11 @@
-import { json } from "@remix-run/node";
 import { createClient } from "@supabase/supabase-js";
-import { error } from "~/utils";
 
 import {
   SUPABASE_SERVICE_ROLE,
   SUPABASE_URL,
   SUPABASE_ANON_PUBLIC,
 } from "~/utils/env";
-import { ShelfStackError, makeShelfError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { isBrowser } from "~/utils/is-browser";
 
 // ⚠️ cloudflare needs you define fetch option : https://github.com/supabase/supabase-js#custom-fetch-implementation
@@ -42,19 +40,15 @@ const supabaseClient = getSupabaseClient(SUPABASE_ANON_PUBLIC);
  * Reason : https://github.com/rphlmr/supa-fly-stack/pull/43#issue-1336412790
  */
 function getSupabaseAdmin() {
-  try {
-    if (isBrowser)
-      throw new ShelfStackError({
-        message:
-          "getSupabaseAdmin is not available in browser and should NOT be used in insecure environments",
-        status: 403,
-      });
+  if (isBrowser)
+    throw new ShelfError({
+      cause: null,
+      message:
+        "getSupabaseAdmin is not available in browser and should NOT be used in insecure environments",
+      label: "Dev error",
+    });
 
-    return getSupabaseClient(SUPABASE_SERVICE_ROLE);
-  } catch (cause) {
-    const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
-  }
+  return getSupabaseClient(SUPABASE_SERVICE_ROLE);
 }
 
 export { getSupabaseAdmin, supabaseClient };

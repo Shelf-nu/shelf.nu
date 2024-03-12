@@ -15,20 +15,42 @@ export type AdditionalData = Record<string, SerializableValue>;
  * @param message The message intended for the user.
  *
  * Other params are for logging purposes and help us debug.
+ * @param label A label to help us debug and filter logs.
  * @param cause The error that caused the rejection.
- * @param metadata Additional data to help us debug.
- * @param tag A tag to help us debug and filter logs.
+ * @param additionalData Additional data to help us debug.
  *
  */
 export type FailureReason = {
+  cause: unknown | null;
   label:
     | "Unknown"
-    | "Unique constrain violation"
-    | "Missing env"
-    | "Bad request"
-    | "Not allowed HTTP method";
+    // Related to our modules
+    | "Asset"
+    | "Auth"
+    | "Booking"
+    | "CSV"
+    | "Image"
+    | "Invite"
+    | "Location"
+    | "Organization"
+    | "Permission"
+    | "QR"
+    | "Report"
+    | "Settings"
+    | "File storage"
+    | "Stripe"
+    | "Subscription"
+    | "Tag"
+    | "Team"
+    | "Tier"
+    | "User"
+    // Other kinds of errors
+    | "Request validation"
+    | "DB constrain violation"
+    | "Dev error" // Error that should never happen in production because it's a developer mistake
+    | "Environment"; // Related to the environment setup
   message: string;
-  cause: unknown | null;
+  title?: string;
   additionalData?: AdditionalData;
   traceId?: string;
   status?:
@@ -38,19 +60,21 @@ export type FailureReason = {
     | 401 // unauthorized
     | 403 // forbidden
     | 404 // not found
-    | 404 // not found
     | 405 // method not allowed
     | 409 // conflict
     | 500; // internal server error
   // Add more status codes as needed: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status
 };
 
+export type ErrorLabel = FailureReason["label"];
+
 /**
  * A custom error class to normalize the error handling in our app.
  */
 export class ShelfError extends Error {
-  readonly label: FailureReason["label"];
   readonly cause: FailureReason["cause"];
+  readonly label: FailureReason["label"];
+  readonly title: FailureReason["title"];
   readonly additionalData: FailureReason["additionalData"];
   readonly status: FailureReason["status"];
   // FIXME: clean this after getting the reason for this line
@@ -58,22 +82,24 @@ export class ShelfError extends Error {
   traceId: FailureReason["traceId"];
 
   constructor({
-    message,
-    status,
     cause = null,
+    message,
+    title,
+    status,
     additionalData,
     label,
     traceId,
   }: FailureReason) {
     super();
     this.name = "ShelfError";
-    this.label = label;
+    this.cause = cause;
     this.message = message;
+    this.title = isLikeShelfError(cause) ? title || cause.title : title;
     this.status = isLikeShelfError(cause)
       ? status || cause.status || 500
       : status || 500;
-    this.cause = cause;
     this.additionalData = additionalData;
+    this.label = label;
     this.traceId = traceId || createId();
     // FIXME: clean this after getting the reason for this line
     // this.isShelfError =
@@ -140,7 +166,7 @@ export function handleUniqueConstraintError(
       modelName,
       ...additionalData,
     },
-    label: "Unique constrain violation",
+    label: "DB constrain violation",
   });
 }
 
@@ -156,15 +182,16 @@ export function notAllowedMethod(
     cause: null,
     message,
     status: 405,
-    label: "Not allowed HTTP method",
+    label: "Request validation",
   });
 }
 
-export function badRequest(message: string) {
+export function badRequest(message: string, additionalData?: AdditionalData) {
   return new ShelfError({
     cause: null,
     message,
     status: 400,
-    label: "Bad request",
+    additionalData,
+    label: "Request validation",
   });
 }

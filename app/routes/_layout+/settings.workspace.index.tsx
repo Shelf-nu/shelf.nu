@@ -18,7 +18,7 @@ import { useUserData } from "~/hooks";
 import { requireOrganisationId } from "~/modules/organization/context.server";
 import { tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription";
 
@@ -69,7 +69,11 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 
   if (!user || user.userOrganizations?.length < 1)
     // @TODO Solve error handling
-    throw new ShelfStackError({ message: "Organization not found" });
+    throw new ShelfError({
+      cause: null,
+      message: "Organization not found",
+      label: "Organization",
+    });
 
   const modelName = {
     singular: "Workspace",

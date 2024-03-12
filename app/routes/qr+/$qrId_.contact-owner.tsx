@@ -12,7 +12,7 @@ import { getAsset } from "~/modules/asset";
 import { createReport, sendReportEmails } from "~/modules/report-found";
 import { getUserByID } from "~/modules/user";
 import { assertIsPost, getRequiredParam, isFormProcessing, tw } from "~/utils";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 export const NewReportSchema = z.object({
   email: z
@@ -62,7 +62,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     assetId: qr.asset.id,
   });
   // @TODO Solve error handling
-  if (!report) return new ShelfStackError({ message: "Something went wrong" });
+  if (!report) {
+    return new ShelfError({
+      cause: null,
+      message: "Something went wrong",
+      label: "Report",
+    });
+  }
 
   /**
    * Here we send 2 emails.

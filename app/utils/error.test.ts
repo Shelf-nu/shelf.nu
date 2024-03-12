@@ -164,7 +164,55 @@ describe(ShelfError.name, () => {
 
       expect(error.status).toEqual(500);
     });
+
+    it("should use the cause's title", () => {
+      const cause = new ShelfError({
+        cause: null,
+        label: "Unknown",
+        title: "Root cause",
+        message: "I am the root cause",
+      });
+      const error = new ShelfError({
+        cause,
+        label: "Unknown",
+        message: "I am an error",
+      });
+
+      expect(error.title).toEqual(cause.title);
+    });
+
+    it("should use the provided title if the cause as no title", () => {
+      const cause = new ShelfError({
+        cause: null,
+        label: "Unknown",
+        message: "I am the root cause",
+      });
+      const error = new ShelfError({
+        cause,
+        label: "Unknown",
+        message: "I am an error",
+        title: "An error occurred",
+      });
+
+      expect(error.title).toEqual("An error occurred");
+    });
+
+    it("should title default to undefined", () => {
+      const cause = new ShelfError({
+        cause: null,
+        label: "Unknown",
+        message: "I am the root cause",
+      });
+      const error = new ShelfError({
+        cause,
+        label: "Unknown",
+        message: "I am an error",
+      });
+
+      expect(error.title).toBeUndefined();
+    });
   });
+
   describe("cause is an Error", () => {
     it("should use the provided status if the cause as no status", () => {
       const cause = new Error("I am the root cause");
@@ -187,6 +235,29 @@ describe(ShelfError.name, () => {
       });
 
       expect(error.status).toEqual(500);
+    });
+
+    it("should use the provided title if the cause as no title", () => {
+      const cause = new Error("I am the root cause");
+      const error = new ShelfError({
+        cause,
+        label: "Unknown",
+        message: "I am an error",
+        title: "An error occurred",
+      });
+
+      expect(error.title).toEqual("An error occurred");
+    });
+
+    it("should title default to undefined", () => {
+      const cause = new Error("I am the root cause");
+      const error = new ShelfError({
+        cause,
+        label: "Unknown",
+        message: "I am an error",
+      });
+
+      expect(error.title).toBeUndefined();
     });
   });
 });

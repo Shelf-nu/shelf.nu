@@ -4,7 +4,7 @@ import { PrismaClient, Roles } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 
 import { createUser } from "~/modules/user";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 import { SUPABASE_SERVICE_ROLE, SUPABASE_URL } from "../utils/env";
 
@@ -146,7 +146,11 @@ async function seed() {
     });
 
     if (!user) {
-      throw new ShelfStackError({ message: "Unable to create user" });
+      throw new ShelfError({
+        cause: null,
+        message: "Unable to create user",
+        label: "Unknown",
+      });
     }
 
     await addUserRoleToAllExistingUsers();
@@ -156,7 +160,11 @@ async function seed() {
       `User added to your database 👇 \n🆔: ${user.id}\n📧: ${user.email}\n🔑: supabase`
     );
   } catch (cause) {
-    throw new ShelfStackError({ message: "Seed failed 🥲", cause });
+    throw new ShelfError({
+      cause,
+      message: "Seed failed 🥲",
+      label: "Unknown",
+    });
   }
 }
 
