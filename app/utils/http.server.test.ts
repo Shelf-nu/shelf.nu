@@ -63,7 +63,7 @@ describe(isGet.name, () => {
     expect(isGet(new Request(BASE_URL, { method: "DELETE" }))).toBeFalsy();
   });
 
-  it("should return true for GET method", async () => {
+  it("should return true for GET method", () => {
     expect(isGet(new Request(BASE_URL, { method: "GET" }))).toBeTruthy();
   });
 });
@@ -76,7 +76,7 @@ describe(isPost.name, () => {
     expect(isPost(new Request(BASE_URL, { method: "DELETE" }))).toBeFalsy();
   });
 
-  it("should return true for POST method", async () => {
+  it("should return true for POST method", () => {
     expect(isPost(new Request(BASE_URL, { method: "POST" }))).toBeTruthy();
   });
 });
