@@ -24,10 +24,7 @@ type Props = ModelFilterProps & {
   label?: string;
   searchIcon?: Icon;
   showSearch?: boolean;
-  renderItem?: (options: {
-    item: ModelFilterItem;
-    checked: boolean;
-  }) => React.ReactNode;
+  renderItem?: (item: ModelFilterItem) => React.ReactNode;
 };
 
 export default function DynamicDropdown({
@@ -141,7 +138,7 @@ export default function DynamicDropdown({
                   htmlFor={item.id}
                   className="flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100 "
                 >
-                  {renderItem({ item, checked })}
+                  {renderItem({ ...item, metadata: item })}
                   <input
                     id={item.id}
                     type="checkbox"
