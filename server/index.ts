@@ -103,6 +103,7 @@ app.use(
   protect({
     onFailRedirectTo: "/login",
     publicPaths: [
+      "/",
       "/accept-invite/:path*", // :path* is a wildcard that will match any path after /accept-invite
       "/forgot-password",
       "/join",
