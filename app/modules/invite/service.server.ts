@@ -7,7 +7,7 @@ import { INVITE_TOKEN_SECRET } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { generateRandomCode, inviteEmailText } from "./helpers";
 import { createTeamMember } from "../team-member";
@@ -174,67 +174,75 @@ export async function updateInviteStatus({
   status,
   password,
 }: Pick<Invite, "id" | "status"> & { password: string }) {
-  const invite = await db.invite.findFirst({
-    where: {
-      id,
-      status: InviteStatuses.PENDING,
-      expiresAt: { gt: new Date() },
-    },
-    include: {
-      inviteeTeamMember: true,
-    },
-  });
-  if (!invite) {
-    throw new ShelfError({
-      cause: null,
-      message: `The invitation you are trying to accept is either not found or expired`,
-      title: "Invite not found",
-      label,
-    });
-  }
-
-  const data = { status };
-  if (status === "ACCEPTED") {
-    const user = await createUserOrAttachOrg({
-      email: invite.inviteeEmail,
-      organizationId: invite.organizationId,
-      roles: invite.roles,
-      password,
-      firstName: invite.inviteeTeamMember.name,
+  try {
+    const invite = await db.invite.findFirst({
+      where: {
+        id,
+        status: InviteStatuses.PENDING,
+        expiresAt: { gt: new Date() },
+      },
+      include: {
+        inviteeTeamMember: true,
+      },
     });
 
-    // FIXME: should not be able to have a null user here
-    if (!user) {
+    if (!invite) {
       throw new ShelfError({
         cause: null,
-        message: `There was an issue with creating/attaching user with email: ${invite.inviteeEmail}`,
-        status: 401,
+        message:
+          "The invitation you are trying to accept is either not found or expired",
+        title: "Invite not found",
         label,
       });
     }
-    Object.assign(data, {
-      inviteeUser: {
-        connect: {
-          id: user.id,
+
+    const data = { status };
+
+    if (status === "ACCEPTED") {
+      const user = await createUserOrAttachOrg({
+        email: invite.inviteeEmail,
+        organizationId: invite.organizationId,
+        roles: invite.roles,
+        password,
+        firstName: invite.inviteeTeamMember.name,
+      });
+
+      Object.assign(data, {
+        inviteeUser: {
+          connect: {
+            id: user.id,
+          },
         },
+      });
+
+      await db.teamMember.update({
+        where: { id: invite.teamMemberId },
+        data: { user: { connect: { id: user.id } } },
+      });
+    }
+
+    const updatedInvite = await db.invite.update({ where: { id }, data });
+
+    //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we invalidate all of them if user rejects 1
+    //because user doesnt or want to join that org, so we should update all pending invite to show the same
+    await db.invite.updateMany({
+      where: {
+        status: InviteStatuses.PENDING,
+        inviteeEmail: invite.inviteeEmail,
+        organizationId: invite.organizationId,
       },
+      data: { status: InviteStatuses.INVALIDATED },
     });
-    await db.teamMember.update({
-      where: { id: invite.teamMemberId },
-      data: { user: { connect: { id: user.id } } },
+
+    return updatedInvite;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong with updating your invite. Please try again",
+      additionalData: { id, status },
+      label,
     });
   }
-
-  const updatedInvite = await db.invite.update({ where: { id }, data });
-  //admin might have sent multiple invites(due to email spam or network issue, or just for fun etc) so we invalidate all of them if user rejects 1
-  //because user doesnt or want to join that org, so we should update all pending invite to show the same
-  await db.invite.updateMany({
-    where: {
-      status: InviteStatuses.PENDING,
-      inviteeEmail: invite.inviteeEmail,
-      organizationId: invite.organizationId,
-    },
-    data: { status: InviteStatuses.INVALIDATED },
-  });
-  return updatedInvite;
 }

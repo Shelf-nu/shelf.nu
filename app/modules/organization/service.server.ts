@@ -53,9 +53,10 @@ export const getOrganizationByUserId = async ({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Organization not found",
+      message: "No organization found for this user.",
       additionalData: {
         userId,
+        orgType,
       },
       label,
     });
@@ -71,7 +72,7 @@ export const getUserOrganizationsWithDetailedData = async ({
 }: {
   userId: User["id"];
 }) =>
-  await db.organization.findMany({
+  db.organization.findMany({
     where: {
       owner: {
         is: {
@@ -185,7 +186,7 @@ export async function updateOrganization({
     });
   }
 
-  return await db.organization.update({
+  return db.organization.update({
     where: { id },
     data: data,
   });

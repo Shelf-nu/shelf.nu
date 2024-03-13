@@ -134,7 +134,7 @@ describe(ShelfError.name, () => {
       expect(error.status).toEqual(cause.status);
     });
 
-    it("should use the provided status if the cause as no status", () => {
+    it("should use the provided status if the cause has no status", () => {
       const cause = new ShelfError({
         cause: null,
         label: "Unknown",
@@ -181,7 +181,7 @@ describe(ShelfError.name, () => {
       expect(error.title).toEqual(cause.title);
     });
 
-    it("should use the provided title if the cause as no title", () => {
+    it("should use the provided title if the cause has no title", () => {
       const cause = new ShelfError({
         cause: null,
         label: "Unknown",
@@ -211,10 +211,54 @@ describe(ShelfError.name, () => {
 
       expect(error.title).toBeUndefined();
     });
+
+    it("should use the cause's shouldBeCaptured", () => {
+      const cause = new ShelfError({
+        cause: null,
+        label: "Unknown",
+        title: "Root cause",
+        message: "I am the root cause",
+        shouldBeCaptured: false,
+      });
+      const error = new ShelfError({
+        cause,
+        label: "Unknown",
+        message: "I am an error",
+      });
+
+      expect(error.shouldBeCaptured).toEqual(cause.shouldBeCaptured);
+    });
+
+    it(`should use the provided shouldBeCaptured if the cause has no shouldBeCaptured`, () => {
+      const cause = new ShelfError({
+        cause: null,
+        label: "Unknown",
+        title: "Root cause",
+        message: "I am the root cause",
+      });
+      const error = new ShelfError({
+        cause,
+        label: "Unknown",
+        message: "I am an error",
+        shouldBeCaptured: false,
+      });
+
+      expect(error.shouldBeCaptured).toBeFalsy();
+    });
+
+    it(`should shouldBeCaptured default to true`, () => {
+      const error = new ShelfError({
+        cause: null,
+        label: "Unknown",
+        message: "I am an error",
+      });
+
+      expect(error.shouldBeCaptured).toBeTruthy();
+    });
   });
 
   describe("cause is an Error", () => {
-    it("should use the provided status if the cause as no status", () => {
+    it("should use the provided status if the cause has no status", () => {
       const cause = new Error("I am the root cause");
       const error = new ShelfError({
         cause,
@@ -237,7 +281,7 @@ describe(ShelfError.name, () => {
       expect(error.status).toEqual(500);
     });
 
-    it("should use the provided title if the cause as no title", () => {
+    it("should use the provided title if the cause has no title", () => {
       const cause = new Error("I am the root cause");
       const error = new ShelfError({
         cause,
@@ -247,6 +291,17 @@ describe(ShelfError.name, () => {
       });
 
       expect(error.title).toEqual("An error occurred");
+    });
+
+    it("should shouldBeCaptured default to true", () => {
+      const cause = new Error("I am the root cause");
+      const error = new ShelfError({
+        cause,
+        label: "Unknown",
+        message: "I am an error",
+      });
+
+      expect(error.shouldBeCaptured).toBeTruthy();
     });
 
     it("should title default to undefined", () => {

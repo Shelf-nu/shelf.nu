@@ -4,7 +4,6 @@ import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
 import sharp from "sharp";
 import type { AuthSession } from "server/session";
 import type { ExtendedPrismaClient } from "~/database";
@@ -24,7 +23,7 @@ import {
   randomUsernameFromEmail,
 } from "~/utils";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, isLikeShelfError } from "~/utils/error";
 import {
   deleteProfilePicture,
   getPublicFileURL,
@@ -35,64 +34,73 @@ import { defaultUserCategories } from "../category/default-categories";
 
 const label: ErrorLabel = "User";
 
-export async function getUserByEmail(email: User["email"]) {
-  return db.user.findUnique({ where: { email: email.toLowerCase() } });
-}
-
-// FIXME: not awaited so will never fall into catch block
-export async function getUserByID(id: User["id"]) {
+export async function findUserByEmail(email: User["email"]) {
   try {
-    return db.user.findUnique({ where: { id } });
+    return await db.user.findUnique({ where: { email: email.toLowerCase() } });
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to get user",
+      message: "Failed to find user",
+      additionalData: { email },
       label,
     });
   }
 }
 
-export async function getUserByIDWithOrg(id: User["id"]) {
-  return db.user.findUnique({
-    where: { id },
-    include: { organizations: true },
-  });
+export async function getUserByID(id: User["id"]) {
+  try {
+    return await db.user.findUniqueOrThrow({ where: { id } });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get user",
+      additionalData: { id },
+      label,
+    });
+  }
 }
 
 async function createUserOrgAssociation(
   tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
-  {
-    organizationIds,
-    userId,
-    roles,
-  }: {
+  payload: {
     roles: OrganizationRoles[];
     organizationIds: Organization["id"][];
     userId: User["id"];
   }
 ) {
-  return await Promise.all(
-    Array.from(new Set(organizationIds)).map((organizationId) =>
-      tx.userOrganization.upsert({
-        where: {
-          userId_organizationId: {
+  const { organizationIds, userId, roles } = payload;
+
+  try {
+    return await Promise.all(
+      Array.from(new Set(organizationIds)).map((organizationId) =>
+        tx.userOrganization.upsert({
+          where: {
+            userId_organizationId: {
+              userId,
+              organizationId,
+            },
+          },
+          create: {
             userId,
             organizationId,
+            roles,
           },
-        },
-        create: {
-          userId,
-          organizationId,
-          roles,
-        },
-        update: {
-          roles: {
-            push: roles,
+          update: {
+            roles: {
+              push: roles,
+            },
           },
-        },
-      })
-    )
-  );
+        })
+      )
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to create user organization association",
+      additionalData: { payload },
+      label,
+    });
+  }
 }
 
 export async function createUserOrAttachOrg({
@@ -106,60 +114,70 @@ export async function createUserOrAttachOrg({
   roles: OrganizationRoles[];
   password: string;
 }) {
-  const shelfUser = await db.user.findFirst({ where: { email } });
-  let authAccount: SupabaseUser | null = null;
+  try {
+    const shelfUser = await db.user.findFirst({ where: { email } });
 
-  /**
-   * If user does not exist, create a new user and attach the org to it
-   * WE have a case where a user registers which only creates an auth account and before confirming their email they try to accept an invite
-   * This will always fail because we need them to confirm their email before we create a user in shelf
-   */
-  if (!shelfUser?.id) {
-    authAccount = await createEmailAuthAccount(email, password);
-    if (!authAccount) {
-      // @TODO Solve error handling
-      throw new ShelfError({
-        cause: null,
-        message:
-          "We are facing some issue with your account. Most likely you are trying to accept an invite, before you have confirmed your account's email. Please try again after confirming your email. If the issue persists, feel free to contact support.",
-        label,
+    /**
+     * If user does not exist, create a new user and attach the org to it
+     * WE have a case where a user registers which only creates an auth account and before confirming their email they try to accept an invite
+     * This will always fail because we need them to confirm their email before we create a user in shelf
+     */
+    if (!shelfUser?.id) {
+      const authAccount = await createEmailAuthAccount(email, password).catch(
+        (cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "We are facing some issue with your account. Most likely you are trying to accept an invite, before you have confirmed your account's email. Please try again after confirming your email. If the issue persists, feel free to contact support.",
+            label,
+          });
+        }
+      );
+
+      return await createUser({
+        email,
+        userId: authAccount.id,
+        username: randomUsernameFromEmail(email),
+        organizationId,
+        roles,
+        firstName,
       });
     }
 
-    const user = await createUser({
-      email,
-      userId: authAccount.id,
-      username: randomUsernameFromEmail(email),
-      organizationId,
+    /** If the user already exists, we just attach the new org to it */
+    await createUserOrgAssociation(db, {
+      userId: shelfUser.id,
+      organizationIds: [organizationId],
       roles,
-      firstName,
     });
-    return user;
-  }
 
-  /** If the user already exists, we just attach the new org to it */
-  await createUserOrgAssociation(db, {
-    userId: shelfUser.id,
-    organizationIds: [organizationId],
-    roles,
-  });
-  return shelfUser;
+    return shelfUser;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : `There was an issue with creating/attaching user with email: ${email}`,
+      additionalData: { email, organizationId, roles, firstName },
+      label,
+    });
+  }
 }
 
-export async function createUser({
-  email,
-  userId,
-  username,
-  organizationId,
-  roles,
-  firstName,
-}: Pick<AuthSession & { username: string }, "userId" | "email" | "username"> & {
-  organizationId?: Organization["id"];
-  roles?: OrganizationRoles[];
-  firstName?: User["firstName"];
-}) {
-  return db
-    .$transaction(
+export async function createUser(
+  payload: Pick<
+    AuthSession & { username: string },
+    "userId" | "email" | "username"
+  > & {
+    organizationId?: Organization["id"];
+    roles?: OrganizationRoles[];
+    firstName?: User["firstName"];
+  }
+) {
+  const { email, userId, username, organizationId, roles, firstName } = payload;
+
+  try {
+    return await db.$transaction(
       async (tx) => {
         const user = await tx.user.create({
           data: {
@@ -190,9 +208,11 @@ export async function createUser({
             organizations: true,
           },
         });
+
         const organizationIds: Organization["id"][] = [
           user.organizations[0].id,
         ];
+
         if (organizationId) {
           organizationIds.push(organizationId);
         }
@@ -211,33 +231,21 @@ export async function createUser({
               roles,
             }),
         ]);
+
         return user;
       },
       { maxWait: 6000, timeout: 10000 }
-    )
-    .then((user) => user)
-    .catch(() => null);
-}
-
-export async function tryCreateUser({
-  email,
-  userId,
-  username,
-}: Pick<AuthSession & { username: string }, "userId" | "email" | "username">) {
-  const user = await createUser({
-    userId,
-    email,
-    username,
-  });
-
-  // user account created and have a session but unable to store in User table
-  // we should delete the user account to allow retry create account again
-  if (!user) {
-    await deleteAuthAccount(userId);
-    return null;
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "We had trouble while creating your account. Please try again.",
+      additionalData: {
+        payload,
+      },
+      label,
+    });
   }
-
-  return user;
 }
 
 export async function updateUser(
@@ -408,7 +416,7 @@ export async function updateProfilePicture({
   }
 
   /** Update user with new picture */
-  return await updateUser({
+  return updateUser({
     id: userId,
     profilePicture: getPublicFileURL({ filename: profilePicture }),
   });
@@ -456,7 +464,7 @@ export async function deleteUser(id: User["id"]) {
 }
 export { defaultUserCategories };
 
-/** THis function is used just for integration tests as it combines the creation of auth accound and user entry */
+/** THis function is used just for integration tests as it combines the creation of auth account and user entry */
 export async function createUserAccountForTesting(
   email: string,
   password: string,
@@ -466,7 +474,7 @@ export async function createUserAccountForTesting(
   // ok, no user account created
   if (!authAccount) return null;
 
-  const { authSession } = await signInWithEmail(email, password);
+  const authSession = await signInWithEmail(email, password);
 
   // user account created but no session 😱
   // we should delete the user account to allow retry create account again
@@ -475,7 +483,7 @@ export async function createUserAccountForTesting(
     return null;
   }
 
-  const user = await tryCreateUser({
+  const user = await createUser({
     email: authSession.email,
     userId: authSession.userId,
     username,

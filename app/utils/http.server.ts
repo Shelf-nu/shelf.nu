@@ -1,5 +1,14 @@
-import type { ShelfError } from "./error";
-import { badRequest, notAllowedMethod } from "./error";
+import type { Params } from "@remix-run/react";
+import { json } from "react-router";
+import { parseFormAny } from "react-zorm";
+import type { ZodType } from "zod";
+import type { Options } from "./error";
+import {
+  ShelfError,
+  makeShelfError,
+  badRequest,
+  notAllowedMethod,
+} from "./error";
 import { Logger } from "./logger";
 
 export function getCurrentPath(request: Request) {
@@ -31,6 +40,16 @@ export function isDelete(request: Request) {
   return request.method.toLowerCase() === "delete";
 }
 
+type HTTPMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+export function getActionMethod(request: Request) {
+  return request.method.toUpperCase() as Exclude<HTTPMethod, "GET">;
+}
+
+/**
+ * FIXME: remove
+ * @deprecated
+ */
 export function getRequiredParam(
   params: Record<string, string | undefined>,
   key: string
@@ -39,23 +58,139 @@ export function getRequiredParam(
 
   if (!value) {
     throw badRequest(`Missing required request param "${key}"`, {
-      params,
-      key,
+      additionalData: {
+        params,
+        key,
+      },
     });
   }
 
   return value;
 }
 
+type ValidationError<Schema extends ZodType<any, any, any>> = Record<
+  keyof Schema["_output"],
+  { message: string | undefined }
+>;
+
+/**
+ * Validate data with a zod schema.
+ *
+ * @throws A `badRequest` error if the form data is invalid.
+ *
+ * **By default, the error will not be captured.**
+ *
+ * If you want to capture the error, you can set the `shouldBeCaptured` option to `true`.
+ */
+export function parseData<Schema extends ZodType<any, any, any>>(
+  data: FormData | URLSearchParams | Params,
+  schema: Schema,
+  options?: Options
+) {
+  if (data instanceof FormData) {
+    data = parseFormAny(data);
+  }
+
+  if (data instanceof URLSearchParams) {
+    data = Object.fromEntries(data);
+  }
+
+  const submission = schema.safeParse(data);
+
+  if (!submission.success) {
+    let validationErrors = {} as ValidationError<Schema>;
+
+    Object.entries(submission.error.formErrors.fieldErrors).forEach(
+      ([key, values]) => {
+        validationErrors[key as keyof Schema["_output"]] = {
+          message: values?.[0],
+        };
+      }
+    );
+
+    throw badRequest(
+      options?.message ||
+        "The request is invalid. Please try again. If the issue persists, contact support.",
+      {
+        ...options,
+        additionalData: {
+          ...options?.additionalData,
+          validationErrors,
+        },
+      }
+    );
+  }
+
+  return submission.data as Schema["_output"];
+}
+
+function hasValidationErrors<Schema extends ZodType<any, any, any>>(
+  additionalData: unknown
+): additionalData is {
+  validationErrors: ValidationError<Schema>;
+} {
+  return (
+    typeof additionalData === "object" &&
+    additionalData !== null &&
+    "validationErrors" in additionalData &&
+    typeof additionalData.validationErrors === "object" &&
+    additionalData.validationErrors !== null
+  );
+}
+
+/**
+ * Get the validation errors returned by loader/action error.
+ *
+ */
+export function getValidationErrors<Schema extends ZodType<any, any, any>>(
+  error: DataOrErrorResponse["error"] | null | undefined
+) {
+  if (!error || !hasValidationErrors<Schema>(error.additionalData)) {
+    return undefined;
+  }
+
+  return error.additionalData.validationErrors;
+}
+
+/**
+ * Assert request params with a zod schema.
+ *
+ * **Use this function outside of loader/action try/catch blocks.**
+ *
+ * @throws A `json` response with a 400 status code if the params are invalid.
+ *
+ * **By default, the error will not be captured.**
+ *
+ * If you want to capture the error, you can set the `shouldBeCaptured` option to `true`.
+ */
+export function assertParams<Schema extends ZodType<any, any, any>>(
+  params: Params<string>,
+  schema: Schema,
+  options?: Options
+) {
+  try {
+    return parseData(params, schema, {
+      ...options,
+      additionalData: {
+        ...options?.additionalData,
+        params,
+      },
+    });
+  } catch (cause) {
+    let reason = cause instanceof ShelfError ? cause : makeShelfError(cause);
+    throw json(error(reason), { status: 400 });
+  }
+}
+
 export function assertIsPost(request: Request, message?: string) {
   if (!isPost(request)) {
-    throw notAllowedMethod("POST", message);
+    throw notAllowedMethod("POST", { message });
   }
 }
 
 export function assertIsDelete(request: Request, message?: string) {
   if (!isDelete(request)) {
-    throw notAllowedMethod("DELETE", message);
+    throw notAllowedMethod("DELETE", { message });
   }
 }
 
@@ -63,8 +198,8 @@ export function assertIsDelete(request: Request, message?: string) {
  * This should be used any time the redirect path is user-provided
  * (Like the query string on our login/signup pages). This avoids
  * open-redirect vulnerabilities.
- * @param {string} to The redirect destination
- * @param {string} defaultRedirect The redirect to use if the to is unsafe.
+ * @param to The redirect destination
+ * @param defaultRedirect The redirect to use if the to is unsafe.
  */
 export function safeRedirect(
   to: FormDataEntryValue | string | null | undefined,

@@ -3,12 +3,12 @@ import { redirect } from "@remix-run/node";
 
 import { assertIsPost } from "~/utils";
 
-export async function action({ context, request }: ActionFunctionArgs) {
+export function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
   context.destroySession();
   return redirect("/login");
 }
 
-export async function loader() {
+export function loader() {
   return redirect("/");
 }

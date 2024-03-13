@@ -4,20 +4,26 @@ import { json, redirect } from "@remix-run/node";
 import { Link, useSearchParams } from "@remix-run/react";
 import { GreenCheckMarkIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared";
+import { data } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { isErrorResponse } from "~/utils/http";
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export function loader({ context }: LoaderFunctionArgs) {
   const title = "Check your email";
   const subHeading = "";
-  if (context.isAuthenticated) return redirect("/assets");
 
-  return json({ title, subHeading });
+  if (context.isAuthenticated) {
+    return redirect("/assets");
+  }
+
+  return json(data({ title, subHeading }));
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
 
+// @FIXME: Is it still used?
 export default function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
   const email = searchParams.get("email") || "";
@@ -37,7 +43,11 @@ export default function VerifyEmailPage() {
         setMessage("Email resent successfully. Please check your inbox.");
       } else {
         const data = await response.json();
-        setMessage(data.error || "Something went wrong. Please try again.");
+        setMessage(
+          isErrorResponse(data)
+            ? data.error.message
+            : "Something went wrong. Please try again."
+        );
       }
     } catch (error) {
       setMessage("Something went wrong. Please try again.");

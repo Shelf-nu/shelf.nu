@@ -13,15 +13,23 @@ export type AdditionalData = Record<string, SerializableValue>;
 
 /**
  * @param message The message intended for the user.
+ * @param title The title of the error, if any, for a modal, a toast, etc.
  *
  * Other params are for logging purposes and help us debug.
  * @param label A label to help us debug and filter logs.
  * @param cause The error that caused the rejection.
  * @param additionalData Additional data to help us debug.
+ * @param shouldBeCaptured Whether we should capture this error or not.
  *
  */
 export type FailureReason = {
+  /**
+   * The error that caused the rejection, if any.
+   */
   cause: unknown | null;
+  /**
+   * A label to help us debug and filter logs.
+   */
   label:
     | "Unknown"
     // Related to our modules
@@ -32,6 +40,7 @@ export type FailureReason = {
     | "Healthcheck"
     | "Image"
     | "Invite"
+    | "User onboarding"
     | "Location"
     | "Organization"
     | "Permission"
@@ -50,10 +59,39 @@ export type FailureReason = {
     | "DB constrain violation"
     | "Dev error" // Error that should never happen in production because it's a developer mistake
     | "Environment"; // Related to the environment setup
+  /**
+   * The message intended for the user.
+   */
   message: string;
+  /**
+   * The title of the error, if any, for a modal, a toast, etc.
+   */
   title?: string;
+  /**
+   * Additional data to help us debug.
+   *
+   * **Do not put sensitive data here.** It will be logged and could be sent to Sentry.
+   */
   additionalData?: AdditionalData;
+  /**
+   * Whether we should capture this error or not.
+   *
+   * If not, it will be logged but not sent to Sentry.
+   *
+   * **Default is true**
+   */
+  shouldBeCaptured?: boolean;
+  /**
+   * The traceId is a unique identifier for the error.
+   *
+   * It can be the Stripe event id or an random generated id.
+   */
   traceId?: string;
+  /**
+   * The HTTP status code to return.
+   *
+   * Add more status codes as needed: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status
+   */
   status?:
     | 200 // ok
     | 204 // no content
@@ -64,7 +102,6 @@ export type FailureReason = {
     | 405 // method not allowed
     | 409 // conflict
     | 500; // internal server error
-  // Add more status codes as needed: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status
 };
 
 export type ErrorLabel = FailureReason["label"];
@@ -77,30 +114,36 @@ export class ShelfError extends Error {
   readonly label: FailureReason["label"];
   readonly title: FailureReason["title"];
   readonly additionalData: FailureReason["additionalData"];
+  readonly shouldBeCaptured: FailureReason["shouldBeCaptured"];
   readonly status: FailureReason["status"];
   // FIXME: clean this after getting the reason for this line
   // readonly isShelfError: boolean;
   traceId: FailureReason["traceId"];
 
   constructor({
-    cause = null,
+    cause,
+    label,
     message,
     title,
-    status,
     additionalData,
-    label,
+    shouldBeCaptured,
+    status,
     traceId,
   }: FailureReason) {
     super();
     this.name = "ShelfError";
     this.cause = cause;
+    this.label = label;
     this.message = message;
     this.title = isLikeShelfError(cause) ? title || cause.title : title;
+    this.additionalData = additionalData;
+    this.shouldBeCaptured =
+      (isLikeShelfError(cause)
+        ? shouldBeCaptured ?? cause.shouldBeCaptured
+        : shouldBeCaptured) ?? true;
     this.status = isLikeShelfError(cause)
       ? status || cause.status || 500
       : status || 500;
-    this.additionalData = additionalData;
-    this.label = label;
     this.traceId = traceId || createId();
     // FIXME: clean this after getting the reason for this line
     // this.isShelfError =
@@ -168,6 +211,7 @@ export function handleUniqueConstraintError(
       ...additionalData,
     },
     label: "DB constrain violation",
+    shouldBeCaptured: false,
   });
 }
 
@@ -175,24 +219,48 @@ export function handleUniqueConstraintError(
 /*                               Pre made errors                               */
 /* --------------------------------------------------------------------------- */
 
-export function notAllowedMethod(
-  method: "POST" | "DELETE",
-  message = `"${method}" method is not allowed.`
-) {
+export type Options = Partial<
+  Pick<
+    FailureReason,
+    "additionalData" | "message" | "title" | "shouldBeCaptured"
+  >
+>;
+
+/**
+ * Error for when a method is not allowed.
+ *
+ * **By default, the error will not be captured.**
+ *
+ * If you want to capture the error, you can set the `shouldBeCaptured` option to `true`.
+ */
+export function notAllowedMethod(method: string, options?: Options) {
   return new ShelfError({
+    shouldBeCaptured: false,
+    message: `"${method}" method is not allowed.`,
+    ...options,
     cause: null,
-    message,
     status: 405,
     label: "Request validation",
   });
 }
 
-export function badRequest(message: string, additionalData?: AdditionalData) {
+/**
+ * Error for when a resource is not found.
+ *
+ * **By default, the error will not be captured.**
+ *
+ * If you want to capture the error, you can set the `shouldBeCaptured` option to `true`.
+ */
+export function badRequest(
+  message: string,
+  options?: Omit<Options, "message">
+) {
   return new ShelfError({
+    shouldBeCaptured: false,
+    ...options,
     cause: null,
     message,
     status: 400,
-    additionalData,
     label: "Request validation",
   });
 }

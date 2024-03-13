@@ -6,9 +6,9 @@ import { ShelfError } from "~/utils/error";
 
 const label: ErrorLabel = "Auth";
 
-export async function mapAuthSession(
+export function mapAuthSession(
   supabaseAuthSession: SupabaseAuthSession
-): Promise<AuthSession> {
+): AuthSession {
   if (!supabaseAuthSession.user.email) {
     throw new ShelfError({
       cause: null,

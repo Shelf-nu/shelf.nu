@@ -1,30 +1,28 @@
 import { InviteStatuses } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import jwt from "jsonwebtoken";
+import { z } from "zod";
 import { Spinner } from "~/components/shared/spinner";
 import { signInWithEmail } from "~/modules/auth";
 import { updateInviteStatus } from "~/modules/invite";
 import { generateRandomCode } from "~/modules/invite/helpers";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { INVITE_TOKEN_SECRET, error, safeRedirect } from "~/utils";
+import { INVITE_TOKEN_SECRET, error, parseData, safeRedirect } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import jwt from "~/utils/jsonwebtoken.server";
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
-  // if (context.isAuthenticated) return redirect("/assets");
+export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
-    const searchParams = new URL(decodeURIComponent(request.url)).searchParams;
-    const token = searchParams.get("token") as string;
-
-    if (!token) {
-      throw new ShelfError({
-        cause: null,
+    const { token } = parseData(
+      new URL(decodeURIComponent(request.url)).searchParams,
+      z.object({ token: z.string() }),
+      {
         message:
           "The invitation link doesn't have a token provided. Please try clicking the link in your email again or request a new invite. If the issue persists, feel free to contact support",
-        label: "Invite",
-      });
-    }
+      }
+    );
+
     const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET) as {
       id: string;
     };
@@ -35,8 +33,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       password,
     });
 
-    if (updatedInvite?.status !== InviteStatuses.ACCEPTED) {
-      // @TODO Solve error handling
+    if (updatedInvite.status !== InviteStatuses.ACCEPTED) {
       throw new ShelfError({
         cause: null,
         message:
@@ -57,47 +54,45 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     }
 
     /** Sign in the user */
-    const signInResult = await signInWithEmail(
+    const authSession = await signInWithEmail(
       updatedInvite.inviteeEmail,
       password
     );
     /**
-     * User could already be registered and hence loggin in with our password failed,
+     * User could already be registered and hence login in with our password failed,
      * redirect to home and let user login or go to home */
-    if (signInResult.status === "error") {
+    if (!authSession) {
       return redirect("/login?acceptedInvite=yes");
     }
 
-    // Ensure that user property exists before proceeding
-    if (signInResult.status === "success" && signInResult.authSession) {
-      const { authSession } = signInResult;
-      // Commit the session
-      context.setSession({ ...authSession });
-      return redirect(
-        safeRedirect(
-          `/onboarding?organizationId=${updatedInvite.organizationId}`
-        ),
-        {
-          headers: [
-            setCookie(
-              await setSelectedOrganizationIdCookie(
-                updatedInvite.organizationId
-              )
-            ),
-          ],
-        }
-      );
-    }
+    // Commit the session
+    context.setSession(authSession);
 
-    return json({ title: "Accept team invite" });
+    return redirect(
+      safeRedirect(
+        `/onboarding?organizationId=${updatedInvite.organizationId}`
+      ),
+      {
+        headers: [
+          setCookie(
+            await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
+          ),
+        ],
+      }
+    );
   } catch (cause) {
     const reason = makeShelfError(cause);
-    throw json(
-      { title: "Accept team invite", ...error(reason) },
-      { status: reason.status }
-    );
+
+    if (cause instanceof Error && cause.name === "JsonWebTokenError") {
+      reason.message =
+        "The invitation link is invalid. Please try clicking the link in your email again or request a new invite. If the issue persists, feel free to contact support";
+    }
+
+    throw json(error({ ...reason, title: "Accept team invite" }), {
+      status: reason.status,
+    });
   }
-};
+}
 
 export default function AcceptInvite() {
   return (
