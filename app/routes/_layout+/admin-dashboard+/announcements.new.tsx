@@ -1,42 +1,65 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form } from "@remix-run/react";
+import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
 import { MarkdownEditor } from "~/components/markdown";
 import { Button } from "~/components/shared";
 import { db } from "~/database";
+import { ShelfError, data, error, makeShelfError, parseData } from "~/utils";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  await requireAdmin(authSession.userId);
+  const { userId } = authSession;
 
-  return json({});
+  try {
+    await requireAdmin(userId);
+
+    return json(data(null));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
-  await requireAdmin(authSession.userId);
+  const { userId } = authSession;
 
-  const formData = await request.formData();
-  const name = formData.get("name") as string;
-  const content = formData.get("content") as string;
-  const link = formData.get("link") as string;
-  const linkText = formData.get("linkText") as string;
-  const published = formData.get("published") === "on";
+  try {
+    await requireAdmin(userId);
 
-  await db.announcement.create({
-    data: {
-      name,
-      content,
-      link,
-      linkText,
-      published,
-    },
-  });
+    const payload = parseData(
+      await request.formData(),
+      z.object({
+        name: z.string(),
+        content: z.string(),
+        link: z.string(),
+        linkText: z.string(),
+        published: z.coerce.boolean(),
+      })
+    );
 
-  return redirect("/admin-dashboard/announcements");
+    await db.announcement
+      .create({
+        data: payload,
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to create announcement",
+          additionalData: { userId, payload },
+          label: "Admin dashboard",
+        });
+      });
+
+    return redirect("/admin-dashboard/announcements");
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 };
 
 export default function NewAnnouncement() {
@@ -65,7 +88,7 @@ export default function NewAnnouncement() {
             <span>Published</span>
           </label>
           <div>
-            <Switch name={`published`} defaultChecked={false} required />
+            <Switch name={`published`} defaultChecked={false} />
           </div>
         </div>
         <div className="flex gap-1">

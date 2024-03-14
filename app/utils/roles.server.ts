@@ -1,19 +1,24 @@
 import { Roles } from "@prisma/client";
-import { json } from "@remix-run/node";
 import { db } from "~/database";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { ShelfError } from ".";
 import type { PermissionAction, PermissionEntity } from "./permissions";
 import { validatePermission } from "./permissions";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
-  const user = await db.user.findFirst({
-    where: { id: userId, roles: { some: { name } } },
-  });
-
-  if (!user) {
-    throw json({ error: "Unauthorized", requiredRole: name }, { status: 403 });
+  try {
+    return await db.user.findFirstOrThrow({
+      where: { id: userId, roles: { some: { name } } },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "You do not have permission to access this resource",
+      additionalData: { userId, name },
+      label: "Permission",
+      status: 403,
+    });
   }
-  return user;
 }
 
 export async function requireAdmin(userId: string) {

@@ -90,15 +90,24 @@ export async function generateOrphanedCodes({
   amount: number;
   organizationId: Organization["id"];
 }) {
-  const data = Array.from({ length: amount }).map(() => ({
-    userId,
-    organizationId,
-  }));
+  try {
+    const data = Array.from({ length: amount }).map(() => ({
+      userId,
+      organizationId,
+    }));
 
-  return await db.qr.createMany({
-    data: data,
-    skipDuplicates: true,
-  });
+    return await db.qr.createMany({
+      data: data,
+      skipDuplicates: true,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to generate orphaned codes",
+      additionalData: { userId, amount, organizationId },
+      label,
+    });
+  }
 }
 
 export async function assertWhetherQrBelongsToCurrentOrganization({

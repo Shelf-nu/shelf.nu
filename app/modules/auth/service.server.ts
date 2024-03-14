@@ -5,6 +5,7 @@ import { SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { mapAuthSession } from "./mappers.server";
 
 const label: ErrorLabel = "Auth";
@@ -186,11 +187,23 @@ export async function updateAccountPassword(id: string, password: string) {
 }
 
 export async function deleteAuthAccount(userId: string) {
-  const { error } = await getSupabaseAdmin().auth.admin.deleteUser(userId);
+  try {
+    const { error } = await getSupabaseAdmin().auth.admin.deleteUser(userId);
 
-  if (error) return null;
-
-  return true;
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Something went wrong while deleting the auth account. Please manually delete the user account in the Supabase dashboard.",
+        additionalData: { userId },
+        label,
+      })
+    );
+  }
 }
 
 export async function getAuthUserById(userId: string) {

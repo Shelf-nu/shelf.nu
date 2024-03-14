@@ -321,24 +321,33 @@ export const getPaginatedAndFilterableUsers = async ({
   const searchParams = getCurrentSearchParams(request);
   const { page, search } = getParamsValues(searchParams);
 
-  const { users, totalUsers } = await getUsers({
-    page,
-    perPage: 25,
-    search,
-  });
-  const totalPages = Math.ceil(totalUsers / 25);
+  try {
+    const { users, totalUsers } = await getUsers({
+      page,
+      perPage: 25,
+      search,
+    });
+    const totalPages = Math.ceil(totalUsers / 25);
 
-  return {
-    page,
-    perPage: 25,
-    search,
-    totalUsers,
-    users,
-    totalPages,
-  };
+    return {
+      page,
+      perPage: 25,
+      search,
+      totalUsers,
+      users,
+      totalPages,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get paginated and filterable users",
+      additionalData: { page, search },
+      label,
+    });
+  }
 };
 
-export async function getUsers({
+async function getUsers({
   page = 1,
   perPage = 8,
   search,
@@ -351,34 +360,43 @@ export async function getUsers({
 
   search?: string | null;
 }) {
-  const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
-  /** Default value of where. Takes the assetss belonging to current user */
-  let where: Prisma.UserWhereInput = {};
+    /** Default value of where. Takes the assets belonging to current user */
+    let where: Prisma.UserWhereInput = {};
 
-  /** If the search string exists, add it to the where object */
-  if (search) {
-    where.email = {
-      contains: search,
-      mode: "insensitive",
-    };
+    /** If the search string exists, add it to the where object */
+    if (search) {
+      where.email = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    const [users, totalUsers] = await Promise.all([
+      /** Get the users */
+      db.user.findMany({
+        skip,
+        take,
+        where,
+        orderBy: { createdAt: "desc" },
+      }),
+
+      /** Count them */
+      db.user.count({ where }),
+    ]);
+
+    return { users, totalUsers };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get users",
+      additionalData: { page, perPage, search },
+      label,
+    });
   }
-
-  const [users, totalUsers] = await db.$transaction([
-    /** Get the users */
-    db.user.findMany({
-      skip,
-      take,
-      where,
-      orderBy: { createdAt: "desc" },
-    }),
-
-    /** Count them */
-    db.user.count({ where }),
-  ]);
-
-  return { users, totalUsers };
 }
 
 export async function updateProfilePicture({
@@ -427,15 +445,6 @@ export async function updateProfilePicture({
 }
 
 export async function deleteUser(id: User["id"]) {
-  if (!id) {
-    // @TODO Solve error handling
-    throw new ShelfError({
-      cause: null,
-      message: "User ID is required",
-      label,
-    });
-  }
-
   try {
     const user = await db.user.findUnique({
       where: { id },
@@ -452,20 +461,26 @@ export async function deleteUser(id: User["id"]) {
     });
 
     await db.user.delete({ where: { id } });
-  } catch (error) {
+  } catch (cause) {
     if (
-      error instanceof PrismaClientKnownRequestError &&
-      error.code === "P2025"
+      cause instanceof PrismaClientKnownRequestError &&
+      cause.code === "P2025"
     ) {
       // eslint-disable-next-line no-console
       console.log("User not found, so no need to delete");
     } else {
-      throw error;
+      throw new ShelfError({
+        cause,
+        message: "Unable to delete user",
+        additionalData: { id },
+        label,
+      });
     }
   }
 
   await deleteAuthAccount(id);
 }
+
 export { defaultUserCategories };
 
 /** THis function is used just for integration tests as it combines the creation of auth account and user entry */

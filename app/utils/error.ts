@@ -33,11 +33,13 @@ export type FailureReason = {
   label:
     | "Unknown"
     // Related to our modules
+    | "Admin dashboard"
     | "App layout"
     | "Asset"
     | "Auth"
     | "Booking"
     | "CSV"
+    | "Dashboard"
     | "Email"
     | "Healthcheck"
     | "Image"
