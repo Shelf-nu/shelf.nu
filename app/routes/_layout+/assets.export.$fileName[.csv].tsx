@@ -2,12 +2,12 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { assertUserCanExportAssets } from "~/modules/tier";
 import { exportAssetsToCsv } from "~/utils/csv.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
 
-  const { organizationId, organizations } = await requirePermision({
+  const { organizationId, organizations } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.asset,

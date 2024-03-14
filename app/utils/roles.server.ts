@@ -1,7 +1,7 @@
 import { Roles } from "@prisma/client";
 import { json } from "@remix-run/node";
 import { db } from "~/database";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import type { PermissionAction, PermissionEntity } from "./permissions";
 import { validatePermission } from "./permissions";
 
@@ -33,7 +33,7 @@ export async function isAdmin(context: Record<string, any>) {
   return !!user;
 }
 
-export async function requirePermision({
+export async function requirePermission({
   userId,
   request,
   entity,
@@ -57,7 +57,7 @@ export async function requirePermision({
     userOrganizations,
     organizations,
     currentOrganization,
-  } = await requireOrganisationId({ userId, request });
+  } = await getSelectedOrganisation({ userId, request });
 
   const roles = userOrganizations.find(
     (o) => o.organization.id === organizationId

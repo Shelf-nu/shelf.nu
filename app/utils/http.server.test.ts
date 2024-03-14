@@ -12,7 +12,6 @@ import {
   error,
   assertParams,
   parseData,
-  getValidationErrors,
 } from "./http.server";
 import { Logger } from "./logger";
 
@@ -184,180 +183,146 @@ describe(error.name, () => {
 
     expect(Logger.error).toBeCalledWith(cause);
   });
+});
 
-  describe(assertParams.name, () => {
-    it("should return params", () => {
-      const params = { id: "123" };
-      const result = assertParams(params, z.object({ id: z.string() }));
+describe(assertParams.name, () => {
+  it("should return params", () => {
+    const params = { id: "123" };
+    const result = assertParams(params, z.object({ id: z.string() }));
 
-      expect(result).toEqual(params);
-    });
-
-    it("should throw a `json` response if params are invalid", async () => {
-      const params = {};
-
-      try {
-        assertParams(params, z.object({ id: z.string() }));
-      } catch (e) {
-        const response = e as Response;
-        const body = await response.json();
-        expect(response.status).toEqual(400);
-        expect(body).toEqual({
-          error: {
-            additionalData: {
-              params: {},
-              validationErrors: {
-                id: {
-                  message: "Required",
-                },
-              },
-            },
-            label: "Request validation",
-            message:
-              "Invalid request. Please try again. If the issue persists, contact support.",
-            traceId: expect.any(String),
-          },
-        });
-      }
-    });
-
-    it("should return params in additionalData if validation fails", async () => {
-      const params = { id: "123" };
-
-      try {
-        assertParams(params, z.object({ id: z.string(), name: z.string() }));
-      } catch (e) {
-        const response = e as Response;
-        const body = await response.json();
-        expect(response.status).toEqual(400);
-        expect(body).toEqual({
-          error: {
-            additionalData: {
-              params,
-              validationErrors: {
-                name: {
-                  message: "Required",
-                },
-              },
-            },
-            label: expect.any(String),
-            message: expect.any(String),
-            traceId: expect.any(String),
-          },
-        });
-      }
-    });
+    expect(result).toEqual(params);
   });
 
-  describe(parseData.name, () => {
-    it("should parse formData", () => {
-      const formData = new FormData();
-      formData.append("id", "123");
+  it("should throw a `json` response if params are invalid", async () => {
+    const params = {};
 
-      const result = parseData(formData, z.object({ id: z.string() }));
-
-      expect(result).toEqual({ id: "123" });
-    });
-
-    it("should parse URLSearchParams", () => {
-      const searchParams = new URLSearchParams();
-      searchParams.append("id", "123");
-
-      const result = parseData(searchParams, z.object({ id: z.string() }));
-
-      expect(result).toEqual({ id: "123" });
-    });
-
-    it("should parse request params", () => {
-      const params = { id: "123" };
-
-      const result = parseData(params, z.object({ id: z.string() }));
-
-      expect(result).toEqual({ id: "123" });
-    });
-
-    it("should throw a `badRequest` if validation fails", () => {
-      const params = {};
-
-      try {
-        parseData(params, z.object({ id: z.string() }));
-      } catch (e) {
-        expect(e).toBeInstanceOf(ShelfError);
-        const error = e as ShelfError;
-        expect(error.status).toEqual(400);
-        expect(error.message).toEqual(
-          "Invalid request. Please try again. If the issue persists, contact support."
-        );
-        expect(error.additionalData).toEqual({
-          validationErrors: {
-            id: {
-              message: "Required",
-            },
-          },
-        });
-      }
-    });
-
-    it("should throw a `badRequest` with custom options", () => {
-      const params = {};
-
-      try {
-        parseData(params, z.object({ id: z.string() }), {
-          title: "Oops!",
-          message: "Params are invalid!",
+    try {
+      assertParams(params, z.object({ id: z.string() }));
+    } catch (e) {
+      const response = e as Response;
+      const body = await response.json();
+      expect(response.status).toEqual(400);
+      expect(body).toEqual({
+        error: {
           additionalData: {
-            userId: "123",
-          },
-        });
-      } catch (e) {
-        expect(e).toBeInstanceOf(ShelfError);
-        const error = e as ShelfError;
-        expect(error.status).toEqual(400);
-        expect(error.title).toEqual("Oops!");
-        expect(error.message).toEqual("Params are invalid!");
-        expect(error.additionalData).toEqual({
-          userId: "123",
-          validationErrors: {
-            id: {
-              message: "Required",
+            params: {},
+            validationErrors: {
+              id: {
+                message: "Required",
+              },
             },
           },
-        });
-      }
-    });
+          label: "Request validation",
+          message:
+            "The request is invalid. Please try again. If the issue persists, contact support.",
+          traceId: expect.any(String),
+        },
+      });
+    }
   });
 
-  describe(getValidationErrors.name, () => {
-    it("should return validation error", () => {
-      const schema = z.object({ id: z.string() });
-      try {
-        parseData({}, schema);
-      } catch (e) {
-        const error = e as ShelfError;
+  it("should return params in additionalData if validation fails", async () => {
+    const params = { id: "123" };
 
-        const validationErrors = getValidationErrors<typeof schema>(error);
+    try {
+      assertParams(params, z.object({ id: z.string(), name: z.string() }));
+    } catch (e) {
+      const response = e as Response;
+      const body = await response.json();
+      expect(response.status).toEqual(400);
+      expect(body).toEqual({
+        error: {
+          additionalData: {
+            params,
+            validationErrors: {
+              name: {
+                message: "Required",
+              },
+            },
+          },
+          label: expect.any(String),
+          message: expect.any(String),
+          traceId: expect.any(String),
+        },
+      });
+    }
+  });
+});
 
-        // we explicitly use validationErrors?.id to test that inference works
-        expect(validationErrors?.id).toEqual({
-          message: "Required",
-        });
-      }
-    });
+describe(parseData.name, () => {
+  it("should parse formData", () => {
+    const formData = new FormData();
+    formData.append("id", "123");
 
-    it("should return nothing if the error has no validation errors", () => {
-      const schema = z.object({ id: z.string() });
-      try {
-        parseData({}, schema);
-      } catch (e) {
-        const error = e as ShelfError;
+    const result = parseData(formData, z.object({ id: z.string() }));
 
-        const validationErrors = getValidationErrors<typeof schema>(error);
+    expect(result).toEqual({ id: "123" });
+  });
 
-        // we explicitly use validationErrors?.id to test that inference works
-        expect(validationErrors?.id).toEqual({
-          message: "Required",
-        });
-      }
-    });
+  it("should parse URLSearchParams", () => {
+    const searchParams = new URLSearchParams();
+    searchParams.append("id", "123");
+
+    const result = parseData(searchParams, z.object({ id: z.string() }));
+
+    expect(result).toEqual({ id: "123" });
+  });
+
+  it("should parse request params", () => {
+    const params = { id: "123" };
+
+    const result = parseData(params, z.object({ id: z.string() }));
+
+    expect(result).toEqual({ id: "123" });
+  });
+
+  it("should throw a `badRequest` if validation fails", () => {
+    const params = {};
+
+    try {
+      parseData(params, z.object({ id: z.string() }));
+    } catch (e) {
+      expect(e).toBeInstanceOf(ShelfError);
+      const error = e as ShelfError;
+      expect(error.status).toEqual(400);
+      expect(error.message).toEqual(
+        "The request is invalid. Please try again. If the issue persists, contact support."
+      );
+      expect(error.additionalData).toEqual({
+        validationErrors: {
+          id: {
+            message: "Required",
+          },
+        },
+      });
+    }
+  });
+
+  it("should throw a `badRequest` with custom options", () => {
+    const params = {};
+
+    try {
+      parseData(params, z.object({ id: z.string() }), {
+        title: "Oops!",
+        message: "Params are invalid!",
+        additionalData: {
+          userId: "123",
+        },
+      });
+    } catch (e) {
+      expect(e).toBeInstanceOf(ShelfError);
+      const error = e as ShelfError;
+      expect(error.status).toEqual(400);
+      expect(error.title).toEqual("Oops!");
+      expect(error.message).toEqual("Params are invalid!");
+      expect(error.additionalData).toEqual({
+        userId: "123",
+        validationErrors: {
+          id: {
+            message: "Required",
+          },
+        },
+      });
+    }
   });
 });

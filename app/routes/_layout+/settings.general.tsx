@@ -39,7 +39,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { canExportAssets } from "~/utils/subscription";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { MAX_SIZE } from "./settings.workspace.new";
@@ -53,7 +53,7 @@ const EditWorkspaceFormSchema = z.object({
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.generalSettings,
@@ -145,7 +145,7 @@ export const ErrorBoundary = () => <ErrorContent />;
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
 
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.generalSettings,

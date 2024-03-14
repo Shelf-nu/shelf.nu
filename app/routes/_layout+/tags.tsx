@@ -26,11 +26,11 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.tag,
@@ -83,7 +83,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.tag,

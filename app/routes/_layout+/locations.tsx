@@ -1,11 +1,11 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.location,

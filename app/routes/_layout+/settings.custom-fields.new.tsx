@@ -16,14 +16,14 @@ import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 const title = "New Custom Field";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
 
-  const { organizationId, organizations } = await requirePermision({
+  const { organizationId, organizations } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.customField,
@@ -52,7 +52,7 @@ export const handle = {
 export async function action({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
 
-  const { organizationId, organizations } = await requirePermision({
+  const { organizationId, organizations } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.customField,

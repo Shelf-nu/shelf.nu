@@ -1,7 +1,7 @@
 import type { Organization, Prisma, TeamMember } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
-import { getCurrentSearchParams, getParamsValues } from "~/utils";
+import { ShelfError, getCurrentSearchParams, getParamsValues } from "~/utils";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -12,16 +12,25 @@ export async function createTeamMember({
   name: TeamMember["name"];
   organizationId: Organization["id"];
 }) {
-  return db.teamMember.create({
-    data: {
-      name,
-      organization: {
-        connect: {
-          id: organizationId,
+  try {
+    return await db.teamMember.create({
+      data: {
+        name,
+        organization: {
+          connect: {
+            id: organizationId,
+          },
         },
       },
-    },
-  });
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while creating the team member",
+      additionalData: { name, organizationId },
+      label: "Team Member",
+    });
+  }
 }
 
 export async function createTeamMemberIfNotExists({

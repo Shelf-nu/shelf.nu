@@ -193,12 +193,27 @@ export async function deleteAuthAccount(userId: string) {
   return true;
 }
 
-export async function getAuthUserByAccessToken(accessToken: string) {
-  const { data, error } = await getSupabaseAdmin().auth.getUser(accessToken);
+export async function getAuthUserById(userId: string) {
+  try {
+    const { data, error } =
+      await getSupabaseAdmin().auth.admin.getUserById(userId);
 
-  if (!data.user || error) return null;
+    if (error) {
+      throw error;
+    }
 
-  return data.user;
+    const { user } = data;
+
+    return user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while getting the auth user by id. Please try again later or contact support.",
+      additionalData: { userId },
+      label,
+    });
+  }
 }
 
 export async function getAuthResponseByAccessToken(accessToken: string) {

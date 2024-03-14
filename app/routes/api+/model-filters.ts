@@ -2,7 +2,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { getSelectedOrganisation } from "~/modules/organization/context.server";
 
 export type AllowedModelNames = "asset" | "tag" | "category" | "location";
 
@@ -24,7 +24,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId } = await requireOrganisationId({ userId, request });
+  const { organizationId } = await getSelectedOrganisation({ userId, request });
 
   /** Getting all the query parameters from url */
   const url = new URL(request.url);

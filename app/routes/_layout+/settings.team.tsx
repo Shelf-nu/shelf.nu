@@ -9,6 +9,7 @@ import type {
   ActionFunctionArgs,
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -17,23 +18,16 @@ import { UsersTable } from "~/components/workspace/users-table";
 import { db } from "~/database";
 import { createInvite } from "~/modules/invite";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { revokeAccessToOrganization } from "~/modules/user";
-import { error } from "~/utils";
+import { data, error, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
-type ActionIntent =
-  | "delete"
-  | "revokeAccess"
-  | "resend"
-  | "invite"
-  | "cancelInvite";
 export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
 const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
@@ -60,141 +54,151 @@ type InviteWithTeamMember = Pick<
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.teamMember,
-    action: PermissionAction.read,
-  });
 
-  const { organizationId } = await requireOrganisationId({
-    userId: authSession.userId,
-    request,
-  });
-  const [organization, userMembers, invites, teamMembers] =
-    await db.$transaction([
-      /** Get the org */
-      db.organization.findFirst({
-        where: {
-          id: organizationId,
-        },
-        include: {
-          owner: true,
-        },
-      }),
-      /** Get Users */
-      db.userOrganization.findMany({
-        where: {
-          organizationId,
-        },
-        select: {
-          user: true,
-          roles: true,
-        },
-      }),
-      /** Get the invites */
-      db.invite.findMany({
-        where: {
-          organizationId,
-          status: {
-            in: [InviteStatuses.PENDING],
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.teamMember,
+      action: PermissionAction.read,
+    });
+
+    const [organization, userMembers, invites, teamMembers] = await Promise.all(
+      [
+        /** Get the org */
+        db.organization.findFirst({
+          where: {
+            id: organizationId,
           },
-          inviteeEmail: {
-            not: "",
+          include: {
+            owner: true,
           },
-        },
-        distinct: ["inviteeEmail"],
-        select: {
-          id: true,
-          teamMemberId: true,
-          inviteeEmail: true,
-          status: true,
-          inviteeTeamMember: {
-            select: {
-              name: true,
+        }),
+        /** Get Users */
+        db.userOrganization.findMany({
+          where: {
+            organizationId,
+          },
+          select: {
+            user: true,
+            roles: true,
+          },
+        }),
+        /** Get the invites */
+        db.invite.findMany({
+          where: {
+            organizationId,
+            status: {
+              in: [InviteStatuses.PENDING],
+            },
+            inviteeEmail: {
+              not: "",
             },
           },
-          roles: true,
-        },
-      }),
-      /** Get the teamMembers */
-      /**
-       * 1. Don't have any invites(userId:null)
-       * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
-       */
-      db.teamMember.findMany({
-        where: {
-          deletedAt: null,
-          organizationId,
-          userId: null,
-          receivedInvites: {
-            none: {
-              status: {
-                in: [InviteStatuses.PENDING],
+          distinct: ["inviteeEmail"],
+          select: {
+            id: true,
+            teamMemberId: true,
+            inviteeEmail: true,
+            status: true,
+            inviteeTeamMember: {
+              select: {
+                name: true,
+              },
+            },
+            roles: true,
+          },
+        }),
+        /** Get the teamMembers */
+        /**
+         * 1. Don't have any invites(userId:null)
+         * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
+         */
+        db.teamMember.findMany({
+          where: {
+            deletedAt: null,
+            organizationId,
+            userId: null,
+            receivedInvites: {
+              none: {
+                status: {
+                  in: [InviteStatuses.PENDING],
+                },
               },
             },
           },
-        },
-        include: {
-          _count: {
-            select: {
-              custodies: true,
+          include: {
+            _count: {
+              select: {
+                custodies: true,
+              },
             },
           },
-        },
-      }),
-    ]);
-  if (!organization) {
-    throw new Error("Organization not found");
+        }),
+      ]
+    );
+
+    if (!organization) {
+      throw new ShelfError({
+        cause: null,
+        message: "Organization not found",
+        additionalData: { organizationId, userId: authSession.userId },
+        label: "Team",
+      });
+    }
+
+    const header: HeaderData = {
+      title: `Settings - ${organization.name}`,
+    };
+
+    /** Create a structure for the users org members and merge it with invites */
+    const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
+      userMembers.map((um) => ({
+        name: `${um.user.firstName ? um.user.firstName : ""} ${
+          um.user.lastName ? um.user.lastName : ""
+        }`,
+        img: um.user.profilePicture || "/static/images/default_pfp.jpg",
+        email: um.user.email,
+        status: "ACCEPTED",
+        role: organizationRolesMap[um.roles[0]],
+        userId: um.user.id,
+      }));
+
+    /** Create the same structure for invites */
+    for (const invite of invites as InviteWithTeamMember[]) {
+      teamMembersWithUserOrInvite.push({
+        name: invite.inviteeTeamMember.name,
+        img: "/static/images/default_pfp.jpg",
+        email: invite.inviteeEmail,
+        status: invite.status,
+        role: organizationRolesMap[invite?.roles[0]],
+        userId: null,
+      });
+    }
+
+    return json(
+      data({
+        currentOrganizationId: organizationId,
+        organization,
+        header,
+        owner: organization.owner,
+        teamMembers,
+        teamMembersWithUserOrInvite,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId: authSession.userId });
+    throw json(error(reason), { status: reason.status });
   }
-
-  const header: HeaderData = {
-    title: `Settings - ${organization.name}`,
-  };
-
-  /** Create a structure for the users org members and merge it with invites */
-  const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
-    userMembers.map((um) => ({
-      name: `${um.user.firstName ? um.user.firstName : ""} ${
-        um.user.lastName ? um.user.lastName : ""
-      }`,
-      img: um.user.profilePicture || "/static/images/default_pfp.jpg",
-      email: um.user.email,
-      status: "ACCEPTED",
-      role: organizationRolesMap[um.roles[0]],
-      userId: um.user.id,
-    }));
-
-  /** Create the same structure for invites */
-  for (const invite of invites as InviteWithTeamMember[]) {
-    teamMembersWithUserOrInvite.push({
-      name: invite.inviteeTeamMember.name,
-      img: "/static/images/default_pfp.jpg",
-      email: invite.inviteeEmail,
-      status: invite.status,
-      role: organizationRolesMap[invite?.roles[0]],
-      userId: null,
-    });
-  }
-
-  return json({
-    currentOrganizationId: organizationId,
-    organization,
-    header,
-    owner: organization.owner,
-    teamMembers,
-    teamMembersWithUserOrInvite,
-  });
 }
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
-  /** @TODO needs testing agian due to messy merge */
+  /** @TODO needs testing again due to messy merge */
   const authSession = context.getSession();
+  const { userId } = authSession;
 
   try {
-    const { userId } = authSession;
-
-    const { organizationId } = await requirePermision({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
@@ -202,51 +206,95 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
     });
 
     const formData = await request.formData();
-    const intent = formData.get("intent") as ActionIntent;
-    const teamMemberId = formData.get("teamMemberId") as string;
+    const { intent } = parseData(
+      formData,
+      z.object({
+        intent: z.enum([
+          "delete",
+          "revokeAccess",
+          "resend",
+          "invite",
+          "cancelInvite",
+        ]),
+      }),
+      {
+        additionalData: {
+          organizationId,
+        },
+      }
+    );
 
     switch (intent) {
-      case "delete":
-        await db.teamMember.update({
-          where: {
-            id: teamMemberId,
-          },
-          data: {
-            deletedAt: new Date(),
-          },
-        });
+      case "delete": {
+        const { teamMemberId } = parseData(
+          formData,
+          z.object({
+            teamMemberId: z.string(),
+          }),
+          {
+            additionalData: {
+              organizationId,
+              intent,
+            },
+          }
+        );
+
+        await db.teamMember
+          .update({
+            where: {
+              id: teamMemberId,
+            },
+            data: {
+              deletedAt: new Date(),
+            },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to delete team member",
+              additionalData: { teamMemberId, userId, organizationId },
+              label: "Team",
+            });
+          });
+
         return redirect(`/settings/team`);
-      case "revokeAccess":
-        const targetUserId = formData.get("userId") as string;
+      }
+      case "revokeAccess": {
+        const { userId: targetUserId } = parseData(
+          formData,
+          z.object({
+            userId: z.string(),
+          }),
+          {
+            additionalData: {
+              organizationId,
+              intent,
+            },
+          }
+        );
+
         const user = await revokeAccessToOrganization({
           userId: targetUserId,
           organizationId,
         });
 
-        if (!user) {
-          throw new ShelfError({
-            cause: null,
-            message: "User not found",
-            label: "Team",
+        const org = await db.organization
+          .findUniqueOrThrow({
+            where: {
+              id: organizationId,
+            },
+            select: {
+              name: true,
+            },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Organization not found",
+              additionalData: { organizationId },
+              label: "Team",
+            });
           });
-        }
-
-        const org = await db.organization.findUnique({
-          where: {
-            id: organizationId,
-          },
-          select: {
-            name: true,
-          },
-        });
-
-        if (!org) {
-          throw new ShelfError({
-            cause: null,
-            message: "Organization not found",
-            label: "Team",
-          });
-        }
 
         await sendEmail({
           to: user.email,
@@ -260,36 +308,82 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
+
         return redirect("/settings/team");
-      case "cancelInvite":
-        await db.invite.updateMany({
-          where: {
-            inviteeEmail: formData.get("email") as string,
-            organizationId,
-            status: InviteStatuses.PENDING,
-          },
-          data: {
-            status: InviteStatuses.INVALIDATED,
-          },
-        });
+      }
+      case "cancelInvite": {
+        const { email: inviteeEmail } = parseData(
+          formData,
+          z.object({
+            email: z.string(),
+          }),
+          {
+            additionalData: {
+              organizationId,
+              intent,
+            },
+          }
+        );
+
+        await db.invite
+          .updateMany({
+            where: {
+              inviteeEmail,
+              organizationId,
+              status: InviteStatuses.PENDING,
+            },
+            data: {
+              status: InviteStatuses.INVALIDATED,
+            },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to cancel invites",
+              additionalData: { userId, organizationId, inviteeEmail },
+              label: "Team",
+            });
+          });
+
         sendNotification({
           title: "Invitation cancelled",
           message: "The invitation has successfully been cancelled.",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });
-        return null;
 
-      case "resend":
+        return null;
+      }
+      case "resend": {
+        const {
+          email: inviteeEmail,
+          name: teamMemberName,
+          teamMemberId,
+        } = parseData(
+          formData,
+          z.object({
+            email: z.string(),
+            name: z.string(),
+            teamMemberId: z.string(),
+          }),
+          {
+            additionalData: {
+              organizationId,
+              intent,
+            },
+          }
+        );
+
         const invite = await createInvite({
           organizationId,
-          inviteeEmail: formData.get("email") as string,
-          teamMemberName: formData.get("name") as string,
+          inviteeEmail,
+          teamMemberName,
           teamMemberId,
           inviterId: userId,
           roles: [OrganizationRoles.ADMIN],
           userId,
         });
+
         if (invite) {
           sendNotification({
             title: "Successfully invited user",
@@ -299,18 +393,21 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
             senderId: userId,
           });
         }
-        return null;
+
+        return json(data(null));
+      }
       default: {
         throw new ShelfError({
           cause: null,
           message: "Invalid action",
+          additionalData: { intent },
           label: "Team",
         });
       }
     }
   } catch (cause) {
-    const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
 };
 

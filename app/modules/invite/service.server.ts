@@ -34,138 +34,174 @@ export async function getExisitingActiveInvite({
     },
   });
 }
-export async function createInvite({
-  organizationId,
-  inviteeEmail,
-  inviterId,
-  roles,
-  teamMemberName,
-  teamMemberId,
-  userId,
-}: Pick<Invite, "inviterId" | "inviteeEmail" | "organizationId" | "roles"> & {
-  teamMemberName: TeamMember["name"];
-  teamMemberId?: Invite["teamMemberId"];
-  userId: string;
-}) {
-  const existingUser = await db.user.findFirst({
-    where: {
-      email: inviteeEmail,
-      userOrganizations: {
-        some: { organizationId },
-      },
-    },
-  });
-  if (existingUser) {
-    //if email is already part of organization, we dont allow new invite
-
-    sendNotification({
-      title: `Cannot invite user ${inviteeEmail}`,
-      message:
-        "There is a user with same email already part of the organization",
-      icon: { name: "x", variant: "error" },
-      senderId: userId,
-    });
-    return null;
+export async function createInvite(
+  payload: Pick<
+    Invite,
+    "inviterId" | "inviteeEmail" | "organizationId" | "roles"
+  > & {
+    teamMemberName: TeamMember["name"];
+    teamMemberId?: Invite["teamMemberId"];
+    userId: string;
   }
-  if (!teamMemberId) {
-    const previousInvite = await db.invite.findFirst({
+) {
+  let {
+    organizationId,
+    inviteeEmail,
+    inviterId,
+    roles,
+    teamMemberName,
+    teamMemberId,
+    userId,
+  } = payload;
+
+  try {
+    const existingUser = await db.user.findFirst({
       where: {
-        organizationId,
-        inviteeEmail,
+        email: inviteeEmail,
+        userOrganizations: {
+          some: { organizationId },
+        },
       },
     });
-    if (previousInvite?.teamMemberId) {
-      //we already invited this user before, so dont create 1 more team member
-      teamMemberId = previousInvite.teamMemberId;
-    } else {
-      const member = await createTeamMember({
-        name: teamMemberName,
-        organizationId,
-      });
-      teamMemberId = member.id;
-    }
-  } else {
-    const previousActiveInvite = await db.invite.findFirst({
-      where: {
-        organizationId,
-        inviteeEmail,
-        status: InviteStatuses.PENDING,
-        expiresAt: { gt: new Date() },
-      },
-    });
-    if (
-      previousActiveInvite &&
-      previousActiveInvite.teamMemberId !== teamMemberId
-    ) {
-      //there is already an active invite for different team member, so dont allow new invte
+
+    if (existingUser) {
+      //if email is already part of organization, we dont allow new invite
       sendNotification({
         title: `Cannot invite user ${inviteeEmail}`,
         message:
-          "There is an active invite for this user linked to different NRM",
+          "There is a user with same email already part of the organization",
         icon: { name: "x", variant: "error" },
         senderId: userId,
       });
+
       return null;
     }
-  }
 
-  const inviter = {
-    connect: {
-      id: inviterId,
-    },
-  };
-  const organization = {
-    connect: {
-      id: organizationId,
-    },
-  };
+    if (!teamMemberId) {
+      const previousInvite = await db.invite.findFirst({
+        where: {
+          organizationId,
+          inviteeEmail,
+        },
+      });
 
-  const inviteeTeamMember = {
-    connect: {
-      id: teamMemberId,
-    },
-  };
+      if (previousInvite?.teamMemberId) {
+        //we already invited this user before, so dont create 1 more team member
+        teamMemberId = previousInvite.teamMemberId;
+      } else {
+        const member = await createTeamMember({
+          name: teamMemberName,
+          organizationId,
+        });
 
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
-  const data = {
-    inviteeTeamMember,
-    organization,
-    inviter,
-    inviteeEmail,
-    expiresAt,
-    inviteCode: generateRandomCode(6),
-  };
+        teamMemberId = member.id;
+      }
+    } else {
+      const previousActiveInvite = await db.invite.findFirst({
+        where: {
+          organizationId,
+          inviteeEmail,
+          status: InviteStatuses.PENDING,
+          expiresAt: { gt: new Date() },
+        },
+      });
 
-  if (roles.length) {
-    Object.assign(data, {
-      roles,
+      if (
+        previousActiveInvite &&
+        previousActiveInvite.teamMemberId !== teamMemberId
+      ) {
+        //there is already an active invite for different team member, so dont allow new invite
+        sendNotification({
+          title: `Cannot invite user ${inviteeEmail}`,
+          message:
+            "There is an active invite for this user linked to different NRM",
+          icon: { name: "x", variant: "error" },
+          senderId: userId,
+        });
+
+        return null;
+      }
+    }
+
+    const inviter = {
+      connect: {
+        id: inviterId,
+      },
+    };
+
+    const organization = {
+      connect: {
+        id: organizationId,
+      },
+    };
+
+    const inviteeTeamMember = {
+      connect: {
+        id: teamMemberId,
+      },
+    };
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + INVITE_EXPIRY_TTL_DAYS);
+
+    const data = {
+      inviteeTeamMember,
+      organization,
+      inviter,
+      inviteeEmail,
+      expiresAt,
+      inviteCode: generateRandomCode(6),
+    };
+
+    if (roles.length) {
+      Object.assign(data, {
+        roles,
+      });
+    }
+
+    const invite = await db.invite
+      .create({
+        data,
+        include: {
+          organization: true,
+          inviter: {
+            select: {
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to create invite in database",
+          additionalData: { data },
+          label,
+        });
+      });
+
+    const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
+      expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
+    }); //keep only needed data in token to maintain the size
+
+    await sendEmail({
+      to: inviteeEmail,
+      subject: `You have been invited to ${invite.organization.name}`,
+      text: inviteEmailText({ invite, token }),
+      html: invitationTemplateString({ invite, token }),
+    });
+
+    return invite;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong with creating your invite. Please try again. If the problem persists, please contact support",
+      additionalData: { payload },
+      label,
     });
   }
-  const invite = await db.invite.create({
-    data,
-    include: {
-      organization: true,
-      inviter: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-  });
-
-  const token = jwt.sign({ id: invite.id }, INVITE_TOKEN_SECRET, {
-    expiresIn: `${INVITE_EXPIRY_TTL_DAYS}d`,
-  }); //keep only needed data in token to maintain the size
-  await sendEmail({
-    to: inviteeEmail,
-    subject: `You have been invited to ${invite.organization.name}`,
-    text: inviteEmailText({ invite, token }),
-    html: invitationTemplateString({ invite, token }),
-  });
-
-  return invite;
 }
 
 //when user clicks on accept/reject route action will validate the jwt if its valid it will call this

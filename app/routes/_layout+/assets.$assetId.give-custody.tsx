@@ -20,7 +20,7 @@ import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
 export const loader = async ({
@@ -30,7 +30,7 @@ export const loader = async ({
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,
@@ -91,7 +91,7 @@ export const action = async ({
 }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
-  await requirePermision({
+  await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,

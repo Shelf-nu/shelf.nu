@@ -22,12 +22,12 @@ import { createLocation } from "~/modules/location";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 const title = "New Location";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.location,
@@ -53,7 +53,7 @@ export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.location,

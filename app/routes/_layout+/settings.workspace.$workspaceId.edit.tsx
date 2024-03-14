@@ -26,13 +26,13 @@ import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { MAX_SIZE } from "./settings.workspace.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
 
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.workspace,
@@ -70,7 +70,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = context.getSession();
 
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.workspace,

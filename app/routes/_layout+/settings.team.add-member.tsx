@@ -10,12 +10,12 @@ import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { handleUniqueConstraintError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
 
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.teamMember,
@@ -31,7 +31,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.teamMember,

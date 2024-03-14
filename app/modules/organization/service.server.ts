@@ -193,25 +193,32 @@ export async function updateOrganization({
 }
 
 export const getUserOrganizations = async ({ userId }: { userId: string }) => {
-  const userOrganizations = await db.userOrganization.findMany({
-    where: { userId },
-    select: {
-      roles: true,
-      organization: {
-        select: {
-          id: true,
-          type: true,
-          name: true,
-          imageId: true,
-          userId: true,
-          updatedAt: true,
-          currency: true,
+  try {
+    return await db.userOrganization.findMany({
+      where: { userId },
+      select: {
+        roles: true,
+        organization: {
+          select: {
+            id: true,
+            type: true,
+            name: true,
+            imageId: true,
+            userId: true,
+            updatedAt: true,
+            currency: true,
+          },
         },
       },
-    },
-  });
-
-  return userOrganizations;
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get user organizations",
+      additionalData: { userId },
+      label,
+    });
+  }
 };
 
 export const getOrganizationAdminsEmails = async ({

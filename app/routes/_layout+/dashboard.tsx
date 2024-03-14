@@ -36,13 +36,13 @@ import {
 import { makeShelfError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
 
   try {
-    const { organizationId, currentOrganization } = await requirePermision({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.dashboard,

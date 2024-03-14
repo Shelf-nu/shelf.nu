@@ -42,12 +42,12 @@ import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId, role } = await requirePermision({
+  const { organizationId, role } = await requirePermission({
     userId: authSession?.userId,
     request,
     entity: PermissionEntity.booking,
@@ -243,7 +243,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     cancel: PermissionAction.update,
   };
 
-  const { organizationId, role } = await requirePermision({
+  const { organizationId, role } = await requirePermission({
     userId: authSession?.userId,
     request,
     entity: PermissionEntity.booking,

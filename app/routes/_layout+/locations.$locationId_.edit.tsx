@@ -22,12 +22,12 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { MAX_SIZE } from "./locations.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.location,
@@ -67,7 +67,7 @@ export const handle = {
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.location,

@@ -31,7 +31,7 @@ import { getRequiredParam, isFormProcessing } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
 import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -41,7 +41,7 @@ export const loader = async ({
   params,
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession?.userId,
     request,
     entity: PermissionEntity.booking,
@@ -103,7 +103,7 @@ export const action = async ({
   params,
 }: ActionFunctionArgs) => {
   const authSession = context.getSession();
-  await requirePermision({
+  await requirePermission({
     userId: authSession?.userId,
 
     request,

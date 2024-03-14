@@ -12,13 +12,13 @@ import { useMatchesData } from "~/hooks";
 import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
 import { getCurrentSearchParams, slugify } from "~/utils";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.qr,

@@ -1,19 +1,12 @@
-import { createCookie, json, redirect } from "@remix-run/node";
-import {
-  NODE_ENV,
-  SESSION_SECRET,
-  error,
-  getCurrentPath,
-  isGet,
-} from "~/utils";
+import { createCookie } from "@remix-run/node";
+import { NODE_ENV, SESSION_SECRET } from "~/utils";
 import {
   destroyCookie,
   parseCookie,
   serializeCookie,
-  setCookie,
 } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 import { getUserOrganizations } from "./service.server";
 
@@ -47,91 +40,69 @@ export function destroySelectedOrganizationIdCookie() {
   return destroyCookie(selectedOrganizationIdCookie);
 }
 
-export async function requireOrganisationId({
+/**
+ * This function is used to get the selected organization for the user.
+ *
+ * It checks if the user is part of the organization and if the organizationId is set in the cookie.
+ *
+ * @throws If the user is not part of the organization or the organizationId is not set
+ */
+export async function getSelectedOrganisation({
   userId,
   request,
 }: {
   userId: string;
   request: Request;
 }) {
-  try {
-    const organizationId = await getSelectedOrganizationIdCookie(request);
+  let organizationId = await getSelectedOrganizationIdCookie(request);
 
-    /** There could be a case when you get removed from an organization while browsing it.
-     * In this case what we do is we set the current organization to the first one in the list
-     */
-    const userOrganizations = await getUserOrganizations({ userId });
-    const organizations = userOrganizations.map((uo) => uo.organization);
-    const userOrganizationIds = organizations.map((org) => org.id);
-    const personalOrganization = organizations.find(
-      (org) => org.type === "PERSONAL"
-    );
-    const currentOrganization = organizations.find(
-      (org) => org.id === organizationId
-    );
+  /** There could be a case when you get removed from an organization while browsing it.
+   * In this case what we do is we set the current organization to the first one in the list
+   */
+  const userOrganizations = await getUserOrganizations({ userId });
+  const organizations = userOrganizations.map((uo) => uo.organization);
+  const userOrganizationIds = organizations.map((org) => org.id);
+  const personalOrganization = organizations.find(
+    (org) => org.type === "PERSONAL"
+  );
 
-    if (!personalOrganization) {
-      throw new ShelfError({
-        cause: null,
-        title: "No organization found",
-        message:
-          "You do not have a personal organization. This should not happen. Please contact support.",
-        label,
-      });
-    }
-
-    /**
-     * If for some reason there is no currentOrganization, we handle it by setting it to the personalOrganization
-     */
-    if (!currentOrganization) {
-      if (isGet(request)) {
-        throw redirect(getCurrentPath(request), {
-          headers: [
-            setCookie(
-              await setSelectedOrganizationIdCookie(personalOrganization.id)
-            ),
-          ],
-        });
-      }
-
-      // Other methods should throw an error (mostly for actions)
-      throw new ShelfError({
-        cause: null,
-        message: "You do not have access to this organization",
-        status: 401,
-        label,
-      });
-    }
-
-    // If the user is not part of the organization or the organizationId is not set (should not happen but just in case)
-    if (!organizationId || !userOrganizationIds.includes(organizationId)) {
-      if (isGet(request)) {
-        throw redirect(getCurrentPath(request), {
-          headers: [
-            setCookie(
-              await setSelectedOrganizationIdCookie(personalOrganization.id)
-            ),
-          ],
-        });
-      }
-
-      // Other methods should throw an error (mostly for actions)
-      throw new ShelfError({
-        cause: null,
-        message: "You do not have access to this organization",
-        status: 401,
-        label,
-      });
-    }
-
-    return {
-      organizationId,
-      organizations,
-      userOrganizations,
-      currentOrganization,
-    };
-  } catch (cause) {
-    const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+  if (!personalOrganization) {
+    throw new ShelfError({
+      cause: null,
+      title: "No personal organization found",
+      message:
+        "You do not have a personal organization. This should not happen. Please contact support.",
+      additionalData: { userId, organizationId, userOrganizationIds },
+      label,
+    });
   }
+
+  // If the organizationId is not set, we set it to the personal organization
+  if (!organizationId) {
+    organizationId = personalOrganization.id;
+  }
+
+  const currentOrganization = organizations.find(
+    (org) => org.id === organizationId
+  );
+
+  // If the user is not part of the organization or the organizationId is not set (should not happen but just in case)
+  if (!userOrganizationIds.includes(organizationId) || !currentOrganization) {
+    throw new ShelfError({
+      cause: null,
+      title: "No access to organization",
+      message: "You do not have access to this organization",
+      status: 401,
+      additionalData: { userId, organizationId, userOrganizationIds },
+      shouldBeCaptured: false,
+      label,
+    });
+  }
+
+  return {
+    organizationId,
+    organizations,
+    userOrganizations,
+    currentOrganization,
+  };
 }

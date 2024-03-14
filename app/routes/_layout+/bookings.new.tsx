@@ -19,7 +19,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 /**
  * In the case of bookings, when the user clicks "new", we automatically create the booking.
@@ -29,7 +29,7 @@ import { requirePermision } from "~/utils/roles.server";
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId, role } = await requirePermision({
+  const { organizationId, role } = await requirePermission({
     userId: authSession?.userId,
     request,
     entity: PermissionEntity.booking,
@@ -115,7 +115,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const formData = await request.formData();
 
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession?.userId,
     request,
     entity: PermissionEntity.booking,

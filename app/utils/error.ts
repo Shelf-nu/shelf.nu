@@ -33,15 +33,18 @@ export type FailureReason = {
   label:
     | "Unknown"
     // Related to our modules
+    | "App layout"
     | "Asset"
     | "Auth"
     | "Booking"
     | "CSV"
+    | "Email"
     | "Healthcheck"
     | "Image"
     | "Invite"
     | "User onboarding"
     | "Location"
+    | "Notification"
     | "Organization"
     | "Permission"
     | "QR"
@@ -52,6 +55,7 @@ export type FailureReason = {
     | "Subscription"
     | "Tag"
     | "Team"
+    | "Team Member"
     | "Tier"
     | "User"
     // Other kinds of errors

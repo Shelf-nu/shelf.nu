@@ -24,13 +24,13 @@ import { getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
 
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.customField,
@@ -65,7 +65,7 @@ export const handle = {
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
 
-  const { organizationId, organizations } = await requirePermision({
+  const { organizationId, organizations } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.customField,

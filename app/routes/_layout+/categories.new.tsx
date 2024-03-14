@@ -18,7 +18,7 @@ import { getRandomColor, isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const NewCategoryFormSchema = z.object({
@@ -31,7 +31,7 @@ const title = "New category";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.category,
@@ -53,7 +53,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function action({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.category,

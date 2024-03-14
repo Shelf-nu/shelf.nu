@@ -6,7 +6,7 @@ import { createNote, deleteNote } from "~/modules/asset";
 import { assertIsDelete, assertIsPost, isDelete, isPost } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const loader = async ({ params }: LoaderFunctionArgs) =>
   /** makes sure that if the user navigates to that url, it redirects back to asset */
@@ -20,7 +20,7 @@ export const action = async ({
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  await requirePermision({
+  await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,

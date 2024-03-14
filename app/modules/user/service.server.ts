@@ -16,6 +16,7 @@ import {
   updateAccountPassword,
 } from "~/modules/auth";
 
+import type { ValidationError } from "~/utils";
 import {
   dateTimeInUnix,
   getCurrentSearchParams,
@@ -29,7 +30,7 @@ import {
   getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
-import type { UpdateUserPayload, UpdateUserResponse } from "./types";
+import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
 
 const label: ErrorLabel = "User";
@@ -53,7 +54,7 @@ export async function getUserByID(id: User["id"]) {
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to get user",
+      message: "No user found with this ID",
       additionalData: { id },
       label,
     });
@@ -248,19 +249,17 @@ export async function createUser(
   }
 }
 
-export async function updateUser(
-  updateUserPayload: UpdateUserPayload
-): Promise<UpdateUserResponse> {
-  try {
-    /**
-     * Remove password from object so we can pass it to prisma user update
-     * Also we remove the email as we dont allow it to be changed for now
-     * */
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const cleanClone = (({ password, confirmPassword, email, ...o }) => o)(
-      updateUserPayload
-    );
+export async function updateUser(updateUserPayload: UpdateUserPayload) {
+  /**
+   * Remove password from object so we can pass it to prisma user update
+   * Also we remove the email as we dont allow it to be changed for now
+   * */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const cleanClone = (({ password, confirmPassword, email, ...o }) => o)(
+    updateUserPayload
+  );
 
+  try {
     const updatedUser = await db.user.update({
       where: { id: updateUserPayload.id },
       data: {
@@ -290,22 +289,27 @@ export async function updateUser(
       );
     }
 
-    return { user: updatedUser, errors: null };
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError) {
+    return updatedUser;
+  } catch (cause) {
+    const validationErrors: ValidationError<any> = {};
+
+    if (
+      cause instanceof Prisma.PrismaClientKnownRequestError &&
+      cause.code === "P2002"
+    ) {
       // The .code property can be accessed in a type-safe manner
-      if (e.code === "P2002") {
-        return {
-          user: null,
-          errors: {
-            [e?.meta?.target as string]: `${e?.meta?.target} is already taken.`,
-          },
-        };
-      } else {
-        return { user: null, errors: { global: "Unknown error." } };
-      }
+      validationErrors[cause.meta?.target as string] = {
+        message: `${cause.meta?.target} is already taken.`,
+      };
     }
-    return { user: null, errors: null };
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while updating your profile. Please try again or contact support.",
+      additionalData: { ...cleanClone, validationErrors },
+      label,
+    });
   }
 }
 
@@ -501,34 +505,42 @@ export async function revokeAccessToOrganization({
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
-  /**
-   * if I want to revokeAccess access, i simply need to:
-   * 1. Remove relation between user and team member
-   * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
-   */
-  const teamMember = await db.teamMember.findFirst({
-    where: { userId, organizationId },
-  });
+  try {
+    /**
+     * if I want to revokeAccess access, i simply need to:
+     * 1. Remove relation between user and team member
+     * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
+     */
+    const teamMember = await db.teamMember.findFirst({
+      where: { userId, organizationId },
+    });
 
-  const user = await db.user.update({
-    where: { id: userId },
-    data: {
-      ...(teamMember?.id && {
-        teamMembers: {
-          disconnect: {
-            id: teamMember.id,
+    return await db.user.update({
+      where: { id: userId },
+      data: {
+        ...(teamMember?.id && {
+          teamMembers: {
+            disconnect: {
+              id: teamMember.id,
+            },
           },
-        },
-      }),
-      userOrganizations: {
-        delete: {
-          userId_organizationId: {
-            userId,
-            organizationId,
+        }),
+        userOrganizations: {
+          delete: {
+            userId_organizationId: {
+              userId,
+              organizationId,
+            },
           },
         },
       },
-    },
-  });
-  return user;
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to revoke user access to organization",
+      additionalData: { userId, organizationId },
+      label,
+    });
+  }
 }

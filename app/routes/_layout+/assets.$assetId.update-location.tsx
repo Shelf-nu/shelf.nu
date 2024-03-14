@@ -13,7 +13,7 @@ import styles from "~/styles/layout/custom-modal.css";
 import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const loader = async ({
   context,
@@ -22,7 +22,7 @@ export const loader = async ({
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,
@@ -48,7 +48,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   assertIsPost(request);
   const authSession = context.getSession();
   const { userId } = authSession;
-  await requirePermision({
+  await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,

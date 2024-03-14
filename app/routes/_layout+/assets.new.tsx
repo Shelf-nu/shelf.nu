@@ -26,7 +26,7 @@ import {
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 const title = "New Asset";
 const header = {
@@ -38,7 +38,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     const { userId } = authSession;
 
-    const { organizationId, currentOrganization } = await requirePermision({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -93,7 +93,7 @@ export const handle = {
 export async function action({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,

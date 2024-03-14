@@ -50,7 +50,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 
 export const AvailabilityForBookingFormSchema = z.object({
@@ -62,7 +62,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     const { userId } = authSession;
 
-    const { organizationId } = await requirePermision({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -147,7 +147,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     toggle: PermissionAction.update,
   };
 
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,

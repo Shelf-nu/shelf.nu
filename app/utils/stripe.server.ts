@@ -3,7 +3,11 @@ import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database";
+import type { ErrorLabel } from ".";
+import { ShelfError } from ".";
 import { STRIPE_SECRET_KEY } from "./env";
+
+const label: ErrorLabel = "Stripe";
 
 export type CustomerWithSubscriptions = Stripe.Customer & {
   subscriptions: {
@@ -129,30 +133,47 @@ export const createStripeCustomer = async ({
   email: User["email"];
   userId: User["id"];
 }) => {
-  if (config.enablePremiumFeatures && stripe) {
-    const { id: customerId } = await stripe.customers.create({
-      email,
-      name,
-      metadata: {
-        userId,
-      },
-    });
+  try {
+    if (config.enablePremiumFeatures && stripe) {
+      const { id: customerId } = await stripe.customers.create({
+        email,
+        name,
+        metadata: {
+          userId,
+        },
+      });
 
-    await db.user.update({
-      where: { id: userId },
-      data: { customerId },
-    });
+      await db.user.update({
+        where: { id: userId },
+        data: { customerId },
+      });
 
-    return customerId;
+      return customerId;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to create customer in Stripe",
+      additionalData: { email, name, userId },
+      label,
+    });
   }
 };
 
 /** Fetches customer based on ID */
 export const getStripeCustomer = async (customerId: string) => {
-  const customer = await stripe.customers.retrieve(customerId, {
-    expand: ["subscriptions"],
-  });
-  return customer;
+  try {
+    return await stripe.customers.retrieve(customerId, {
+      expand: ["subscriptions"],
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to retrieve customer from Stripe",
+      additionalData: { customerId },
+      label,
+    });
+  }
 };
 
 export async function createBillingPortalSession({
@@ -217,7 +238,7 @@ export function getCustomerTrialSubscription({
 }
 
 export async function fetchStripeSubscription(id: string) {
-  return await stripe.subscriptions.retrieve(id, {
+  return stripe.subscriptions.retrieve(id, {
     expand: ["items.data.plan.product"],
   });
 }

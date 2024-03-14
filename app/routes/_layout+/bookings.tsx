@@ -27,11 +27,11 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId, role } = await requirePermision({
+  const { organizationId, role } = await requirePermission({
     userId: authSession?.userId,
     request,
     entity: PermissionEntity.booking,

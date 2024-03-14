@@ -38,7 +38,7 @@ import { userPrefs } from "~/utils/cookies.server";
 import { ShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -77,7 +77,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   const { organizationId, organizations, currentOrganization, role } =
-    await requirePermision({
+    await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,

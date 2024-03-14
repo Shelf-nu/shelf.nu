@@ -2,6 +2,7 @@ import type { Params } from "@remix-run/react";
 import { json } from "react-router";
 import { parseFormAny } from "react-zorm";
 import type { ZodType } from "zod";
+import { sendNotification } from "./emitter/send-notification.server";
 import type { Options } from "./error";
 import {
   ShelfError,
@@ -68,7 +69,7 @@ export function getRequiredParam(
   return value;
 }
 
-type ValidationError<Schema extends ZodType<any, any, any>> = Record<
+export type ValidationError<Schema extends ZodType<any, any, any>> = Record<
   keyof Schema["_output"],
   { message: string | undefined }
 >;
@@ -78,9 +79,9 @@ type ValidationError<Schema extends ZodType<any, any, any>> = Record<
  *
  * @throws A `badRequest` error if the form data is invalid.
  *
- * **By default, the error will not be captured.**
+ * **By default, the error will be captured.**
  *
- * If you want to capture the error, you can set the `shouldBeCaptured` option to `true`.
+ * If you don't want to capture the error, you can set the `shouldBeCaptured` option to `false`.
  */
 export function parseData<Schema extends ZodType<any, any, any>>(
   data: FormData | URLSearchParams | Params,
@@ -112,6 +113,7 @@ export function parseData<Schema extends ZodType<any, any, any>>(
       options?.message ||
         "The request is invalid. Please try again. If the issue persists, contact support.",
       {
+        shouldBeCaptured: true,
         ...options,
         additionalData: {
           ...options?.additionalData,
@@ -124,34 +126,6 @@ export function parseData<Schema extends ZodType<any, any, any>>(
   return submission.data as Schema["_output"];
 }
 
-function hasValidationErrors<Schema extends ZodType<any, any, any>>(
-  additionalData: unknown
-): additionalData is {
-  validationErrors: ValidationError<Schema>;
-} {
-  return (
-    typeof additionalData === "object" &&
-    additionalData !== null &&
-    "validationErrors" in additionalData &&
-    typeof additionalData.validationErrors === "object" &&
-    additionalData.validationErrors !== null
-  );
-}
-
-/**
- * Get the validation errors returned by loader/action error.
- *
- */
-export function getValidationErrors<Schema extends ZodType<any, any, any>>(
-  error: DataOrErrorResponse["error"] | null | undefined
-) {
-  if (!error || !hasValidationErrors<Schema>(error.additionalData)) {
-    return undefined;
-  }
-
-  return error.additionalData.validationErrors;
-}
-
 /**
  * Assert request params with a zod schema.
  *
@@ -159,9 +133,11 @@ export function getValidationErrors<Schema extends ZodType<any, any, any>>(
  *
  * @throws A `json` response with a 400 status code if the params are invalid.
  *
- * **By default, the error will not be captured.**
+ * **By default, the error will be captured.**
  *
- * If you want to capture the error, you can set the `shouldBeCaptured` option to `true`.
+ * If you don't want to capture the error, you can set the `shouldBeCaptured` option to `false`.
+ *
+ * @deprecated Use `parseData` instead and set params in the `additionalData` option.
  */
 export function assertParams<Schema extends ZodType<any, any, any>>(
   params: Params<string>,
@@ -170,6 +146,7 @@ export function assertParams<Schema extends ZodType<any, any, any>>(
 ) {
   try {
     return parseData(params, schema, {
+      shouldBeCaptured: true,
       ...options,
       additionalData: {
         ...options?.additionalData,
@@ -244,6 +221,19 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
  */
 export function error(cause: ShelfError) {
   Logger.error(cause);
+
+  // TODO: maybe globally rethink this
+  if (
+    cause.additionalData?.userId &&
+    typeof cause.additionalData?.userId === "string"
+  ) {
+    sendNotification({
+      title: cause.title || "Oops! Something went wrong",
+      message: cause.message,
+      icon: { name: "x", variant: "error" },
+      senderId: cause.additionalData.userId,
+    });
+  }
 
   return {
     error: {

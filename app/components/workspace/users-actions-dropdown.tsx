@@ -21,11 +21,13 @@ export function TeamUsersActionsDropdown({
   userId,
   inviteStatus,
   name,
+  teamMemberId,
   email,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
   name?: string;
+  teamMemberId?: string;
   email: string;
 }) {
   const fetcher = useFetcher();
@@ -60,6 +62,7 @@ export function TeamUsersActionsDropdown({
               <>
                 <input type="hidden" name="name" value={name} />
                 <input type="hidden" name="email" value={email} />
+                <input type="hidden" name="teamMemberId" value={teamMemberId} />
                 <Button
                   type="submit"
                   variant="link"

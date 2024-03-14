@@ -4,7 +4,7 @@ import { UnlinkIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
 
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const loader = async ({
   context,
@@ -12,7 +12,7 @@ export const loader = async ({
   params,
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.qr,

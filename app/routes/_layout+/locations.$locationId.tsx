@@ -38,7 +38,7 @@ import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const loader = async ({
   context,
@@ -46,7 +46,7 @@ export const loader = async ({
   params,
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.location,
@@ -125,7 +125,7 @@ export const links: LinksFunction = () => [
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.location,

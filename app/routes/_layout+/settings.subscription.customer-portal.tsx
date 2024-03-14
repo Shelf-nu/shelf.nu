@@ -2,12 +2,12 @@ import { redirect } from "@remix-run/node";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { createBillingPortalSession } from "~/utils/stripe.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.subscription,

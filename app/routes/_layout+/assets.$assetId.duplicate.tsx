@@ -22,7 +22,7 @@ import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const loader = async ({
   context,
@@ -32,7 +32,7 @@ export const loader = async ({
   const authSession = context.getSession();
   try {
     const { userId } = authSession;
-    await requirePermision({
+    await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -80,7 +80,7 @@ export const action = async ({
   const authSession = context.getSession();
   try {
     const { userId } = authSession;
-    const { organizationId } = await requirePermision({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,

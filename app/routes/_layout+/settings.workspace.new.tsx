@@ -18,7 +18,7 @@ import {
 
 import { createOrganization } from "~/modules/organization";
 import {
-  requireOrganisationId,
+  getSelectedOrganisation,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreOrganizations } from "~/modules/tier";
@@ -28,7 +28,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requireOrganisationId({
+  const { organizationId } = await getSelectedOrganisation({
     userId: authSession.userId,
     request,
   });

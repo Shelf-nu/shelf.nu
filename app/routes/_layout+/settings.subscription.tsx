@@ -25,7 +25,7 @@ import { ENABLE_PREMIUM_FEATURES } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getDomainUrl,
@@ -44,7 +44,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return redirect("/settings/account");
   }
 
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.subscription,
@@ -104,7 +104,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
 
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.subscription,

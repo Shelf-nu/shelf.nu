@@ -1,9 +1,7 @@
 import type { Organization, OrganizationType, User } from "@prisma/client";
-import { json } from "@remix-run/node";
 import { db } from "~/database";
-import { error } from "~/utils";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   canCreateMoreCustomFields,
@@ -124,40 +122,42 @@ export async function assertUserCanInviteUsersToWorkspace({
 }: {
   organizationId: Organization["id"];
 }) {
-  try {
-    /** Get the tier limit and check if they can export */
-    // const tierLimit = await getUserTierLimit(userId);
-    const org = await db.organization.findUnique({
+  /** Get the tier limit and check if they can export */
+  // const tierLimit = await getUserTierLimit(userId);
+  const org = await db.organization
+    .findUnique({
       where: { id: organizationId },
       select: {
         type: true,
       },
+    })
+    .catch((cause) => {
+      throw new ShelfError({
+        cause,
+        message: "Failed to get organization",
+        additionalData: { organizationId },
+        label,
+      });
     });
 
-    if (!org) {
-      // @TODO Solve error
-      throw new ShelfError({
-        cause: null,
-        message: "Organization not found",
-        label,
-      });
-    }
+  if (!org) {
+    throw new ShelfError({
+      cause: null,
+      message: "Organization not found",
+      additionalData: { organizationId },
+      label,
+    });
+  }
 
-    if (isPersonalOrg(org)) {
-      // @TODO Solve error
-      throw new ShelfError({
-        cause: null,
-        title: "Cannot invite users",
-        message:
-          "You cannot invite other users to a personal workspace. Please create a Team workspace.",
-        status: 403,
-        label,
-      });
-    }
-    return true;
-  } catch (cause) {
-    const reason = makeShelfError(cause);
-    throw json(error(reason), { status: reason.status });
+  if (isPersonalOrg(org)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Cannot invite users",
+      message:
+        "You cannot invite other users to a personal workspace. Please create a Team workspace.",
+      status: 403,
+      label,
+    });
   }
 }
 
@@ -230,5 +230,5 @@ export async function getOrganizationTierLimit({
   const ownerId = currentOrganization?.userId as string;
 
   /** Get the tier limit and check if they can export */
-  return await getUserTierLimit(ownerId);
+  return getUserTierLimit(ownerId);
 }

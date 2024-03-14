@@ -23,13 +23,13 @@ import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError } from "~/utils/error";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId, organizations } = await requirePermision({
+  const { organizationId, organizations } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,
@@ -93,7 +93,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId, organizations } = await requirePermision({
+  const { organizationId, organizations } = await requirePermission({
     userId,
     request,
     entity: PermissionEntity.asset,

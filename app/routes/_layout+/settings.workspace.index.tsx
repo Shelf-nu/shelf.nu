@@ -15,7 +15,7 @@ import { Table, Td, Th } from "~/components/table";
 import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
 import { db } from "~/database";
 import { useUserData } from "~/hooks";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError } from "~/utils/error";
@@ -26,7 +26,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   // permissions here?
   // Every user can see this view for themseleves, so we dont have to manage any permissions here
-  const { organizationId } = await requireOrganisationId({
+  const { organizationId } = await getSelectedOrganisation({
     userId: authSession.userId,
     request,
   });
