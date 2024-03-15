@@ -193,6 +193,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
+    if (payload.addAnother) {
+      return redirect(`/assets/new`);
+    }
+
     return redirect(`/assets/${id}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
