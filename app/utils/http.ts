@@ -1,6 +1,7 @@
 import { isRouteErrorResponse } from "@remix-run/react";
 import type { ZodType } from "zod";
-import type { DataOrErrorResponse, ErrorResponse, ValidationError } from ".";
+import type { DataOrErrorResponse, ErrorResponse } from ".";
+import { VALIDATION_ERROR } from "./error";
 
 export function isErrorResponse(response: unknown): response is ErrorResponse {
   return (
@@ -17,6 +18,11 @@ export function isRouteError(
   return isRouteErrorResponse(response) && isErrorResponse(response.data);
 }
 
+export type ValidationError<Schema extends ZodType<any, any, any>> = Record<
+  keyof Schema["_output"],
+  { message: string | undefined }
+>;
+
 function hasValidationErrors<Schema extends ZodType<any, any, any>>(
   additionalData: unknown
 ): additionalData is {
@@ -25,7 +31,7 @@ function hasValidationErrors<Schema extends ZodType<any, any, any>>(
   return (
     typeof additionalData === "object" &&
     additionalData !== null &&
-    "validationErrors" in additionalData &&
+    VALIDATION_ERROR in additionalData &&
     typeof additionalData.validationErrors === "object" &&
     additionalData.validationErrors !== null
   );
@@ -42,5 +48,5 @@ export function getValidationErrors<Schema extends ZodType<any, any, any>>(
     return undefined;
   }
 
-  return error.additionalData.validationErrors;
+  return error.additionalData[VALIDATION_ERROR];
 }

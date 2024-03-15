@@ -1,16 +1,15 @@
-import type { Organization } from "@prisma/client";
+import { useRouteLoaderData } from "@remix-run/react";
+import type { loader } from "~/routes/_layout+/_layout";
 import { ShelfError } from "~/utils/error";
-import { useMatchesData } from "./use-matches-data";
 
 /**
  * This base hook is used to access the organization from within the _layout route
  * @returns The organization data or undefined if not found
  */
-export function useCurrentOrganization(): Organization | undefined {
-  const layoutData = useMatchesData<{
-    organizations: Organization[];
-    currentOrganizationId: string;
-  }>("routes/_layout+/_layout");
+export function useCurrentOrganization() {
+  const layoutData = useRouteLoaderData<typeof loader>(
+    "routes/_layout+/_layout"
+  );
 
   // FIXME: check what throwing in frontend implies
   if (!layoutData) {

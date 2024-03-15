@@ -57,7 +57,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const authSession = await signInWithEmail(
       updatedInvite.inviteeEmail,
       password
+    ).catch(
+      // We don't care about the error here, let the user login if he's already registered
+      () => null
     );
+
     /**
      * User could already be registered and hence login in with our password failed,
      * redirect to home and let user login or go to home */

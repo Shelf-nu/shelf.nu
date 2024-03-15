@@ -1,15 +1,14 @@
 import React, { useMemo, useRef } from "react";
-import type { Asset } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData, useRouteLoaderData } from "@remix-run/react";
 import { changeDpiDataUrl } from "changedpi";
 import domtoimage from "dom-to-image";
 import { useReactToPrint } from "react-to-print";
 import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
-import { useMatchesData } from "~/hooks";
 import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
+import type { loader as assetLoader } from "~/routes/_layout+/assets.$assetId";
 import { getCurrentSearchParams, slugify } from "~/utils";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
@@ -54,7 +53,7 @@ export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
-  const asset = useMatchesData<{ asset: Asset }>(
+  const asset = useRouteLoaderData<typeof assetLoader>(
     "routes/_layout+/assets.$assetId"
   )?.asset;
 

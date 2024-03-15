@@ -1,4 +1,6 @@
 import { createId } from "@paralleldrive/cuid2";
+import { Prisma } from "@prisma/client";
+import type { ValidationError } from "./http";
 
 /**
  * The goal of this custom error class is to normalize our errors.
@@ -6,10 +8,19 @@ import { createId } from "@paralleldrive/cuid2";
 
 type SerializableValue = string | number | boolean | object | null | undefined;
 
+export const VALIDATION_ERROR = "validationErrors";
+
 /**
  * Additional data to help us debug.
  */
-export type AdditionalData = Record<string, SerializableValue>;
+export type AdditionalData =
+  | {
+      [key: string]: SerializableValue;
+    }
+  | {
+      [VALIDATION_ERROR]?: ValidationError<any> | undefined;
+      [key: string]: SerializableValue;
+    };
 
 /**
  * @param message The message intended for the user.
@@ -35,10 +46,14 @@ export type FailureReason = {
     // Related to our modules
     | "Admin dashboard"
     | "App layout"
-    | "Asset"
+    | "Assets"
     | "Auth"
     | "Booking"
+    | "Category"
+    | "Crop image"
     | "CSV"
+    | "Custody"
+    | "Custom fields"
     | "Dashboard"
     | "Email"
     | "Healthcheck"
@@ -194,33 +209,6 @@ export function makeShelfError(
   });
 }
 
-// FIXME: check this again to understand if it's still needed
-export function handleUniqueConstraintError(
-  cause: any,
-  modelName: string,
-  additionalData?: AdditionalData
-) {
-  if (cause?.code && cause.code === "P2002") {
-    return {
-      item: null,
-      error: {
-        message: `${modelName} name is already taken. Please choose a different name.`,
-      },
-    };
-  }
-
-  throw new ShelfError({
-    message: `Error creating ${modelName}: ${cause}`,
-    cause,
-    additionalData: {
-      modelName,
-      ...additionalData,
-    },
-    label: "DB constrain violation",
-    shouldBeCaptured: false,
-  });
-}
-
 /* --------------------------------------------------------------------------- */
 /*                               Pre made errors                               */
 /* --------------------------------------------------------------------------- */
@@ -268,5 +256,42 @@ export function badRequest(
     message,
     status: 400,
     label: "Request validation",
+  });
+}
+
+/**
+ * Error for when a you could suspect a unique constraint violation.
+ *
+ * **By default, the error will not be captured if it is a constrain violation**
+ *
+ * If you want to capture all errors, you can set the `shouldBeCaptured` option to `true`.
+ */
+export function maybeUniqueConstraintViolation(
+  cause: unknown,
+  modelName: string,
+  options?: Options
+) {
+  let message =
+    "We couldn't create the resource. Please try again or contact support.";
+  let shouldBeCaptured = true;
+
+  if (
+    cause instanceof Prisma.PrismaClientKnownRequestError &&
+    cause.code === "P2002"
+  ) {
+    message = `${modelName} name is already taken. Please choose a different name.`;
+    shouldBeCaptured = false;
+  }
+
+  return new ShelfError({
+    cause,
+    shouldBeCaptured,
+    ...options,
+    message,
+    additionalData: {
+      modelName,
+      ...(options && options.additionalData),
+    },
+    label: "DB constrain violation",
   });
 }

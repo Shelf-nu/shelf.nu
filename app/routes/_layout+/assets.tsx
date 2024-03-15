@@ -1,9 +1,8 @@
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { Link, Outlet } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
-// import { ErrorBoundryComponent } from "~/components/errors";
 
-export async function loader() {
+export function loader() {
   return null;
 }
 

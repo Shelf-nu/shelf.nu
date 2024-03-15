@@ -10,7 +10,7 @@ import { Badge } from "~/components/shared";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { Td, Th } from "~/components/table";
 import {
-  countAcviteCustomFields,
+  countActiveCustomFields,
   getFilteredAndPaginatedCustomFields,
 } from "~/modules/custom-field";
 import { getOrganizationTierLimit } from "~/modules/tier";
@@ -78,7 +78,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       modelName,
       canCreateMoreCustomFields: canCreateMoreCustomFields({
         tierLimit,
-        totalCustomFields: await countAcviteCustomFields({ organizationId }),
+        totalCustomFields: await countActiveCustomFields({ organizationId }),
       }),
     },
     {

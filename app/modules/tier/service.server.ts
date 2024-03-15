@@ -9,11 +9,11 @@ import {
   canExportAssets,
   canImportAssets,
 } from "~/utils/subscription";
-import { countAcviteCustomFields } from "../custom-field";
+import { countActiveCustomFields } from "../custom-field";
 
 const label: ErrorLabel = "Tier";
 
-export async function getUserTierLimit(id: User["id"]) {
+async function getUserTierLimit(id: User["id"]) {
   try {
     const { tier } = await db.user.findUniqueOrThrow({
       where: { id },
@@ -24,9 +24,14 @@ export async function getUserTierLimit(id: User["id"]) {
       },
     });
 
-    return tier?.tierLimit;
+    return tier.tierLimit;
   } catch (cause) {
-    throw new Error("Something went wrong while fetching user tier limit");
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching user tier limit",
+      additionalData: { userId: id },
+      label,
+    });
   }
 }
 
@@ -43,14 +48,18 @@ export async function assertUserCanImportAssets({
     userId: string;
   }[];
 }) {
-  /* Check the tier limit */
   const tierLimit = await getOrganizationTierLimit({
     organizationId,
     organizations,
   });
 
   if (!canImportAssets(tierLimit)) {
-    throw new Error("Your user cannot import assets");
+    throw new ShelfError({
+      cause: null,
+      message: "You are not allowed to import assets",
+      additionalData: { organizationId },
+      label,
+    });
   }
 }
 
@@ -74,7 +83,12 @@ export async function assertUserCanExportAssets({
   });
 
   if (!canExportAssets(tierLimit)) {
-    throw new Error("Your user cannot export assets");
+    throw new ShelfError({
+      cause: null,
+      message: "Your user cannot export assets",
+      additionalData: { organizationId },
+      label,
+    });
   }
 }
 
@@ -95,7 +109,8 @@ export const assertUserCanCreateMoreCustomFields = async ({
     organizationId,
     organizations,
   });
-  const totalActiveCustomFields = await countAcviteCustomFields({
+
+  const totalActiveCustomFields = await countActiveCustomFields({
     organizationId,
   });
 
@@ -108,6 +123,7 @@ export const assertUserCanCreateMoreCustomFields = async ({
     throw new ShelfError({
       cause: null,
       message: "Your user cannot create more custom fields",
+      additionalData: { organizationId },
       label,
     });
   }
@@ -222,13 +238,22 @@ export async function getOrganizationTierLimit({
     userId: string;
   }[];
 }) {
-  /** Find the current organization as we need the owner */
-  const currentOrganization = organizations.find(
-    (org) => org.id === organizationId
-  );
-  /** We get the owner ID so we can check if the organization has permissions for importing */
-  const ownerId = currentOrganization?.userId as string;
+  try {
+    /** Find the current organization as we need the owner */
+    const currentOrganization = organizations.find(
+      (org) => org.id === organizationId
+    );
+    /** We get the owner ID so we can check if the organization has permissions for importing */
+    const ownerId = currentOrganization?.userId as string;
 
-  /** Get the tier limit and check if they can export */
-  return getUserTierLimit(ownerId);
+    /** Get the tier limit and check if they can export */
+    return await getUserTierLimit(ownerId);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching organization tier limit",
+      additionalData: { organizationId },
+      label,
+    });
+  }
 }

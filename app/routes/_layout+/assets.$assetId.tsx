@@ -1,9 +1,7 @@
-import type { Location } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
-  SerializeFrom,
   MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
@@ -12,7 +10,7 @@ import { useFetcher, useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import ActionsDopdown from "~/components/assets/actions-dropdown";
+import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { Notes } from "~/components/assets/notes";
@@ -41,27 +39,42 @@ import { getScanByQrId } from "~/modules/scan";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
 
-import { getRequiredParam, tw, isLink, isFormProcessing, error } from "~/utils";
+import {
+  tw,
+  isLink,
+  isFormProcessing,
+  error,
+  getParams,
+  data,
+  parseData,
+} from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 
 export const AvailabilityForBookingFormSchema = z.object({
-  availableToBook: z.string().transform((val) => val === "on"),
+  availableToBook: z
+    .string()
+    .transform((val) => val === "on")
+    .default("false"),
 });
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  try {
-    const { userId } = authSession;
+  const { userId } = authSession;
+  const { assetId: id } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
 
+  try {
     const { organizationId } = await requirePermission({
       userId,
       request,
@@ -70,18 +83,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const locale = getLocale(request);
-    const id = getRequiredParam(params, "assetId");
 
     const asset = await getAsset({ organizationId, id });
-    if (!asset) {
-      throw new ShelfError({
-        cause: null,
-        title: "Asset Not Found",
-        message: "We couldn't find the asset you were looking for.",
-        status: 404,
-        label: "Asset",
-      });
-    }
+
     /** We get the first QR code(for now we can only have 1)
      * And using the ID of tha qr code, we find the latest scan
      */
@@ -120,16 +124,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: asset.title,
     };
 
-    return json({
-      asset: {
-        ...asset,
-        custody,
-        notes,
-      },
-      lastScan,
-      header,
-      locale,
-    });
+    return json(
+      data({
+        asset: {
+          ...asset,
+          custody,
+          notes,
+        },
+        lastScan,
+        header,
+        locale,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason));
@@ -139,66 +145,80 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-
-  const formData = await request.formData();
-  const intent = formData.get("intent") as "delete" | "toggle";
-  const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
-    delete: PermissionAction.delete,
-    toggle: PermissionAction.update,
-  };
-
-  const { organizationId } = await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.asset,
-    action: intent2ActionMap[intent],
+  const { assetId: id } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
   });
 
-  const id = getRequiredParam(params, "assetId");
-  switch (intent) {
-    case "delete":
-      const mainImageUrl = formData.get("mainImage") as string;
+  try {
+    const formData = await request.formData();
 
-      await deleteAsset({ organizationId, id });
-      await deleteAssetImage({
-        url: mainImageUrl,
-        bucketName: "assets",
-      });
+    const { intent } = parseData(
+      formData,
+      z.object({ intent: z.enum(["delete", "toggle"]) })
+    );
 
-      sendNotification({
-        title: "Asset deleted",
-        message: "Your asset has been deleted successfully",
-        icon: { name: "trash", variant: "error" },
-        senderId: authSession.userId,
-      });
+    const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
+      delete: PermissionAction.delete,
+      toggle: PermissionAction.update,
+    };
 
-      return redirect(`/assets`);
-    case "toggle":
-      const availableToBook = formData.get("availableToBook") === "on";
-      const rsp = await updateAssetBookingAvailability(id, availableToBook);
-      if (rsp.error) {
-        return json(
-          {
-            errors: {
-              title: rsp.error,
-            },
-          },
-          {
-            status: 400,
-          }
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: intent2ActionMap[intent],
+    });
+
+    switch (intent) {
+      case "delete": {
+        const { mainImageUrl } = parseData(
+          formData,
+          z.object({ mainImageUrl: z.string().optional() })
         );
+
+        await deleteAsset({ organizationId, id });
+
+        if (mainImageUrl) {
+          await deleteAssetImage({
+            url: mainImageUrl,
+            bucketName: "assets",
+          });
+        }
+
+        sendNotification({
+          title: "Asset deleted",
+          message: "Your asset has been deleted successfully",
+          icon: { name: "trash", variant: "error" },
+          senderId: authSession.userId,
+        });
+
+        return redirect(`/assets`);
       }
+      case "toggle": {
+        const { availableToBook } = parseData(
+          formData,
+          AvailabilityForBookingFormSchema
+        );
 
-      sendNotification({
-        title: "Asset availability status updated successfully",
-        message: "Your asset's availability for booking has been updated",
-        icon: { name: "success", variant: "success" },
-        senderId: authSession.userId,
-      });
+        await updateAssetBookingAvailability(id, availableToBook);
 
-      return json({ success: true });
-    default:
-      return null;
+        sendNotification({
+          title: "Asset availability status updated successfully",
+          message: "Your asset's availability for booking has been updated",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data(null));
+      }
+      default: {
+        checkExhaustiveSwitch(intent);
+        return json(data(null));
+      }
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    return json(error(reason), { status: reason.status });
   }
 }
 
@@ -218,14 +238,14 @@ export const links: LinksFunction = () => [
 export default function AssetDetailsPage() {
   const { asset, locale } = useLoaderData<typeof loader>();
   const customFieldsValues =
-    asset?.customFields?.length > 0
-      ? asset.customFields.filter((f) => f?.value)
+    asset.customFields?.length > 0
+      ? asset.customFields.filter((f) => f.value)
       : [];
   const assetIsAvailable = asset.status === "AVAILABLE";
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
-  const location = asset?.location as SerializeFrom<Location>;
+  const location = asset.location;
   usePosition();
   const fetcher = useFetcher();
   const zo = useZorm(
@@ -256,7 +276,7 @@ export default function AssetDetailsPage() {
             <Button to="qr" variant="secondary" icon="barcode">
               View QR code
             </Button>
-            <ActionsDopdown />
+            <ActionsDropdown />
           </>
         ) : null}
       </Header>
@@ -313,7 +333,7 @@ export default function AssetDetailsPage() {
                     required
                     title={
                       isSelfService
-                        ? "You do not have the permissions to change availablility"
+                        ? "You do not have the permissions to change availability"
                         : "Toggle availability"
                     }
                   />

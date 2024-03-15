@@ -10,7 +10,7 @@ import {
   safeRedirect,
   data,
   error,
-  assertParams,
+  getParams,
   parseData,
 } from "./http.server";
 import { Logger } from "./logger";
@@ -185,10 +185,10 @@ describe(error.name, () => {
   });
 });
 
-describe(assertParams.name, () => {
+describe(getParams.name, () => {
   it("should return params", () => {
     const params = { id: "123" };
-    const result = assertParams(params, z.object({ id: z.string() }));
+    const result = getParams(params, z.object({ id: z.string() }));
 
     expect(result).toEqual(params);
   });
@@ -197,7 +197,7 @@ describe(assertParams.name, () => {
     const params = {};
 
     try {
-      assertParams(params, z.object({ id: z.string() }));
+      getParams(params, z.object({ id: z.string() }));
     } catch (e) {
       const response = e as Response;
       const body = await response.json();
@@ -205,7 +205,7 @@ describe(assertParams.name, () => {
       expect(body).toEqual({
         error: {
           additionalData: {
-            params: {},
+            data: {},
             validationErrors: {
               id: {
                 message: "Required",
@@ -221,11 +221,13 @@ describe(assertParams.name, () => {
     }
   });
 
-  it("should return params in additionalData if validation fails", async () => {
+  it("should return additionalData if validation fails", async () => {
     const params = { id: "123" };
 
     try {
-      assertParams(params, z.object({ id: z.string(), name: z.string() }));
+      getParams(params, z.object({ id: z.string(), name: z.string() }), {
+        additionalData: { userId: "user-id" },
+      });
     } catch (e) {
       const response = e as Response;
       const body = await response.json();
@@ -233,7 +235,8 @@ describe(assertParams.name, () => {
       expect(body).toEqual({
         error: {
           additionalData: {
-            params,
+            data: params,
+            userId: "user-id",
             validationErrors: {
               name: {
                 message: "Required",
@@ -289,6 +292,7 @@ describe(parseData.name, () => {
         "The request is invalid. Please try again. If the issue persists, contact support."
       );
       expect(error.additionalData).toEqual({
+        data: {},
         validationErrors: {
           id: {
             message: "Required",
@@ -317,6 +321,7 @@ describe(parseData.name, () => {
       expect(error.message).toEqual("Params are invalid!");
       expect(error.additionalData).toEqual({
         userId: "123",
+        data: {},
         validationErrors: {
           id: {
             message: "Required",

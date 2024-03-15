@@ -1,9 +1,12 @@
 import type { Organization, Prisma, TeamMember } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
+import type { ErrorLabel } from "~/utils";
 import { ShelfError, getCurrentSearchParams, getParamsValues } from "~/utils";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+
+const label: ErrorLabel = "Team Member";
 
 export async function createTeamMember({
   name,
@@ -28,7 +31,7 @@ export async function createTeamMember({
       cause,
       message: "Something went wrong while creating the team member",
       additionalData: { name, organizationId },
-      label: "Team Member",
+      label,
     });
   }
 }
@@ -40,99 +43,113 @@ export async function createTeamMemberIfNotExists({
   data: CreateAssetFromContentImportPayload[];
   organizationId: Organization["id"];
 }): Promise<Record<string, TeamMember["id"]>> {
-  // first we get all the teamMembers from the assets and make then into an object where the category is the key and the value is an empty string
-  /**
-   * Important note: The field in the csv is called "custodian" for making it easy for the user
-   * However in the app it works a bit different due to how the relationships are
-   */
-  const teamMembers = new Map(
-    data
-      .filter((asset) => asset.custodian !== "")
-      .map((asset) => [asset.custodian, ""])
-  );
+  try {
+    // first we get all the teamMembers from the assets and make then into an object where the category is the key and the value is an empty string
+    /**
+     * Important note: The field in the csv is called "custodian" for making it easy for the user
+     * However in the app it works a bit different due to how the relationships are
+     */
+    const teamMembers = new Map(
+      data
+        .filter((asset) => asset.custodian !== "")
+        .map((asset) => [asset.custodian, ""])
+    );
 
-  // Handle the case where there are no teamMembers
-  if (teamMembers.has(undefined)) {
-    return {};
-  }
-
-  // now we loop through the categories and check if they exist
-  for (const [teamMember, _] of teamMembers) {
-    const existingTeamMember = await db.teamMember.findFirst({
-      where: {
-        deletedAt: null,
-        name: teamMember,
-        organizationId,
-      },
-    });
-
-    if (!existingTeamMember) {
-      // if the teamMember doesn't exist, we create a new one
-      const newTeamMember = await createTeamMember({
-        name: teamMember as string,
-        organizationId,
-      });
-      teamMembers.set(teamMember, newTeamMember.id);
-    } else {
-      // if the teamMember exists, we just update the id
-      teamMembers.set(teamMember, existingTeamMember.id);
+    // Handle the case where there are no teamMembers
+    if (teamMembers.has(undefined)) {
+      return {};
     }
-  }
 
-  return Object.fromEntries(Array.from(teamMembers));
+    // now we loop through the categories and check if they exist
+    for (const [teamMember, _] of teamMembers) {
+      const existingTeamMember = await db.teamMember.findFirst({
+        where: {
+          deletedAt: null,
+          name: teamMember,
+          organizationId,
+        },
+      });
+
+      if (!existingTeamMember) {
+        // if the teamMember doesn't exist, we create a new one
+        const newTeamMember = await createTeamMember({
+          name: teamMember as string,
+          organizationId,
+        });
+        teamMembers.set(teamMember, newTeamMember.id);
+      } else {
+        // if the teamMember exists, we just update the id
+        teamMembers.set(teamMember, existingTeamMember.id);
+      }
+    }
+
+    return Object.fromEntries(Array.from(teamMembers));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating the team member. Please try again or contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
 }
 
-export async function getTeamMembers({
-  organizationId,
-  page = 1,
-  perPage = 8,
-  search,
-}: {
+export async function getTeamMembers(params: {
   organizationId: Organization["id"];
-
   /** Page number. Starts at 1 */
   page: number;
-
   /** Assets to be loaded per page */
   perPage?: number;
-
   search?: string | null;
 }) {
-  const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+  const { organizationId, page = 1, perPage = 8, search } = params;
 
-  /** Default value of where. Takes the assetss belonging to current user */
-  let where: Prisma.TeamMemberWhereInput = {
-    deletedAt: null,
-    organizationId,
-  };
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
-  /** If the search string exists, add it to the where object */
-  if (search) {
-    where.name = {
-      contains: search,
-      mode: "insensitive",
+    /** Default value of where. Takes the assets belonging to current user */
+    let where: Prisma.TeamMemberWhereInput = {
+      deletedAt: null,
+      organizationId,
     };
+
+    /** If the search string exists, add it to the where object */
+    if (search) {
+      where.name = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    const [teamMembers, totalTeamMembers] = await Promise.all([
+      /** Get the assets */
+      db.teamMember.findMany({
+        skip,
+        take,
+        where,
+        orderBy: { createdAt: "desc" },
+        include: {
+          custodies: true,
+        },
+      }),
+
+      /** Count them */
+      db.teamMember.count({ where }),
+    ]);
+
+    return { teamMembers, totalTeamMembers };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching the team members",
+      additionalData: { ...params },
+      label,
+    });
   }
-
-  const [teamMembers, totalTeamMembers] = await db.$transaction([
-    /** Get the assets */
-    db.teamMember.findMany({
-      skip,
-      take,
-      where,
-      orderBy: { createdAt: "desc" },
-      include: {
-        custodies: true,
-      },
-    }),
-
-    /** Count them */
-    db.teamMember.count({ where }),
-  ]);
-
-  return { teamMembers, totalTeamMembers };
 }
+
 export const getPaginatedAndFilterableTeamMembers = async ({
   request,
   organizationId,
@@ -146,21 +163,30 @@ export const getPaginatedAndFilterableTeamMembers = async ({
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
-  const { teamMembers, totalTeamMembers } = await getTeamMembers({
-    organizationId,
-    page,
-    perPage,
-    search,
-  });
-  const totalPages = Math.ceil(totalTeamMembers / perPage);
+  try {
+    const { teamMembers, totalTeamMembers } = await getTeamMembers({
+      organizationId,
+      page,
+      perPage,
+      search,
+    });
+    const totalPages = Math.ceil(totalTeamMembers / perPage);
 
-  return {
-    page,
-    perPage,
-    search,
-    teamMembers,
-    totalPages,
-    totalTeamMembers,
-    cookie,
-  };
+    return {
+      page,
+      perPage,
+      search,
+      teamMembers,
+      totalPages,
+      totalTeamMembers,
+      cookie,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching the team members",
+      additionalData: { organizationId, page, perPageParam, search },
+      label,
+    });
+  }
 };

@@ -8,7 +8,7 @@ import { db } from "~/database";
 import styles from "~/styles/layout/custom-modal.css";
 import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { handleUniqueConstraintError } from "~/utils/error";
+import { maybeUniqueConstraintViolation } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -64,7 +64,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 
     return redirect(`/settings/team`);
   } catch (cause) {
-    const rsp = handleUniqueConstraintError(cause, "Team Member");
+    const rsp = maybeUniqueConstraintViolation(cause, "Team Member");
 
     return json(
       { error: { name: rsp.error.message } },

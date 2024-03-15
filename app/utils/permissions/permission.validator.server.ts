@@ -29,61 +29,67 @@ const Role2PermissionMap: {
   },
 };
 
-const hasPermission = async ({
-  userId,
-  entity,
-  action,
-  organizationId,
-  roles,
-}: PermissionCheckProps): Promise<Boolean> => {
-  if (!roles || !Array.isArray(roles)) {
-    const userOrg = await db.userOrganization.findFirst({
-      where: { userId, organizationId },
+async function hasPermission(params: PermissionCheckProps): Promise<Boolean> {
+  let { userId, entity, action, organizationId, roles } = params;
+
+  try {
+    if (!roles || !Array.isArray(roles)) {
+      const userOrg = await db.userOrganization.findFirst({
+        where: { userId, organizationId },
+      });
+
+      if (!userOrg) {
+        throw new ShelfError({
+          cause: null,
+          message: `User doesn't belong to organization`,
+          status: 403,
+          additionalData: { userId, organizationId },
+          label: "Permission",
+        });
+      }
+
+      roles = userOrg.roles;
+    }
+
+    if (
+      roles.includes(OrganizationRoles.ADMIN) ||
+      roles.includes(OrganizationRoles.OWNER)
+    ) {
+      //owner and admin can do anything for now
+      return true;
+    }
+
+    const validRoles = roles.filter((role) => {
+      const entityPermMap = Role2PermissionMap[role];
+
+      if (!entityPermMap) {
+        return false;
+      }
+
+      const permissions = entityPermMap[entity];
+
+      return permissions.includes(action);
     });
 
-    if (!userOrg) {
-      throw new ShelfError({
-        cause: null,
-        message: `User doesn't belong to organization`,
-        status: 403,
-        additionalData: { userId, organizationId },
-        label: "Permission",
-      });
-    }
-
-    roles = userOrg.roles;
+    return validRoles.length > 0;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Error while checking permission",
+      additionalData: { ...params },
+      label: "Permission",
+    });
   }
-
-  if (
-    roles.includes(OrganizationRoles.ADMIN) ||
-    roles.includes(OrganizationRoles.OWNER)
-  ) {
-    //owner and admin can do anything for now
-    return true;
-  }
-
-  const validRoles = roles.filter((role) => {
-    const entityPermMap = Role2PermissionMap[role];
-
-    if (!entityPermMap) {
-      return false;
-    }
-
-    const permissions = entityPermMap[entity];
-
-    return permissions.includes(action);
-  });
-
-  return validRoles.length > 0;
-};
+}
 
 export const validatePermission = async (props: PermissionCheckProps) => {
   const res = await hasPermission(props);
+
   if (!res) {
     throw new ShelfError({
       cause: null,
       title: "Unauthorized",
-      message: `You are not authorized to access this view.`,
+      message: `You have no permission to perform this action`,
       additionalData: { ...props },
       status: 403,
       label: "Permission",

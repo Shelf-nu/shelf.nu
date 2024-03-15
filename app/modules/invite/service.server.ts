@@ -253,7 +253,7 @@ export async function updateInviteStatus({
 
       await db.teamMember.update({
         where: { id: invite.teamMemberId },
-        data: { user: { connect: { id: user.id } } },
+        data: { deletedAt: null, user: { connect: { id: user.id } } },
       });
     }
 

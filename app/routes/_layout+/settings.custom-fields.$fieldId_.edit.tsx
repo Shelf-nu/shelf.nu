@@ -15,7 +15,7 @@ import {
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
-  countAcviteCustomFields,
+  countActiveCustomFields,
   getCustomField,
   updateCustomField,
 } from "~/modules/custom-field";
@@ -100,7 +100,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizations,
     });
 
-    const totalActiveCustomFields = await countAcviteCustomFields({
+    const totalActiveCustomFields = await countActiveCustomFields({
       organizationId,
     });
 

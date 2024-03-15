@@ -16,7 +16,6 @@ import {
   updateAccountPassword,
 } from "~/modules/auth";
 
-import type { ValidationError } from "~/utils";
 import {
   dateTimeInUnix,
   getCurrentSearchParams,
@@ -25,6 +24,7 @@ import {
 } from "~/utils";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
+import type { ValidationError } from "~/utils/http";
 import {
   deleteProfilePicture,
   getPublicFileURL,

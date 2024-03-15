@@ -15,6 +15,7 @@ export async function createEmailAuthAccount(email: string, password: string) {
     const { data, error } = await getSupabaseAdmin().auth.admin.createUser({
       email,
       password,
+      email_confirm: true,
     });
 
     if (error) {

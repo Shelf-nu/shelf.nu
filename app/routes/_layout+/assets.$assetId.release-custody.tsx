@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { z } from "zod";
 import { UserXIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
@@ -8,50 +9,81 @@ import { createNote } from "~/modules/asset";
 import { releaseCustody } from "~/modules/custody";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
-import { isFormProcessing } from "~/utils";
+import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.asset,
-    action: PermissionAction.update,
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
   });
-  const custody = await db.custody.findUnique({
-    where: { assetId: params.assetId as string },
-    select: {
-      custodian: {
+
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
+
+    const custody = await db.custody
+      .findUnique({
+        where: { assetId },
         select: {
-          id: true,
-          name: true,
+          custodian: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
-      },
-    },
-  });
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching custody. Please try again or contact support.",
+          additionalData: { userId, assetId },
+          label: "Assets",
+        });
+      });
 
-  if (!custody) return redirect(`/assets/${params.assetId}`);
+    if (!custody) {
+      return redirect(`/assets/${assetId}`);
+    }
 
-  return json({
-    showModal: true,
-    custody,
-    asset: await db.asset.findUnique({
-      where: { id: params.assetId as string },
-      select: {
-        title: true,
-      },
-    }),
-  });
-};
+    const asset = await db.asset
+      .findUniqueOrThrow({
+        where: { id: params.assetId as string },
+        select: {
+          title: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "We couldn't find the asset you were looking for.",
+          additionalData: { userId, assetId },
+          label: "Assets",
+        });
+      });
+
+    return json(
+      data({
+        showModal: true,
+        custody,
+        asset,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
 
 export const action = async ({
   context,
@@ -60,47 +92,57 @@ export const action = async ({
 }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
-  await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.asset,
-    action: PermissionAction.update,
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
   });
-  const assetId = params.assetId as string;
-  const user = await getUserByID(userId);
 
-  if (!user)
-    // @TODO Solve error handling
-    throw new ShelfError({
-      cause: null,
-      message:
-        "User not found. Please refresh and if the issue persists contact support.",
-      label: "Asset",
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
     });
 
-  const asset = await releaseCustody({ assetId });
-  if (!asset.custody) {
-    const formData = await request.formData();
-    const custodianName = formData.get("custodianName") as string;
+    const user = await getUserByID(userId);
 
-    /** Once the asset is updated, we create the note */
-    await createNote({
-      content: `**${user.firstName?.trim()} ${
-        user.lastName
-      }** has released **${custodianName?.trim()}'s** custody over **${asset.title?.trim()}**`,
-      type: "UPDATE",
-      userId: asset.userId,
-      assetId: asset.id,
-    });
-    sendNotification({
-      title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
-      message: "This asset is available again.",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
-    });
+    const asset = await releaseCustody({ assetId });
+
+    if (!asset.custody) {
+      const formData = await request.formData();
+      const { custodianName } = parseData(
+        formData,
+        z.object({
+          custodianName: z.string(),
+        }),
+        {
+          additionalData: { userId, assetId },
+        }
+      );
+
+      /** Once the asset is updated, we create the note */
+      await createNote({
+        content: `**${user.firstName?.trim()} ${
+          user.lastName
+        }** has released **${custodianName?.trim()}'s** custody over **${asset.title?.trim()}**`,
+        type: "UPDATE",
+        userId: asset.userId,
+        assetId: asset.id,
+      });
+
+      sendNotification({
+        title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
+        message: "This asset is available again.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+    }
+
+    return redirect(`/assets/${assetId}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    return json(error(reason), { status: reason.status });
   }
-
-  return redirect(`/assets/${assetId}`);
 };
 
 export function links() {
@@ -122,7 +164,7 @@ export default function Custody() {
           <p>
             Are you sure you want to release{" "}
             <span className="font-medium">{custody?.custodian.name}’s</span>{" "}
-            custody over <span className="font-medium">{asset?.title}</span>?
+            custody over <span className="font-medium">{asset.title}</span>?
           </p>
         </div>
         <div className="">

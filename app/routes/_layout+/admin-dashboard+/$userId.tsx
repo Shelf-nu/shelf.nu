@@ -9,11 +9,11 @@ import { db } from "~/database";
 import { deleteUser } from "~/modules/user";
 import {
   ShelfError,
+  getParams,
   data,
   error,
   isDelete,
   makeShelfError,
-  parseData,
 } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { requireAdmin } from "~/utils/roles.server";
@@ -31,15 +31,14 @@ export type UserWithQrCodes = User & {
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const { userId: shelfUserId } = getParams(
+    params,
+    z.object({ userId: z.string() }),
+    { additionalData: { userId } }
+  );
 
   try {
     await requireAdmin(userId);
-
-    const { userId: shelfUserId } = parseData(
-      params,
-      z.object({ userId: z.string() }),
-      { additionalData: { params } }
-    );
 
     const user = await db.user
       .findUnique({
@@ -85,7 +84,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
 
     return json(data({ user, organizations }));
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
+    const reason = makeShelfError(cause, { userId, shelfUserId });
     throw json(error(reason), { status: reason.status });
   }
 };
@@ -101,15 +100,14 @@ export const action = async ({
 }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const { userId: shelfUserId } = getParams(
+    params,
+    z.object({ userId: z.string() }),
+    { additionalData: { userId } }
+  );
 
   try {
     await requireAdmin(userId);
-
-    const { userId: shelfUserId } = parseData(
-      params,
-      z.object({ userId: z.string() }),
-      { additionalData: { params } }
-    );
 
     if (isDelete(request)) {
       await deleteUser(shelfUserId);
@@ -126,7 +124,7 @@ export const action = async ({
 
     return json(data(null));
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
+    const reason = makeShelfError(cause, { userId, shelfUserId });
     return json(error(reason), { status: reason.status });
   }
 };

@@ -43,9 +43,11 @@ export function destroySelectedOrganizationIdCookie() {
 /**
  * This function is used to get the selected organization for the user.
  *
- * It checks if the user is part of the organization and if the organizationId is set in the cookie.
+ * It checks if the user is part of the current selected organization
  *
- * @throws If the user is not part of the organization or the organizationId is not set
+ * **It always defaults to the personal organization if the user is not part of the current selected organization.**
+ *
+ * @throws If the user is not part of any organization
  */
 export async function getSelectedOrganisation({
   userId,
@@ -77,8 +79,9 @@ export async function getSelectedOrganisation({
     });
   }
 
-  // If the organizationId is not set, we set it to the personal organization
-  if (!organizationId) {
+  // If the organizationId is not set or the user is not part of the organization, we set it to the personal organization
+  // This case should be extremely rare (be revoked from an organization while browsing it), so, I keep it simple
+  if (!organizationId || !userOrganizationIds.includes(organizationId)) {
     organizationId = personalOrganization.id;
   }
 
@@ -86,13 +89,14 @@ export async function getSelectedOrganisation({
     (org) => org.id === organizationId
   );
 
-  // If the user is not part of the organization or the organizationId is not set (should not happen but just in case)
-  if (!userOrganizationIds.includes(organizationId) || !currentOrganization) {
+  // (should not happen but just in case)
+  if (!currentOrganization) {
     throw new ShelfError({
       cause: null,
-      title: "No access to organization",
-      message: "You do not have access to this organization",
-      status: 401,
+      title: "No organization",
+      message:
+        "You do not have access to any organization. Please contact support.",
+      status: 403,
       additionalData: { userId, organizationId, userOrganizationIds },
       shouldBeCaptured: false,
       label,

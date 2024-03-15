@@ -6,32 +6,32 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { ErrorContent } from "~/components/errors";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
 import { duplicateAsset } from "~/modules/asset";
 import styles from "~/styles/layout/custom-modal.css";
-import { error, isFormProcessing } from "~/utils";
+import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { getValidationErrors } from "~/utils/http";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
+
   try {
-    const { userId } = authSession;
     await requirePermission({
       userId,
       request,
@@ -39,29 +39,29 @@ export const loader = async ({
       action: PermissionAction.create,
     });
 
-    const assetId = params.assetId as string;
-    const asset = await db.asset.findUnique({ where: { id: assetId } });
-    if (!asset) {
-      throw new ShelfError({
-        cause: null,
-        message: "Asset Not Found",
-        status: 404,
-        label: "Asset",
+    const asset = await db.asset
+      .findFirstOrThrow({ where: { id: assetId } })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Asset Not Found",
+          additionalData: { userId, assetId },
+          status: 404,
+          label: "Assets",
+        });
       });
-    }
 
-    return json({
-      showModal: true,
-      asset,
-    });
-  } catch (cause) {
-    const reason = makeShelfError(cause);
-    throw json(
-      { asset: null, showModal: true, ...error(reason) },
-      { status: reason.status }
+    return json(
+      data({
+        showModal: true,
+        asset,
+      })
     );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    throw json(error(reason), { status: reason.status });
   }
-};
+}
 
 const DuplicateAssetSchema = z.object({
   amountOfDuplicates: z.coerce
@@ -72,14 +72,14 @@ const DuplicateAssetSchema = z.object({
     }),
 });
 
-export const action = async ({
-  context,
-  request,
-  params,
-}: ActionFunctionArgs) => {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
+
   try {
-    const { userId } = authSession;
     const { organizationId } = await requirePermission({
       userId,
       request,
@@ -87,31 +87,25 @@ export const action = async ({
       action: PermissionAction.create,
     });
 
-    const assetId = params.assetId as string;
-    const asset = await db.asset.findUnique({
-      where: { id: assetId },
-      include: { custody: { include: { custodian: true } }, tags: true },
-    });
-    if (!asset) {
-      // @TODO Solve error handling
-      throw new ShelfError({
-        cause: null,
-        message: "Asset Not Found",
-        status: 404,
-        label: "Asset",
+    const asset = await db.asset
+      .findFirstOrThrow({
+        where: { id: assetId },
+        include: { custody: { include: { custodian: true } }, tags: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Asset Not Found",
+          additionalData: { userId, assetId },
+          status: 404,
+          label: "Assets",
+        });
       });
-    }
 
-    const formData = await request.formData();
-    const result = await DuplicateAssetSchema.safeParseAsync(
-      parseFormAny(formData)
+    const { amountOfDuplicates } = parseData(
+      await request.formData(),
+      DuplicateAssetSchema
     );
-
-    if (!result.success) {
-      return json({ error: { ...result.error } }, { status: 400 });
-    }
-
-    const amountOfDuplicates = Number(result.data.amountOfDuplicates);
 
     const duplicatedAssets = await duplicateAsset({
       asset,
@@ -131,13 +125,10 @@ export const action = async ({
       `/assets/${amountOfDuplicates > 1 ? "" : duplicatedAssets[0].id}`
     );
   } catch (cause) {
-    const reason = makeShelfError(cause);
-    return json(
-      { showModal: true, ...error(reason) },
-      { status: reason.status }
-    );
+    const reason = makeShelfError(cause, { userId, assetId });
+    return json(error(reason), { status: reason.status });
   }
-};
+}
 
 export function links() {
   return [{ rel: "stylesheet", href: styles }];
@@ -193,41 +184,37 @@ export default function DuplicateAsset() {
             /* We have to find a way to normalize the error object when it comes from zod */
             error={
               zo.errors.amountOfDuplicates()?.message ||
-              // @ts-ignore
-              actionData?.error?.amountOfDuplicates
+              getValidationErrors<typeof DuplicateAssetSchema>(
+                actionData?.error
+              )?.amountOfDuplicates.message
             }
           />
-
-          <div className="flex gap-3">
-            <Button
-              to=".."
-              variant="secondary"
-              width="full"
-              disabled={isProcessing}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              width="full"
-              type="submit"
-              disabled={isProcessing}
-            >
-              {isProcessing ? <Spinner /> : "Duplicate"}
-            </Button>
-          </div>
-          {actionData?.error ? (
-            <div className="text-error-500">
-              {/*@ts-ignore */}
-              <p className="font-medium">{actionData.error?.title || ""}</p>
-              {/* @ts-ignore */}
-              <p>{actionData?.error?.message}</p>
-            </div>
-          ) : null}
         </div>
+        <div className="flex gap-3">
+          <Button
+            to=".."
+            variant="secondary"
+            width="full"
+            disabled={isProcessing}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            width="full"
+            type="submit"
+            disabled={isProcessing}
+          >
+            {isProcessing ? <Spinner /> : "Duplicate"}
+          </Button>
+        </div>
+        {actionData?.error ? (
+          <div className="text-error-500">
+            <p className="font-medium">{actionData.error?.title || ""}</p>
+            <p>{actionData?.error?.message}</p>
+          </div>
+        ) : null}
       </div>
     </Form>
   );
 }
-
-export const ErrorBoundary = () => <ErrorContent />;

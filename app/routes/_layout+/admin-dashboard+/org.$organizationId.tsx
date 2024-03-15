@@ -10,22 +10,21 @@ import { Button } from "~/components/shared";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database";
 import { generateOrphanedCodes } from "~/modules/qr";
-import { data, error, parseData } from "~/utils";
+import { getParams, data, error, parseData } from "~/utils";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const { organizationId } = getParams(
+    params,
+    z.object({ organizationId: z.string() }),
+    { additionalData: { userId } }
+  );
 
   try {
     await requireAdmin(userId);
-
-    const { organizationId } = parseData(
-      params,
-      z.object({ organizationId: z.string() }),
-      { additionalData: { params } }
-    );
 
     const organization = await db.organization
       .findFirstOrThrow({
@@ -50,7 +49,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
 
     return json(data({ organization }));
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
+    const reason = makeShelfError(cause, { userId, organizationId });
     throw json(error(reason), { status: reason.status });
   }
 };
@@ -62,17 +61,14 @@ export const action = async ({
 }: ActionFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
+  const { organizationId } = getParams(
+    params,
+    z.object({ organizationId: z.string() }),
+    { additionalData: { userId } }
+  );
 
   try {
     await requireAdmin(userId);
-
-    const { organizationId } = parseData(
-      params,
-      z.object({ organizationId: z.string() }),
-      {
-        additionalData: { params },
-      }
-    );
 
     const { amount, userId: ownerId } = parseData(
       await request.formData(),
@@ -90,7 +86,7 @@ export const action = async ({
 
     return json(data({ message: "Generated Orphaned QR codes" }));
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
+    const reason = makeShelfError(cause, { userId, organizationId });
     return json(error(reason), { status: reason.status });
   }
 };

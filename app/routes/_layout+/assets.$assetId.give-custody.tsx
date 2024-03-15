@@ -8,6 +8,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
+import { z } from "zod";
 import CustodianSelect from "~/components/custody/custodian-select";
 import { UserIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
@@ -16,156 +17,198 @@ import { db } from "~/database";
 import { createNote } from "~/modules/asset";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
-import { isFormProcessing } from "~/utils";
+import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
+import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { organizationId } = await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.asset,
-    action: PermissionAction.update,
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
   });
 
-  const assetId = params.assetId as string;
-  const asset = await db.asset.findUnique({
-    where: { id: assetId },
-    select: {
-      custody: {
-        select: {
-          id: true,
-        },
-      },
-      bookings: {
-        where: {
-          status: {
-            in: [BookingStatus.RESERVED],
-          },
-        },
-        select: {
-          id: true,
-        },
-      },
-    },
-  });
-  /** If the asset already has a custody, this page should not be visible */
-  if (asset && asset.custody) {
-    return redirect(`/assets/${assetId}`);
-  }
-
-  /** We get all the team members that are part of the user's personal organization */
-  const teamMembers = await db.teamMember.findMany({
-    where: {
-      deletedAt: null,
-      organizationId,
-    },
-    include: {
-      user: true,
-    },
-    orderBy: {
-      userId: "asc",
-    },
-  });
-
-  return json({
-    showModal: true,
-    teamMembers,
-    asset,
-  });
-};
-
-export const action = async ({
-  context,
-  request,
-  params,
-}: ActionFunctionArgs) => {
-  const authSession = context.getSession();
-  const { userId } = authSession;
-  await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.asset,
-    action: PermissionAction.update,
-  });
-
-  const formData = await request.formData();
-  const assetId = params.assetId as string;
-  const custodian = formData.get("custodian");
-  const user = await getUserByID(userId);
-
-  if (!user)
-    // @TODO Solve error handling
-    throw new ShelfError({
-      cause: null,
-      message:
-        "User not found. Please refresh and if the issue persists contact support.",
-      label: "Asset",
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
     });
 
-  if (!custodian)
-    return json({ error: "Please select a custodian" }, { status: 400 });
-
-  /** We send the data from the form as a json string, so we can easily have both the name and id
-   * ID is used to connect the asset to the custodian
-   * Name is used to create the note
-   */
-  const { id: custodianId, name: custodianName } = JSON.parse(
-    custodian as string
-  );
-
-  /** In order to do it with a single query
-   * 1. We update the asset status
-   * 2. We create a new custody record for that specific asset
-   * 3. We link it to the custodian
-   */
-  const asset = await db.asset.update({
-    where: { id: assetId },
-    data: {
-      status: AssetStatus.IN_CUSTODY,
-      custody: {
-        create: {
-          custodian: { connect: { id: custodianId as string } },
-        },
-      },
-    },
-    include: {
-      user: {
+    const asset = await db.asset
+      .findUnique({
+        where: { id: assetId },
         select: {
-          firstName: true,
-          lastName: true,
+          custody: {
+            select: {
+              id: true,
+            },
+          },
+          bookings: {
+            where: {
+              status: {
+                in: [BookingStatus.RESERVED],
+              },
+            },
+            select: {
+              id: true,
+            },
+          },
         },
-      },
-    },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching asset. Please try again or contact support.",
+          additionalData: { userId, assetId, organizationId },
+          label: "Assets",
+        });
+      });
+
+    /** If the asset already has a custody, this page should not be visible */
+    if (asset && asset.custody) {
+      return redirect(`/assets/${assetId}`);
+    }
+
+    /** We get all the team members that are part of the user's personal organization */
+    const teamMembers = await db.teamMember
+      .findMany({
+        where: {
+          deletedAt: null,
+          organizationId,
+        },
+        include: {
+          user: true,
+        },
+        orderBy: {
+          userId: "asc",
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching team members. Please try again or contact support.",
+          additionalData: { userId, assetId, organizationId },
+          label: "Assets",
+        });
+      });
+
+    return json(
+      data({
+        showModal: true,
+        teamMembers,
+        asset,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
   });
 
-  /** Once the asset is updated, we create the note */
-  await createNote({
-    content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**`,
-    type: "UPDATE",
-    userId: userId,
-    assetId: asset.id,
-  });
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
 
-  sendNotification({
-    title: `‘${asset.title}’ is now in custody of ${custodianName}`,
-    message:
-      "Remember, this asset will be unavailable until custody is manually released.",
-    icon: { name: "success", variant: "success" },
-    senderId: userId,
-  });
+    const { custodian } = parseData(
+      await request.formData(),
+      z.object({
+        custodian: stringToJSONSchema.pipe(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+          })
+        ),
+      }),
+      {
+        additionalData: { userId, assetId },
+        message: "Please select a custodian",
+      }
+    );
 
-  return redirect(`/assets/${assetId}`);
-};
+    const user = await getUserByID(userId);
+
+    /** We send the data from the form as a json string, so we can easily have both the name and id
+     * ID is used to connect the asset to the custodian
+     * Name is used to create the note
+     */
+    const { id: custodianId, name: custodianName } = custodian;
+
+    /** In order to do it with a single query
+     * 1. We update the asset status
+     * 2. We create a new custody record for that specific asset
+     * 3. We link it to the custodian
+     */
+    const asset = await db.asset
+      .update({
+        where: { id: assetId },
+        data: {
+          status: AssetStatus.IN_CUSTODY,
+          custody: {
+            create: {
+              custodian: { connect: { id: custodianId } },
+            },
+          },
+        },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while updating asset. Please try again or contact support.",
+          additionalData: { userId, assetId, custodianId },
+          label: "Assets",
+        });
+      });
+
+    /** Once the asset is updated, we create the note */
+    await createNote({
+      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+      type: "UPDATE",
+      userId: userId,
+      assetId: asset.id,
+    });
+
+    sendNotification({
+      title: `‘${asset.title}’ is now in custody of ${custodianName}`,
+      message:
+        "Remember, this asset will be unavailable until custody is manually released.",
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+
+    return redirect(`/assets/${assetId}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    return json(error(reason), { status: reason.status });
+  }
+}
 
 export function links() {
   return [{ rel: "stylesheet", href: styles }];
@@ -174,7 +217,7 @@ export function links() {
 export default function Custody() {
   const { asset } = useLoaderData<typeof loader>();
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
-  const actionData = useActionData<{ error: string } | null>();
+  const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
 
@@ -197,7 +240,7 @@ export default function Custody() {
           </div>
           {actionData?.error ? (
             <div className="-mt-8 mb-8 text-sm text-error-500">
-              {actionData.error}
+              {actionData.error.message}
             </div>
           ) : null}
 

@@ -10,6 +10,7 @@ import {
   badRequest,
   notAllowedMethod,
 } from "./error";
+import type { ValidationError } from "./http";
 import { Logger } from "./logger";
 
 export function getCurrentPath(request: Request) {
@@ -69,11 +70,6 @@ export function getRequiredParam(
   return value;
 }
 
-export type ValidationError<Schema extends ZodType<any, any, any>> = Record<
-  keyof Schema["_output"],
-  { message: string | undefined }
->;
-
 /**
  * Validate data with a zod schema.
  *
@@ -99,7 +95,7 @@ export function parseData<Schema extends ZodType<any, any, any>>(
   const submission = schema.safeParse(data);
 
   if (!submission.success) {
-    let validationErrors = {} as ValidationError<Schema>;
+    const validationErrors = {} as ValidationError<Schema>;
 
     Object.entries(submission.error.formErrors.fieldErrors).forEach(
       ([key, values]) => {
@@ -117,6 +113,7 @@ export function parseData<Schema extends ZodType<any, any, any>>(
         ...options,
         additionalData: {
           ...options?.additionalData,
+          data,
           validationErrors,
         },
       }
@@ -127,7 +124,7 @@ export function parseData<Schema extends ZodType<any, any, any>>(
 }
 
 /**
- * Assert request params with a zod schema.
+ * Get and validate request params with a zod schema.
  *
  * **Use this function outside of loader/action try/catch blocks.**
  *
@@ -137,9 +134,8 @@ export function parseData<Schema extends ZodType<any, any, any>>(
  *
  * If you don't want to capture the error, you can set the `shouldBeCaptured` option to `false`.
  *
- * @deprecated Use `parseData` instead and set params in the `additionalData` option.
  */
-export function assertParams<Schema extends ZodType<any, any, any>>(
+export function getParams<Schema extends ZodType<any, any, any>>(
   params: Params<string>,
   schema: Schema,
   options?: Options
@@ -150,11 +146,10 @@ export function assertParams<Schema extends ZodType<any, any, any>>(
       ...options,
       additionalData: {
         ...options?.additionalData,
-        params,
       },
     });
   } catch (cause) {
-    let reason = cause instanceof ShelfError ? cause : makeShelfError(cause);
+    const reason = cause instanceof ShelfError ? cause : makeShelfError(cause);
     throw json(error(reason), { status: 400 });
   }
 }

@@ -14,9 +14,18 @@ export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
 }
 
 export async function getQr(id: Qr["id"]) {
-  return db.qr.findFirst({
-    where: { id },
-  });
+  try {
+    return await db.qr.findFirst({
+      where: { id },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get QR code",
+      additionalData: { id },
+      label,
+    });
+  }
 }
 
 export async function createQr({
@@ -119,23 +128,26 @@ export async function assertWhetherQrBelongsToCurrentOrganization({
 }) {
   const searchParams = getCurrentSearchParams(request);
   const qrId = searchParams.get("qrId");
-  /** We have the case when someone could be linking a QR that doesnt belong to the current org */
-  if (qrId) {
-    const qr = await db.qr.findUnique({
-      where: {
-        id: qrId,
-        organizationId,
-      },
-    });
-    if (!qr) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "This QR code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
-        title: "QR code not found",
-        status: 403,
-        label,
+
+  try {
+    /** We have the case when someone could be linking a QR that doesnt belong to the current org */
+    if (qrId) {
+      await db.qr.findUniqueOrThrow({
+        where: {
+          id: qrId,
+          organizationId,
+        },
       });
     }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "This QR code doesn't exist or it doesn't belong to your current organization. A new asset cannot be linked to it.",
+      title: "QR code not found",
+      status: 403,
+      additionalData: { qrId, organizationId },
+      label,
+    });
   }
 }

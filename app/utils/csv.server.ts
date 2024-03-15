@@ -8,6 +8,7 @@ import chardet from "chardet";
 import { parse } from "csv-parse";
 import iconv from "iconv-lite";
 import { fetchAssetsForExport } from "~/modules/asset";
+import { ShelfError } from ".";
 
 export type CSVData = [string[], ...string[][]] | [];
 
@@ -49,16 +50,24 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 
 /** Takes a request object and extracts the file from it and parses it as csvData */
 export const csvDataFromRequest = async ({ request }: { request: Request }) => {
-  // Upload handler to store file in memory
-  const formData = await unstable_parseMultipartFormData(
-    request,
-    memoryUploadHandler
-  );
+  try {
+    // Upload handler to store file in memory
+    const formData = await unstable_parseMultipartFormData(
+      request,
+      memoryUploadHandler
+    );
 
-  const csvFile = formData.get("file") as File;
-  const csvData = await csvFile.arrayBuffer();
+    const csvFile = formData.get("file") as File;
+    const csvData = await csvFile.arrayBuffer();
 
-  return (await parseCsv(csvData)) as CSVData;
+    return (await parseCsv(csvData)) as CSVData;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while parsing the CSV file.",
+      label: "CSV",
+    });
+  }
 };
 
 export const memoryUploadHandler = unstable_composeUploadHandlers(
@@ -141,27 +150,43 @@ export async function exportAssetsToCsv({
 }: {
   organizationId: string;
 }) {
-  const assets = await fetchAssetsForExport({ organizationId });
+  try {
+    const assets = await fetchAssetsForExport({ organizationId });
 
-  const csvData = buildCsvDataFromAssets({
-    assets,
-    keysToSkip,
-  });
+    const csvData = buildCsvDataFromAssets({
+      assets,
+      keysToSkip,
+    });
 
-  if (!csvData) return null;
-  /** Get the headers from the first row and filter out the keys to skip */
-  const headers = Object.keys(assets[0]).filter(
-    (header) => !keysToSkip.includes(header)
-  );
+    if (!csvData) {
+      throw new ShelfError({
+        cause: null,
+        message: "Nothing to export.",
+        label: "CSV",
+      });
+    }
 
-  /** Add the header column */
-  csvData.unshift(headers);
+    /** Get the headers from the first row and filter out the keys to skip */
+    const headers = Object.keys(assets[0]).filter(
+      (header) => !keysToSkip.includes(header)
+    );
 
-  /** Convert the data to a string */
-  const csvRows = csvData.map((row) => row.join(";"));
+    /** Add the header column */
+    csvData.unshift(headers);
 
-  /** Join the rows with a new line */
-  const csvString = csvRows.join("\n");
+    /** Convert the data to a string */
+    const csvRows = csvData.map((row) => row.join(";"));
 
-  return csvString;
+    /** Join the rows with a new line */
+    const csvString = csvRows.join("\n");
+
+    return csvString;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while exporting the assets.",
+      additionalData: { organizationId },
+      label: "CSV",
+    });
+  }
 }

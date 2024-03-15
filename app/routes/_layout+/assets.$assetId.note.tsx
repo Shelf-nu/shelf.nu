@@ -1,84 +1,95 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { parseFormAny } from "react-zorm";
+import { z } from "zod";
 import { NewNoteSchema } from "~/components/assets/notes/new";
 import { createNote, deleteNote } from "~/modules/asset";
-import { assertIsDelete, assertIsPost, isDelete, isPost } from "~/utils";
+import {
+  data,
+  error,
+  getActionMethod,
+  getParams,
+  makeShelfError,
+  notAllowedMethod,
+  parseData,
+} from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({ params }: LoaderFunctionArgs) =>
-  /** makes sure that if the user navigates to that url, it redirects back to asset */
-  redirect(`/assets/${params.assetId}`);
+export function loader({ params }: LoaderFunctionArgs) {
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }));
 
-export const action = async ({
-  context,
-  request,
-  params,
-}: ActionFunctionArgs) => {
+  return redirect(`/assets/${assetId}`);
+}
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-
-  await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.asset,
-    action: PermissionAction.update,
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
   });
-  const formData = await request.formData();
 
-  /* Create note */
-  if (isPost(request)) {
-    assertIsPost(request);
-    const result = await NewNoteSchema.safeParseAsync(parseFormAny(formData));
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
 
-    if (!result.success) {
-      return json(
-        {
-          errors: result.error,
-        },
-        {
-          status: 400,
-        }
-      );
+    const method = getActionMethod(request);
+
+    switch (method) {
+      case "POST": {
+        const payload = parseData(await request.formData(), NewNoteSchema, {
+          additionalData: { userId, assetId },
+        });
+
+        sendNotification({
+          title: "Note created",
+          message: "Your note has been created successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        const note = await createNote({
+          ...payload,
+          assetId,
+          userId,
+        });
+
+        return json(data({ note }));
+      }
+      case "DELETE": {
+        const { noteId } = parseData(
+          await request.formData(),
+          z.object({
+            noteId: z.string(),
+          }),
+          {
+            additionalData: { userId, assetId },
+          }
+        );
+
+        sendNotification({
+          title: "Note deleted",
+          message: "Your note has been deleted successfully",
+          icon: { name: "trash", variant: "error" },
+          senderId: authSession.userId,
+        });
+
+        await deleteNote({
+          id: noteId,
+          userId,
+        });
+
+        return json(data(null));
+      }
     }
 
-    if (!params.assetId)
-      return json({ errors: "assetId is required" }, { status: 400 });
-
-    sendNotification({
-      title: "Note created",
-      message: "Your note has been created successfully",
-      icon: { name: "success", variant: "success" },
-      senderId: authSession.userId,
-    });
-    const note = await createNote({
-      ...result.data,
-      assetId: params.assetId,
-      userId: authSession.userId,
-    });
-
-    return json({ note });
+    throw notAllowedMethod(method);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    return json(error(reason), { status: reason.status });
   }
-
-  /* Delete note */
-  if (isDelete(request)) {
-    assertIsDelete(request);
-    const noteId = formData.get("noteId") as string | null;
-    if (!noteId) return json({ errors: "noteId is required" }, { status: 400 });
-
-    sendNotification({
-      title: "Note deleted",
-      message: "Your note has been deleted successfully",
-      icon: { name: "trash", variant: "error" },
-      senderId: authSession.userId,
-    });
-
-    const deleted = await deleteNote({
-      id: noteId,
-      userId: authSession.userId,
-    });
-    return json({ deleted });
-  }
-};
+}
