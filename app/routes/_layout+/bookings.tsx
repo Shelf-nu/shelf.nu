@@ -18,7 +18,13 @@ import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
 import { getBookings } from "~/modules/booking";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getCurrentSearchParams, getParamsValues } from "~/utils";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParamsValues,
+  makeShelfError,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
@@ -31,86 +37,94 @@ import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId, role } = await requirePermission({
-    userId: authSession?.userId,
-    request,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.read,
-  });
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search, status } = getParamsValues(searchParams);
-  const cookie = await updateCookieWithPerPage(request, perPageParam);
-  const { perPage } = cookie;
+  const { userId } = authSession;
 
-  const { bookings, bookingCount } = await getBookings({
-    organizationId,
-    page,
-    perPage,
-    search,
-    userId: authSession?.userId,
-    ...(status && {
-      // If status is in the params, we filter based on it
-      statuses: [status],
-    }),
-    ...(isSelfService && {
-      // If the user is self service, we only show bookings that belong to that user)
-      custodianUserId: authSession?.userId,
-    }),
-  });
+  try {
+    const { organizationId, role } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.read,
+    });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const searchParams = getCurrentSearchParams(request);
+    const { page, perPageParam, search, status } =
+      getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
 
-  const totalPages = Math.ceil(bookingCount / perPage);
-
-  const header: HeaderData = {
-    title: "Bookings",
-  };
-  const modelName = {
-    singular: "booking",
-    plural: "bookings",
-  };
-
-  /** We format the dates on the server based on the users timezone and locale  */
-  const items = bookings.map((b) => {
-    if (b.from && b.to) {
-      const from = new Date(b.from);
-      const displayFrom = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(from);
-
-      const to = new Date(b.to);
-      const displayTo = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(to);
-
-      return {
-        ...b,
-        displayFrom: displayFrom.split(","),
-        displayTo: displayTo.split(","),
-      };
-    }
-    return b;
-  });
-
-  return json(
-    {
-      header,
-      items,
-      search,
+    const { bookings, bookingCount } = await getBookings({
+      organizationId,
       page,
-      totalItems: bookingCount,
-      totalPages,
       perPage,
-      modelName,
-    },
-    {
-      headers: [
-        setCookie(await userPrefs.serialize(cookie)),
-        setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-      ],
-    }
-  );
+      search,
+      userId: authSession?.userId,
+      ...(status && {
+        // If status is in the params, we filter based on it
+        statuses: [status],
+      }),
+      ...(isSelfService && {
+        // If the user is self service, we only show bookings that belong to that user)
+        custodianUserId: authSession?.userId,
+      }),
+    });
+
+    const totalPages = Math.ceil(bookingCount / perPage);
+
+    const header: HeaderData = {
+      title: "Bookings",
+    };
+    const modelName = {
+      singular: "booking",
+      plural: "bookings",
+    };
+
+    /** We format the dates on the server based on the users timezone and locale  */
+    const items = bookings.map((b) => {
+      if (b.from && b.to) {
+        const from = new Date(b.from);
+        const displayFrom = getDateTimeFormat(request, {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(from);
+
+        const to = new Date(b.to);
+        const displayTo = getDateTimeFormat(request, {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(to);
+
+        return {
+          ...b,
+          displayFrom: displayFrom.split(","),
+          displayTo: displayTo.split(","),
+        };
+      }
+      return b;
+    });
+
+    return json(
+      data({
+        header,
+        items,
+        search,
+        page,
+        totalItems: bookingCount,
+        totalPages,
+        perPage,
+        modelName,
+      }),
+      {
+        headers: [
+          setCookie(await userPrefs.serialize(cookie)),
+          setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+        ],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

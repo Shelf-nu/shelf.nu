@@ -13,6 +13,7 @@ import {
   useSearchParams,
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
+import { z } from "zod";
 import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
@@ -27,138 +28,148 @@ import { Td } from "~/components/table";
 import { createNotes, getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
 import { getUserByID } from "~/modules/user";
-import { getRequiredParam, isFormProcessing } from "~/utils";
+import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
-import { ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermission({
-    userId: authSession?.userId,
-    request,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.update,
-  });
+  const { userId } = authSession;
+  const { bookingId: id } = getParams(
+    params,
+    z.object({ bookingId: z.string() }),
+    {
+      additionalData: { userId },
+    }
+  );
 
-  const id = getRequiredParam(params, "bookingId");
-
-  const {
-    search,
-    totalAssets,
-    perPage,
-    page,
-    categories,
-    tags,
-    assets,
-    totalPages,
-  } = await getPaginatedAndFilterableAssets({
-    request,
-    organizationId,
-    excludeCategoriesQuery: true,
-    excludeTagsQuery: true,
-    excludeSearchFromView: true,
-  });
-
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
-
-  const booking = await getBooking({ id, organizationId });
-  if (!booking) {
-    throw new ShelfError({
-      cause: null,
-      message: "Booking not found",
-      label: "Booking",
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
     });
+
+    const {
+      search,
+      totalAssets,
+      perPage,
+      page,
+      categories,
+      tags,
+      assets,
+      totalPages,
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+      excludeCategoriesQuery: true,
+      excludeTagsQuery: true,
+      excludeSearchFromView: true,
+    });
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    const booking = await getBooking({ id, organizationId });
+
+    return json(
+      data({
+        showModal: true,
+        noScroll: true,
+        booking,
+        items: assets,
+        categories,
+        tags,
+        search,
+        page,
+        totalItems: totalAssets,
+        perPage,
+        totalPages,
+        modelName,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
   }
+}
 
-  return json({
-    showModal: true,
-    noScroll: true,
-    booking,
-    items: assets,
-    categories,
-    tags,
-    search,
-    page,
-    totalItems: totalAssets,
-    perPage,
-    totalPages,
-    modelName,
-  });
-};
-
-export const action = async ({
-  context,
-  request,
-  params,
-}: ActionFunctionArgs) => {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermission({
-    userId: authSession?.userId,
-
-    request,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.update,
+  const { userId } = authSession;
+  const { bookingId } = getParams(params, z.object({ bookingId: z.string() }), {
+    additionalData: { userId },
   });
 
-  const bookingId = getRequiredParam(params, "bookingId");
-  const formData = await request.formData();
-  const assetIds = formData.getAll("assetId") as string[];
-  const removedAssetIds = formData.getAll("removedAssetId") as string[];
-
-  const user = await getUserByID(authSession.userId);
-  if (!user) {
-    throw new ShelfError({
-      cause: null,
-      message: "User not found",
-      label: "Booking",
+  try {
+    await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
     });
-  }
 
-  /** We only update the booking if there are assets to add */
-  if (assetIds.length > 0) {
-    /** We update the booking with the new assets */
-    const b = await upsertBooking(
+    // assetIds: z.array(z.string()).optional().default([]),
+    // removedAssetIds: z.array(z.string()).optional().default([]),
+
+    const { assetIds, removedAssetIds } = parseData(
+      await request.formData(),
+      z.object({
+        assetIds: z.array(z.string()).optional().default([]),
+        removedAssetIds: z.array(z.string()).optional().default([]),
+      }),
       {
-        id: bookingId,
-        assetIds,
-      },
-      getClientHint(request)
+        additionalData: { userId, bookingId },
+      }
     );
 
-    /** We create notes for the assets that were added */
-    await createNotes({
-      content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
-        b.name
-      }](/bookings/${b.id})**.`,
-      type: "UPDATE",
-      userId: authSession.userId,
-      assetIds,
-    });
-  }
+    const user = await getUserByID(authSession.userId);
 
-  /** If some assets were removed, we also need to handle those */
-  if (removedAssetIds.length > 0) {
-    await removeAssets({
-      booking: { id: bookingId, assetIds: removedAssetIds },
-      firstName: user?.firstName || "",
-      lastName: user?.lastName || "",
-      userId: authSession.userId,
-    });
-  }
+    /** We only update the booking if there are assets to add */
+    if (assetIds.length > 0) {
+      /** We update the booking with the new assets */
+      const b = await upsertBooking(
+        {
+          id: bookingId,
+          assetIds,
+        },
+        getClientHint(request)
+      );
 
-  return redirect(`/bookings/${bookingId}`);
-};
+      /** We create notes for the assets that were added */
+      await createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
+          b.name
+        }](/bookings/${b.id})**.`,
+        type: "UPDATE",
+        userId: authSession.userId,
+        assetIds,
+      });
+    }
+
+    /** If some assets were removed, we also need to handle those */
+    if (removedAssetIds.length > 0) {
+      await removeAssets({
+        booking: { id: bookingId, assetIds: removedAssetIds },
+        firstName: user?.firstName || "",
+        lastName: user?.lastName || "",
+        userId: authSession.userId,
+      });
+    }
+
+    return redirect(`/bookings/${bookingId}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, bookingId });
+    return json(error(reason), { status: reason.status });
+  }
+}
 
 export default function AddAssetsToNewBooking() {
   const { booking, search } = useLoaderData<typeof loader>();
@@ -293,20 +304,20 @@ export default function AddAssetsToNewBooking() {
           <Form method="post">
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
             {/* These are the asset ids, coming from the server */}
-            {removedAssetIds.map((assetId) => (
+            {removedAssetIds.map((assetId, i) => (
               <input
                 key={assetId}
                 type="hidden"
-                name="removedAssetId"
+                name={`removedAssetIds[${i}]`}
                 value={assetId}
               />
             ))}
             {/* These are the ids selected by the user and stored in the atom */}
-            {selectedAssets.map((assetId) => (
+            {selectedAssets.map((assetId, i) => (
               <input
                 key={assetId}
                 type="hidden"
-                name="assetId"
+                name={`assetIds[${i}]`}
                 value={assetId}
               />
             ))}
