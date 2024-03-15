@@ -36,6 +36,7 @@
       "warn",
       {
         "vars": "all",
+        "varsIgnorePattern": "^_",
         "args": "all",
         "argsIgnorePattern": "^_",
         "destructuredArrayIgnorePattern": "^_",
