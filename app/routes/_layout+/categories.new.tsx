@@ -78,7 +78,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     });
 
     const payload = parseData(await request.formData(), NewCategoryFormSchema, {
-      additionalData: { userId },
+      additionalData: { userId, organizationId },
     });
 
     await createCategory({

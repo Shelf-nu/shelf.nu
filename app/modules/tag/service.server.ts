@@ -188,7 +188,7 @@ export async function getTag({
   organizationId,
 }: Pick<Tag, "id" | "organizationId">) {
   try {
-    return await db.tag.findUnique({
+    return await db.tag.findUniqueOrThrow({
       where: {
         id,
         organizationId,
@@ -197,7 +197,7 @@ export async function getTag({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while fetching the tag",
+      message: "Tag not found",
       additionalData: { id, organizationId },
       label,
     });

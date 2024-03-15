@@ -97,7 +97,7 @@ export async function action({ context, request, params }: LoaderFunctionArgs) {
       await request.formData(),
       UpdateCategoryFormSchema,
       {
-        additionalData: { userId, id },
+        additionalData: { userId, id, organizationId },
       }
     );
 
