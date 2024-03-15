@@ -205,7 +205,7 @@ export async function updateCategory({
   color,
 }: Pick<Category, "id" | "organizationId" | "description" | "name" | "color">) {
   try {
-    const category = await db.category.update({
+    return await db.category.update({
       where: {
         id,
         organizationId,
@@ -216,7 +216,6 @@ export async function updateCategory({
         color,
       },
     });
-    return { category, error: null };
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Category", {
       additionalData: { id, organizationId, name },

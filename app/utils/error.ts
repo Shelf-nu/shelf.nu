@@ -271,8 +271,7 @@ export function maybeUniqueConstraintViolation(
   modelName: string,
   options?: Options
 ) {
-  let message =
-    "We couldn't create the resource. Please try again or contact support.";
+  let message = `We could not create or update this ${modelName}. Please try again or contact support.`;
   let shouldBeCaptured = true;
 
   if (

@@ -35,7 +35,7 @@ import { getOrganizationTierLimit } from "~/modules/tier";
 import assetCss from "~/styles/assets.css";
 import { data, error } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { userPrefs } from "~/utils/cookies.server";
+import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
@@ -206,7 +206,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalTags,
       }),
       {
-        headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
+        headers: [setCookie(await userPrefs.serialize(cookie))],
       }
     );
   } catch (cause) {
