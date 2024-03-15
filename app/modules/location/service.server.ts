@@ -34,7 +34,7 @@ export async function getLocation(
 
     const [location, totalAssetsWithinLocation] = await Promise.all([
       /** Get the items */
-      db.location.findFirst({
+      db.location.findFirstOrThrow({
         where: { id, organizationId },
         include: {
           image: {
