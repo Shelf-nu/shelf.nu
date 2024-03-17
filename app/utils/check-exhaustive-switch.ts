@@ -4,5 +4,5 @@
  * @param _: The value to check for exhaustiveness
  */
 export function checkExhaustiveSwitch(_: never) {
-    // do nothing, only used for exhaustiveness checking
+  // do nothing, only used for exhaustiveness checking
 }
