@@ -623,7 +623,7 @@ export async function removeAssets({
       });
     }
 
-    createNotes({
+    await createNotes({
       content: `**${firstName?.trim()} ${lastName?.trim()}** removed asset from booking **[${
         b.name
       }](/bookings/${b.id})**.`,

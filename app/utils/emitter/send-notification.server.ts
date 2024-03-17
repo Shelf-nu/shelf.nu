@@ -2,9 +2,7 @@ import type { NotificationType } from "~/atoms/notifications";
 import { emitter } from "./emitter.server";
 import { ShelfError } from "../error";
 
-export function sendNotification(
-  notification: Omit<NotificationType, "open">
-): void {
+export function sendNotification(notification: Omit<NotificationType, "open">) {
   try {
     emitter.emit(
       "notification",

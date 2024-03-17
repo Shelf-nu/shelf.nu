@@ -3,7 +3,6 @@ import type { Organization } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-// import { ErrorBoundryComponent } from "~/components/errors";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
@@ -16,93 +15,101 @@ import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actio
 import { db } from "~/database";
 import { useUserData } from "~/hooks";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
-import { tw } from "~/utils";
+import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription";
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  // permissions here?
-  // Every user can see this view for themseleves, so we dont have to manage any permissions here
-  const { organizationId } = await getSelectedOrganisation({
-    userId: authSession.userId,
-    request,
-  });
   const { userId } = authSession;
 
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      userOrganizations: {
-        include: {
-          organization: {
+  try {
+    // permissions here?
+    // Every user can see this view for themseleves, so we dont have to manage any permissions here
+    const { organizationId } = await getSelectedOrganisation({
+      userId: authSession.userId,
+      request,
+    });
+
+    const user = await db.user
+      .findUniqueOrThrow({
+        where: {
+          id: userId,
+        },
+        select: {
+          firstName: true,
+          tier: {
+            include: { tierLimit: true },
+          },
+          userOrganizations: {
             include: {
-              _count: {
-                select: {
-                  assets: true,
-                  members: true,
-                  locations: true,
-                },
-              },
-              owner: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  profilePicture: true,
+              organization: {
+                include: {
+                  _count: {
+                    select: {
+                      assets: true,
+                      members: true,
+                      locations: true,
+                    },
+                  },
+                  owner: {
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                    },
+                  },
                 },
               },
             },
           },
         },
-      },
-    },
-  });
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "User not found",
+          additionalData: { userId, organizationId },
+          label: "Settings",
+        });
+      });
 
-  if (!user || user.userOrganizations?.length < 1)
-    // @TODO Solve error handling
-    throw new ShelfError({
-      cause: null,
-      message: "Organization not found",
-      label: "Organization",
-    });
+    const modelName = {
+      singular: "Workspace",
+      plural: "Workspaces",
+    };
 
-  const modelName = {
-    singular: "Workspace",
-    plural: "Workspaces",
-  };
+    /** Get the organization that are owner by the current uer */
+    const organizations = user.userOrganizations.map((r) => r.organization);
 
-  /** Get the organization that are owner by the current uer */
-  const organizations = user.userOrganizations.map((r) => r.organization);
-
-  return json({
-    userId,
-    tier: user?.tier,
-    currentOrganizationId: organizationId,
-    canCreateMoreOrganizations: canCreateMoreOrganizations({
-      tierLimit: user?.tier?.tierLimit,
-      totalOrganizations: organizations.filter((o) => o.owner.id === userId)
-        .length,
-    }),
-    items: organizations,
-    totalItems: organizations.length,
-    modelName,
-    title: "Workspace",
-  });
-};
+    return json(
+      data({
+        userId,
+        tier: user.tier,
+        currentOrganizationId: organizationId,
+        canCreateMoreOrganizations: canCreateMoreOrganizations({
+          tierLimit: user.tier.tierLimit,
+          totalOrganizations: organizations.filter((o) => o.owner.id === userId)
+            .length,
+        }),
+        items: organizations,
+        totalItems: organizations.length,
+        modelName,
+        title: "Workspace",
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
-// export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function WorkspacePage() {
   const {

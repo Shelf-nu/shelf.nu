@@ -361,7 +361,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           getClientHint(request)
         );
 
-        createNotes({
+        await createNotes({
           content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** deleted booking **${
             deletedBooking.name
           }**.`,
@@ -416,7 +416,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           getClientHint(request)
         );
 
-        createNotes({
+        await createNotes({
           content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
             booking.name
           }](/bookings/${booking.id})**.`,
@@ -446,7 +446,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         /** Create check-in notes for all assets */
-        createNotes({
+        await createNotes({
           content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
             booking.name
           }](/bookings/${booking.id})**.`,
@@ -489,7 +489,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           getClientHint(request)
         );
 
-        createNotes({
+        await createNotes({
           content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
             cancelledBooking.name
           }](/bookings/${cancelledBooking.id})**.`,

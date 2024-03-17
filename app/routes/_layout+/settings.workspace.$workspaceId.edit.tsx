@@ -12,7 +12,7 @@ import type {
 import { useLoaderData } from "@remix-run/react";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
-import { parseFormAny } from "react-zorm";
+import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -22,7 +22,14 @@ import {
 } from "~/components/workspace/form";
 
 import { getOrganization, updateOrganization } from "~/modules/organization";
-import { assertIsPost, getRequiredParam } from "~/utils";
+import {
+  assertIsPost,
+  data,
+  error,
+  getParams,
+  makeShelfError,
+  parseData,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
@@ -31,31 +38,42 @@ import { MAX_SIZE } from "./settings.workspace.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
+  const { userId } = authSession;
+  const { workspaceId: id } = getParams(
+    params,
+    z.object({ workspaceId: z.string() }),
+    {
+      additionalData: { userId },
+    }
+  );
 
-  await requirePermission({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.workspace,
-    action: PermissionAction.update,
-  });
-  const id = getRequiredParam(params, "workspaceId");
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.workspace,
+      action: PermissionAction.update,
+    });
 
-  const organization = await getOrganization({
-    id,
-    userId: authSession.userId,
-  });
-  if (!organization) {
-    throw new Response("Not Found", { status: 404 });
+    const organization = await getOrganization({
+      id,
+      userId,
+    });
+
+    const header: HeaderData = {
+      title: `Edit | ${organization.name}`,
+    };
+
+    return json(
+      data({
+        organization,
+        header,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
   }
-
-  const header: HeaderData = {
-    title: `Edit | ${organization.name}`,
-  };
-
-  return json({
-    organization,
-    header,
-  });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -67,60 +85,63 @@ export const handle = {
 };
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
-  assertIsPost(request);
   const authSession = context.getSession();
-
-  await requirePermission({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.workspace,
-    action: PermissionAction.update,
-  });
-
-  const id = getRequiredParam(params, "workspaceId");
-  const clonedRequest = request.clone();
-  const formData = await clonedRequest.formData();
-  const result = await NewWorkspaceFormSchema.safeParseAsync(
-    parseFormAny(formData)
+  const { userId } = authSession;
+  const { workspaceId: id } = getParams(
+    params,
+    z.object({ workspaceId: z.string() }),
+    {
+      additionalData: { userId },
+    }
   );
 
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-        success: false,
-      },
-      {
-        status: 400,
-      }
+  try {
+    assertIsPost(request);
+
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.workspace,
+      action: PermissionAction.update,
+    });
+
+    const clonedRequest = request.clone();
+
+    const formData = await clonedRequest.formData();
+    const payload = parseData(formData, NewWorkspaceFormSchema, {
+      additionalData: { userId, id },
+    });
+
+    const { name, currency } = payload;
+
+    const formDataFile = await unstable_parseMultipartFormData(
+      request,
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
     );
+
+    const file = formDataFile.get("image") as File | null;
+    invariant(file instanceof File, "file not the right type");
+
+    await updateOrganization({
+      id,
+      name,
+      image: file || null,
+      userId: authSession.userId,
+      currency,
+    });
+
+    sendNotification({
+      title: "Workspace updated",
+      message: "Your workspace  has been updated successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect("/settings/workspace");
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    return json(error(reason), { status: reason.status });
   }
-
-  const { name, currency } = result.data;
-  const formDataFile = await unstable_parseMultipartFormData(
-    request,
-    unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
-  );
-
-  const file = formDataFile.get("image") as File | null;
-  invariant(file instanceof File, "file not the right type");
-
-  await updateOrganization({
-    id,
-    name,
-    image: file || null,
-    userId: authSession.userId,
-    currency,
-  });
-
-  sendNotification({
-    title: "Workspace updated",
-    message: "Your workspace  has been updated successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return redirect("/settings/workspace");
 }
 
 export default function WorkspaceEditPage() {

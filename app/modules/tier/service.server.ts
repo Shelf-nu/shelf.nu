@@ -181,45 +181,63 @@ export async function assertUserCanInviteUsersToWorkspace({
  * Fetches user and calls {@link canCreateMoreOrganizations};.
  * Throws an error if the user cannot create more organizations.
  */
-export const assertUserCanCreateMoreOrganizations = async (userId: string) => {
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    include: {
-      tier: {
-        include: { tierLimit: true },
+export async function assertUserCanCreateMoreOrganizations(userId: string) {
+  const user = await db.user
+    .findUnique({
+      where: {
+        id: userId,
       },
-      userOrganizations: {
-        include: {
-          organization: {
-            select: {
-              userId: true,
+      include: {
+        tier: {
+          include: { tierLimit: true },
+        },
+        userOrganizations: {
+          include: {
+            organization: {
+              select: {
+                userId: true,
+              },
             },
           },
         },
       },
-    },
-  });
+    })
+    .catch((cause) => {
+      throw new ShelfError({
+        cause,
+        message: "Failed to get user",
+        additionalData: { userId },
+        label,
+      });
+    });
 
-  const organizations = user?.userOrganizations
+  if (!user) {
+    throw new ShelfError({
+      cause: null,
+      message: "User not found",
+      additionalData: { userId },
+      label,
+    });
+  }
+
+  const organizations = user.userOrganizations
     .map((o) => o.organization)
     .filter((o) => o.userId === userId);
 
   if (
     !canCreateMoreOrganizations({
-      tierLimit: user?.tier?.tierLimit,
-      totalOrganizations: organizations?.length || 1,
+      tierLimit: user.tier.tierLimit,
+      totalOrganizations: organizations.length || 1,
     })
   ) {
     throw new ShelfError({
       cause: null,
       message: "You cannot create workspaces with your current plan.",
+      additionalData: { userId, tierLimit: user.tier.tierLimit },
       label,
     });
   }
-  return true;
-};
+}
 
 /**
  * @returns The tier limit of the organization's owner
