@@ -254,7 +254,7 @@ serve(
           resolve(null);
         });
       });
-      broadcastDevReady(build);
+      void broadcastDevReady(build);
     }
   }
 );

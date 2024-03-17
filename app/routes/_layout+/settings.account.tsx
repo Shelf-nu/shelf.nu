@@ -136,7 +136,7 @@ export default function UserPage() {
   const user = useUserData();
   const usernameError =
     getValidationErrors<typeof UpdateFormSchema>(data?.error)?.username
-      .message || zo.errors.username()?.message;
+      ?.message || zo.errors.username()?.message;
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   return (

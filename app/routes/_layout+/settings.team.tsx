@@ -54,10 +54,11 @@ type InviteWithTeamMember = Pick<
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
+  const { userId } = authSession;
 
   try {
     const { organizationId } = await requirePermission({
-      userId: authSession.userId,
+      userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.read,
@@ -142,7 +143,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: "Organization not found",
-        additionalData: { organizationId, userId: authSession.userId },
+        additionalData: { organizationId, userId },
         label: "Team",
       });
     }

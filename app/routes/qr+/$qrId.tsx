@@ -2,25 +2,27 @@ import type { Organization } from "@prisma/client";
 import { redirect, json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
+import { z } from "zod";
 import { QrNotFound } from "~/components/qr/not-found";
 import { getUserOrganizations } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getQr } from "~/modules/qr";
 import { createScan, updateScan } from "~/modules/scan";
-import { assertIsPost, error } from "~/utils";
+import { assertIsPost, data, error, getParams } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
-  /* @TODO - double check because of messy merge*/
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.isAuthenticated
+    ? context.getSession()
+    : { userId: "anonymous" };
+  const { userId } = authSession;
+  const { qrId: id } = getParams(params, z.object({ qrId: z.string() }), {
+    additionalData: { userId },
+  });
 
+  /* @TODO - double check because of messy merge*/
   try {
-    /* Get the ID of the QR from the params */
-    const id = params.qrId as string;
     /* Find the QR in the database */
     const qr = await getQr(id);
 
@@ -28,7 +30,6 @@ export const loader = async ({
      * if the QR doesn't exist, we still record the scan
      * and we still save the id in a field specifically for deleted QRs
      */
-
     const scan = await createScan({
       userAgent: request.headers.get("user-agent") as string,
       qrId: id,
@@ -37,13 +38,19 @@ export const loader = async ({
 
     /** If the QR doesn't exist, return a 404
      *
-     * AFTER MVP: Here we have to consider a delted User which will
+     * AFTER MVP: Here we have to consider a deleted User which will
      * delete all the connected QRs.
      * However, in real life there could be a physical QR code
      * that is still there. Will we allow someone to claim it?
      */
     if (!qr) {
-      throw new ShelfError({ cause: null, message: "Not found", label: "QR" });
+      throw new ShelfError({
+        cause: null,
+        message: "QR is not found",
+        additionalData: { userId, id },
+        label: "QR",
+        status: 404,
+      });
     }
 
     /**
@@ -54,14 +61,11 @@ export const loader = async ({
     if (!context.isAuthenticated) {
       return redirect(`not-logged-in?scanId=${scan.id}&redirectTo=/qr/${id}`);
     }
-    const authSession = context.getSession();
 
-    if (authSession) {
-      updateScan({
-        id: scan.id,
-        userId: authSession.userId,
-      });
-    }
+    await updateScan({
+      id: scan.id,
+      userId,
+    });
 
     /**
      * Does the QR code belong to any user.
@@ -69,12 +73,10 @@ export const loader = async ({
      * user assigned. We currently can't even do that because we have a unique constraint
      * on the userId within Qr in the database.
      */
-
     /**
      * Does the QR code belong to LOGGED IN user's any of organizations?
      * Redirect to page to report if found.
      */
-
     /** There could be a case when you get removed from an organization while browsing it.
      * In this case what we do is we set the current organization to the first one in the list
      */
@@ -118,26 +120,32 @@ export const loader = async ({
       }
     );
   } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
+  }
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  try {
+    assertIsPost(request);
+
+    const formData = await request.formData();
+    const latitude = formData.get("latitude") as string;
+    const longitude = formData.get("longitude") as string;
+    const scanId = formData.get("scanId") as string;
+
+    await updateScan({
+      id: scanId,
+      latitude,
+      longitude,
+    });
+
+    return json(data({ ok: true }));
+  } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
   }
-};
-
-export const action = async ({ request }: ActionFunctionArgs) => {
-  assertIsPost(request);
-  const formData = await request.formData();
-  const latitude = formData.get("latitude") as string;
-  const longitude = formData.get("longitude") as string;
-  const scanId = formData.get("scanId") as string;
-
-  await updateScan({
-    id: scanId,
-    latitude,
-    longitude,
-  });
-
-  return json({ ok: true });
-};
+}
 
 export function ErrorBoundary() {
   const error = useRouteError();

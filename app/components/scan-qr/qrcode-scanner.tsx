@@ -35,43 +35,47 @@ const QRScanner: React.FC<QRScannerProps> = ({ onClose }) => {
     codeReader.hints = hints;
 
     if (videoRef.current) {
-      codeReader.decodeFromVideoDevice(null, videoRef.current, (result) => {
-        if (result) {
-          const scannedData = result.getText();
+      void codeReader.decodeFromVideoDevice(
+        null,
+        videoRef.current,
+        (result) => {
+          if (result) {
+            const scannedData = result.getText();
 
-          if (scannedData != null) {
-            // Check if the new scanned data is same as the last one
-            if (lastScannedData.current !== scannedData) {
-              lastScannedData.current = scannedData; // Update the lastScannedData
+            if (scannedData != null) {
+              // Check if the new scanned data is same as the last one
+              if (lastScannedData.current !== scannedData) {
+                lastScannedData.current = scannedData; // Update the lastScannedData
 
-              const regex =
-                /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
-              const match = scannedData.match(regex);
+                const regex =
+                  /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
+                const match = scannedData.match(regex);
 
-              if (match) {
-                stopMediaStream();
-                const qrId = match[4]; // Get the last segment of the URL as the QR id
+                if (match) {
+                  void stopMediaStream();
+                  const qrId = match[4]; // Get the last segment of the URL as the QR id
 
-                setScanCompleted(true); // Set the scanCompleted state to true
-                // window.location.href = scannedData;
+                  setScanCompleted(true); // Set the scanCompleted state to true
+                  // window.location.href = scannedData;
 
-                navigate(`/qr/${qrId}`);
-              } else {
-                sendNotification({
-                  title: "QR Code Not Valid",
-                  message: "Please Scan valid asset QR",
-                  icon: { name: "trash", variant: "error" },
-                });
+                  navigate(`/qr/${qrId}`);
+                } else {
+                  sendNotification({
+                    title: "QR Code Not Valid",
+                    message: "Please Scan valid asset QR",
+                    icon: { name: "trash", variant: "error" },
+                  });
+                }
               }
             }
           }
         }
-      });
+      );
     }
     return () => {
       codeReader.reset();
 
-      stopMediaStream();
+      void stopMediaStream();
     };
   }, [videoDevices, stopMediaStream, sendNotification, navigate]);
 

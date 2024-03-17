@@ -102,13 +102,13 @@ export async function getCustomField({
   organizationId: Organization["id"];
 }) {
   try {
-    return await db.customField.findFirst({
+    return await db.customField.findFirstOrThrow({
       where: { id, organizationId },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while fetching the custom field",
+      message: "Custom field not found",
       additionalData: { id, organizationId },
       label,
     });

@@ -186,7 +186,7 @@ export default function DuplicateAsset() {
               zo.errors.amountOfDuplicates()?.message ||
               getValidationErrors<typeof DuplicateAssetSchema>(
                 actionData?.error
-              )?.amountOfDuplicates.message
+              )?.amountOfDuplicates?.message
             }
           />
         </div>

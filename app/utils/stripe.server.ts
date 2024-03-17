@@ -42,15 +42,23 @@ export type StripeEvent = ReturnType<Stripe["webhooks"]["constructEvent"]>;
 export function getDomainUrl(request: Request) {
   const host =
     request.headers.get("X-Forwarded-Host") ?? request.headers.get("host");
+
   if (!host) {
-    throw new Error("Could not determine domain URL.");
+    throw new ShelfError({
+      cause: null,
+      message: "Could not determine domain URL.",
+
+      label,
+    });
   }
+
   const protocol = host.includes("localhost") ? "http" : "https";
+
   return `${protocol}://${host}`;
 }
 
 /** Needed when user has no subscription and wants to buy their first one */
-export const createStripeCheckoutSession = async ({
+export async function createStripeCheckoutSession({
   priceId,
   userId,
   domainUrl,
@@ -60,43 +68,84 @@ export const createStripeCheckoutSession = async ({
   userId: User["id"];
   domainUrl: string;
   customerId: string;
-}): Promise<string> => {
-  if (!stripe) return Promise.reject("Stripe not initialized");
-  const SECRET_KEY = STRIPE_SECRET_KEY;
+}): Promise<string> {
+  try {
+    if (!stripe) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe not initialized",
+        additionalData: { priceId, userId, domainUrl, customerId },
+        label,
+      });
+    }
 
-  if (!SECRET_KEY) return Promise.reject("Stripe secret key not found");
+    const SECRET_KEY = STRIPE_SECRET_KEY;
 
-  const lineItems = [
-    {
-      price: priceId,
-      quantity: 1,
-    },
-  ];
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    payment_method_types: ["card"],
-    line_items: lineItems,
-    success_url: `${domainUrl}/settings/subscription?success=true`,
-    cancel_url: `${domainUrl}/settings/subscription?canceled=true`,
-    client_reference_id: userId,
-    customer: customerId,
-  });
+    if (!SECRET_KEY) {
+      throw new ShelfError({
+        cause: null,
+        message: "Stripe secret key not found",
+        additionalData: { priceId, userId, domainUrl, customerId },
+        label,
+      });
+    }
 
-  // @ts-ignore
-  return session.url;
-};
+    const lineItems = [
+      {
+        price: priceId,
+        quantity: 1,
+      },
+    ];
+
+    const { url } = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      payment_method_types: ["card"],
+      line_items: lineItems,
+      success_url: `${domainUrl}/settings/subscription?success=true`,
+      cancel_url: `${domainUrl}/settings/subscription?canceled=true`,
+      client_reference_id: userId,
+      customer: customerId,
+    });
+
+    if (!url) {
+      throw new ShelfError({
+        cause: null,
+        message: "No url found in stripe checkout session response",
+        additionalData: { priceId, userId, domainUrl, customerId },
+        label,
+      });
+    }
+
+    return url;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a checkout session. Please try again later or contact support.",
+      additionalData: { priceId, userId, domainUrl, customerId },
+      label,
+    });
+  }
+}
 
 /** Fetches prices and products from stripe */
-export const getStripePricesAndProducts = async () => {
-  const pricesResponse = await stripe.prices.list({
-    active: true,
-    expand: ["data.product"],
-  });
-  const prices = groupPricesByInterval(
-    pricesResponse.data as PriceWithProduct[]
-  );
-  return prices;
-};
+export async function getStripePricesAndProducts() {
+  try {
+    const pricesResponse = await stripe.prices.list({
+      active: true,
+      expand: ["data.product"],
+    });
+
+    return groupPricesByInterval(pricesResponse.data as PriceWithProduct[]);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching prices and products from Stripe. Please try again later or contact support.",
+      label,
+    });
+  }
+}
 
 // Function to group prices by recurring interval
 function groupPricesByInterval(prices: PriceWithProduct[]) {
@@ -181,12 +230,22 @@ export async function createBillingPortalSession({
 }: {
   customerId: string;
 }) {
-  const { url } = await stripe.billingPortal.sessions.create({
-    customer: customerId,
-    return_url: `${process.env.SERVER_URL}/settings/subscription`,
-  });
+  try {
+    const { url } = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: `${process.env.SERVER_URL}/settings/subscription`,
+    });
 
-  return { url };
+    return { url };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a billing portal session. Please try again later or contact support.",
+      additionalData: { customerId },
+      label,
+    });
+  }
 }
 
 export function getActiveProduct({
@@ -238,24 +297,42 @@ export function getCustomerTrialSubscription({
 }
 
 export async function fetchStripeSubscription(id: string) {
-  return stripe.subscriptions.retrieve(id, {
-    expand: ["items.data.plan.product"],
-  });
+  try {
+    return await stripe.subscriptions.retrieve(id, {
+      expand: ["items.data.plan.product"],
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch subscription from Stripe",
+      additionalData: { id },
+      label,
+    });
+  }
 }
 
 export async function getDataFromStripeEvent(event: Stripe.Event) {
-  // Here we need to update the user's tier in the database based on the subscription they created
-  const subscription = event.data.object as Stripe.Subscription;
+  try {
+    // Here we need to update the user's tier in the database based on the subscription they created
+    const subscription = event.data.object as Stripe.Subscription;
 
-  /** Get the product */
-  const productId = subscription.items.data[0].plan.product as string;
-  const product = await stripe.products.retrieve(productId);
-  const customerId = subscription.customer as string;
-  const tierId = product?.metadata?.shelf_tier;
+    /** Get the product */
+    const productId = subscription.items.data[0].plan.product as string;
+    const product = await stripe.products.retrieve(productId);
+    const customerId = subscription.customer as string;
+    const tierId = product?.metadata?.shelf_tier;
 
-  return {
-    subscription,
-    customerId,
-    tierId,
-  };
+    return {
+      subscription,
+      customerId,
+      tierId,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching data from Stripe event",
+      additionalData: { event },
+      label,
+    });
+  }
 }

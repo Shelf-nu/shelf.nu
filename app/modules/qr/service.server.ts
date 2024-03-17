@@ -21,7 +21,8 @@ export async function getQr(id: Qr["id"]) {
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to get QR code",
+      message:
+        "Something went wrong while fetching the QR. Please try again or contact support.",
       additionalData: { id },
       label,
     });

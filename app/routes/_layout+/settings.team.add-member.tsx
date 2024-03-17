@@ -1,58 +1,71 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { z } from "zod";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import styles from "~/styles/layout/custom-modal.css";
-import { isFormProcessing } from "~/utils";
+import { data, error, isFormProcessing, parseData } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { maybeUniqueConstraintViolation } from "~/utils/error";
+import { makeShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
-  const authSession = context.getSession();
-
-  await requirePermission({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.teamMember,
-    action: PermissionAction.create,
-  });
-
-  return json({
-    showModal: true,
-  });
-};
-
-export const action = async ({ context, request }: ActionFunctionArgs) => {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId } = await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.teamMember,
-    action: PermissionAction.create,
-  });
-  const formData = await request.formData();
-
   try {
-    const name = formData.get("name") as string;
-    const teamMember = await db.teamMember.create({
-      data: {
-        name: name.trim(),
-        organizationId,
-      },
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.teamMember,
+      action: PermissionAction.create,
     });
 
-    if (!teamMember)
-      return json({
-        error: {
-          general: "Something went wrong. Please try again.",
+    return json(
+      data({
+        showModal: true,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
+
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.teamMember,
+      action: PermissionAction.create,
+    });
+
+    const payload = parseData(
+      await request.formData(),
+      z.object({ name: z.string() })
+    );
+
+    const { name } = payload;
+
+    await db.teamMember
+      .create({
+        data: {
+          name: name.trim(),
+          organizationId,
         },
+      })
+      .catch((cause) => {
+        throw maybeUniqueConstraintViolation(cause, "Team Member", {
+          additionalData: { userId, name },
+        });
       });
 
     sendNotification({
@@ -64,25 +77,17 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 
     return redirect(`/settings/team`);
   } catch (cause) {
-    const rsp = maybeUniqueConstraintViolation(cause, "Team Member");
-
-    return json(
-      { error: { name: rsp.error.message } },
-      {
-        status: 400,
-      }
-    );
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-};
+}
 
 export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
 export default function AddMember() {
-  const actionData = useActionData<{
-    error?: { [key: string]: string };
-  }>();
+  const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   return (
@@ -105,7 +110,6 @@ export default function AddMember() {
             label="Name"
             className="mb-8"
             placeholder="Enter team member’s name"
-            error={actionData?.error?.name}
             required
             autoFocus
           />
@@ -118,9 +122,9 @@ export default function AddMember() {
             Add team member
           </Button>
         </Form>
-        {actionData?.error?.general && (
+        {actionData?.error && (
           <div className="text-sm text-error-500">
-            {actionData.error.general}
+            {actionData.error.message}
           </div>
         )}
       </div>

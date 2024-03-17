@@ -8,7 +8,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
 
   return eventStream(request.signal, function setup(send) {
-    /** Notification is a strigified json object with the shape {@link Notification} */
+    /** Notification is a stringified json object with the shape {@link Notification} */
     function handle(notification: string) {
       /** We only send the notification if the logged in userId is the same as the senderId.
        * We do this to prevent other users receiving notifications

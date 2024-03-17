@@ -238,7 +238,7 @@ export default function Onboarding() {
             error={
               getValidationErrors<typeof OnboardingFormSchema>(
                 actionData?.error
-              )?.username.message || zo.errors.username()?.message
+              )?.username?.message || zo.errors.username()?.message
             }
             defaultValue={user?.username}
             className="w-full"

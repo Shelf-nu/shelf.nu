@@ -1,7 +1,7 @@
 import type { Asset } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons";
@@ -11,8 +11,16 @@ import { usePosition } from "~/hooks";
 import { getAsset } from "~/modules/asset";
 import { createReport, sendReportEmails } from "~/modules/report-found";
 import { getUserByID } from "~/modules/user";
-import { assertIsPost, getRequiredParam, isFormProcessing, tw } from "~/utils";
-import { ShelfError } from "~/utils/error";
+import {
+  assertIsPost,
+  data,
+  error,
+  getParams,
+  isFormProcessing,
+  parseData,
+  tw,
+} from "~/utils";
+import { ShelfError, makeShelfError } from "~/utils/error";
 
 export const NewReportSchema = z.object({
   email: z
@@ -22,74 +30,80 @@ export const NewReportSchema = z.object({
   content: z.string().min(3, "Content is required"),
 });
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  assertIsPost(request);
+export async function action({ request, params }: ActionFunctionArgs) {
+  const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
-  /** Get the QR id from the url */
-  const qrId = getRequiredParam(params, "qrId");
-  /** Query the QR and include the asset and userId for later use */
-  const qr = await db.qr.findFirst({
-    where: {
-      id: qrId,
-    },
-    select: {
-      asset: true,
-      userId: true,
-    },
-  });
+  try {
+    assertIsPost(request);
 
-  if (!qr || !qr.asset || !qr.asset.id) {
-    return new Response("QR code doesnt exist.", { status: 400 });
-  }
+    /** Query the QR and include the asset and userId for later use */
+    const qr = await db.qr
+      .findFirst({
+        where: {
+          id: qrId,
+        },
+        select: {
+          asset: true,
+          userId: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching the QR. Please try again or contact support.",
+          additionalData: { qrId },
+          label: "QR",
+        });
+      });
 
-  const owner = await getUserByID(qr.userId);
-  if (!owner) return new Response("Something went wrong", { status: 500 });
-  const asset = await getAsset({ id: qr.asset.id });
+    if (!qr || !qr.asset || !qr.asset.id) {
+      throw new ShelfError({
+        cause: null,
+        message: "QR code doesn't exist.",
+        additionalData: { qrId },
+        label: "QR",
+        status: 400,
+      });
+    }
 
-  const formData = await request.formData();
-  const result = await NewReportSchema.safeParseAsync(parseFormAny(formData));
-  if (!result.success) {
-    return json({
-      errors: result.error,
+    const owner = await getUserByID(qr.userId);
+    const asset = await getAsset({ id: qr.asset.id });
+
+    const payload = parseData(await request.formData(), NewReportSchema);
+    const { email, content } = payload;
+
+    const report = await createReport({
+      email,
+      content,
+      assetId: qr.asset.id,
     });
-  }
 
-  const { email, content } = result.data;
-
-  const report = await createReport({
-    email,
-    content,
-    assetId: qr.asset.id,
-  });
-  // @TODO Solve error handling
-  if (!report) {
-    return new ShelfError({
-      cause: null,
-      message: "Something went wrong",
-      label: "Report",
+    /**
+     * Here we send 2 emails.
+     * 1. To the owner of the asset
+     * 2. To the person who reported the asset as found
+     */
+    await sendReportEmails({
+      owner,
+      asset: asset as Asset,
+      message: report.content,
+      reporterEmail: report.email,
     });
+
+    return json(data({ report }));
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
   }
-
-  /**
-   * Here we send 2 emails.
-   * 1. To the owner of the asset
-   * 2. To the person who reported the asset as found
-   */
-
-  await sendReportEmails({
-    owner,
-    asset: asset as Asset,
-    message: report.content,
-    reporterEmail: report.email,
-  });
-  return json({ report });
-};
+}
 
 export default function ContactOwner() {
   const zo = useZorm("NewQuestionWizardScreen", NewReportSchema);
   const data = useActionData<typeof action>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+  const isReported = data && !data.error;
   usePosition();
 
   return (
@@ -104,7 +118,7 @@ export default function ContactOwner() {
         <Form
           method="post"
           ref={zo.ref}
-          className={tw("text-left", data?.report ? "hidden" : "")}
+          className={tw("text-left", isReported ? "hidden" : "")}
         >
           <Input
             label="Email"
@@ -136,7 +150,7 @@ export default function ContactOwner() {
         <div
           className={tw(
             "rounded-xl border border-solid border-success-300 bg-success-25 p-4 text-center leading-[1]",
-            data?.report ? "block" : "hidden"
+            isReported ? "block" : "hidden"
           )}
         >
           <p className="inline-flex items-center gap-2 font-semibold leading-[1] text-success-700">

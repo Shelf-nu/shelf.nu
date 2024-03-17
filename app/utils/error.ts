@@ -68,7 +68,10 @@ export type FailureReason = {
     | "Report"
     | "Settings"
     | "File storage"
+    | "Scan"
+    | "Scheduler"
     | "Stripe"
+    | "Stripe webhook"
     | "Subscription"
     | "Tag"
     | "Team"
@@ -273,6 +276,7 @@ export function maybeUniqueConstraintViolation(
 ) {
   let message = `We could not create or update this ${modelName}. Please try again or contact support.`;
   let shouldBeCaptured = true;
+  const validationErrors = {} as ValidationError<any>;
 
   if (
     cause instanceof Prisma.PrismaClientKnownRequestError &&
@@ -280,6 +284,9 @@ export function maybeUniqueConstraintViolation(
   ) {
     message = `${modelName} name is already taken. Please choose a different name.`;
     shouldBeCaptured = false;
+    validationErrors["name"] = {
+      message,
+    };
   }
 
   return new ShelfError({
@@ -290,6 +297,7 @@ export function maybeUniqueConstraintViolation(
     additionalData: {
       modelName,
       ...(options && options.additionalData),
+      validationErrors,
     },
     label: "DB constrain violation",
   });

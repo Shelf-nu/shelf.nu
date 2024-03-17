@@ -26,7 +26,7 @@ export type ValidationError<Schema extends ZodType<any, any, any>> = Record<
 function hasValidationErrors<Schema extends ZodType<any, any, any>>(
   additionalData: unknown
 ): additionalData is {
-  validationErrors: ValidationError<Schema>;
+  validationErrors: Partial<ValidationError<Schema>>;
 } {
   return (
     typeof additionalData === "object" &&

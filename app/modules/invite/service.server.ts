@@ -16,23 +16,33 @@ import { createUserOrAttachOrg } from "../user";
 const label: ErrorLabel = "Invite";
 
 //can be used in ui when user enters email so that we can tell invitee is already invited
-export async function getExisitingActiveInvite({
+export async function getExistingActiveInvite({
   organizationId,
   inviteeEmail,
 }: Pick<Invite, "inviteeEmail" | "organizationId">) {
-  return db.invite.findFirst({
-    where: {
-      organizationId,
-      inviteeEmail,
-      OR: [
-        //invite is either not rejected or not expired
-        {
-          status: { notIn: ["REJECTED"] }, //should we allow reinvite if user rejects?
-        },
-        { expiresAt: { gt: new Date() } },
-      ],
-    },
-  });
+  try {
+    return await db.invite.findFirst({
+      where: {
+        organizationId,
+        inviteeEmail,
+        OR: [
+          //invite is either not rejected or not expired
+          {
+            status: { notIn: ["REJECTED"] }, //should we allow reinvite if user rejects?
+          },
+          { expiresAt: { gt: new Date() } },
+        ],
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong with fetching existing invite. Please try again or contact support.",
+      additionalData: { organizationId, inviteeEmail },
+      label,
+    });
+  }
 }
 export async function createInvite(
   payload: Pick<

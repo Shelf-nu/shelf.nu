@@ -7,8 +7,11 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useOrganizationId } from "~/hooks/use-organization-id";
+import type { action as editCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.$fieldId_.edit";
+import type { action as newCustomFieldsAction } from "~/routes/_layout+/settings.custom-fields.new";
 import { isFormProcessing } from "~/utils";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
+import { getValidationErrors } from "~/utils/http";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -86,16 +89,12 @@ export const CustomFieldForm = ({
 
   // keeping text field type by default selected
   const organizationId = useOrganizationId();
-  const actionData = useActionData<{
-    errors?: {
-      name?: {
-        message: string;
-      };
-      active?: {
-        message: string;
-      };
-    };
-  }>();
+  const actionData = useActionData<
+    typeof newCustomFieldsAction | typeof editCustomFieldsAction
+  >();
+  const validationErrors = getValidationErrors<typeof NewCustomFieldFormSchema>(
+    actionData?.error
+  );
 
   return (
     <Card className="md:w-min">
@@ -115,9 +114,7 @@ export const CustomFieldForm = ({
             hideLabel
             name={zo.fields.name()}
             disabled={disabled}
-            error={
-              actionData?.errors?.name?.message || zo.errors.name()?.message
-            }
+            error={validationErrors?.name?.message || zo.errors.name()?.message}
             autoFocus
             onChange={updateTitle}
             className="w-full"
@@ -216,9 +213,9 @@ export const CustomFieldForm = ({
               </p>
             </div>
           </div>
-          {actionData?.errors?.active?.message ? (
+          {validationErrors?.active ? (
             <div className="text-sm text-error-500">
-              {actionData?.errors?.active?.message}
+              {validationErrors?.active.message}
             </div>
           ) : null}
         </FormRow>
