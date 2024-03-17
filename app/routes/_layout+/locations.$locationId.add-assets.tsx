@@ -252,7 +252,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     /** Creates the relevant notes for all the changed assets */
-    createBulkLocationChangeNotes({
+    await createBulkLocationChangeNotes({
       modifiedAssets,
       assetIds,
       removedAssetIds,

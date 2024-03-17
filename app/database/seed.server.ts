@@ -17,7 +17,7 @@ export const createUserRole = async () => {
 
   if (existingRole) return null;
 
-  return await prisma.role.create({
+  return prisma.role.create({
     data: {
       name: Roles["USER"],
     },
@@ -33,7 +33,7 @@ export const createAdminRole = async () => {
 
   if (existingRole) return null;
 
-  return await prisma.role.create({
+  return prisma.role.create({
     data: {
       name: Roles["ADMIN"],
     },
@@ -53,26 +53,30 @@ export const addUserRoleToAllExistingUsers = async () => {
     },
   })) as Role;
 
-  allUsers.map(async (user) => {
-    if (
-      user.roles?.some(
-        (role) => role.name === Roles["USER"] || role.name === Roles["ADMIN"]
-      )
-    )
-      return;
-    return await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-      data: {
-        roles: {
-          connect: {
-            id: userRole.id,
+  await Promise.all(
+    allUsers.map(async (user) => {
+      if (
+        user.roles?.some(
+          (role) => role.name === Roles["USER"] || role.name === Roles["ADMIN"]
+        )
+      ) {
+        return;
+      }
+
+      return prisma.user.update({
+        where: {
+          id: user.id,
+        },
+        data: {
+          roles: {
+            connect: {
+              id: userRole.id,
+            },
           },
         },
-      },
-    });
-  });
+      });
+    })
+  );
 
   return allUsers;
 };

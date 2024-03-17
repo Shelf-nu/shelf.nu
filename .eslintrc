@@ -6,6 +6,7 @@
     "plugin:tailwindcss/recommended",
     "prettier"
   ],
+  "ignorePatterns": ["coverage"],
   "parserOptions": {
     "project": ["./tsconfig.json"]
   },

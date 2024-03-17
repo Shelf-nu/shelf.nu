@@ -95,7 +95,9 @@ export default function QRPreview() {
 
           // Clean up the object URL after the download
           URL.revokeObjectURL(downloadLink.href);
-        });
+        })
+        // eslint-disable-next-line no-console
+        .catch(console.error);
     }
   }
 

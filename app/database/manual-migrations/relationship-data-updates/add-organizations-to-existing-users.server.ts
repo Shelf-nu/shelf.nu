@@ -25,25 +25,27 @@ async function seed() {
       },
     });
 
-    allUsers.map(async (user) => {
-      if (
-        user.organizations?.some(
-          (org) => org.type === OrganizationType["PERSONAL"]
+    await Promise.all(
+      allUsers.map(async (user) => {
+        if (
+          user.organizations?.some(
+            (org) => org.type === OrganizationType["PERSONAL"]
+          )
         )
-      )
-        return;
+          return;
 
-      return await prisma.user.update({
-        where: {
-          id: user.id,
-        },
-        data: {
-          organizations: {
-            create: [{ name: "Personal" }],
+        return prisma.user.update({
+          where: {
+            id: user.id,
           },
-        },
-      });
-    });
+          data: {
+            organizations: {
+              create: [{ name: "Personal" }],
+            },
+          },
+        });
+      })
+    );
     console.log(
       `Users without a personal organization have been updated. 🌱\n`
     );
