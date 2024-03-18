@@ -140,8 +140,7 @@ export class ShelfError extends Error {
   readonly additionalData: FailureReason["additionalData"];
   readonly shouldBeCaptured: FailureReason["shouldBeCaptured"];
   readonly status: FailureReason["status"];
-  // FIXME: clean this after getting the reason for this line
-  // readonly isShelfError: boolean;
+
   traceId: FailureReason["traceId"];
 
   constructor({

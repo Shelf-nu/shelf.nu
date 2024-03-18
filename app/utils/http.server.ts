@@ -212,8 +212,6 @@ export function error(cause: ShelfError) {
     error: {
       message: cause.message,
       label: cause.label,
-      // FIXME: clean this after getting the reason for this line
-      // isShelfError: cause.isShelfError,
       ...(cause.title && { title: cause.title }),
       ...(cause.additionalData && {
         additionalData: cause.additionalData,

@@ -11,7 +11,6 @@ export function useCurrentOrganization() {
     "routes/_layout+/_layout"
   );
 
-  // FIXME: check what throwing in frontend implies
   if (!layoutData) {
     throw new ShelfError({
       cause: null,
