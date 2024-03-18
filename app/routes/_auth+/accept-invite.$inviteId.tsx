@@ -12,17 +12,15 @@ import { setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import jwt from "~/utils/jsonwebtoken.server";
 
-
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
-    
     /** Here we have to do a check based on the session of the current user
      * If the user is already signed in, we have to make sure the invite sent, is for the same user
      */
     if (context.isAuthenticated) {
       await checkUserAndInviteMatch({ context, params });
     }
-    
+
     const { token } = parseData(
       new URL(decodeURIComponent(request.url)).searchParams,
       z.object({ token: z.string() }),
@@ -41,11 +39,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       status: InviteStatuses.ACCEPTED,
       password,
     });
-  }
-  const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET) as {
-    id: string;
-  };
-
 
     if (updatedInvite.status !== InviteStatuses.ACCEPTED) {
       throw new ShelfError({
@@ -56,28 +49,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-  /** Sign in the user */
-  const signInResult = await signInWithEmail(
-    updatedInvite.inviteeEmail,
-    password
-  );
-  /**
-   * User could already be registered and hence loggin in with our password failed,
-   * redirect to home and let user login or go to home */
-  if (signInResult.status === "error") {
-    return redirect("/login?acceptedInvite=yes");
-  }
-
-  // Ensure that user property exists before proceeding
-  if (signInResult.status === "success" && signInResult.authSession) {
-    const { authSession } = signInResult;
-    // Commit the session
-    context.setSession({ ...authSession });
-    return redirect(
-      safeRedirect(
-        `/onboarding?organizationId=${updatedInvite.organizationId}`
-      ),
-      {
+    /** If the user is already signed in, we jus redirect them to assets index and set */
+    if (context.isAuthenticated) {
+      return redirect(safeRedirect(`/assets`), {
         headers: [
           setCookie(
             await setSelectedOrganizationIdCookie(updatedInvite.organizationId)

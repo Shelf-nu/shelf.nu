@@ -307,28 +307,35 @@ export async function checkUserAndInviteMatch({
 }) {
   const authSession = context.getSession();
   const { userId } = authSession;
+
   /** We get the user, selecting only the email */
-  const user = await db.user.findFirst({
-    where: {
-      id: userId,
-    },
-    select: {
-      email: true,
-    },
-  });
+  const user = await db.user
+    .findFirst({
+      where: {
+        id: userId,
+      },
+      select: {
+        email: true,
+      },
+    })
+    .catch(() => null);
 
   /** We get the invite based on the id of the params */
-  const inv = await db.invite.findFirst({
-    where: {
-      id: params.inviteId,
-    },
-  });
+  const inv = await db.invite
+    .findFirst({
+      where: {
+        id: params.inviteId,
+      },
+    })
+    .catch(() => null);
 
   if (user?.email !== inv?.inviteeEmail) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       title: "Wrong user",
       message:
         "Your user's email doesn't match with the invited user so you cannot accept the invite. If you already have a user, make sure that you are logged in with the correct user. If the issue persists, feel free to contact support.",
+      label: "Invite",
     });
   }
 }
