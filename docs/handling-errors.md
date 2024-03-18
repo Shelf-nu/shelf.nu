@@ -224,9 +224,7 @@ This mostly to prevent calling an async function that doesn't internally handle 
 
 > [!TIP]
 > If you know what you are doing (like calling a `sendEmail` function that handles its own errors in a catch block), you can silence this error with calling the function with `void`. (Use with caution!)
-> 
+>
 > ```ts
 > void sendEmail();
 > ```
-
-
