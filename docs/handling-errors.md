@@ -211,3 +211,22 @@ It pairs well with Forms validation, when you want to display a specific error m
 const nameError = getValidationErrors<typeof MySchema>(actionData?.error).name
   ?.message;
 ```
+
+### Eslint rules involved
+
+#### @typescript-eslint/no-floating-promises
+
+> [Link](https://typescript-eslint.io/rules/no-floating-promises/)
+
+This rules will require you to handle floating promises (promises that are not awaited or returned).
+
+This mostly to prevent calling an async function that doesn't internally handle its own errors. This could result in a server crash.
+
+> [!TIP]
+> If you know what you are doing (like calling a `sendEmail` function that handles its own errors in a catch block), you can silence this error with calling the function with `void`. (Use with caution!)
+> 
+> ```ts
+> void sendEmail();
+> ```
+
+
