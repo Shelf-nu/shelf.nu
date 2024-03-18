@@ -293,7 +293,17 @@ export async function countActiveCustomFields({
 }: {
   organizationId: string;
 }) {
-  return db.customField.count({
-    where: { organizationId, active: true },
-  });
+  try {
+    return await db.customField.count({
+      where: { organizationId, active: true },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching active custom fields. Please try again or contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
 }
