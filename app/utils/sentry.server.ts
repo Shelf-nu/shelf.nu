@@ -31,7 +31,6 @@ export function initSentry() {
 
         return breadcrumb;
       },
-
       beforeSendTransaction(event, hint) {
         return handleBeforeSend(event, hint);
       },

@@ -274,6 +274,7 @@ export async function action({ request }: ActionFunctionArgs) {
           additionalData: { event },
           label: "Stripe webhook",
           status: 400,
+          shouldBeCaptured: false,
         });
       }
     }
