@@ -81,6 +81,7 @@ export async function getSelectedOrganisation({
 
   // If the organizationId is not set or the user is not part of the organization, we set it to the personal organization
   // This case should be extremely rare (be revoked from an organization while browsing it), so, I keep it simple
+  // 💡 This can be improved by implementing a system that sends an sse notification when a user is revoked and forcing the app to reload
   if (!organizationId || !userOrganizationIds.includes(organizationId)) {
     organizationId = personalOrganization.id;
   }
