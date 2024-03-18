@@ -83,7 +83,7 @@ export default Route() {
 ## Services
 
 > [!IMPORTANT]
-> 
+>
 > Only throw `ShelfError`, never a `json` or `Response`
 
 - ✅ Always use a `try/catch` block to catch errors and send a proper `ShelfError`.
