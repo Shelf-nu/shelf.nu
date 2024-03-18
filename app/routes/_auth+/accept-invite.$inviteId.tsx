@@ -86,10 +86,11 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     }
 
     return json({ title: "Accept team invite" });
-  } catch (cause) {
+  } catch (cause: unknown) {
     throw new ShelfStackError({
       cause,
-      message: "Failed to accept invite",
+      // @ts-expect-error will be solved when we improve error handling
+      message: cause?.message || "Failed to accept invite",
     });
   }
 };

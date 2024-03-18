@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import * as serverBuild from "@remix-run/dev/server-build";
 import type { AppLoadContext, ServerBuild } from "@remix-run/node";
-import { createCookieSessionStorage, installGlobals } from "@remix-run/node";
+import { createCookieSessionStorage } from "@remix-run/node";
 import { broadcastDevReady } from "@remix-run/server-runtime";
 import { Hono } from "hono";
 import { remix } from "remix-hono/handler";

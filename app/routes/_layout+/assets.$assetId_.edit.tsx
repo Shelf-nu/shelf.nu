@@ -158,6 +158,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     newLocationId,
     currentLocationId,
     valuation,
+    addAnother,
   } = result.data;
 
   /** This checks if tags are passed and build the  */
@@ -196,7 +197,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     senderId: authSession.userId,
   });
 
-  return redirect(`/assets/${id}`, {});
+  if (addAnother) {
+    return redirect(`/assets/new`);
+  }
+
+  return redirect(`/assets/${id}`);
 }
 
 export default function AssetEditPage() {
