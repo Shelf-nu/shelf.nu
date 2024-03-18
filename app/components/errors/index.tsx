@@ -19,7 +19,7 @@ export const ErrorContent = () => {
   return (
     <div className="flex size-full items-center justify-center">
       <div className="flex flex-col items-center text-center">
-        <img src="/images/error-icon.svg" alt="" className="mb-5" />
+        <img src="/static/images/error-icon.svg" alt="" className="mb-5" />
         <h2 className="mb-2">{title}</h2>
         <p className="max-w-[550px]">{message}</p>
 

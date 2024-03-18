@@ -99,9 +99,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         "The invitation link is invalid. Please try clicking the link in your email again or request a new invite. If the issue persists, feel free to contact support";
     }
 
-    throw json(error({ ...reason, title: "Accept team invite" }), {
-      status: reason.status,
-    });
+    throw json(
+      error({ ...reason, title: reason.title || "Accept team invite" }),
+      {
+        status: reason.status,
+      }
+    );
   }
 }
 
