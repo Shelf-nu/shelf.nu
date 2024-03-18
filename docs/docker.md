@@ -20,6 +20,7 @@ docker run -d \
   -e 'MAPTILER_TOKEN=maptiler-token' \
   -e 'SMTP_HOST=mail.example.com' \
   -e 'SMTP_USER=some-email@example.com' \
+  -e 'SMTP_FROM="Carlos from shelf.nu" <carlos@shelf.nu>' \
   -e 'SMTP_PWD=super-safe-passw0rd' \
   -p 3000:8080 \
   --restart unless-stopped \
