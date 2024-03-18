@@ -10,10 +10,12 @@ export const ErrorContent = () => {
   let title = "Oops, something went wrong";
   let message =
     "There was an unexpected error. Please refresh to try again. If the issues persists, please contact support.";
+  let traceId;
 
   if (isRouteError(response)) {
     message = response.data.error.message;
     title = response.data.error.title || "Oops, something went wrong";
+    traceId = response.data.error.traceId;
   }
 
   return (
@@ -22,7 +24,7 @@ export const ErrorContent = () => {
         <img src="/static/images/error-icon.svg" alt="" className="mb-5" />
         <h2 className="mb-2">{title}</h2>
         <p className="max-w-[550px]">{message}</p>
-
+        {traceId && <p className="text-gray-400">(Trace id: {traceId})</p>}
         <div className=" mt-8 flex gap-3">
           <Button to="/" variant="secondary" icon="home">
             Back to home
