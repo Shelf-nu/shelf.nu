@@ -4,7 +4,7 @@ import { json, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { Spinner } from "~/components/shared/spinner";
 import { signInWithEmail } from "~/modules/auth";
-import { updateInviteStatus } from "~/modules/invite";
+import { checkUserAndInviteMatch, updateInviteStatus } from "~/modules/invite";
 import { generateRandomCode } from "~/modules/invite/helpers";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { INVITE_TOKEN_SECRET, error, parseData, safeRedirect } from "~/utils";
@@ -12,8 +12,17 @@ import { setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import jwt from "~/utils/jsonwebtoken.server";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
+
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
+    
+    /** Here we have to do a check based on the session of the current user
+     * If the user is already signed in, we have to make sure the invite sent, is for the same user
+     */
+    if (context.isAuthenticated) {
+      await checkUserAndInviteMatch({ context, params });
+    }
+    
     const { token } = parseData(
       new URL(decodeURIComponent(request.url)).searchParams,
       z.object({ token: z.string() }),
@@ -32,6 +41,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       status: InviteStatuses.ACCEPTED,
       password,
     });
+  }
+  const decodedInvite = jwt.verify(token, INVITE_TOKEN_SECRET) as {
+    id: string;
+  };
+
 
     if (updatedInvite.status !== InviteStatuses.ACCEPTED) {
       throw new ShelfError({
@@ -42,9 +56,28 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    /** If the user is already signed in, we jus redirect them to assets index and set */
-    if (context.isAuthenticated) {
-      return redirect(safeRedirect(`/assets`), {
+  /** Sign in the user */
+  const signInResult = await signInWithEmail(
+    updatedInvite.inviteeEmail,
+    password
+  );
+  /**
+   * User could already be registered and hence loggin in with our password failed,
+   * redirect to home and let user login or go to home */
+  if (signInResult.status === "error") {
+    return redirect("/login?acceptedInvite=yes");
+  }
+
+  // Ensure that user property exists before proceeding
+  if (signInResult.status === "success" && signInResult.authSession) {
+    const { authSession } = signInResult;
+    // Commit the session
+    context.setSession({ ...authSession });
+    return redirect(
+      safeRedirect(
+        `/onboarding?organizationId=${updatedInvite.organizationId}`
+      ),
+      {
         headers: [
           setCookie(
             await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
