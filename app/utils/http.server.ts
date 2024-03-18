@@ -49,28 +49,6 @@ export function getActionMethod(request: Request) {
 }
 
 /**
- * FIXME: remove
- * @deprecated
- */
-export function getRequiredParam(
-  params: Record<string, string | undefined>,
-  key: string
-) {
-  const value = params[key];
-
-  if (!value) {
-    throw badRequest(`Missing required request param "${key}"`, {
-      additionalData: {
-        params,
-        key,
-      },
-    });
-  }
-
-  return value;
-}
-
-/**
  * Validate data with a zod schema.
  *
  * @throws A `badRequest` error if the form data is invalid.
@@ -217,7 +195,7 @@ export type DataResponse<T extends ResponsePayload = ResponsePayload> =
 export function error(cause: ShelfError) {
   Logger.error(cause);
 
-  // TODO: maybe globally rethink this
+  // TODO: @DonKoko maybe globally rethink this?
   if (
     cause.additionalData?.userId &&
     typeof cause.additionalData?.userId === "string"
