@@ -1,5 +1,7 @@
 import type { Invite, TeamMember } from "@prisma/client";
 import { InviteStatuses } from "@prisma/client";
+import type { AppLoadContext } from "@remix-run/node";
+import type { Params } from "@remix-run/react";
 import jwt from "jsonwebtoken";
 import { db } from "~/database";
 import { invitationTemplateString } from "~/emails/invite-template";
@@ -230,4 +232,42 @@ export async function updateInviteStatus({
     data: { status: InviteStatuses.INVALIDATED },
   });
   return updatedInvite;
+}
+
+/**
+ * Checks if the user is already signed in and if the invite is for the same user
+ */
+export async function checkUserAndInviteMatch({
+  context,
+  params,
+}: {
+  context: AppLoadContext;
+  params: Params<string>;
+}) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  /** We get the user, selecting only the email */
+  const user = await db.user.findFirst({
+    where: {
+      id: userId,
+    },
+    select: {
+      email: true,
+    },
+  });
+
+  /** We get the invite based on the id of the params */
+  const inv = await db.invite.findFirst({
+    where: {
+      id: params.inviteId,
+    },
+  });
+
+  if (user?.email !== inv?.inviteeEmail) {
+    throw new ShelfStackError({
+      title: "Wrong user",
+      message:
+        "Your user's email doesn't match with the invited user so you cannot accept the invite. If you already have a user, make sure that you are logged in with the correct user. If the issue persists, feel free to contact support.",
+    });
+  }
 }
