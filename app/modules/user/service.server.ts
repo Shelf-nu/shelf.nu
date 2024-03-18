@@ -3,7 +3,6 @@ import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
 import sharp from "sharp";
 import type { AuthSession } from "server/session";
 import type { ExtendedPrismaClient } from "~/database";
@@ -406,42 +405,52 @@ export async function updateProfilePicture({
   request: Request;
   userId: User["id"];
 }) {
-  const user = await getUserByID(userId);
-  const previousProfilePictureUrl = user?.profilePicture || undefined;
+  try {
+    const user = await getUserByID(userId);
+    const previousProfilePictureUrl = user.profilePicture || undefined;
 
-  const fileData = await parseFileFormData({
-    request,
-    newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
-    resizeOptions: {
-      height: 150,
-      width: 150,
-      fit: sharp.fit.cover,
-      withoutEnlargement: true,
-    },
-  });
-
-  const profilePicture = fileData.get("profile-picture") as string;
-
-  /** if profile picture is an empty string, the upload failed so we return an error */
-  if (!profilePicture || profilePicture === "") {
-    return json(
-      {
-        error: "Something went wrong. Please refresh and try again",
+    const fileData = await parseFileFormData({
+      request,
+      newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
+      resizeOptions: {
+        height: 150,
+        width: 150,
+        fit: sharp.fit.cover,
+        withoutEnlargement: true,
       },
-      { status: 500 }
-    );
-  }
+    });
 
-  if (previousProfilePictureUrl) {
-    /** Delete the old picture  */
-    await deleteProfilePicture({ url: previousProfilePictureUrl });
-  }
+    const profilePicture = fileData.get("profile-picture") as string;
 
-  /** Update user with new picture */
-  return updateUser({
-    id: userId,
-    profilePicture: getPublicFileURL({ filename: profilePicture }),
-  });
+    /** if profile picture is an empty string, the upload failed so we return an error */
+    if (!profilePicture || profilePicture === "") {
+      throw new ShelfError({
+        cause: null,
+        message: "There is no profile picture to upload",
+        additionalData: { userId },
+        label,
+      });
+    }
+
+    if (previousProfilePictureUrl) {
+      /** Delete the old picture  */
+      await deleteProfilePicture({ url: previousProfilePictureUrl });
+    }
+
+    /** Update user with new picture */
+    return await updateUser({
+      id: userId,
+      profilePicture: getPublicFileURL({ filename: profilePicture }),
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while updating your profile picture. Please try again or contact support.",
+      additionalData: { userId },
+      label,
+    });
+  }
 }
 
 export async function deleteUser(id: User["id"]) {
@@ -489,11 +498,15 @@ export async function createUserAccountForTesting(
   password: string,
   username: string
 ): Promise<AuthSession | null> {
-  const authAccount = await createEmailAuthAccount(email, password);
-  // ok, no user account created
-  if (!authAccount) return null;
+  const authAccount = await createEmailAuthAccount(email, password).catch(
+    () => null
+  );
 
-  const authSession = await signInWithEmail(email, password);
+  if (!authAccount) {
+    return null;
+  }
+
+  const authSession = await signInWithEmail(email, password).catch(() => null);
 
   // user account created but no session 😱
   // we should delete the user account to allow retry create account again
@@ -506,9 +519,12 @@ export async function createUserAccountForTesting(
     email: authSession.email,
     userId: authSession.userId,
     username,
-  });
+  }).catch(() => null);
 
-  if (!user) return null;
+  if (!user) {
+    await deleteAuthAccount(authAccount.id);
+    return null;
+  }
 
   return authSession;
 }
