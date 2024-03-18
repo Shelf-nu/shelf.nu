@@ -231,7 +231,16 @@ export async function getAuthUserById(userId: string) {
 }
 
 export async function getAuthResponseByAccessToken(accessToken: string) {
-  return getSupabaseAdmin().auth.getUser(accessToken);
+  try {
+    return await getSupabaseAdmin().auth.getUser(accessToken);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while getting the auth response by access token. Please try again later or contact support.",
+      label,
+    });
+  }
 }
 
 export async function refreshAccessToken(
@@ -276,11 +285,20 @@ export async function refreshAccessToken(
 }
 
 export async function verifyAuthSession(authSession: AuthSession) {
-  const authAccount = await getAuthResponseByAccessToken(
-    authSession.accessToken
-  );
+  try {
+    const authAccount = await getAuthResponseByAccessToken(
+      authSession.accessToken
+    );
 
-  return Boolean(authAccount);
+    return Boolean(authAccount);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while verifying the auth session. Please try again later or contact support.",
+      label,
+    });
+  }
 }
 
 export async function verifyOtpAndSignin(email: string, otp: string) {
