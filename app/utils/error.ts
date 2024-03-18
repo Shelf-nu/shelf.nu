@@ -169,9 +169,6 @@ export class ShelfError extends Error {
       ? status || cause.status || 500
       : status || 500;
     this.traceId = traceId || createId();
-    // FIXME: clean this after getting the reason for this line
-    // this.isShelfError =
-    //   cause instanceof Error && cause.name === "ShelfStackError";
   }
 }
 
