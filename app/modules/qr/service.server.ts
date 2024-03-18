@@ -8,9 +8,19 @@ import { ShelfError } from "~/utils/error";
 const label: ErrorLabel = "QR";
 
 export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
-  return db.qr.findFirst({
-    where: { assetId },
-  });
+  try {
+    return await db.qr.findFirst({
+      where: { assetId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching the QR. Please try again or contact support.",
+      additionalData: { assetId },
+      label,
+    });
+  }
 }
 
 export async function getQr(id: Qr["id"]) {
@@ -68,27 +78,37 @@ export async function generateCode({
   qr: Qr;
   size: "cable" | "small" | "medium" | "large";
 }) {
-  const code = QRCode(version, errorCorrection);
-  code.addData(`${process.env.SERVER_URL}/qr/${qr.id}`);
-  code.make();
+  try {
+    const code = QRCode(version, errorCorrection);
+    code.addData(`${process.env.SERVER_URL}/qr/${qr.id}`);
+    code.make();
 
-  /** We use a margin of 0 because we handle this using canvas in the client */
-  const sizes = {
-    cable: [1, 0], // 29px => 0.8cm(0.77)
-    small: [2, 0], // 58px => 1.5cm(1.53)
-    medium: [4, 0], // 116px => 3.1cm(3.07)
-    large: [6, 0], // 174px => 4.7cm(4.6)
-  };
-  const src = await gifToPng(code.createDataURL(...sizes[size]));
+    /** We use a margin of 0 because we handle this using canvas in the client */
+    const sizes = {
+      cable: [1, 0], // 29px => 0.8cm(0.77)
+      small: [2, 0], // 58px => 1.5cm(1.53)
+      medium: [4, 0], // 116px => 3.1cm(3.07)
+      large: [6, 0], // 174px => 4.7cm(4.6)
+    };
+    const src = await gifToPng(code.createDataURL(...sizes[size]));
 
-  return {
-    sizes,
-    code: {
-      size: size,
-      src,
-      id: qr.id,
-    },
-  };
+    return {
+      sizes,
+      code: {
+        size: size,
+        src,
+        id: qr.id,
+      },
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while generating the QR code. Please try again or contact support.",
+      additionalData: { version, errorCorrection, qr, size },
+      label,
+    });
+  }
 }
 
 export async function generateOrphanedCodes({
