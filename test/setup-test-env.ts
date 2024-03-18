@@ -1,4 +1,3 @@
-// import { installGlobals } from "@remix-run/node";
 import "@testing-library/jest-dom/vitest";
 import { server } from "mocks";
 
@@ -30,8 +29,6 @@ if (typeof window !== "undefined") {
   // @ts-expect-error missing vitest type
   window.happyDOM.settings.enableFileSystemHttpRequests = true;
 }
-
-// installGlobals();
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());

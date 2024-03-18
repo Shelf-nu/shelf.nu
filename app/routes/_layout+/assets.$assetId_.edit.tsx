@@ -168,6 +168,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       newLocationId,
       currentLocationId,
       valuation,
+      addAnother,
     } = payload;
 
     /** This checks if tags are passed and build the  */
@@ -193,7 +194,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    if (payload.addAnother) {
+    if (addAnother) {
       return redirect(`/assets/new`);
     }
 
