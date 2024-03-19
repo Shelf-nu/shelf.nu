@@ -2,6 +2,14 @@
 
 If you prefer using docker for running shelf locally or self hosting your live app, we have a Docker image ready for you thanks to [@anatolinicolae](https://github.com/anatolinicolae)
 
+## Prerequisites
+
+If you want to run shelf via docker, there are still some prerequisites you need to meet. Because our docker setup doesn't currently support self-hosting supabase, you need to complete the following steps of the general setup:
+1. https://github.com/Shelf-nu/shelf.nu/blob/main/docs/get-started.md#development
+2. https://github.com/Shelf-nu/shelf.nu/blob/main/docs/get-started.md#authentication
+
+This will make sure you have a DATABASE that you are ready to connect to.
+
 ## Instructions
 
 1. Make sure you have docker installed on your machine
