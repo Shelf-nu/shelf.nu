@@ -21,7 +21,8 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { getOrganization, updateOrganization } from "~/modules/organization";
+import { db } from "~/database";
+import { updateOrganization } from "~/modules/organization";
 import { assertIsPost, getRequiredParam } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -40,10 +41,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
   const id = getRequiredParam(params, "workspaceId");
 
-  const organization = await getOrganization({
-    id,
-    userId: authSession.userId,
+  /** We get the organization and make sure the current user is the owner as only owner should be able to edit it */
+  const organization = await db.organization.findUnique({
+    where: {
+      id,
+      owner: {
+        is: {
+          id: authSession.userId,
+        },
+      },
+    },
   });
+
   if (!organization) {
     throw new Response("Not Found", { status: 404 });
   }
