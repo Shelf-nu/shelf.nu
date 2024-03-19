@@ -22,7 +22,6 @@ import {
 } from "~/modules/asset";
 
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganization } from "~/modules/organization";
 import { buildTagsSet } from "~/modules/tag";
 import { assertIsPost, getRequiredParam, slugify } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -38,13 +37,12 @@ import { requirePermision } from "~/utils/roles.server";
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { organizationId } = await requirePermision({
+  const { organizationId, currentOrganization } = await requirePermision({
     userId,
     request,
     entity: PermissionEntity.asset,
     action: PermissionAction.update,
   });
-  const organization = await getOrganization({ id: organizationId, userId });
 
   const id = getRequiredParam(params, "assetId");
 
@@ -83,7 +81,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     totalTags: tags.length,
     locations,
     totalLocations,
-    currency: organization?.currency,
+    currency: currentOrganization?.currency,
     customFields,
   });
 }
