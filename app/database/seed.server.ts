@@ -86,9 +86,11 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, {
 
 const prisma = new PrismaClient();
 
-const email = "hello@supabase.com";
+const email = process.env.ADMIN_EMAIL || "hello@supabase.com";
 
-const getUserId = async (email = "hello@supabase.com"): Promise<string> => {
+const getUserId = async (
+  email = process.env.ADMIN_EMAIL || "hello@supabase.com"
+): Promise<string> => {
   const userList = await supabaseAdmin.auth.admin.listUsers();
 
   if (userList.error) {
@@ -105,7 +107,7 @@ const getUserId = async (email = "hello@supabase.com"): Promise<string> => {
 
   const newUser = await supabaseAdmin.auth.admin.createUser({
     email,
-    password: "supabase",
+    password: process.env.ADMIN_PASSWORD || "supabase",
     email_confirm: true,
   });
 
@@ -142,7 +144,7 @@ async function seed() {
     const user = await createUser({
       email,
       userId: id,
-      username: "supabase",
+      username: process.env.ADMIN_USERNAME || "supabase",
     });
 
     if (!user) {
@@ -153,7 +155,10 @@ async function seed() {
 
     console.log(`Database has been seeded. 🌱\n`);
     console.log(
-      `User added to your database 👇 \n🆔: ${user.id}\n📧: ${user.email}\n🔑: supabase`
+      `User added to your database 👇\n`,
+      `🆔: ${user.id}\n`,
+      `📧: ${user.email}\n`,
+      `🔑: ${process.env.ADMIN_PASSWORD || "supabase"}`
     );
   } catch (cause) {
     throw new ShelfStackError({ message: "Seed failed 🥲", cause });
