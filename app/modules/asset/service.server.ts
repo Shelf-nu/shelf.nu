@@ -138,6 +138,7 @@ async function getAssetsFromView(params: {
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
+  locationIds?: Location["id"][] | null;
 }) {
   const {
     organizationId,
@@ -151,6 +152,7 @@ async function getAssetsFromView(params: {
     bookingTo,
     hideUnavailable,
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
+    locationIds,
   } = params;
 
   try {
@@ -251,6 +253,12 @@ async function getAssetsFromView(params: {
             in: tagsIds,
           },
         },
+      };
+    }
+
+    if (locationIds && locationIds.length > 0 && where.asset) {
+      where.asset.location = {
+        id: { in: locationIds },
       };
     }
 
@@ -1187,12 +1195,14 @@ export async function getPaginatedAndFilterableAssets({
   excludeCategoriesQuery = false,
   excludeTagsQuery = false,
   excludeSearchFromView = false,
+  excludeLocationQuery = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   extraInclude?: Prisma.AssetInclude;
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
+  excludeLocationQuery?: boolean;
   /**
    * Set to true if you want the query to be performed by directly accessing the assets table
    *  instead of the AssetSearchView
@@ -1216,6 +1226,7 @@ export async function getPaginatedAndFilterableAssets({
     bookingTo,
     hideUnavailable,
     unhideAssetsBookigIds,
+    locationIds,
   } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -1229,6 +1240,9 @@ export async function getPaginatedAndFilterableAssets({
       tagsExcludedSelected,
       selectedTags,
       totalTags,
+      locationExcludedSelected,
+      selectedLocations,
+      totalLocations,
     ] = await Promise.all([
       db.category.findMany({
         where: { organizationId, id: { notIn: categoriesIds } },
@@ -1246,6 +1260,15 @@ export async function getPaginatedAndFilterableAssets({
         where: { organizationId, id: { in: tagsIds } },
       }),
       db.tag.count({ where: { organizationId } }),
+      // locations
+      db.location.findMany({
+        where: { organizationId, id: { notIn: locationIds } },
+        take: getAllEntries.includes("location") ? undefined : 12,
+      }),
+      db.location.findMany({
+        where: { organizationId, id: { in: locationIds } },
+      }),
+      db.location.count({ where: { organizationId } }),
     ]);
 
     let getFunction = getAssetsFromView;
@@ -1265,6 +1288,7 @@ export async function getPaginatedAndFilterableAssets({
       bookingTo,
       hideUnavailable,
       unhideAssetsBookigIds,
+      locationIds,
     });
     const totalPages = Math.ceil(totalAssets / perPage);
 
@@ -1282,6 +1306,10 @@ export async function getPaginatedAndFilterableAssets({
       assets,
       totalPages,
       cookie,
+      locations: excludeLocationQuery
+        ? []
+        : [...selectedLocations, ...locationExcludedSelected],
+      totalLocations,
     };
   } catch (cause) {
     throw new ShelfError({

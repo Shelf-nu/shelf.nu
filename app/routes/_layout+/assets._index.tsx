@@ -22,6 +22,7 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
@@ -33,7 +34,7 @@ import {
 } from "~/modules/asset";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import assetCss from "~/styles/assets.css";
-import { data, error } from "~/utils";
+import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -144,6 +145,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         cookie,
         totalCategories,
         totalTags,
+        locations,
+        totalLocations,
       },
     ] = await Promise.all([
       getOrganizationTierLimit({
@@ -204,6 +207,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
         totalCategories,
         totalTags,
+        locations,
+        totalLocations,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -236,8 +241,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
-  const hasFiltersToClear = useSearchParamHasValue("category", "tag");
-  const clearFilters = useClearValueFromParams("category", "tag");
+  const hasFiltersToClear = useSearchParamHasValue(
+    "category",
+    "tag",
+    "location"
+  );
+  const clearFilters = useClearValueFromParams("category", "tag", "location");
   const { canImportAssets } = useLoaderData<typeof loader>();
   const isSelfService = useUserIsSelfService();
 
@@ -304,6 +313,31 @@ export default function AssetIndexPage() {
                 label="Filter by tags"
                 initialDataKey="tags"
                 countKey="totalTags"
+              />
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Locations{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "location", key: "name" }}
+                label="Filter by Location"
+                initialDataKey="locations"
+                countKey="totalLocations"
+                renderItem={({ metadata }) => (
+                  <div className="flex items-center gap-2">
+                    <Image
+                      imageId={metadata.imageId}
+                      alt="img"
+                      className={tw(
+                        "size-6 rounded-[2px] object-cover",
+                        metadata.description ? "rounded-b-none border-b-0" : ""
+                      )}
+                    />
+                    <div>{metadata.name}</div>
+                  </div>
+                )}
               />
             </div>
           </div>

@@ -94,21 +94,19 @@ export function useModelFilters({
   const handleSearchQueryChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
-    if (!e.target.value) {
-      resetModelFiltersFetcher();
+    if (!e.currentTarget.value) {
+      clearFilters();
     } else {
       setSearchQuery(e.currentTarget.value);
-      if (e.currentTarget.value) {
-        fetcher.submit(
-          {
-            model: model.name,
-            queryKey: model.key as string,
-            queryValue: e.currentTarget.value,
-            selectedValues: selectedItems,
-          },
-          { method: "GET", action: "/api/model-filters" }
-        );
-      }
+      fetcher.submit(
+        {
+          model: model.name,
+          queryKey: model.key as string,
+          queryValue: e.currentTarget.value,
+          selectedValues: selectedItems,
+        },
+        { method: "GET", action: "/api/model-filters" }
+      );
     }
   };
 
