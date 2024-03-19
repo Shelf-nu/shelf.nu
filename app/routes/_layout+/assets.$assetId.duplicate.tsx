@@ -44,7 +44,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          message: "Asset Not Found",
+          title: "Asset Not Found",
+          message:
+            "The asset you are trying to access does not exist or you do not have permission to access it.",
           additionalData: { userId, assetId },
           status: 404,
           label: "Assets",
@@ -95,7 +97,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          message: "Asset Not Found",
+          title: "Asset Not Found",
+          message:
+            "The asset you are trying to access does not exist or you do not have permission to access it.",
           additionalData: { userId, assetId },
           status: 404,
           label: "Assets",

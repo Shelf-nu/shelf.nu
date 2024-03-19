@@ -113,7 +113,8 @@ export async function getAsset({
     throw new ShelfError({
       cause,
       title: "Asset not found",
-      message: "We couldn't find the asset you were looking for.",
+      message:
+        "The asset you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId, userId },
       label,
     });

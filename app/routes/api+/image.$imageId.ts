@@ -25,7 +25,9 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          message: "Not found",
+          title: "Image not found",
+          message:
+            "The image you are trying to access does not exist or you do not have permission to access it.",
           additionalData: { userId, imageId },
           status: 404,
           label: "Image",

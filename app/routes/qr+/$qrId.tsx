@@ -46,7 +46,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     if (!qr) {
       throw new ShelfError({
         cause: null,
-        message: "QR is not found",
+        title: "QR is not found",
+        message:
+          "The QR you are trying to access does not exist or you do not have permission to access it.",
         additionalData: { userId, id },
         label: "QR",
         status: 404,

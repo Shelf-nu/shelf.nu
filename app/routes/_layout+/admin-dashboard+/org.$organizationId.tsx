@@ -41,7 +41,9 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          message: "Organization not found",
+          title: "Organization not found",
+          message:
+            "The organization you are trying to access does not exist or you do not have permission to access it.",
           additionalData: { userId, params },
           label: "Admin dashboard",
         });

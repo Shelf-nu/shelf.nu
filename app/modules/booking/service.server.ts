@@ -749,8 +749,9 @@ export async function getBooking(
   } catch (cause) {
     throw new ShelfError({
       cause,
+      title: "Booking not found",
       message:
-        "Booking not found. Please try again or contact support if the problem persists.",
+        "The booking you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { booking },
       label,
     });

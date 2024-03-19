@@ -197,7 +197,9 @@ export async function getTag({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Tag not found",
+      title: "Tag not found",
+      message:
+        "The tag you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id, organizationId },
       label,
     });

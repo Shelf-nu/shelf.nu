@@ -56,7 +56,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          message: "Location not found",
+          title: "Location not found",
+          message:
+            "The location you are trying to access does not exist or you do not have permission to access it.",
           additionalData: { locationId, userId, organizationId },
           status: 404,
           label: "Location",

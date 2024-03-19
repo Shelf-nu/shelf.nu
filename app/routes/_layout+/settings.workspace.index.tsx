@@ -26,7 +26,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    // permissions here?
     // Every user can see this view for themseleves, so we dont have to manage any permissions here
     const { organizationId } = await getSelectedOrganisation({
       userId: authSession.userId,
@@ -71,7 +70,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       .catch((cause) => {
         throw new ShelfError({
           cause,
-          message: "User not found",
+          title: "User not found",
+          message:
+            "The user you are trying to access does not exist or you do not have permission to access it.",
           additionalData: { userId, organizationId },
           label: "Settings",
         });
