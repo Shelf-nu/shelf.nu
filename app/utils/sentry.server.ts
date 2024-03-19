@@ -48,7 +48,7 @@ function handleBeforeSend<E extends Event>(event: E, hint: EventHint) {
   const exception = hint.originalException;
 
   if (
-    !exception ||
+    !(exception instanceof Error) ||
     (isLikeShelfError(exception) && !exception.shouldBeCaptured)
   ) {
     return null;
