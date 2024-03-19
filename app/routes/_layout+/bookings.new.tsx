@@ -188,7 +188,7 @@ export const handle = {
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
-
+  const now = new Date();
   return (
     <div>
       <header className="mb-5">
@@ -203,16 +203,8 @@ export default function NewBooking() {
         <BookingForm
           id={booking.id}
           name={booking.name}
-          startDate={
-            booking.from
-              ? dateForDateTimeInputValue(new Date(booking.from))
-              : undefined
-          }
-          endDate={
-            booking.to
-              ? dateForDateTimeInputValue(new Date(booking.to))
-              : undefined
-          }
+          startDate={dateForDateTimeInputValue(new Date(now.setHours(8, 0, 0)))}
+          endDate={dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)))}
           custodianUserId={
             booking.custodianUserId ||
             teamMembers.find(
