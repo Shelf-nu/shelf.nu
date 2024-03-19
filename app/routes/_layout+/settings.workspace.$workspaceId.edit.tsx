@@ -21,9 +21,10 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-
+import { db } from "~/database";
 import { updateOrganization } from "~/modules/organization";
 import {
+  ShelfError,
   assertIsPost,
   data,
   error,
@@ -31,7 +32,6 @@ import {
   makeShelfError,
   parseData,
 } from "~/utils";
-import { db } from "~/database";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -57,18 +57,31 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       entity: PermissionEntity.workspace,
       action: PermissionAction.update,
     });
-      
+
     /** We get the organization and make sure the current user is the owner as only owner should be able to edit it */
-    const organization = await db.organization.findUnique({
-      where: {
-        id,
-        owner: {
-          is: {
-            id: authSession.userId,
+    const organization = await db.organization
+      .findUniqueOrThrow({
+        where: {
+          id,
+          owner: {
+            is: {
+              id: authSession.userId,
+            },
           },
         },
-      },
-    });
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Your are not the owner of this organization.",
+          additionalData: {
+            userId,
+            id,
+          },
+          label: "Organization",
+          status: 403,
+        });
+      });
 
     const header: HeaderData = {
       title: `Edit | ${organization.name}`,

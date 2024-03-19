@@ -50,7 +50,7 @@ export function useModelFilters({
 
   const items = useMemo(() => {
     if (searchQuery && fetcher.data && !fetcher.data.error) {
-      return fetcher.data;
+      return fetcher.data.filters;
     }
 
     return (initialData[initialDataKey] ?? []) as Array<ModelFilterItem>;

@@ -6,29 +6,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { defaultUserCategories } from "../category/default-categories";
 
-
 const label: ErrorLabel = "Organization";
-
-export async function getOrganization({
-  id
-}: {
-  id: Organization["id"];
-}) {
-  try {
-    return await db.organization.findUnique({
-      where: {
-        id,
-      },
-    });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Organization not found.",
-      additionalData: { id, userId },
-      label,
-    });
-  }
-}
 
 export const getOrganizationByUserId = async ({
   userId,
