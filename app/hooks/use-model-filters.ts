@@ -49,12 +49,12 @@ export function useModelFilters({
   const fetcher = useFetcherWithReset<SerializeFrom<typeof loader>>();
 
   const items = useMemo(() => {
-    if (fetcher.data && !fetcher.data.error) {
-      return fetcher.data.filters;
+    if (searchQuery && fetcher.data && !fetcher.data.error) {
+      return fetcher.data;
     }
 
     return (initialData[initialDataKey] ?? []) as Array<ModelFilterItem>;
-  }, [fetcher.data, initialData, initialDataKey]);
+  }, [fetcher.data, initialData, initialDataKey, searchQuery]);
 
   const handleSelectItemChange = useCallback(
     (value: string) => {

@@ -6,24 +6,18 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { defaultUserCategories } from "../category/default-categories";
 
+
 const label: ErrorLabel = "Organization";
 
 export async function getOrganization({
-  id,
-  userId,
+  id
 }: {
   id: Organization["id"];
-  userId: User["id"];
 }) {
   try {
-    return await db.organization.findUniqueOrThrow({
+    return await db.organization.findUnique({
       where: {
         id,
-        owner: {
-          is: {
-            id: userId,
-          },
-        },
       },
     });
   } catch (cause) {

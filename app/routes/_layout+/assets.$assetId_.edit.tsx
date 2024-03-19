@@ -21,7 +21,6 @@ import {
 } from "~/modules/asset";
 
 import { getActiveCustomFields } from "~/modules/custom-field";
-import { getOrganization } from "~/modules/organization";
 import { buildTagsSet } from "~/modules/tag";
 import {
   assertIsPost,
@@ -49,17 +48,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, currentOrganization } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });
-
-    const [organization, asset] = await Promise.all([
-      getOrganization({ id: organizationId, userId }),
-      getAsset({ organizationId, id }),
-    ]);
+  
+    const asset = await getAsset({ organizationId, id });
 
     const {
       categories,
@@ -92,7 +88,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalTags: tags.length,
         locations,
         totalLocations,
-        currency: organization?.currency,
+        currency: currentOrganization?.currency,
         customFields,
       })
     );
