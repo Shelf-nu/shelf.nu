@@ -23,7 +23,8 @@ Shelf's basic setup is based on a Remix stack by [rphlmr](https://github.com/rph
 
 If you prefer to run shelf locally or host your live app via docker, please check our [Docker](./docker.md) documentation.
 
-_**Note**: Currently we dont have a docker setup that also includes self hositng supabase. Once released the docker documentation will be updated to include it as well._
+> [!NOTE]
+> Currently we dont have a docker setup that also includes self hositng supabase. Once released the docker documentation will be updated to include it as well.
 
 ## Development
 
