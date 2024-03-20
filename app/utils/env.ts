@@ -153,6 +153,12 @@ export const ENABLE_PREMIUM_FEATURES =
     isRequired: false,
   }) === "true" || false;
 
+export const SEND_ONBOARDING_EMAIL =
+  getEnv("SEND_ONBOARDING_EMAIL", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
 export function getBrowserEnv() {
   return {
     NODE_ENV,
