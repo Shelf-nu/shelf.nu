@@ -24,12 +24,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    const regex =
-      // eslint-disable-next-line no-useless-escape
-      /\/assets\/([a-f0-9-]+)\/([a-z0-9]+)\/([a-z0-9\-]+\.[a-z]{3,4})/i;
-    const match = mainImage.match(regex);
-
-    const filename = match ? `/${match[1]}/${match[2]}/${match[3]}` : null;
+    const url = new URL(mainImage);
+    const path = url.pathname;
+    const start = path.indexOf("/assets/");
+    const filename =
+      start !== -1 ? path.slice(start + "/assets/".length) : null;
 
     if (!filename) {
       throw new ShelfError({

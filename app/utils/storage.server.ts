@@ -51,7 +51,7 @@ export async function createSignedUrl({
 
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
-      .createSignedUrl(filename, 86_400_000); //24h
+      .createSignedUrl(filename, 24 * 60 * 60); //24h
 
     if (error) {
       throw error;
