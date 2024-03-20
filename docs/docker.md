@@ -31,6 +31,7 @@ docker run -d \
   -e 'SMTP_HOST=mail.example.com' \
   -e 'SMTP_USER=some-email@example.com' \
   -e 'SMTP_PWD=super-safe-passw0rd' \
+  -e 'NODE_ENV=production' \
   -p 3000:8080 \
   --restart unless-stopped \
   ghcr.io/shelf-nu/shelf.nu:latest
