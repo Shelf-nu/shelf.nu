@@ -113,7 +113,6 @@ app.use(
       "/resend-otp",
       "/reset-password",
       "/send-otp",
-      "/verify-email",
       "/healthcheck",
       "/api/public-stats",
       "/api/oss-friends",
