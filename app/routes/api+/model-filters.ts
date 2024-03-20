@@ -2,9 +2,8 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-
-export type AllowedModelNames = "asset" | "tag" | "category" | "location";
+import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { data, error, makeShelfError, parseData } from "~/utils";
 
 const ModelFiltersSchema = z.object({
   /** Models that are allowed to filter */
@@ -20,50 +19,61 @@ const ModelFiltersSchema = z.object({
   selectedValues: z.string().optional(),
 });
 
+export type AllowedModelNames = z.infer<typeof ModelFiltersSchema>["model"];
+
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId } = await requireOrganisationId({ userId, request });
+  try {
+    const { organizationId } = await getSelectedOrganisation({
+      userId,
+      request,
+    });
 
-  /** Getting all the query parameters from url */
-  const url = new URL(request.url);
-  const data: Record<string, string> = {};
-  for (const [key, value] of url.searchParams.entries()) {
-    data[key] = value;
-  }
+    /** Getting all the query parameters from url */
+    const url = new URL(request.url);
+    const searchParams: Record<string, string> = {};
+    for (const [key, value] of url.searchParams.entries()) {
+      searchParams[key] = value;
+    }
 
-  /** Validating parameters */
-  const result = await ModelFiltersSchema.safeParseAsync(data);
-  if (!result.success) {
-    return json({ errors: result.error }, { status: 400 });
-  }
+    /** Validating parameters */
+    const { model, queryKey, queryValue, selectedValues } = parseData(
+      searchParams,
+      ModelFiltersSchema
+    );
 
-  const model = result.data.model as AllowedModelNames;
-  const queryData = (await db[model].dynamicFindMany({
-    where: {
-      organizationId,
-      OR: [
-        {
-          [result.data.queryKey]: {
-            contains: result.data.queryValue,
-            mode: "insensitive",
+    const queryData = (await db[model].dynamicFindMany({
+      where: {
+        organizationId,
+        OR: [
+          {
+            [queryKey]: {
+              contains: queryValue,
+              mode: "insensitive",
+            },
           },
-        },
-        {
-          id: { in: (result.data.selectedValues ?? "").split(",") },
-        },
-      ],
-    },
-    take: 6,
-  })) as Array<Record<string, string>>;
+          {
+            id: { in: (selectedValues ?? "").split(",") },
+          },
+        ],
+      },
+      take: 6,
+    })) as Array<Record<string, string>>;
 
-  return json(
-    queryData.map((item) => ({
-      id: item.id,
-      name: item[result.data.queryKey],
-      color: item?.color,
-      metadata: item,
-    }))
-  );
+    return json(
+      data({
+        filters: queryData.map((item) => ({
+          id: item.id,
+          name: item[queryKey],
+          color: item?.color,
+          metadata: item,
+        })),
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 }

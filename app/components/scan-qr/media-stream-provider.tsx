@@ -108,14 +108,14 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
           video.srcObject = mediaStream;
         } catch (e) {
           sendNotification({
-            title: "camera acces error",
-            message: "smothing went wrong",
+            title: "camera access error",
+            message: "somthing went wrong",
             icon: { name: "trash", variant: "error" },
           });
         }
         await video.play().catch((error) => {
           sendNotification({
-            title: "camera acces error",
+            title: "camera access error",
             message: error.toString(),
             icon: { name: "trash", variant: "error" },
           });
@@ -134,7 +134,7 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
         );
       } catch (error: any) {
         sendNotification({
-          title: "camera acces error",
+          title: "camera access error",
           message: error.toString(),
           icon: { name: "trash", variant: "error" },
         });
@@ -162,7 +162,7 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
       setCurrentVideoDeviceId("");
     } catch (error: any) {
       sendNotification({
-        title: "camera acces error",
+        title: "camera access error",
         message: error.toString(),
         icon: { name: "trash", variant: "error" },
       });
@@ -212,8 +212,8 @@ export const MediaStreamProvider: FC<PropsWithChildren> = ({ children }) => {
         constraints?.width ||
         constraints?.aspectRatio
       ) {
-        stopMediaStream();
-        startMediaStream({
+        void stopMediaStream();
+        void startMediaStream({
           videoTrackConstraints: {
             ...constraints,
             advanced,
@@ -314,7 +314,7 @@ export const MediaStreamVideo: FC<MediaStreamVideoProps> = ({
       video.volume = 0;
       video.setAttribute("playsinline", "playsinline");
       video.srcObject = mediaStream;
-      video.play().then(() => {});
+      void video.play().then(() => {});
     }
   }, [mediaStream]);
 

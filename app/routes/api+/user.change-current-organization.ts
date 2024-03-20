@@ -1,19 +1,29 @@
-import { type ActionFunctionArgs, redirect } from "@remix-run/node";
+import { type ActionFunctionArgs, redirect, json } from "@remix-run/node";
+import { z } from "zod";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { error, parseData } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const formData = await request.formData();
-  const organizationId = formData.get("organizationId");
-  if (!organizationId)
-    throw new ShelfStackError({ message: "Organization ID is required" });
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  return redirect("/", {
-    headers: [
-      setCookie(
-        await setSelectedOrganizationIdCookie(organizationId as string)
-      ),
-    ],
-  });
-};
+  try {
+    const { organizationId } = parseData(
+      await request.formData(),
+      z.object({
+        organizationId: z.string(),
+      })
+    );
+
+    return redirect("/", {
+      headers: [
+        setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+      ],
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
+}

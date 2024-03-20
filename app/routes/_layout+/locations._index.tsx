@@ -11,58 +11,75 @@ import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
 import { getLocations } from "~/modules/location";
-import { getCurrentSearchParams, getParamsValues, tw } from "~/utils";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParamsValues,
+  makeShelfError,
+  tw,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.location,
-    action: PermissionAction.read,
-  });
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search } = getParamsValues(searchParams);
-  const cookie = await updateCookieWithPerPage(request, perPageParam);
-  const { perPage } = cookie;
+  const { userId } = authSession;
 
-  const { locations, totalLocations } = await getLocations({
-    organizationId,
-    page,
-    perPage,
-    search,
-  });
-  const totalPages = Math.ceil(totalLocations / perPage);
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.read,
+    });
+    const searchParams = getCurrentSearchParams(request);
+    const { page, perPageParam, search } = getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
 
-  const header: HeaderData = {
-    title: "Locations",
-  };
-  const modelName = {
-    singular: "location",
-    plural: "locations",
-  };
-  return json(
-    {
-      header,
-      items: locations,
-      search,
+    const { locations, totalLocations } = await getLocations({
+      organizationId,
       page,
-      totalItems: totalLocations,
-      totalPages,
       perPage,
+      search,
+    });
+    const totalPages = Math.ceil(totalLocations / perPage);
 
-      modelName,
-    },
-    {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
-    }
-  );
+    const header: HeaderData = {
+      title: "Locations",
+    };
+    const modelName = {
+      singular: "location",
+      plural: "locations",
+    };
+
+    return json(
+      data({
+        header,
+        items: locations,
+        search,
+        page,
+        totalItems: totalLocations,
+        totalPages,
+        perPage,
+
+        modelName,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

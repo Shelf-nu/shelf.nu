@@ -104,22 +104,22 @@ export const mergedSchema = <T extends ZodRawShape>({
 /** Takes the result of zod's safeParseAsync and extracts custom fields values from it
  * Custom fields need to be prefixed with `cf-`
  */
-export const extractCustomFieldValuesFromResults = ({
-  result,
+export const extractCustomFieldValuesFromPayload = ({
+  payload,
   customFieldDef,
 }: {
-  result: { [key: string]: any };
+  payload: { [key: string]: any };
   customFieldDef: CustomField[];
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
-  const customFieldsKeys = Object.keys(result.data).filter(
-    (key) => key.startsWith("cf-") && result.data[key] != ""
+  const customFieldsKeys = Object.keys(payload).filter(
+    (key) => key.startsWith("cf-") && payload[key] != ""
   );
 
   return customFieldsKeys.map((key) => {
     const id = key.split("-")[1];
     const value = buildCustomFieldValue(
-      { raw: result.data[key] },
+      { raw: payload[key] },
       customFieldDef.find((v) => v.id === id)!
     );
     return { id, value } as ShelfAssetCustomFieldValueType;

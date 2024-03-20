@@ -16,7 +16,7 @@ function getNewPrismaClient() {
   return new PrismaClient().$extends({
     model: {
       $allModels: {
-        async dynamicFindMany<T>(this: T, options: Prisma.Args<T, "findMany">) {
+        dynamicFindMany<T>(this: T, options: Prisma.Args<T, "findMany">) {
           const ctx = Prisma.getExtensionContext(this) as any;
           return ctx.findMany(options);
         },
@@ -36,7 +36,7 @@ if (NODE_ENV === "production") {
     global.__db__ = getNewPrismaClient();
   }
   db = global.__db__;
-  db.$connect();
+  void db.$connect();
 }
 
 export { db };

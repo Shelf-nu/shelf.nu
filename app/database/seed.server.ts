@@ -4,7 +4,7 @@ import { PrismaClient, Roles } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 
 import { createUser } from "~/modules/user";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 import { SUPABASE_SERVICE_ROLE, SUPABASE_URL } from "../utils/env";
 
@@ -17,7 +17,7 @@ export const createUserRole = async () => {
 
   if (existingRole) return null;
 
-  return await prisma.role.create({
+  return prisma.role.create({
     data: {
       name: Roles["USER"],
     },
@@ -33,7 +33,7 @@ export const createAdminRole = async () => {
 
   if (existingRole) return null;
 
-  return await prisma.role.create({
+  return prisma.role.create({
     data: {
       name: Roles["ADMIN"],
     },
@@ -53,26 +53,30 @@ export const addUserRoleToAllExistingUsers = async () => {
     },
   })) as Role;
 
-  allUsers.map(async (user) => {
-    if (
-      user.roles?.some(
-        (role) => role.name === Roles["USER"] || role.name === Roles["ADMIN"]
-      )
-    )
-      return;
-    return await prisma.user.update({
-      where: {
-        id: user.id,
-      },
-      data: {
-        roles: {
-          connect: {
-            id: userRole.id,
+  await Promise.all(
+    allUsers.map(async (user) => {
+      if (
+        user.roles?.some(
+          (role) => role.name === Roles["USER"] || role.name === Roles["ADMIN"]
+        )
+      ) {
+        return;
+      }
+
+      return prisma.user.update({
+        where: {
+          id: user.id,
+        },
+        data: {
+          roles: {
+            connect: {
+              id: userRole.id,
+            },
           },
         },
-      },
-    });
-  });
+      });
+    })
+  );
 
   return allUsers;
 };
@@ -148,7 +152,11 @@ async function seed() {
     });
 
     if (!user) {
-      throw new ShelfStackError({ message: "Unable to create user" });
+      throw new ShelfError({
+        cause: null,
+        message: "Unable to create user",
+        label: "Unknown",
+      });
     }
 
     await addUserRoleToAllExistingUsers();
@@ -161,7 +169,11 @@ async function seed() {
       `🔑: ${process.env.ADMIN_PASSWORD || "supabase"}`
     );
   } catch (cause) {
-    throw new ShelfStackError({ message: "Seed failed 🥲", cause });
+    throw new ShelfError({
+      cause,
+      message: "Seed failed 🥲",
+      label: "Unknown",
+    });
   }
 }
 

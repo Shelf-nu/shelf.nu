@@ -1,60 +1,78 @@
 import React, { useMemo, useRef } from "react";
-import type { Asset } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData, useRouteLoaderData } from "@remix-run/react";
 import { changeDpiDataUrl } from "changedpi";
 import domtoimage from "dom-to-image";
 import { useReactToPrint } from "react-to-print";
+import { z } from "zod";
 import { XIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
-import { useMatchesData } from "~/hooks";
 import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
-import { getCurrentSearchParams, slugify } from "~/utils";
+import type { loader as assetLoader } from "~/routes/_layout+/assets.$assetId";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  makeShelfError,
+  slugify,
+} from "~/utils";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { organizationId } = await requirePermision({
-    userId,
-    request,
-    entity: PermissionEntity.qr,
-    action: PermissionAction.read,
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
   });
 
-  const { assetId } = params as { assetId: string };
-  const searchParams = getCurrentSearchParams(request);
-  const size = (searchParams.get("size") || "medium") as SizeKeys;
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.qr,
+      action: PermissionAction.read,
+    });
 
-  let qr = await getQrByAssetId({ assetId });
-  if (!qr) {
-    /** If for some reason there is no QR, we create one and return it */
-    qr = await createQr({ assetId, userId, organizationId });
+    const searchParams = getCurrentSearchParams(request);
+    const size = (searchParams.get("size") || "medium") as SizeKeys;
+
+    let qr = await getQrByAssetId({ assetId });
+
+    if (!qr) {
+      /** If for some reason there is no QR, we create one and return it */
+      qr = await createQr({ assetId, userId, organizationId });
+    }
+
+    // Create a QR code with a URL
+    const { sizes, code } = await generateCode({
+      version: qr.version as TypeNumber,
+      errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
+      size,
+      qr,
+    });
+
+    return json(
+      data({
+        qr: code,
+        sizes,
+        showSidebar: true,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
   }
-
-  // Create a QR code with a URL
-  const { sizes, code } = await generateCode({
-    version: qr.version as TypeNumber,
-    errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
-    size,
-    qr,
-  });
-
-  return json({
-    qr: code,
-    sizes,
-    showSidebar: true,
-  });
 }
 
 export default function QRPreview() {
   const data = useLoaderData<typeof loader>();
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
-  const asset = useMatchesData<{ asset: Asset }>(
+  const asset = useRouteLoaderData<typeof assetLoader>(
     "routes/_layout+/assets.$assetId"
   )?.asset;
 
@@ -96,7 +114,9 @@ export default function QRPreview() {
 
           // Clean up the object URL after the download
           URL.revokeObjectURL(downloadLink.href);
-        });
+        })
+        // eslint-disable-next-line no-console
+        .catch(console.error);
     }
   }
 

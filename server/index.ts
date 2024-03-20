@@ -9,7 +9,7 @@ import { remix } from "remix-hono/handler";
 import { getSession, session } from "remix-hono/session";
 
 import { initEnv, env } from "~/utils/env";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
@@ -103,6 +103,7 @@ app.use(
   protect({
     onFailRedirectTo: "/login",
     publicPaths: [
+      "/",
       "/accept-invite/:path*", // :path* is a wildcard that will match any path after /accept-invite
       "/forgot-password",
       "/join",
@@ -112,7 +113,6 @@ app.use(
       "/resend-otp",
       "/reset-password",
       "/send-otp",
-      "/verify-email",
       "/healthcheck",
       "/api/public-stats",
       "/api/oss-friends",
@@ -149,11 +149,12 @@ app.use(
           const auth = session.get(authSessionKey);
 
           if (!auth) {
-            throw new ShelfStackError({
+            throw new ShelfError({
               cause: null,
               message:
                 "There is no session here. This should not happen because if you require it, this route should be mark as protected and catch by the protect middleware.",
               status: 403,
+              label: "Dev error",
             });
           }
 
@@ -252,7 +253,7 @@ serve(
           resolve(null);
         });
       });
-      broadcastDevReady(build);
+      void broadcastDevReady(build);
     }
   }
 );

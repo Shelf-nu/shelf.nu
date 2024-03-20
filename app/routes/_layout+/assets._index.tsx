@@ -34,13 +34,13 @@ import {
 } from "~/modules/asset";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import assetCss from "~/styles/assets.css";
-import { tw } from "~/utils";
+import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { userPrefs } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
+import { setCookie, userPrefs } from "~/utils/cookies.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -78,125 +78,146 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId, organizations, currentOrganization, role } =
-    await requirePermision({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
-    });
-  // @TODO we shouldnt have to do this. We can combine it with the requirePermission
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      userOrganizations: {
-        where: {
+  try {
+    const [{ organizationId, organizations, currentOrganization, role }, user] =
+      await Promise.all([
+        requirePermission({
           userId,
-        },
-        select: {
-          organization: {
+          request,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.read,
+        }),
+        db.user
+          .findUniqueOrThrow({
+            where: {
+              id: userId,
+            },
             select: {
-              id: true,
-              name: true,
-              type: true,
-              owner: {
+              firstName: true,
+              tier: {
+                include: { tierLimit: true },
+              },
+              userOrganizations: {
+                where: {
+                  userId,
+                },
                 select: {
-                  tier: {
-                    include: { tierLimit: true },
+                  organization: {
+                    select: {
+                      id: true,
+                      name: true,
+                      type: true,
+                      owner: {
+                        select: {
+                          tier: {
+                            include: { tierLimit: true },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
             },
-          },
-        },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message:
+                "We can't find your user data. Please try again or contact support.",
+              additionalData: { userId },
+              label: "Assets",
+            });
+          }),
+      ]);
+
+    let [
+      tierLimit,
+      {
+        search,
+        totalAssets,
+        perPage,
+        page,
+        categories,
+        tags,
+        assets,
+        totalPages,
+        cookie,
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
       },
-    },
-  });
-  const tierLimit = await getOrganizationTierLimit({
-    organizationId,
-    organizations,
-  });
-  let {
-    search,
-    totalAssets,
-    perPage,
-    page,
-    categories,
-    tags,
-    assets,
-    totalPages,
-    cookie,
-    totalCategories,
-    totalTags,
-    locations,
-    totalLocations,
-  } = await getPaginatedAndFilterableAssets({
-    request,
-    organizationId,
-  });
-  if (totalPages !== 0 && page > totalPages) {
-    return redirect("/assets");
-  }
-  if (!assets) {
-    throw new ShelfStackError({
-      title: "Hey!",
-      message: `No assets found`,
-      status: 404,
-    });
-  }
-  if (role === OrganizationRoles.SELF_SERVICE) {
-    /**
-     * For self service users we dont return the assets that are not available to book
-     */
-    assets = assets.filter((a) => a.availableToBook);
-  }
-  assets = await updateAssetsWithBookingCustodians(assets);
-  const header: HeaderData = {
-    title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
-        : `Your inventory`
-      : currentOrganization?.name
-      ? `${currentOrganization?.name}'s inventory`
-      : "Your inventory",
-  };
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
-  return json(
-    {
-      header,
-      items: assets,
-      categories,
-      tags,
-      search,
-      page,
-      totalItems: totalAssets,
-      perPage,
-      totalPages,
-      modelName,
-      canImportAssets: canImportAssets(tierLimit),
-      searchFieldLabel: "Search assets",
-      searchFieldTooltip: {
-        title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-      },
-      totalCategories,
-      totalTags,
-      locations,
-      totalLocations,
-    },
-    {
-      headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
+    ] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId,
+        organizations,
+      }),
+      getPaginatedAndFilterableAssets({
+        request,
+        organizationId,
+      }),
+    ]);
+
+    if (totalPages !== 0 && page > totalPages) {
+      return redirect("/assets");
     }
-  );
+
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      /**
+       * For self service users we dont return the assets that are not available to book
+       */
+      assets = assets.filter((a) => a.availableToBook);
+    }
+
+    assets = await updateAssetsWithBookingCustodians(assets);
+
+    const header: HeaderData = {
+      title: isPersonalOrg(currentOrganization)
+        ? user?.firstName
+          ? `${user.firstName}'s inventory`
+          : `Your inventory`
+        : currentOrganization?.name
+        ? `${currentOrganization?.name}'s inventory`
+        : "Your inventory",
+    };
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    return json(
+      data({
+        header,
+        items: assets,
+        categories,
+        tags,
+        search,
+        page,
+        totalItems: totalAssets,
+        perPage,
+        totalPages,
+        modelName,
+        canImportAssets: canImportAssets(tierLimit),
+        searchFieldLabel: "Search assets",
+        searchFieldTooltip: {
+          title: "Search your asset database",
+          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        },
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export function shouldRevalidate({

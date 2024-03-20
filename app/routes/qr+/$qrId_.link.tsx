@@ -1,26 +1,32 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { z } from "zod";
 import { UnlinkIcon } from "~/components/icons";
 import { Button } from "~/components/shared";
+import { data, error, getParams, makeShelfError } from "~/utils";
 
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.qr,
-    action: PermissionAction.update,
-  });
-  const { qrId } = params;
-  return json({ qrId });
-};
+  const { userId } = authSession;
+  const { qrId } = getParams(params, z.object({ qrId: z.string() }));
+
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.qr,
+      action: PermissionAction.update,
+    });
+
+    return json(data({ qrId }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
 
 export default function QrLink() {
   const { qrId } = useLoaderData<typeof loader>();

@@ -13,11 +13,12 @@ import {
 } from "@remix-run/node";
 import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { ExportButton } from "~/components/assets/export-button";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
+
 import {
   Select,
   SelectContent,
@@ -33,12 +34,12 @@ import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
 import { updateOrganization } from "~/modules/organization";
-import { isFormProcessing } from "~/utils";
+import { data, error, isFormProcessing, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { canExportAssets } from "~/utils/subscription";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { MAX_SIZE } from "./settings.workspace.new";
@@ -52,74 +53,94 @@ const EditWorkspaceFormSchema = z.object({
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.generalSettings,
-    action: PermissionAction.read,
-  });
   const { userId } = authSession;
 
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      userOrganizations: {
-        include: {
-          organization: {
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.generalSettings,
+      action: PermissionAction.read,
+    });
+
+    const user = await db.user
+      .findUniqueOrThrow({
+        where: {
+          id: userId,
+        },
+        select: {
+          firstName: true,
+          tier: {
+            include: { tierLimit: true },
+          },
+          userOrganizations: {
             include: {
-              _count: {
-                select: {
-                  assets: true,
-                  members: true,
-                  locations: true,
-                },
-              },
-              owner: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  profilePicture: true,
-                  tier: {
-                    include: { tierLimit: true },
+              organization: {
+                include: {
+                  _count: {
+                    select: {
+                      assets: true,
+                      members: true,
+                      locations: true,
+                    },
+                  },
+                  owner: {
+                    select: {
+                      id: true,
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                      tier: {
+                        include: { tierLimit: true },
+                      },
+                    },
                   },
                 },
               },
             },
           },
         },
-      },
-    },
-  });
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "User not found",
+          additionalData: { userId, organizationId },
+          label: "Settings",
+        });
+      });
 
-  if (!user || user.userOrganizations?.length < 1)
-    throw new ShelfStackError({ message: "Organization not found" });
+    const currentOrganization = user.userOrganizations.find(
+      (userOrg) => userOrg.organizationId === organizationId
+    );
 
-  const currentOrganization = user.userOrganizations.find(
-    (userOrg) => userOrg.organizationId === organizationId
-  );
+    if (!currentOrganization) {
+      throw new ShelfError({
+        cause: null,
+        message: "Organization not found",
+        additionalData: { userId, organizationId },
+        label: "Settings",
+      });
+    }
 
-  if (!currentOrganization)
-    throw new ShelfStackError({ message: "Organization not found" });
+    const header: HeaderData = {
+      title: "General",
+    };
 
-  const header: HeaderData = {
-    title: "General",
-  };
-
-  return json({
-    header,
-    currentOrganization: currentOrganization.organization,
-    canExportAssets: canExportAssets(
-      currentOrganization.organization.owner.tier.tierLimit
-    ),
-    user,
-  });
+    return json(
+      data({
+        header,
+        currentOrganization: currentOrganization.organization,
+        canExportAssets: canExportAssets(
+          currentOrganization.organization.owner.tier.tierLimit
+        ),
+        user,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const handle = {
@@ -130,60 +151,56 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
+  const { userId } = authSession;
 
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.generalSettings,
-    action: PermissionAction.update,
-  });
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.generalSettings,
+      action: PermissionAction.update,
+    });
 
-  const clonedRequest = request.clone();
-  const formData = await clonedRequest.formData();
-  const result = await EditWorkspaceFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+    const clonedRequest = request.clone();
+    const formData = await clonedRequest.formData();
 
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-        success: false,
-      },
-      {
-        status: 400,
-      }
+    const payload = parseData(formData, EditWorkspaceFormSchema, {
+      additionalData: { userId, organizationId },
+    });
+
+    const { name, currency, id } = payload;
+
+    const formDataFile = await unstable_parseMultipartFormData(
+      request,
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
     );
+
+    const file = formDataFile.get("image") as File | null;
+
+    await updateOrganization({
+      id,
+      name,
+      image: file || null,
+      userId: authSession.userId,
+      currency,
+    });
+
+    sendNotification({
+      title: "Workspace updated",
+      message: "Your workspace  has been updated successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect("/settings/general");
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-
-  const { name, currency, id } = result.data;
-  const formDataFile = await unstable_parseMultipartFormData(
-    request,
-    unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
-  );
-
-  const file = formDataFile.get("image") as File | null;
-
-  await updateOrganization({
-    id,
-    name,
-    image: file || null,
-    userId: authSession.userId,
-    currency,
-  });
-
-  sendNotification({
-    title: "Workspace updated",
-    message: "Your workspace  has been updated successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return redirect("/settings/general");
 }
 
 export default function GeneralPage() {

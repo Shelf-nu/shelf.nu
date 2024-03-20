@@ -39,7 +39,7 @@ export const ImportContent = () => (
       Import your own content by placing it in the csv file. Here you can{" "}
       <Button
         variant="link"
-        to="/shelf.nu-example-asset-import-from-content.csv"
+        to="/static/shelf.nu-example-asset-import-from-content.csv"
         target="_blank"
         download
       >
@@ -107,7 +107,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
 
   const { data, state } = fetcher;
   const disabled = isFormProcessing(state) || agreed !== "I AGREE";
-  const isSuccessful = data?.success;
+  const isSuccessful = data && !data.error;
 
   /** We use a controlled field for the file, because of the confirmation dialog we have.
    * That way we can disabled the confirmation dialog button until a file is selected
@@ -157,7 +157,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                   You need to type: <b>"I AGREE"</b> in the field below to
                   accept the import. By doing this you agree that you have read
                   the requirements and you understand the limitations and
-                  consiquences of using this feature.
+                  consequences of using this feature.
                 </AlertDialogDescription>
                 <Input
                   type="text"
@@ -172,12 +172,9 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
               </>
             ) : null}
           </AlertDialogHeader>
-          {fetcher.data?.error?.message && !isSuccessful ? (
+          {fetcher.data?.error ? (
             <div>
-              <b className="text-red-500">{fetcher.data?.error?.message}</b>
-              <p>
-                <b>{fetcher.data?.error?.details?.code}</b>
-              </p>
+              <b className="text-red-500">{fetcher.data.error.message}</b>
               <p>
                 Please fix your CSV file and try again. If the issue persists,
                 don't hesitate to get in touch with us.
