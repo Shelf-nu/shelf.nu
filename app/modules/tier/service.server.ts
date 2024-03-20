@@ -56,6 +56,7 @@ export async function assertUserCanImportAssets({
   if (!canImportAssets(tierLimit)) {
     throw new ShelfError({
       cause: null,
+      title: "Not allowed",
       message: "You are not allowed to import assets",
       additionalData: { organizationId },
       label,
@@ -85,6 +86,7 @@ export async function assertUserCanExportAssets({
   if (!canExportAssets(tierLimit)) {
     throw new ShelfError({
       cause: null,
+      title: "Not allowed",
       message: "Your user cannot export assets",
       additionalData: { organizationId },
       label,
@@ -122,6 +124,7 @@ export const assertUserCanCreateMoreCustomFields = async ({
   if (!canCreateMore) {
     throw new ShelfError({
       cause: null,
+      title: "Not allowed",
       message: "Your user cannot create more custom fields",
       additionalData: { organizationId },
       label,
@@ -168,7 +171,7 @@ export async function assertUserCanInviteUsersToWorkspace({
   if (isPersonalOrg(org)) {
     throw new ShelfError({
       cause: null,
-      title: "Cannot invite users",
+      title: "Not allowed",
       message:
         "You cannot invite other users to a personal workspace. Please create a Team workspace.",
       status: 403,
@@ -232,6 +235,7 @@ export async function assertUserCanCreateMoreOrganizations(userId: string) {
   ) {
     throw new ShelfError({
       cause: null,
+      title: "Not allowed",
       message: "You cannot create workspaces with your current plan.",
       additionalData: { userId, tierLimit: user.tier.tierLimit },
       label,
