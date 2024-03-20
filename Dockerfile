@@ -31,7 +31,7 @@ WORKDIR /myapp
 
 COPY --from=deps /myapp/node_modules /myapp/node_modules
 
-ADD /app/database/schema.prisma .
+ADD /app/database/schema.prisma ./app/database/schema.prisma
 RUN npx prisma generate
 
 ADD . .
@@ -47,11 +47,12 @@ WORKDIR /myapp
 
 COPY --from=production-deps /myapp/node_modules /myapp/node_modules
 COPY --from=build /myapp/node_modules/.prisma /myapp/node_modules/.prisma
+COPY --from=build /myapp/app/database/schema.prisma /myapp/app/database/schema.prisma
 
 COPY --from=build /myapp/build /myapp/build
 COPY --from=build /myapp/public /myapp/public
 COPY --from=build /myapp/package.json /myapp/package.json
-COPY --from=build /myapp/start.sh /myapp/start.sh
-RUN chmod +x /myapp/start.sh
+COPY --from=build /myapp/docker-entrypoint.sh /myapp/docker-entrypoint.sh
+RUN chmod +x /myapp/docker-entrypoint.sh
 
-ENTRYPOINT [ "./start.sh" ]
+ENTRYPOINT [ "./docker-entrypoint.sh" ]
