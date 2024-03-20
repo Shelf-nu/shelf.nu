@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import { OrganizationType, PrismaClient } from "@prisma/client";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 const prisma = new PrismaClient();
 
@@ -23,28 +23,37 @@ async function seed() {
       },
     });
 
-    allUsers.map(async (user) => {
-      user.assets.map(async (asset) => {
-        if (asset.organizationId) return;
-        return await prisma.asset.update({
-          where: {
-            id: asset.id,
-          },
-          data: {
-            organizationId: user.organizations.find(
-              (organization) => organization.type === OrganizationType.PERSONAL
-            )?.id,
-          },
-        });
-      });
-    });
+    await Promise.all(
+      allUsers.map((user) =>
+        user.assets.map((asset) => {
+          if (asset.organizationId) {
+            return null;
+          }
+          return prisma.asset.update({
+            where: {
+              id: asset.id,
+            },
+            data: {
+              organizationId: user.organizations.find(
+                (organization) =>
+                  organization.type === OrganizationType.PERSONAL
+              )?.id,
+            },
+          });
+        })
+      )
+    );
 
     console.log(
       `Assets without organizationId have been assigned to PERSONAL organization. 🌱\n`
     );
     console.log(`Database has been seeded. 🌱\n`);
   } catch (cause) {
-    throw new ShelfStackError({ message: "Seed failed 🥲", cause });
+    throw new ShelfError({
+      cause,
+      message: "Seed failed 🥲",
+      label: "Unknown",
+    });
   }
 }
 

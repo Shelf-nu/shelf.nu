@@ -18,18 +18,19 @@ import {
 } from "@remix-run/react";
 import { withSentry } from "@sentry/remix";
 
-import { ErrorBoundryComponent } from "./components/errors";
-
+import { ErrorContent } from "./components/errors";
 import { HomeIcon } from "./components/icons";
 import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import styles from "./tailwind.css";
+import { data } from "./utils";
 import { ClientHintCheck, getHints } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
 import { useNonce } from "./utils/nonce-provider";
 import { splashScreenLinks } from "./utils/splash-screen-links";
+
 export interface RootData {
   env: typeof getBrowserEnv;
   user: User;
@@ -59,14 +60,16 @@ export const meta: MetaFunction = () => [
   },
 ];
 
-export const loader = async ({ request }: LoaderFunctionArgs) =>
-  json({
-    env: getBrowserEnv(),
-    maintenanceMode: false,
-    requestInfo: {
-      hints: getHints(request),
-    },
-  });
+export const loader = ({ request }: LoaderFunctionArgs) =>
+  json(
+    data({
+      env: getBrowserEnv(),
+      maintenanceMode: false,
+      requestInfo: {
+        hints: getHints(request),
+      },
+    })
+  );
 
 export const shouldRevalidate = () => false;
 
@@ -110,4 +113,4 @@ function App() {
 
 export default withSentry(App);
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

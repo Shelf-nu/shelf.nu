@@ -1,6 +1,6 @@
 import { rest } from "msw";
 
-import { USER_EMAIL, USER_ID, USER_PASSWORD, ORGANIZATION_ID } from "./user";
+import { USER_EMAIL, USER_ID, USER_PASSWORD } from "./user";
 
 export const supabaseAuthSession = {
   user: { id: USER_ID, email: USER_EMAIL },
@@ -13,7 +13,6 @@ export const authSession = {
   refreshToken: "valid",
   accessToken: "valid",
   userId: USER_ID,
-  organizationId: ORGANIZATION_ID,
   email: USER_EMAIL,
   expiresIn: -1,
   expiresAt: -1,

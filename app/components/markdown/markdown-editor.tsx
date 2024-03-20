@@ -36,7 +36,7 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
   ref
 ) {
   const fetcher = useFetcher<typeof action>();
-  const content = fetcher?.data?.content;
+  const content = fetcher.data?.error ? "" : fetcher.data?.content;
   const [markdown, setMarkdown] = useAtom(markdownAtom);
 
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {

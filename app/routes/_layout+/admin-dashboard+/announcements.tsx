@@ -1,49 +1,90 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Outlet, useFetcher, useLoaderData } from "@remix-run/react";
+import { z } from "zod";
 import { Switch } from "~/components/forms/switch";
 import { MarkdownViewer } from "~/components/markdown";
 import { Button } from "~/components/shared";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { db } from "~/database";
+import { ShelfError, data, error, makeShelfError, parseData } from "~/utils";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  await requireAdmin(authSession.userId);
+  const { userId } = authSession;
 
-  const announcements = await db.announcement.findMany({
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  try {
+    await requireAdmin(userId);
 
-  return json({
-    announcements: announcements.map((a) => ({
-      ...a,
-      content: parseMarkdownToReact(a.content),
-    })),
-  });
+    const announcements = await db.announcement
+      .findMany({
+        orderBy: {
+          createdAt: "desc",
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load announcements",
+          additionalData: { userId },
+          label: "Admin dashboard",
+        });
+      });
+
+    return json(
+      data({
+        announcements: announcements.map((a) => ({
+          ...a,
+          content: parseMarkdownToReact(a.content),
+        })),
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
-  await requireAdmin(authSession.userId);
-  const formData = await request.formData();
-  const published = formData.get("published") === "on";
-  const announcementId = formData.get("id") as string;
+  const { userId } = authSession;
 
-  await db.announcement.update({
-    where: {
-      id: announcementId,
-    },
-    data: {
-      published,
-    },
-  });
+  try {
+    await requireAdmin(userId);
 
-  return null;
+    const { published, id: announcementId } = parseData(
+      await request.formData(),
+      z.object({
+        published: z.coerce.boolean(),
+        id: z.string(),
+      })
+    );
+
+    await db.announcement
+      .update({
+        where: {
+          id: announcementId,
+        },
+        data: {
+          published,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to update announcement",
+          additionalData: { userId, published, announcementId },
+          label: "Admin dashboard",
+        });
+      });
+
+    return json(data(null));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 };
 
 export default function Announcements() {

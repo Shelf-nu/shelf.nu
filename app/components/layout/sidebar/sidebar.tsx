@@ -30,7 +30,7 @@ export default function Sidebar() {
   useStopMediaStream(stopMediaStream);
 
   const handleScannerClose = () => {
-    stopMediaStream();
+    void stopMediaStream();
     setShowScanner(false);
   };
 

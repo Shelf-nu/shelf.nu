@@ -210,7 +210,7 @@ const ConditionalActionsDropdown = () => {
   );
 };
 
-const ActionsDopdown = () => {
+const ActionsDropdown = () => {
   const isHydrated = useHydrated();
 
   if (!isHydrated)
@@ -229,4 +229,4 @@ const ActionsDopdown = () => {
   );
 };
 
-export default ActionsDopdown;
+export default ActionsDropdown;

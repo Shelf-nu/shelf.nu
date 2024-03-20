@@ -1,4 +1,5 @@
 # Docker
+
 > [!NOTE]
 > The Docker configuration for shelf.nu is an effort powered by people within the community, done by [@anatolinicolae](https://github.com/anatolinicolae). Shelf Asset Management Inc. does not yet provide official support for Docker, but we will accept fixes and documentation at this time. Use at your own risk.
 
@@ -30,6 +31,7 @@ docker run -d \
   -e 'MAPTILER_TOKEN=maptiler-token' \
   -e 'SMTP_HOST=mail.example.com' \
   -e 'SMTP_USER=some-email@example.com' \
+  -e 'SMTP_FROM="Carlos from shelf.nu" <carlos@shelf.nu>' \
   -e 'SMTP_PWD=super-safe-passw0rd' \
   -e 'NODE_ENV=production' \
   -p 3000:8080 \

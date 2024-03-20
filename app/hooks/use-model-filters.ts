@@ -1,7 +1,8 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
-import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import type { AllowedModelNames, loader } from "~/routes/api+/model-filters";
 import useFetcherWithReset from "./use-fetcher-with-reset";
 
 export type ModelFilterItem = {
@@ -45,11 +46,11 @@ export function useModelFilters({
 
   const totalItems = initialData[countKey];
 
-  const fetcher = useFetcherWithReset<Array<ModelFilterItem>>();
+  const fetcher = useFetcherWithReset<SerializeFrom<typeof loader>>();
 
   const items = useMemo(() => {
-    if (searchQuery && fetcher.data) {
-      return fetcher.data;
+    if (searchQuery && fetcher.data && !fetcher.data.error) {
+      return fetcher.data.filters;
     }
 
     return (initialData[initialDataKey] ?? []) as Array<ModelFilterItem>;

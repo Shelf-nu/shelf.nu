@@ -64,6 +64,7 @@ SERVER_URL="http://localhost:3000"
 SMTP_HOST="smtp.yourhost.com"
 SMTP_USER="you@example.com"
 SMTP_PWD="yourSMTPpassword"
+SMTP_FROM="You from example.com" <you@example.com>
 
 # Set this to false to disable requirement of subscription for premium features. This will make premium features available for all users
 # You can also directly adjust this in remix.config.js and set it to false
@@ -174,6 +175,7 @@ Prior to your first deployment, you'll need to do a few things:
   fly secrets set SMTP_HOST="smtp.yourhost.com"
   fly secrets set SMTP_USER="you@example.com"
   fly secrets set SMTP_PWD="yourSMTPpassword"
+  fly secrets set SMTP_FROM="Carlos from shelf.nu" <carlos@shelf.nu>
 
 
   # staging (specify --app name) ** not mandatory if you don't want a staging environnement **

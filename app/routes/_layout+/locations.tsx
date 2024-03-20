@@ -1,19 +1,26 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { Link, Outlet, json } from "@remix-run/react";
+import { data, error, makeShelfError } from "~/utils";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.location,
-    action: PermissionAction.read,
-  });
+  const { userId } = authSession;
 
-  return null;
+  try {
+    await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.read,
+    });
+
+    return json(data(null));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const handle = {
@@ -23,5 +30,3 @@ export const handle = {
 export default function LocationsPage() {
   return <Outlet />;
 }
-
-export const ErrorBoundary = () => <ErrorBoundryComponent />;

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared";
-import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
+import type { loader } from "~/routes/_layout+/assets.$assetId.update-location";
 import { tw } from "~/utils";
 import { SearchInput } from "./search-input";
 import { useLocationSearch } from "./useLocationSearch";
@@ -30,14 +30,14 @@ export const LocationSelect = () => {
     [refinedLocations]
   );
   const { asset } = useLoaderData<typeof loader>();
-  const [locationId, setLocationId] = useState(asset?.locationId || undefined);
+  const [locationId, setLocationId] = useState(asset.locationId || undefined);
 
   return (
     <div className="relative w-full">
       <input
         type="hidden"
         name="currentLocationId"
-        value={asset?.locationId || ""}
+        value={asset.locationId || ""}
       />
       <div className="flex items-center gap-2">
         {/* setting locationId as a key if it exists else a random string to clear select, solution based on https://github.com/radix-ui/primitives/issues/1569#issuecomment-1434801848*/}

@@ -6,6 +6,7 @@
     "plugin:tailwindcss/recommended",
     "prettier"
   ],
+  "ignorePatterns": ["coverage"],
   "parserOptions": {
     "project": ["./tsconfig.json"]
   },
@@ -23,12 +24,21 @@
     "no-console": "warn",
     "arrow-body-style": ["warn", "as-needed"],
     // @typescript-eslint
+    // Note: you must disable the base rule as it can report incorrect errors
+    "no-return-await": "off",
+    "@typescript-eslint/return-await": ["error", "in-try-catch"],
+    // Note: you must disable the base rule as it can report incorrect errors
+    "require-await": "off",
+    "@typescript-eslint/require-await": "error",
+    "@typescript-eslint/no-floating-promises": "error",
+    "@typescript-eslint/await-thenable": "error",
     "@typescript-eslint/no-duplicate-imports": "error",
     "@typescript-eslint/consistent-type-imports": "error",
     "@typescript-eslint/no-unused-vars": [
       "warn",
       {
         "vars": "all",
+        "varsIgnorePattern": "^_",
         "args": "all",
         "argsIgnorePattern": "^_",
         "destructuredArrayIgnorePattern": "^_",

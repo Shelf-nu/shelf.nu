@@ -1,15 +1,24 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { Link, Outlet, json } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
+
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { data, error, makeShelfError } from "~/utils";
 
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requireAdmin(authSession.userId);
+  const { userId } = authSession;
 
-  return null;
+  try {
+    await requireAdmin(userId);
+
+    return json(data(null));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const handle = {
@@ -32,4 +41,4 @@ export default function Area51Page() {
   );
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

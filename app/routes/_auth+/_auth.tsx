@@ -1,6 +1,6 @@
 import { Link, useMatches } from "@remix-run/react";
 import { Outlet } from "react-router";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 import SubHeading from "~/components/shared/sub-heading";
 
 export const loader = () => null;
@@ -57,4 +57,4 @@ export default function App() {
   );
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

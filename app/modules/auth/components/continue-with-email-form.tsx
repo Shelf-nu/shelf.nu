@@ -25,7 +25,7 @@ export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
         inputClassName="w-full"
         placeholder="zaans@huisje.com"
         disabled={isLoading}
-        error={data?.error || ""}
+        error={data?.error.message || ""}
       />
 
       <Button

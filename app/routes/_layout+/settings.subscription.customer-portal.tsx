@@ -1,28 +1,54 @@
-import { redirect } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { db } from "~/database";
+import { ShelfError, error, makeShelfError } from "~/utils";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { createBillingPortalSession } from "~/utils/stripe.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.subscription,
-    action: PermissionAction.update,
-  });
-  const user = await db.user.findUnique({
-    where: { id: authSession.userId },
-    select: { customerId: true },
-  });
+  const { userId } = authSession;
 
-  if (!user?.customerId) throw new Error("No customer ID found");
+  try {
+    await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.subscription,
+      action: PermissionAction.update,
+    });
 
-  const { url } = await createBillingPortalSession({
-    customerId: user.customerId,
-  });
+    const user = await db.user
+      .findUnique({
+        where: { id: authSession.userId },
+        select: { customerId: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong fetching the user. Please try again or contact support.",
+          additionalData: { userId },
+          label: "Subscription",
+        });
+      });
 
-  return redirect(url);
+    if (!user?.customerId) {
+      throw new ShelfError({
+        cause: null,
+        message: "No customer ID found for user",
+        additionalData: { userId },
+        label: "Subscription",
+      });
+    }
+
+    const { url } = await createBillingPortalSession({
+      customerId: user.customerId,
+    });
+
+    return redirect(url);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 }
