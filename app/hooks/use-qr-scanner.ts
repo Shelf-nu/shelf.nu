@@ -11,7 +11,6 @@ export const useQrScanner = () => {
   const [sendNotification] = useClientNotification();
   const [selectedDevice, setSelectedDevice] = useState("");
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [noCamera, setNoCamera] = useState<boolean>(false);
 
   const { devices } = useMediaDevices({
     constraints: {
@@ -31,9 +30,7 @@ export const useQrScanner = () => {
         (device) => device.kind === "videoinput"
       );
 
-      // @TODO here we have to manage the case when there are no media devices available
       if (videoDevices.length === 0) {
-        setNoCamera(true);
         return;
       }
 
@@ -103,6 +100,5 @@ export const useQrScanner = () => {
     selectedDevice,
     setSelectedDevice,
     hasPermission,
-    noCamera,
   };
 };
