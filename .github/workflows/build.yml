@@ -62,6 +62,7 @@ jobs:
         uses: docker/build-push-action@v5.1.0
         with:
           context: .
+          file: Dockerfile.image
           platforms: linux/amd64,linux/arm64
           push: true
           # Note: provenance fixes unknown/unknown platform to be generated on build

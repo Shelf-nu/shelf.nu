@@ -47,7 +47,7 @@ COPY --from=build /myapp/app/database /myapp/app/database
 COPY --from=build /myapp/build /myapp/build
 COPY --from=build /myapp/public /myapp/public
 COPY --from=build /myapp/package.json /myapp/package.json
-COPY --from=build /myapp/start.sh /myapp/start.sh
-RUN chmod +x /myapp/start.sh
+COPY --from=build /myapp/docker-entrypoint.sh /myapp/docker-entrypoint.sh
+RUN chmod +x /myapp/docker-entrypoint.sh
 
-ENTRYPOINT [ "/myapp/start.sh" ]
+ENTRYPOINT [ "/myapp/docker-entrypoint.sh" ]
