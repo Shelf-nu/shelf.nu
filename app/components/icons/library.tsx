@@ -360,8 +360,8 @@ export function GreenCheckMarkIcon(props: SVGProps<SVGSVGElement>) {
         d="M27.7499 33L31.2499 36.5L38.2499 29.5M44.6666 33C44.6666 39.4433 39.4432 44.6666 32.9999 44.6666C26.5566 44.6666 21.3333 39.4433 21.3333 33C21.3333 26.5567 26.5566 21.3333 32.9999 21.3333C39.4432 21.3333 44.6666 26.5567 44.6666 33Z"
         stroke="#039855"
         strokeWidth="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
       <rect
         x="5"
@@ -387,7 +387,7 @@ export function SearchIcon(props: SVGProps<SVGSVGElement>) {
     >
       <path
         d="m16.5 16.5-3.625-3.625m1.958-4.708a6.667 6.667 0 1 1-13.333 0 6.667 6.667 0 0 1 13.333 0Z"
-        stroke="#344054"
+        stroke="currentColor"
         strokeWidth={1.667}
         strokeLinecap="round"
         strokeLinejoin="round"

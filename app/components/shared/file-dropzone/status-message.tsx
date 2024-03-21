@@ -18,7 +18,7 @@ export function StatusMessage({
   fetcher: Fetcher;
   filename: string;
   message: string | null;
-  /** Indicates if tehre was a front-end error with the dropzone */
+  /** Indicates if there was a front-end error with the dropzone */
   error: boolean;
 }) {
   const { data, state } = fetcher;

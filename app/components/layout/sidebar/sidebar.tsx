@@ -19,7 +19,7 @@ export default function Sidebar() {
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);
 
-  /** We use optimistic UI for folding of the sidebar
+  /** We use optimistic UI for folding of the scanner.tsx sidebar
    * As we are making a request to the server to store the cookie,
    * we need to use this approach, otherwise the sidebar will close/open
    * only once the response is received from the server

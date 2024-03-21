@@ -7,20 +7,19 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
-import { parseFormAny } from "react-zorm";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css";
 import { db } from "~/database";
 
 import { upsertBooking } from "~/modules/booking";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getUserByID } from "~/modules/user";
+import { data, error, makeShelfError, parseData } from "~/utils";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 /**
  * In the case of bookings, when the user clicks "new", we automatically create the booking.
@@ -30,145 +29,162 @@ import { requirePermision } from "~/utils/roles.server";
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId, role } = await requirePermision({
-    userId: authSession?.userId,
-    request,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.create,
-  });
+  const { userId } = authSession;
 
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-  const user = await getUserByID(authSession.userId);
+  try {
+    const { organizationId, role } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
+    });
 
-  const booking = await upsertBooking(
-    {
-      organizationId,
-      name: "Draft booking",
-      creatorId: authSession.userId,
-      // If the user is self service, we already set them as the custodian as that is the only possible option
-      ...(isSelfService && {
-        custodianUserId: authSession.userId,
-      }),
-    },
-    getClientHint(request)
-  );
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
-  /**
-   * We need to fetch the team members to be able to display them in the custodian dropdown.
-   */
-  const teamMembers = await db.teamMember.findMany({
-    where: {
-      deletedAt: null,
-      organizationId,
-      userId: {
-        not: null,
+    const booking = await upsertBooking(
+      {
+        organizationId,
+        name: "Draft booking",
+        creatorId: authSession.userId,
+        // If the user is self service, we already set them as the custodian as that is the only possible option
+        ...(isSelfService && {
+          custodianUserId: authSession.userId,
+        }),
       },
-    },
-    include: {
-      user: true,
-    },
-    orderBy: {
-      userId: "asc",
-    },
-  });
+      getClientHint(request)
+    );
 
-  /** We create a teamMember entry to represent the org owner.
-   * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
-   * assigning custody to users, not NRM.
-   */
-  teamMembers.push({
-    id: "owner",
-    name: "owner",
-    user: user,
-    userId: user?.id as string,
-    organizationId,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    deletedAt: null,
-  });
+    const [teamMembers, org] = await Promise.all([
+      /**
+       * We need to fetch the team members to be able to display them in the custodian dropdown.
+       */
+      db.teamMember.findMany({
+        where: {
+          deletedAt: null,
+          organizationId,
+          userId: {
+            not: null,
+          },
+        },
+        include: {
+          user: true,
+        },
+        orderBy: {
+          userId: "asc",
+        },
+      }),
+      /** We create a teamMember entry to represent the org owner.
+       * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
+       * assigning custody to users, not NRM.
+       */
+      db.organization.findUnique({
+        where: {
+          id: organizationId,
+        },
+        select: {
+          owner: true,
+        },
+      }),
+    ]);
 
-  return json(
-    {
-      showModal: true,
-      booking,
-      teamMembers,
-    },
-    {
-      headers: [
-        setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-      ],
+    if (org?.owner) {
+      teamMembers.push({
+        id: "owner",
+        name: "owner",
+        user: org.owner,
+        userId: org.owner.id as string,
+        organizationId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      });
     }
-  );
+
+    return json(
+      data({
+        showModal: true,
+        booking,
+        teamMembers,
+      }),
+      {
+        headers: [
+          setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+        ],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  const formData = await request.formData();
-
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession?.userId,
-    request,
-    entity: PermissionEntity.booking,
-    action: PermissionAction.create,
-  });
+  const { userId } = authSession;
 
-  const result = await NewBookingFormSchema().safeParseAsync(
-    parseFormAny(formData)
-  );
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
+    });
 
-  if (!result.success) {
-    return json(
+    const formData = await request.formData();
+    const payload = parseData(formData, NewBookingFormSchema(), {
+      additionalData: { userId, organizationId },
+    });
+
+    const { name, custodian, id } = payload;
+    const hints = getHints(request);
+
+    const fmt = "yyyy-MM-dd'T'HH:mm";
+
+    const from = DateTime.fromFormat(
+      formData.get("startDate")!.toString()!,
+      fmt,
       {
-        errors: result.error,
-        success: false,
-      },
-      {
-        status: 400,
+        zone: hints.timeZone,
       }
+    ).toJSDate();
+    const to = DateTime.fromFormat(formData.get("endDate")!.toString()!, fmt, {
+      zone: hints.timeZone,
+    }).toJSDate();
+
+    const booking = await upsertBooking(
+      {
+        custodianUserId: custodian,
+        organizationId,
+        id,
+        name,
+        from,
+        to,
+      },
+      getClientHint(request)
     );
+
+    sendNotification({
+      title: "Booking saved",
+      message: "Your booking has been saved successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    const manageAssetsUrl = `/bookings/${
+      booking.id
+    }/add-assets?${new URLSearchParams({
+      // We force the as Date because we know that the booking.from and booking.to are set and exist at this point.
+      bookingFrom: (booking.from as Date).toISOString(),
+      bookingTo: (booking.to as Date).toISOString(),
+      hideUnavailable: "true",
+      unhideAssetsBookigIds: booking.id,
+    })}`;
+
+    return redirect(manageAssetsUrl);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-
-  const { name, custodian, id } = result.data;
-  const hints = getHints(request);
-  const startDate = formData.get("startDate")!.toString();
-  const endDate = formData.get("endDate")!.toString();
-  const fmt = "yyyy-MM-dd'T'HH:mm";
-  const from = DateTime.fromFormat(startDate, fmt, {
-    zone: hints.timeZone,
-  }).toJSDate();
-  const to = DateTime.fromFormat(endDate, fmt, {
-    zone: hints.timeZone,
-  }).toJSDate();
-  var booking = await upsertBooking(
-    {
-      custodianUserId: custodian,
-      organizationId,
-      id,
-      name,
-      from,
-      to,
-    },
-    getClientHint(request)
-  );
-
-  sendNotification({
-    title: "Booking saved",
-    message: "Your booking has been saved successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  const manageAssetsUrl = `/bookings/${
-    booking.id
-  }/add-assets?${new URLSearchParams({
-    // We force the as Date because we know that the booking.from and booking.to are set and exist at this point.
-    bookingFrom: (booking.from as Date).toISOString(),
-    bookingTo: (booking.to as Date).toISOString(),
-    hideUnavailable: "true",
-    unhideAssetsBookigIds: booking.id,
-  })}`;
-
-  return redirect(manageAssetsUrl);
 }
 
 export const handle = {
@@ -178,7 +194,7 @@ export const handle = {
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
-
+  const now = new Date();
   return (
     <div>
       <header className="mb-5">
@@ -193,16 +209,8 @@ export default function NewBooking() {
         <BookingForm
           id={booking.id}
           name={booking.name}
-          startDate={
-            booking.from
-              ? dateForDateTimeInputValue(new Date(booking.from))
-              : undefined
-          }
-          endDate={
-            booking.to
-              ? dateForDateTimeInputValue(new Date(booking.to))
-              : undefined
-          }
+          startDate={dateForDateTimeInputValue(new Date(now.setHours(8, 0, 0)))}
+          endDate={dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)))}
           custodianUserId={
             booking.custodianUserId ||
             teamMembers.find(

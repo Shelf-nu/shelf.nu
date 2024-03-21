@@ -123,6 +123,7 @@ const UserRow = ({
           inviteStatus={invite?.status || status}
           userId={userId}
           name={name}
+          teamMemberId={invite?.teamMemberId}
           email={email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
         />
       ) : null}

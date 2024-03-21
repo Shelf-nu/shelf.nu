@@ -6,7 +6,7 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { ColorInput } from "~/components/forms/color-input";
 import Input from "~/components/forms/input";
@@ -14,11 +14,18 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
 import { getCategory, updateCategory } from "~/modules/category";
-import { isFormProcessing, getRequiredParam } from "~/utils";
+import {
+  isFormProcessing,
+  makeShelfError,
+  error,
+  getParams,
+  data,
+  parseData,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateCategoryFormSchema = z.object({
@@ -31,23 +38,36 @@ const title = "Edit category";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.category,
-    action: PermissionAction.update,
-  });
+  const { userId } = authSession;
+  const { categoryId: id } = getParams(
+    params,
+    z.object({ categoryId: z.string() }),
+    {
+      additionalData: { userId },
+    }
+  );
 
-  const id = getRequiredParam(params, "categoryId");
-  const category = await getCategory({ id });
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.category,
+      action: PermissionAction.update,
+    });
 
-  const colorFromServer = category?.color;
+    const category = await getCategory({ id, organizationId });
 
-  const header = {
-    title,
-  };
+    const colorFromServer = category?.color;
 
-  return json({ header, colorFromServer, category });
+    const header = {
+      title,
+    };
+
+    return json(data({ header, colorFromServer, category }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -56,55 +76,49 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function action({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.category,
-    action: PermissionAction.update,
-  });
-
-  const formData = await request.formData();
-  const result = await UpdateCategoryFormSchema.safeParseAsync(
-    parseFormAny(formData)
+  const { userId } = authSession;
+  const { categoryId: id } = getParams(
+    params,
+    z.object({ categoryId: z.string() }),
+    {
+      additionalData: { userId },
+    }
   );
-  const id = getRequiredParam(params, "categoryId");
 
-  if (!result.success) {
-    return json(
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.category,
+      action: PermissionAction.update,
+    });
+
+    const payload = parseData(
+      await request.formData(),
+      UpdateCategoryFormSchema,
       {
-        errors: result.error,
-      },
-      {
-        status: 400,
+        additionalData: { userId, id, organizationId },
       }
     );
+
+    await updateCategory({
+      ...payload,
+      id,
+      organizationId,
+    });
+
+    sendNotification({
+      title: "Category Updated",
+      message: "Your category has been updated successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect(`/categories`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    return json(error(reason), { status: reason.status });
   }
-
-  const rsp = await updateCategory({
-    ...result.data,
-    id,
-  });
-
-  // Handle response error when creating. Mostly due to duplicate name
-  if (rsp?.error) {
-    return json(
-      {
-        errors: rsp.error,
-      },
-      {
-        status: 400,
-      }
-    );
-  }
-
-  sendNotification({
-    title: "Category Updated",
-    message: "Your category has been updated successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return redirect(`/categories`);
 }
 
 export default function EditCategory() {
@@ -170,9 +184,9 @@ export default function EditCategory() {
             </Button>
           </div>
         </div>
-        {actionData?.errors ? (
+        {actionData?.error ? (
           <div className="mt-3 text-sm text-error-500">
-            {actionData?.errors?.message}
+            {actionData?.error?.message}
           </div>
         ) : null}
       </Form>

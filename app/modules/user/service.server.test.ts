@@ -28,6 +28,7 @@ import {
 // mock db
 vitest.mock("~/database", () => ({
   db: {
+    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
     user: {
       create: vitest.fn().mockResolvedValue({}),
     },
@@ -35,6 +36,9 @@ vitest.mock("~/database", () => ({
       findFirst: vitest.fn().mockResolvedValue({
         id: ORGANIZATION_ID,
       }),
+    },
+    userOrganization: {
+      upsert: vitest.fn().mockResolvedValue({}),
     },
   },
 }));
@@ -193,13 +197,25 @@ describe(createUserAccountForTesting.name, () => {
       if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
     });
     //@ts-expect-error missing vitest type
-    db.user.create.mockResolvedValue({ id: USER_ID, email: USER_EMAIL });
+    db.user.create.mockResolvedValue({
+      id: USER_ID,
+      email: USER_EMAIL,
+      organizations: [
+        {
+          id: "org-id",
+        },
+      ],
+    });
+    // mock db transaction passing the db instance
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementationOnce((callback) => callback(db));
     const username = randomUsernameFromEmail(USER_EMAIL);
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
       username
     );
+
     // we don't want to test the implementation of the function
     result!.expiresAt = -1;
     server.events.removeAllListeners();
@@ -208,13 +224,29 @@ describe(createUserAccountForTesting.name, () => {
         email: USER_EMAIL,
         id: USER_ID,
         username: username,
-        categories: { create: defaultUserCategories },
-        organizations: { create: [{ name: "Personal" }] },
+        firstName: undefined,
+        // categories: { create: defaultUserCategories },
+        organizations: {
+          create: [
+            {
+              name: "Personal",
+              categories: {
+                create: defaultUserCategories.map((c) => ({
+                  ...c,
+                  userId: USER_ID,
+                })),
+              },
+            },
+          ],
+        },
         roles: {
           connect: {
             name: Roles["USER"],
           },
         },
+      },
+      include: {
+        organizations: true,
       },
     });
     expect(result).toEqual(authSession);

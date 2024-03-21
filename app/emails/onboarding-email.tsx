@@ -7,21 +7,19 @@ export const onboardingEmailText = ({
   firstName: string;
 }) => `Hi ${firstName},
 
-I hope this message finds you well! My name is Carlos Virreira, co-founder of Shelf.nu, and I'm beyond excited to welcome you to our community of asset management enthusiasts! 🎉
+Thrilled to have you on board at Shelf! I'm Carlos Virreira, one of the co-founders, and I'm excited to learn more about your needs as an asset management professional.
 
-I came across your profile and noticed that you've signed up to explore our platform. That's fantastic! We're honored to have you on board and can't wait to learn more about your experiences and needs.
+How do you plan to use Shelf.nu? 
 
-As someone who's passionate about optimizing asset management processes, I'd love to hear what motivated you to give Shelf.nu a try. Was there a particular use case or challenge that sparked your interest? Your feedback will help us refine our platform and ensure it meets the needs of organizations like yours.
+What features are essential for you in an asset management system? 
 
-At Shelf.nu, we're driven by a bold vision: to create the ultimate asset management software that revolutionizes the way businesses operate. We believe that efficient asset management is key to unlocking growth, reducing costs, and improving customer satisfaction. By working together, we can achieve great things!
+Your input is key as we fine-tune Shelf.nu for professionals like yourself.
 
-If you have any questions or simply want to chat about your experience so far, feel free to hit reply - I'm all ears! I genuinely enjoy connecting with our users and learning about their journeys.
+Feel free to hit reply and share anything in your mind. All mails reach my personal inbox and I love receiving mails.
 
-Thanks for being part of the Shelf.nu family, and I look forward to hearing your thoughts soon.
-
-Warm regards from the Netherlands,
+Greetings from The Netherlands,
 
 Carlos Virreira
 Founder & Vision Lead
-https://www.shelf.nu/
+Shelf Asset Management, Inc.
 `;

@@ -1,60 +1,65 @@
-import React from "react";
 import { useFetcher } from "@remix-run/react";
+import { useZorm } from "react-zorm";
+import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
-import type { action } from "~/routes/_auth+/send-magic-link";
+import type { action } from "~/routes/_auth+/send-otp";
+import { tw, validEmail } from "~/utils";
+export const SendOtpSchema = z.object({
+  /**
+   * .email() has an issue with validating email
+   * addresses where the there is a subdomain and a dash included:
+   * https://github.com/colinhacks/zod/pull/2157
+   * So we use the custom validation
+   *  */
+  email: z
+    .string()
+    .transform((email) => email.toLowerCase())
+    .refine(validEmail, () => ({
+      message: "Please enter a valid email",
+    })),
+  mode: z.enum(["login", "signup", "confirm_signup"]).optional(),
+});
 
-export function ContinueWithEmailForm() {
-  const ref = React.useRef<HTMLFormElement>(null);
+export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
+  const sendOTP = useFetcher<typeof action>();
+  const { data, state } = sendOTP;
+  const zo = useZorm("NewQuestionWizardScreen", SendOtpSchema);
 
-  const sendMagicLink = useFetcher<typeof action>();
-  const { data, state } = sendMagicLink;
-  const isSuccessFull = state === "idle" && data != null && !data?.error;
   const isLoading = state === "submitting" || state === "loading";
   const buttonLabel = isLoading
-    ? "Sending you a link..."
-    : "Continue with Magic Link";
-
-  React.useEffect(() => {
-    if (isSuccessFull) {
-      ref.current?.reset();
-    }
-  }, [isSuccessFull]);
+    ? "Sending you a one time password..."
+    : "Continue with OTP";
 
   return (
-    <sendMagicLink.Form method="post" action="/send-magic-link" ref={ref}>
+    <sendOTP.Form method="post" action="/send-otp" ref={zo.ref}>
+      <input type="hidden" name="mode" value={mode} />
       <Input
-        label="Magic link"
+        label="Email"
         hideLabel={true}
         type="email"
         name="email"
-        id="magic-link"
+        id="email"
         inputClassName="w-full"
         placeholder="zaans@huisje.com"
         disabled={isLoading}
-        error={data?.error || ""}
+        error={zo.errors.email()?.message || ""}
       />
-
+      {data?.error.message ? (
+        <div className={tw(` text-red-600`)}>{data.error.message}</div>
+      ) : null}
       <Button
         type="submit"
         disabled={isLoading}
         width="full"
         variant="secondary"
         className="mt-3"
-        data-test-id="continueWithMagicLink"
+        data-test-id="continueWithOtpButton"
+        title="One Time Password (OTP) is the most secure way to login. We will send you a code to your email."
       >
         {buttonLabel}
       </Button>
-
-      {isSuccessFull && (
-        <div
-          className={`mb-2 h-6 text-center text-green-600`}
-          data-test-id="magicLinkSuccessMessage"
-        >
-          Check your emails
-        </div>
-      )}
-    </sendMagicLink.Form>
+    </sendOTP.Form>
   );
 }

@@ -1,11 +1,11 @@
-import type { PrismaClient, Organization, User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import sharp from "sharp";
 import type { AuthSession } from "server/session";
+import type { ExtendedPrismaClient } from "~/database";
 import { db } from "~/database";
 
 import {
@@ -21,71 +21,86 @@ import {
   getParamsValues,
   randomUsernameFromEmail,
 } from "~/utils";
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError, isLikeShelfError } from "~/utils/error";
+import type { ValidationError } from "~/utils/http";
 import {
   deleteProfilePicture,
   getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
-import type { UpdateUserPayload, UpdateUserResponse } from "./types";
+import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
 
-export async function getUserByEmail(email: User["email"]) {
-  return db.user.findUnique({ where: { email: email.toLowerCase() } });
-}
+const label: ErrorLabel = "User";
 
-export async function getUserByID(id: User["id"]) {
+export async function findUserByEmail(email: User["email"]) {
   try {
-    return db.user.findUnique({ where: { id } });
+    return await db.user.findUnique({ where: { email: email.toLowerCase() } });
   } catch (cause) {
-    throw new ShelfStackError({
-      message: "Failed to get user",
+    throw new ShelfError({
       cause,
+      message: "Failed to find user",
+      additionalData: { email },
+      label,
     });
   }
 }
 
-export async function getUserByIDWithOrg(id: User["id"]) {
-  return db.user.findUnique({
-    where: { id },
-    include: { organizations: true },
-  });
+export async function getUserByID(id: User["id"]) {
+  try {
+    return await db.user.findUniqueOrThrow({ where: { id } });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "No user found with this ID",
+      additionalData: { id },
+      label,
+    });
+  }
 }
 
 async function createUserOrgAssociation(
-  tx: Omit<PrismaClient, ITXClientDenyList>,
-  {
-    organizationIds,
-    userId,
-    roles,
-  }: {
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  payload: {
     roles: OrganizationRoles[];
     organizationIds: Organization["id"][];
     userId: User["id"];
   }
 ) {
-  return await Promise.all(
-    Array.from(new Set(organizationIds)).map((organizationId) =>
-      tx.userOrganization.upsert({
-        where: {
-          userId_organizationId: {
+  const { organizationIds, userId, roles } = payload;
+
+  try {
+    return await Promise.all(
+      Array.from(new Set(organizationIds)).map((organizationId) =>
+        tx.userOrganization.upsert({
+          where: {
+            userId_organizationId: {
+              userId,
+              organizationId,
+            },
+          },
+          create: {
             userId,
             organizationId,
+            roles,
           },
-        },
-        create: {
-          userId,
-          organizationId,
-          roles,
-        },
-        update: {
-          roles: {
-            push: roles,
+          update: {
+            roles: {
+              push: roles,
+            },
           },
-        },
-      })
-    )
-  );
+        })
+      )
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to create user organization association",
+      additionalData: { payload },
+      label,
+    });
+  }
 }
 
 export async function createUserOrAttachOrg({
@@ -99,58 +114,70 @@ export async function createUserOrAttachOrg({
   roles: OrganizationRoles[];
   password: string;
 }) {
-  const shelfUser = await db.user.findFirst({ where: { email } });
-  let authAccount: SupabaseUser | null = null;
+  try {
+    const shelfUser = await db.user.findFirst({ where: { email } });
 
-  /**
-   * If user does not exist, create a new user and attach the org to it
-   * WE have a case where a user registers which only creates an auth account and before confirming their email they try to accept an invite
-   * This will always fail because we need them to confirm their email before we create a user in shelf
-   */
-  if (!shelfUser?.id) {
-    authAccount = await createEmailAuthAccount(email, password);
-    if (!authAccount) {
-      throw new ShelfStackError({
-        status: 500,
-        message:
-          "We are facing some issue with your account. Most likely you are trying to accept an invite, before you have confirmed your account's email. Please try again after confirming your email. If the issue persists, feel free to contact support.",
+    /**
+     * If user does not exist, create a new user and attach the org to it
+     * WE have a case where a user registers which only creates an auth account and before confirming their email they try to accept an invite
+     * This will always fail because we need them to confirm their email before we create a user in shelf
+     */
+    if (!shelfUser?.id) {
+      const authAccount = await createEmailAuthAccount(email, password).catch(
+        (cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "We are facing some issue with your account. Most likely you are trying to accept an invite, before you have confirmed your account's email. Please try again after confirming your email. If the issue persists, feel free to contact support.",
+            label,
+          });
+        }
+      );
+
+      return await createUser({
+        email,
+        userId: authAccount.id,
+        username: randomUsernameFromEmail(email),
+        organizationId,
+        roles,
+        firstName,
       });
     }
 
-    const user = await createUser({
-      email,
-      userId: authAccount.id,
-      username: randomUsernameFromEmail(email),
-      organizationId,
+    /** If the user already exists, we just attach the new org to it */
+    await createUserOrgAssociation(db, {
+      userId: shelfUser.id,
+      organizationIds: [organizationId],
       roles,
-      firstName,
     });
-    return user;
-  }
 
-  /** If the user already exists, we just attach the new org to it */
-  await createUserOrgAssociation(db, {
-    userId: shelfUser.id,
-    organizationIds: [organizationId],
-    roles,
-  });
-  return shelfUser;
+    return shelfUser;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : `There was an issue with creating/attaching user with email: ${email}`,
+      additionalData: { email, organizationId, roles, firstName },
+      label,
+    });
+  }
 }
 
-export async function createUser({
-  email,
-  userId,
-  username,
-  organizationId,
-  roles,
-  firstName,
-}: Pick<AuthSession & { username: string }, "userId" | "email" | "username"> & {
-  organizationId?: Organization["id"];
-  roles?: OrganizationRoles[];
-  firstName?: User["firstName"];
-}) {
-  return db
-    .$transaction(
+export async function createUser(
+  payload: Pick<
+    AuthSession & { username: string },
+    "userId" | "email" | "username"
+  > & {
+    organizationId?: Organization["id"];
+    roles?: OrganizationRoles[];
+    firstName?: User["firstName"];
+  }
+) {
+  const { email, userId, username, organizationId, roles, firstName } = payload;
+
+  try {
+    return await db.$transaction(
       async (tx) => {
         const user = await tx.user.create({
           data: {
@@ -181,9 +208,11 @@ export async function createUser({
             organizations: true,
           },
         });
+
         const organizationIds: Organization["id"][] = [
           user.organizations[0].id,
         ];
+
         if (organizationId) {
           organizationIds.push(organizationId);
         }
@@ -202,48 +231,34 @@ export async function createUser({
               roles,
             }),
         ]);
+
         return user;
       },
       { maxWait: 6000, timeout: 10000 }
-    )
-    .then((user) => user)
-    .catch(() => null);
-}
-
-export async function tryCreateUser({
-  email,
-  userId,
-  username,
-}: Pick<AuthSession & { username: string }, "userId" | "email" | "username">) {
-  const user = await createUser({
-    userId,
-    email,
-    username,
-  });
-
-  // user account created and have a session but unable to store in User table
-  // we should delete the user account to allow retry create account again
-  if (!user) {
-    await deleteAuthAccount(userId);
-    return null;
-  }
-
-  return user;
-}
-
-export async function updateUser(
-  updateUserPayload: UpdateUserPayload
-): Promise<UpdateUserResponse> {
-  try {
-    /**
-     * Remove password from object so we can pass it to prisma user update
-     * Also we remove the email as we dont allow it to be changed for now
-     * */
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const cleanClone = (({ password, confirmPassword, email, ...o }) => o)(
-      updateUserPayload
     );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "We had trouble while creating your account. Please try again.",
+      additionalData: {
+        payload,
+      },
+      label,
+    });
+  }
+}
 
+export async function updateUser(updateUserPayload: UpdateUserPayload) {
+  /**
+   * Remove password from object so we can pass it to prisma user update
+   * Also we remove the email as we dont allow it to be changed for now
+   * */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const cleanClone = (({ password, confirmPassword, email, ...o }) => o)(
+    updateUserPayload
+  );
+
+  try {
     const updatedUser = await db.user.update({
       where: { id: updateUserPayload.id },
       data: {
@@ -273,22 +288,27 @@ export async function updateUser(
       );
     }
 
-    return { user: updatedUser, errors: null };
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError) {
+    return updatedUser;
+  } catch (cause) {
+    const validationErrors: ValidationError<any> = {};
+
+    if (
+      cause instanceof Prisma.PrismaClientKnownRequestError &&
+      cause.code === "P2002"
+    ) {
       // The .code property can be accessed in a type-safe manner
-      if (e.code === "P2002") {
-        return {
-          user: null,
-          errors: {
-            [e?.meta?.target as string]: `${e?.meta?.target} is already taken.`,
-          },
-        };
-      } else {
-        return { user: null, errors: { global: "Unknown error." } };
-      }
+      validationErrors[cause.meta?.target as string] = {
+        message: `${cause.meta?.target} is already taken.`,
+      };
     }
-    return { user: null, errors: null };
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while updating your profile. Please try again or contact support.",
+      additionalData: { ...cleanClone, validationErrors },
+      label,
+    });
   }
 }
 
@@ -300,24 +320,33 @@ export const getPaginatedAndFilterableUsers = async ({
   const searchParams = getCurrentSearchParams(request);
   const { page, search } = getParamsValues(searchParams);
 
-  const { users, totalUsers } = await getUsers({
-    page,
-    perPage: 25,
-    search,
-  });
-  const totalPages = Math.ceil(totalUsers / 25);
+  try {
+    const { users, totalUsers } = await getUsers({
+      page,
+      perPage: 25,
+      search,
+    });
+    const totalPages = Math.ceil(totalUsers / 25);
 
-  return {
-    page,
-    perPage: 25,
-    search,
-    totalUsers,
-    users,
-    totalPages,
-  };
+    return {
+      page,
+      perPage: 25,
+      search,
+      totalUsers,
+      users,
+      totalPages,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get paginated and filterable users",
+      additionalData: { page, search },
+      label,
+    });
+  }
 };
 
-export async function getUsers({
+async function getUsers({
   page = 1,
   perPage = 8,
   search,
@@ -330,34 +359,43 @@ export async function getUsers({
 
   search?: string | null;
 }) {
-  const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 25 ? perPage : 8; // min 1 and max 25 per page
 
-  /** Default value of where. Takes the assetss belonging to current user */
-  let where: Prisma.UserWhereInput = {};
+    /** Default value of where. Takes the assets belonging to current user */
+    let where: Prisma.UserWhereInput = {};
 
-  /** If the search string exists, add it to the where object */
-  if (search) {
-    where.email = {
-      contains: search,
-      mode: "insensitive",
-    };
+    /** If the search string exists, add it to the where object */
+    if (search) {
+      where.email = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    const [users, totalUsers] = await Promise.all([
+      /** Get the users */
+      db.user.findMany({
+        skip,
+        take,
+        where,
+        orderBy: { createdAt: "desc" },
+      }),
+
+      /** Count them */
+      db.user.count({ where }),
+    ]);
+
+    return { users, totalUsers };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get users",
+      additionalData: { page, perPage, search },
+      label,
+    });
   }
-
-  const [users, totalUsers] = await db.$transaction([
-    /** Get the users */
-    db.user.findMany({
-      skip,
-      take,
-      where,
-      orderBy: { createdAt: "desc" },
-    }),
-
-    /** Count them */
-    db.user.count({ where }),
-  ]);
-
-  return { users, totalUsers };
 }
 
 export async function updateProfilePicture({
@@ -367,49 +405,55 @@ export async function updateProfilePicture({
   request: Request;
   userId: User["id"];
 }) {
-  const user = await getUserByID(userId);
-  const previousProfilePictureUrl = user?.profilePicture || undefined;
+  try {
+    const user = await getUserByID(userId);
+    const previousProfilePictureUrl = user.profilePicture || undefined;
 
-  const fileData = await parseFileFormData({
-    request,
-    newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
-    resizeOptions: {
-      height: 150,
-      width: 150,
-      fit: sharp.fit.cover,
-      withoutEnlargement: true,
-    },
-  });
-
-  const profilePicture = fileData.get("profile-picture") as string;
-
-  /** if profile picture is an empty string, the upload failed so we return an error */
-  if (!profilePicture || profilePicture === "") {
-    return json(
-      {
-        error: "Something went wrong. Please refresh and try again",
+    const fileData = await parseFileFormData({
+      request,
+      newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
+      resizeOptions: {
+        height: 150,
+        width: 150,
+        fit: sharp.fit.cover,
+        withoutEnlargement: true,
       },
-      { status: 500 }
-    );
-  }
+    });
 
-  if (previousProfilePictureUrl) {
-    /** Delete the old picture  */
-    await deleteProfilePicture({ url: previousProfilePictureUrl });
-  }
+    const profilePicture = fileData.get("profile-picture") as string;
 
-  /** Update user with new picture */
-  return await updateUser({
-    id: userId,
-    profilePicture: getPublicFileURL({ filename: profilePicture }),
-  });
+    /** if profile picture is an empty string, the upload failed so we return an error */
+    if (!profilePicture || profilePicture === "") {
+      throw new ShelfError({
+        cause: null,
+        message: "There is no profile picture to upload",
+        additionalData: { userId },
+        label,
+      });
+    }
+
+    if (previousProfilePictureUrl) {
+      /** Delete the old picture  */
+      await deleteProfilePicture({ url: previousProfilePictureUrl });
+    }
+
+    /** Update user with new picture */
+    return await updateUser({
+      id: userId,
+      profilePicture: getPublicFileURL({ filename: profilePicture }),
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while updating your profile picture. Please try again or contact support.",
+      additionalData: { userId },
+      label,
+    });
+  }
 }
 
 export async function deleteUser(id: User["id"]) {
-  if (!id) {
-    throw new ShelfStackError({ message: "User ID is required" });
-  }
-
   try {
     const user = await db.user.findUnique({
       where: { id },
@@ -426,33 +470,43 @@ export async function deleteUser(id: User["id"]) {
     });
 
     await db.user.delete({ where: { id } });
-  } catch (error) {
+  } catch (cause) {
     if (
-      error instanceof PrismaClientKnownRequestError &&
-      error.code === "P2025"
+      cause instanceof PrismaClientKnownRequestError &&
+      cause.code === "P2025"
     ) {
       // eslint-disable-next-line no-console
       console.log("User not found, so no need to delete");
     } else {
-      throw error;
+      throw new ShelfError({
+        cause,
+        message: "Unable to delete user",
+        additionalData: { id },
+        label,
+      });
     }
   }
 
   await deleteAuthAccount(id);
 }
+
 export { defaultUserCategories };
 
-/** THis function is used just for integration tests as it combines the creation of auth accound and user entry */
+/** THis function is used just for integration tests as it combines the creation of auth account and user entry */
 export async function createUserAccountForTesting(
   email: string,
   password: string,
   username: string
 ): Promise<AuthSession | null> {
-  const authAccount = await createEmailAuthAccount(email, password);
-  // ok, no user account created
-  if (!authAccount) return null;
+  const authAccount = await createEmailAuthAccount(email, password).catch(
+    () => null
+  );
 
-  const { authSession } = await signInWithEmail(email, password);
+  if (!authAccount) {
+    return null;
+  }
+
+  const authSession = await signInWithEmail(email, password).catch(() => null);
 
   // user account created but no session 😱
   // we should delete the user account to allow retry create account again
@@ -461,13 +515,16 @@ export async function createUserAccountForTesting(
     return null;
   }
 
-  const user = await tryCreateUser({
+  const user = await createUser({
     email: authSession.email,
     userId: authSession.userId,
     username,
-  });
+  }).catch(() => null);
 
-  if (!user) return null;
+  if (!user) {
+    await deleteAuthAccount(authAccount.id);
+    return null;
+  }
 
   return authSession;
 }
@@ -479,34 +536,42 @@ export async function revokeAccessToOrganization({
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
-  /**
-   * if I want to revokeAccess access, i simply need to:
-   * 1. Remove relation between user and team member
-   * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
-   */
-  const teamMember = await db.teamMember.findFirst({
-    where: { userId, organizationId },
-  });
+  try {
+    /**
+     * if I want to revokeAccess access, i simply need to:
+     * 1. Remove relation between user and team member
+     * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
+     */
+    const teamMember = await db.teamMember.findFirst({
+      where: { userId, organizationId },
+    });
 
-  const user = await db.user.update({
-    where: { id: userId },
-    data: {
-      ...(teamMember?.id && {
-        teamMembers: {
-          disconnect: {
-            id: teamMember.id,
+    return await db.user.update({
+      where: { id: userId },
+      data: {
+        ...(teamMember?.id && {
+          teamMembers: {
+            disconnect: {
+              id: teamMember.id,
+            },
           },
-        },
-      }),
-      userOrganizations: {
-        delete: {
-          userId_organizationId: {
-            userId,
-            organizationId,
+        }),
+        userOrganizations: {
+          delete: {
+            userId_organizationId: {
+              userId,
+              organizationId,
+            },
           },
         },
       },
-    },
-  });
-  return user;
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to revoke user access to organization",
+      additionalData: { userId, organizationId },
+      label,
+    });
+  }
 }

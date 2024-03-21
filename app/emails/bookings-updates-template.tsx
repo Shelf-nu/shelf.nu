@@ -85,7 +85,7 @@ export function BookingUpdatesEmailTemplate({
 
         {!hideViewButton && (
           <Button
-            href={`${SERVER_URL}/bookings/${booking.id}`}
+            href={`${SERVER_URL}/bookings/${booking.id}?orgId=${booking.organizationId}`}
             style={{
               ...styles.button,
               textAlign: "center",

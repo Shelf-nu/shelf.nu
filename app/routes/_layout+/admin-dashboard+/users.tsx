@@ -1,46 +1,58 @@
 import type { User } from "@prisma/client";
-import { redirect, type LoaderFunctionArgs, json } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect, json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { Pagination } from "~/components/list/pagination";
 import { Td } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user";
+import { data, error, makeShelfError } from "~/utils";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requireAdmin(authSession.userId);
-  const { search, totalUsers, perPage, page, users, totalPages } =
-    await getPaginatedAndFilterableUsers({
-      request,
-    });
+  const { userId } = authSession;
 
-  if (page > totalPages) {
-    return redirect("/admin-dashboard");
+  try {
+    await requireAdmin(userId);
+
+    const { search, totalUsers, perPage, page, users, totalPages } =
+      await getPaginatedAndFilterableUsers({
+        request,
+      });
+
+    if (page > totalPages) {
+      return redirect("/admin-dashboard");
+    }
+
+    const header: HeaderData = {
+      title: `Admin dashboard`,
+    };
+
+    const modelName = {
+      singular: "user",
+      plural: "users",
+    };
+
+    return json(
+      data({
+        header,
+        items: users,
+        search,
+        page,
+        totalItems: totalUsers,
+        perPage,
+        totalPages,
+        modelName,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
   }
-
-  const header: HeaderData = {
-    title: `Admin dashboard`,
-  };
-
-  const modelName = {
-    singular: "user",
-    plural: "users",
-  };
-
-  return json({
-    header,
-    items: users,
-    search,
-    page,
-    totalItems: totalUsers,
-    perPage,
-    totalPages,
-    modelName,
-  });
-};
+}
 
 export default function Area51() {
   const navigate = useNavigate();
@@ -70,4 +82,4 @@ const ListUserContent = ({ item }: { item: User }) => (
   </>
 );
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

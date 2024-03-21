@@ -3,21 +3,24 @@ import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { useNavigate, Link, json } from "@remix-run/react";
 import { useMediaDevices } from "react-media-devices";
 import { useZxing } from "react-zxing";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
+
+const label: ErrorLabel = "Scanner";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const header: HeaderData = {
     title: "Locations",
   };
-  await requirePermision({
+  await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.location,
@@ -56,10 +59,12 @@ const QRScanner = () => {
     onDecodeResult(result) {
       decodeQRCodes(result.getText());
     },
-    onError() {
-      throw new ShelfStackError({
+    onError(cause) {
+      throw new ShelfError({
         message: "Unable to access media devices permission",
         status: 403,
+        label,
+        cause,
       });
     },
   });
@@ -125,4 +130,4 @@ const QRScanner = () => {
 
 export default QRScanner;
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

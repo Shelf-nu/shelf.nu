@@ -1,66 +1,54 @@
-import { useRef, type ReactNode, useEffect } from "react";
-import {
-  Form,
-  useLoaderData,
-  useSearchParams,
-  useSubmit,
-} from "@remix-run/react";
-import { useAtom } from "jotai";
+import { useRef, useEffect, useMemo } from "react";
+import type { ReactNode } from "react";
+import { Form, useLoaderData, useSearchParams } from "@remix-run/react";
 
 import type { SearchableIndexResponse } from "~/modules/types";
 import { tw } from "~/utils";
-import {
-  toggleIsFilteringCategoriesAtom,
-  toggleIsFilteringTagsAtom,
-} from "./atoms";
+
 import { SearchForm } from "./search-form";
 
 export const Filters = ({
   children,
   className,
+  slots,
 }: {
   children?: ReactNode;
   className?: string;
+  /** Slots to render nodes within this component.
+   * Available options are:
+   * - left-of-search
+   * - right-of-search
+   */
+  slots?: Record<string, ReactNode>;
 }) => {
   const { search } = useLoaderData<SearchableIndexResponse>();
   const [searchParams] = useSearchParams();
-  const perPageParam = searchParams.get("per_page");
-
-  const [isFilteringCategories, toggleIsFilteringCategories] = useAtom(
-    toggleIsFilteringCategoriesAtom
-  );
-  const [isFilteringTags, toggleIsFilteringTags] = useAtom(
-    toggleIsFilteringTagsAtom
-  );
-
-  const submit = useSubmit();
 
   const formRef = useRef<HTMLFormElement>(null);
+
+  const existingParamInputs = useMemo(() => {
+    const params: Record<string, string[]> = {};
+
+    for (const key of searchParams.keys()) {
+      if (key === "s") continue;
+      params[key] = searchParams.getAll(key);
+    }
+
+    return Object.entries(params)
+      .map(([key, value]) =>
+        value.map((_value) => (
+          <input key={_value} type="hidden" name={key} value={_value} />
+        ))
+      )
+      .flat();
+  }, [searchParams]);
+
   useEffect(() => {
     /** If no search, clear the form and focus on the search field */
     if (!search) {
       formRef?.current?.reset();
     }
   }, [search]);
-
-  /**
-   * Submit the form when the selected array changes
-   */
-  useEffect(() => {
-    /** check the flag and if its true, submit the form. */
-    if (isFilteringCategories) {
-      submit(formRef.current);
-      toggleIsFilteringCategories();
-    }
-  }, [submit, isFilteringCategories, toggleIsFilteringCategories]);
-
-  useEffect(() => {
-    /** check the flag and if its true, submit the form. */
-    if (isFilteringTags) {
-      submit(formRef.current);
-      toggleIsFilteringTags();
-    }
-  }, [submit, isFilteringTags, toggleIsFilteringTags]);
 
   return (
     <div
@@ -70,12 +58,12 @@ export const Filters = ({
       )}
     >
       <Form ref={formRef} className="w-full">
-        {perPageParam ? (
-          <input type="hidden" name="per_page" value={perPageParam} />
-        ) : null}
+        {existingParamInputs}
         <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
-          <div className="flex items-center gap-5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            {slots?.["left-of-search"] || null}
             <SearchForm />
+            {slots?.["right-of-search"] || null}
           </div>
           <div className="flex flex-1 justify-end">{children}</div>
         </div>

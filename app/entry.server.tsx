@@ -13,35 +13,58 @@ import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { registerBookingWorkers } from "./modules/booking";
-import { SENTRY_DSN } from "./utils";
+import { SENTRY_DSN, ShelfError } from "./utils";
+import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
+import { initSentry } from "./utils/sentry.server";
 
-if (SENTRY_DSN) {
-  Sentry.init({
-    dsn: SENTRY_DSN,
-    tracesSampleRate: 1,
-  });
-}
+initSentry();
+
 // === start: register scheduler and workers ===
 schedulerService
   .init()
-  .then(() => {
-    registerBookingWorkers();
+  .then(async () => {
+    await registerBookingWorkers().catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Something went wrong while registering booking workers.",
+          label: "Scheduler",
+        })
+      );
+    });
   })
   .finally(() => {
     // eslint-disable-next-line no-console
     console.log("Scheduler and workers registration completed");
   })
-  // eslint-disable-next-line no-console
-  .catch((e) => console.error(e));
+  .catch((cause) => {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Scheduler crash",
+        label: "Scheduler",
+      })
+    );
+  });
 // === end: register scheduler and workers ===
 
+/**
+ * Handle errors that are not handled by a loader or action try/catch block.
+ *
+ * If this happen, you will have Sentry logs with a `Unhandled` tag and `unhandled.remix.server` as origin.
+ *
+ */
 export function handleError(
   error: unknown,
   { request }: LoaderFunctionArgs | ActionFunctionArgs
 ) {
-  if (Sentry) {
-    Sentry.captureRemixServerException(error, "remix.server", request);
+  if (SENTRY_DSN) {
+    void Sentry.captureRemixServerException(
+      error,
+      "unhandled.remix.server",
+      request
+    );
   }
 }
 

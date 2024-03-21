@@ -1,6 +1,17 @@
 # Docker
 
-If you prefer using docker for running shelf locally or self hosting your live app, we have a Docker image ready for you thanks to [@anatolinicolae](https://github.com/anatolinicolae)
+> [!NOTE]
+> The Docker configuration for shelf.nu is an effort powered by people within the community, done by [@anatolinicolae](https://github.com/anatolinicolae). Shelf Asset Management Inc. does not yet provide official support for Docker, but we will accept fixes and documentation at this time. Use at your own risk.
+
+## Prerequisites
+
+> [!IMPORTANT]
+> If you want to run shelf via docker, there are still some prerequisites you need to meet. Because our docker setup doesn't currently support self-hosting supabase, you need to complete the steps below. This means you have to take care of setting up your supabase environment, running migrations against your database, and making sure Supabase is configured based on our requirements.
+
+1. https://github.com/Shelf-nu/shelf.nu/blob/main/docs/get-started.md#development
+2. https://github.com/Shelf-nu/shelf.nu/blob/main/docs/get-started.md#authentication
+
+This will make sure you have a DATABASE that you are ready to connect to.
 
 ## Instructions
 
@@ -20,7 +31,9 @@ docker run -d \
   -e 'MAPTILER_TOKEN=maptiler-token' \
   -e 'SMTP_HOST=mail.example.com' \
   -e 'SMTP_USER=some-email@example.com' \
+  -e 'SMTP_FROM="Carlos from shelf.nu" <carlos@shelf.nu>' \
   -e 'SMTP_PWD=super-safe-passw0rd' \
+  -e 'NODE_ENV=production' \
   -p 3000:8080 \
   --restart unless-stopped \
   ghcr.io/shelf-nu/shelf.nu:latest

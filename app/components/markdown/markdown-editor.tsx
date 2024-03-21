@@ -35,10 +35,8 @@ export const MarkdownEditor = forwardRef(function MarkdownEditor(
   }: Props,
   ref
 ) {
-  // const sendMagicLink = useTypedFetcher<typeof action>();
-
   const fetcher = useFetcher<typeof action>();
-  const content = fetcher?.data?.content;
+  const content = fetcher.data?.error ? "" : fetcher.data?.content;
   const [markdown, setMarkdown] = useAtom(markdownAtom);
 
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {

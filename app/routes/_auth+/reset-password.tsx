@@ -7,7 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 
 import PasswordInput from "~/components/forms/password-input";
@@ -15,16 +15,28 @@ import { Button } from "~/components/shared/button";
 import { supabaseClient } from "~/integrations/supabase";
 
 import { refreshAccessToken, updateAccountPassword } from "~/modules/auth";
-import { assertIsPost, isFormProcessing, tw } from "~/utils";
+import {
+  data,
+  error,
+  getActionMethod,
+  isFormProcessing,
+  makeShelfError,
+  notAllowedMethod,
+  parseData,
+  tw,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export function loader({ context }: LoaderFunctionArgs) {
   const title = "Set new password";
   const subHeading =
     "Your new password must be different to previously used passwords.";
-  if (context.isAuthenticated) return redirect("/assets");
 
-  return json({ title, subHeading });
+  if (context.isAuthenticated) {
+    return redirect("/assets");
+  }
+
+  return json(data({ title, subHeading }));
 }
 
 const ResetPasswordSchema = z
@@ -48,51 +60,32 @@ const ResetPasswordSchema = z
   });
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  assertIsPost(request);
+  try {
+    const method = getActionMethod(request);
 
-  const formData = await request.formData();
-  const result = await ResetPasswordSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+    switch (method) {
+      case "POST": {
+        const { password, refreshToken } = parseData(
+          await request.formData(),
+          ResetPasswordSchema
+        );
 
-  if (!result.success) {
-    return json(
-      {
-        message:
-          "Invalid request. Please try again. If the issue persists, contact support.",
-      },
-      { status: 400 }
-    );
+        const authSession = await refreshAccessToken(refreshToken);
+
+        await updateAccountPassword(authSession.userId, password);
+
+        // Commit the session and redirect
+        context.setSession({ ...authSession });
+
+        return redirect("/");
+      }
+    }
+
+    throw notAllowedMethod(method);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
   }
-
-  const { password, refreshToken } = result.data;
-
-  const authSession = await refreshAccessToken(refreshToken);
-
-  if (!authSession) {
-    return json(
-      {
-        message:
-          "Invalid refresh token. Please try again. If the issue persists, contact support",
-      },
-      { status: 401 }
-    );
-  }
-
-  const user = await updateAccountPassword(authSession.userId, password);
-
-  if (!user) {
-    return json(
-      {
-        message: "Issue updating passowrd",
-      },
-      { status: 500 }
-    );
-  }
-
-  // Commit the session and redirect
-  context.setSession({ ...authSession });
-  return redirect("/", {});
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -164,10 +157,10 @@ export default function ResetPassword() {
             Change password
           </Button>
         </Form>
-        {actionData?.message ? (
+        {actionData?.error.message ? (
           <div className="flex flex-col items-center">
             <div className={tw(`mb-2 h-6 text-center text-red-600`)}>
-              {actionData.message}
+              {actionData.error.message}
             </div>
             <Button
               variant="link"

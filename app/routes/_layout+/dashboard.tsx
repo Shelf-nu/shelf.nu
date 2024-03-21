@@ -16,11 +16,12 @@ import LocationRatioChart from "~/components/dashboard/location-ratio-chart";
 import MostScannedAssets from "~/components/dashboard/most-scanned-assets";
 import MostScannedCategories from "~/components/dashboard/most-scanned-categories";
 import NewestAssets from "~/components/dashboard/newest-assets";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import { db } from "~/database";
 
 import styles from "~/styles/layout/skeleton-loading.css";
+import { data, error } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getLocale } from "~/utils/client-hints";
 import { userPrefs } from "~/utils/cookies.server";
@@ -33,101 +34,126 @@ import {
   groupAssetsByStatus,
   totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId, currentOrganization } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.dashboard,
-    action: PermissionAction.read,
-  });
+  const { userId } = authSession;
 
-  /** This should be updated to use select to only get the data we need */
-  const assets = await db.asset.findMany({
-    where: {
-      organizationId,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-    include: {
-      category: true,
-      custody: {
+  try {
+    const { organizationId, currentOrganization } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.dashboard,
+      action: PermissionAction.read,
+    });
+
+    /** This should be updated to use select to only get the data we need */
+    const assets = await db.asset
+      .findMany({
+        where: {
+          organizationId,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
         include: {
-          custodian: {
+          category: true,
+          custody: {
             include: {
-              user: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  profilePicture: true,
+              custodian: {
+                include: {
+                  user: {
+                    select: {
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                    },
+                  },
                 },
               },
             },
           },
+          qrCodes: {
+            include: {
+              scans: true,
+            },
+          },
         },
-      },
-      qrCodes: {
-        include: {
-          scans: true,
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load assets",
+          additionalData: { userId, organizationId },
+          label: "Dashboard",
+        });
+      });
+
+    const announcement = await db.announcement
+      .findFirst({
+        where: {
+          published: true,
         },
-      },
-    },
-  });
+        orderBy: {
+          createdAt: "desc",
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load announcement",
+          additionalData: { userId, organizationId },
+          label: "Dashboard",
+        });
+      });
 
-  const announcement = await db.announcement.findFirst({
-    where: {
-      published: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+    /** Calculate the total value of the assets that have value added */
+    const totalValuation = assets.reduce((acc, asset) => {
+      if (asset.valuation) {
+        return acc + asset.valuation;
+      }
+      return acc;
+    }, 0);
+    const cookieHeader = request.headers.get("Cookie");
+    const cookie = (await userPrefs.parse(cookieHeader)) || {};
 
-  /** Calculate the total value of the assets that have value added */
-  const totalValuation = assets.reduce((acc, asset) => {
-    if (asset.valuation) {
-      return acc + asset.valuation;
-    }
-    return acc;
-  }, 0);
-  const cookieHeader = request.headers.get("Cookie");
-  const cookie = (await userPrefs.parse(cookieHeader)) || {};
-
-  return json({
-    header: {
-      title: "Dashboard",
-    },
-    assets,
-    locale: getLocale(request),
-    currency: currentOrganization?.currency,
-    totalValuation,
-    newAssets: assets.slice(0, 5),
-    totalAssets: assets.length,
-    skipOnboardingChecklist: cookie.skipOnboardingChecklist,
-
-    custodiansData: await getCustodiansOrderedByTotalCustodies({
-      assets,
-    }),
-    mostScannedAssets: await getMostScannedAssets({ assets }),
-    mostScannedCategories: await getMostScannedAssetsCategories({ assets }),
-    totalAssetsAtEndOfEachMonth: await totalAssetsAtEndOfEachMonth({
-      assets,
-    }),
-    assetsByStatus: await groupAssetsByStatus({ assets }),
-    assetsByCategory: await groupAssetsByCategory({ assets }),
-    announcement: announcement
-      ? {
-          ...announcement,
-          content: parseMarkdownToReact(announcement.content),
-        }
-      : null,
-    checklistOptions: await checklistOptions({ assets, organizationId }),
-  });
+    // @TODO this needs double checking because merge was messy
+    return json(
+      data({
+        assets,
+        locale: getLocale(request),
+        currency: currentOrganization?.currency,
+        totalValuation,
+        newAssets: assets.slice(0, 5),
+        totalAssets: assets.length,
+        skipOnboardingChecklist: cookie.skipOnboardingChecklist,
+        custodiansData: getCustodiansOrderedByTotalCustodies({
+          assets,
+        }),
+        mostScannedAssets: getMostScannedAssets({ assets }),
+        mostScannedCategories: getMostScannedAssetsCategories({ assets }),
+        totalAssetsAtEndOfEachMonth: totalAssetsAtEndOfEachMonth({
+          assets,
+        }),
+        assetsByStatus: groupAssetsByStatus({ assets }),
+        assetsByCategory: groupAssetsByCategory({ assets }),
+        announcement: announcement
+          ? {
+              ...announcement,
+              content: parseMarkdownToReact(announcement.content),
+            }
+          : null,
+        checklistOptions: await checklistOptions({ assets, organizationId }),
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = () => [
@@ -194,4 +220,4 @@ export default function DashboardPage() {
   );
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

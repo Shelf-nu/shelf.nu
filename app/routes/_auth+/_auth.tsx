@@ -1,6 +1,6 @@
 import { Link, useMatches } from "@remix-run/react";
 import { Outlet } from "react-router";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 import SubHeading from "~/components/shared/sub-heading";
 
 export const loader = () => null;
@@ -19,7 +19,7 @@ export default function App() {
       <main className="flex size-full">
         <div className="flex size-full flex-col items-center justify-center p-6 lg:p-10">
           <div className=" mb-8 text-center">
-            <Link to="/">
+            <Link to="/" reloadDocument>
               <img
                 src="/static/images/shelf-symbol.png"
                 alt="Shelf symbol"
@@ -28,7 +28,9 @@ export default function App() {
             </Link>
 
             <h1>{title}</h1>
-            <SubHeading className="max-w-md">{subHeading}</SubHeading>
+            {subHeading && (
+              <SubHeading className="max-w-md">{subHeading}</SubHeading>
+            )}
           </div>
           <div className=" w-[360px]">
             <Outlet />
@@ -55,4 +57,4 @@ export default function App() {
   );
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

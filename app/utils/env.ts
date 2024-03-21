@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ShelfStackError } from "./error";
+import { ShelfError } from "./error";
 import { isBrowser } from "./is-browser";
 
 declare global {
@@ -36,6 +36,7 @@ declare global {
       SMTP_PWD: string;
       SMTP_HOST: string;
       SMTP_USER: string;
+      SMTP_FROM: string;
       MAINTENANCE_MODE: string;
       DATABASE_URL: string;
       DIRECT_URL: string;
@@ -60,7 +61,12 @@ function getEnv(
   const value = source[name as keyof typeof source];
 
   if (!value && isRequired) {
-    throw new ShelfStackError({ message: `${name} is not set` });
+    // FIXME: @TODO Solve error handling
+    throw new ShelfError({
+      message: `${name} is not set`,
+      cause: null,
+      label: "Environment",
+    });
   }
 
   return value;
@@ -101,6 +107,9 @@ export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
 export const SMTP_PWD = getEnv("SMTP_PWD");
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_USER = getEnv("SMTP_USER");
+export const SMTP_FROM = getEnv("SMTP_FROM", {
+  isRequired: false,
+});
 export const DATABASE_URL = getEnv("DATABASE_URL");
 export const DIRECT_URL = getEnv("DIRECT_URL", {
   isRequired: false,
@@ -149,6 +158,12 @@ export const MAINTENANCE_MODE =
 
 export const ENABLE_PREMIUM_FEATURES =
   getEnv("ENABLE_PREMIUM_FEATURES", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const SEND_ONBOARDING_EMAIL =
+  getEnv("SEND_ONBOARDING_EMAIL", {
     isSecret: false,
     isRequired: false,
   }) === "true" || false;

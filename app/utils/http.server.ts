@@ -1,4 +1,17 @@
-import { ShelfStackError } from "./error";
+import type { Params } from "@remix-run/react";
+import { json } from "react-router";
+import { parseFormAny } from "react-zorm";
+import type { ZodType } from "zod";
+import { sendNotification } from "./emitter/send-notification.server";
+import type { Options } from "./error";
+import {
+  ShelfError,
+  makeShelfError,
+  badRequest,
+  notAllowedMethod,
+} from "./error";
+import type { ValidationError } from "./http";
+import { Logger } from "./logger";
 
 export function getCurrentPath(request: Request) {
   return new URL(request.url).pathname;
@@ -29,43 +42,105 @@ export function isDelete(request: Request) {
   return request.method.toLowerCase() === "delete";
 }
 
-export function notFound(message: string) {
-  return new ShelfStackError({ message, status: 404 });
+type HTTPMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+export function getActionMethod(request: Request) {
+  return request.method.toUpperCase() as Exclude<HTTPMethod, "GET">;
 }
 
-function notAllowedMethod(message: string) {
-  return new ShelfStackError({ message, status: 405 });
-}
-
-export function badRequest(message: string) {
-  return new ShelfStackError({ message, status: 400 });
-}
-
-export function getRequiredParam(
-  params: Record<string, string | undefined>,
-  key: string
+/**
+ * Validate data with a zod schema.
+ *
+ * @throws A `badRequest` error if the form data is invalid.
+ *
+ * **By default, the error will be captured.**
+ *
+ * If you don't want to capture the error, you can set the `shouldBeCaptured` option to `false`.
+ */
+export function parseData<Schema extends ZodType<any, any, any>>(
+  data: FormData | URLSearchParams | Params,
+  schema: Schema,
+  options?: Options
 ) {
-  const value = params[key];
-
-  if (!value) {
-    throw badRequest(`Missing required request param "${key}"`);
+  if (data instanceof FormData) {
+    data = parseFormAny(data);
   }
 
-  return value;
+  if (data instanceof URLSearchParams) {
+    data = Object.fromEntries(data);
+  }
+
+  const submission = schema.safeParse(data);
+
+  if (!submission.success) {
+    const validationErrors = {} as ValidationError<Schema>;
+
+    Object.entries(submission.error.formErrors.fieldErrors).forEach(
+      ([key, values]) => {
+        validationErrors[key as keyof Schema["_output"]] = {
+          message: values?.[0],
+        };
+      }
+    );
+
+    throw badRequest(
+      options?.message ||
+        "The request is invalid. Please try again. If the issue persists, contact support.",
+      {
+        shouldBeCaptured: true,
+        ...options,
+        additionalData: {
+          ...options?.additionalData,
+          data,
+          validationErrors,
+        },
+      }
+    );
+  }
+
+  return submission.data as Schema["_output"];
 }
 
-export function assertIsPost(request: Request, message = "Method not allowed") {
+/**
+ * Get and validate request params with a zod schema.
+ *
+ * **Use this function outside of loader/action try/catch blocks.**
+ *
+ * @throws A `json` response with a 400 status code if the params are invalid.
+ *
+ * **By default, the error will be captured.**
+ *
+ * If you don't want to capture the error, you can set the `shouldBeCaptured` option to `false`.
+ *
+ */
+export function getParams<Schema extends ZodType<any, any, any>>(
+  params: Params<string>,
+  schema: Schema,
+  options?: Options
+) {
+  try {
+    return parseData(params, schema, {
+      shouldBeCaptured: true,
+      ...options,
+      additionalData: {
+        ...options?.additionalData,
+      },
+    });
+  } catch (cause) {
+    const reason = cause instanceof ShelfError ? cause : makeShelfError(cause);
+    throw json(error(reason), { status: 400 });
+  }
+}
+
+export function assertIsPost(request: Request, message?: string) {
   if (!isPost(request)) {
-    throw notAllowedMethod(message);
+    throw notAllowedMethod("POST", { message });
   }
 }
 
-export function assertIsDelete(
-  request: Request,
-  message = "Method not allowed"
-) {
+export function assertIsDelete(request: Request, message?: string) {
   if (!isDelete(request)) {
-    throw notAllowedMethod(message);
+    throw notAllowedMethod("DELETE", { message });
   }
 }
 
@@ -73,8 +148,8 @@ export function assertIsDelete(
  * This should be used any time the redirect path is user-provided
  * (Like the query string on our login/signup pages). This avoids
  * open-redirect vulnerabilities.
- * @param {string} to The redirect destination
- * @param {string} defaultRedirect The redirect to use if the to is unsafe.
+ * @param to The redirect destination
+ * @param defaultRedirect The redirect to use if the to is unsafe.
  */
 export function safeRedirect(
   to: FormDataEntryValue | string | null | undefined,
@@ -91,3 +166,63 @@ export function safeRedirect(
 
   return to;
 }
+
+export type ResponsePayload = Record<string, unknown> | null;
+
+/**
+ * Create a data response payload.
+ *
+ * Normalize the data to return to help type inference.
+ *
+ * @param data - The data to return
+ * @returns The normalized data with `error` key set to `null`
+ */
+export function data<T extends ResponsePayload>(data: T) {
+  return { error: null, ...data };
+}
+
+export type DataResponse<T extends ResponsePayload = ResponsePayload> =
+  ReturnType<typeof data<T>>;
+
+/**
+ * Create an error response payload.
+ *
+ * Normalize the error to return to help type inference.
+ *
+ * @param cause - The error that has been catch
+ * @returns The normalized error with `error` key set to the error
+ */
+export function error(cause: ShelfError) {
+  Logger.error(cause);
+
+  // TODO: @DonKoko maybe globally rethink this?
+  if (
+    cause.additionalData?.userId &&
+    typeof cause.additionalData?.userId === "string"
+  ) {
+    sendNotification({
+      title: cause.title || "Oops! Something went wrong",
+      message: cause.message,
+      icon: { name: "x", variant: "error" },
+      senderId: cause.additionalData.userId,
+    });
+  }
+
+  return {
+    error: {
+      message: cause.message,
+      label: cause.label,
+      ...(cause.title && { title: cause.title }),
+      ...(cause.additionalData && {
+        additionalData: cause.additionalData,
+      }),
+      ...(cause.traceId && { traceId: cause.traceId }),
+    },
+  };
+}
+
+export type ErrorResponse = ReturnType<typeof error>;
+
+export type DataOrErrorResponse<T extends ResponsePayload = ResponsePayload> =
+  | ErrorResponse
+  | DataResponse<T>;

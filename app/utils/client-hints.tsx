@@ -4,7 +4,7 @@
  */
 import { parseAcceptLanguage } from "intl-parse-accept-language";
 import type { ClientHint } from "~/modules/booking/types";
-import { ShelfStackError } from "./error";
+import { ShelfError } from "./error";
 import { useRequestInfo } from "./request-info";
 
 export const clientHints = {
@@ -20,7 +20,12 @@ type ClientHintNames = keyof typeof clientHints;
 function getCookieValue(cookieString: string, name: ClientHintNames) {
   const hint = clientHints[name];
   if (!hint) {
-    throw new ShelfStackError({ message: `Unknown client hint: ${name}` });
+    // @TODO Solve error handling
+    throw new ShelfError({
+      cause: null,
+      message: `Unknown client hint: ${name}`,
+      label: "Dev error",
+    });
   }
   const value = cookieString
     .split(";")
