@@ -1,53 +1,41 @@
-# base node image
-FROM node:20-bookworm-slim as base
+# Base Node image
+FROM node:20-bookworm-slim AS base
 
-# set for base and all layer that inherit from it
+# Set for base and all layer that inherit from it
+ENV PORT="8080"
 ENV NODE_ENV="production"
-
-WORKDIR /myapp
+ARG DEBIAN_FRONTEND="noninteractive"
+WORKDIR /src
 
 # Install openssl for Prisma
 RUN apt-get update && apt-get install -y openssl
 
 # Install all node_modules, including dev dependencies
-FROM base as deps
+FROM base AS deps
 
-ADD package.json ./
-RUN npm install --production=false
+ADD package.json .
+RUN npm install --include=dev
 
-# Setup production node_modules
-FROM base as production-deps
+# Build the app and setup production node_modules
+FROM base AS build
 
-COPY --from=deps /myapp/node_modules /myapp/node_modules
-ADD package.json ./
-RUN npm prune --production
-
-# Build the app
-FROM base as build
-
-COPY --from=deps /myapp/node_modules /myapp/node_modules
-
-ADD /app/database ./app/database
-RUN npx prisma generate
+COPY --from=deps /src/node_modules /src/node_modules
 
 ADD . .
+
+RUN npx prisma generate
 RUN npm run build
+RUN npm prune --omit=dev
 
 # Finally, build the production image with minimal footprint
-FROM base
+FROM base AS release
 
-ENV PORT="8080"
-ENV NODE_ENV="production"
+COPY --from=build /src/node_modules /src/node_modules
+COPY --from=build /src/app/database /src/app/database
+COPY --from=build /src/build /src/build
+COPY --from=build /src/public /src/public
+COPY --from=build /src/package.json /src/package.json
+COPY --from=build /src/start.sh /src/start.sh
+RUN chmod +x /src/start.sh
 
-COPY --from=production-deps /myapp/node_modules /myapp/node_modules
-COPY --from=build /myapp/node_modules/.prisma /myapp/node_modules/.prisma
-COPY --from=build /myapp/node_modules/prisma /myapp/node_modules/prisma
-COPY --from=build /myapp/app/database /myapp/app/database
-
-COPY --from=build /myapp/build /myapp/build
-COPY --from=build /myapp/public /myapp/public
-COPY --from=build /myapp/package.json /myapp/package.json
-COPY --from=build /myapp/start.sh /myapp/start.sh
-RUN chmod +x /myapp/start.sh
-
-ENTRYPOINT [ "/myapp/start.sh" ]
+ENTRYPOINT [ "/src/start.sh" ]
