@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import type { MetaFunction } from "@remix-run/node";
 import { useNavigate, Link, json } from "@remix-run/react";
 import { useMediaDevices } from "react-media-devices";
 import { useZxing } from "react-zxing";
@@ -9,25 +9,21 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermission } from "~/utils/roles.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
 
 const label: ErrorLabel = "Scanner";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
-  const header: HeaderData = {
-    title: "Locations",
-  };
-  await requirePermission({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.location,
-    action: PermissionAction.read,
-  });
-
-  return json({ header });
+export function loader() {
+  try {
+    const header: HeaderData = {
+      title: "Locations",
+    };
+    return json({ header });
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const handle = {
@@ -72,23 +68,25 @@ const QRScanner = () => {
   const decodeQRCodes = (result: string) => {
     if (result != null) {
       const regex = /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
+      /** We make sure the value of the QR code matches the structure of Shelf qr codes */
       const match = result.match(regex);
-
-      if (match) {
-        sendNotification({
-          title: "Shelf's QR Code detected",
-          message: "Redirecting to mapped asset",
-          icon: { name: "success", variant: "success" },
-        });
-        const qrId = match[4]; // Get the last segment of the URL as the QR id
-        navigate(`/qr/${qrId}`);
-      } else {
+      if (!match) {
+        /** If the QR code does not match the structure of Shelf qr codes, we show an error message */
         sendNotification({
           title: "QR Code Not Valid",
           message: "Please Scan valid asset QR",
           icon: { name: "trash", variant: "error" },
         });
+        return;
       }
+
+      sendNotification({
+        title: "Shelf's QR Code detected",
+        message: "Redirecting to mapped asset",
+        icon: { name: "success", variant: "success" },
+      });
+      const qrId = match[4]; // Get the last segment of the URL as the QR id
+      navigate(`/qr/${qrId}`);
     }
   };
 

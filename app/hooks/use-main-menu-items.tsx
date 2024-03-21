@@ -46,15 +46,15 @@ export function useMainMenuItems() {
   ];
   const menuItemsBottom = [
     {
-      icon: <SettingsIcon />,
-      to: "settings",
-      label: "Settings",
-      end: true,
-    },
-    {
       icon: <ScanQRIcon />,
       to: "scanner",
       label: "QR scanner",
+      end: true,
+    },
+    {
+      icon: <SettingsIcon />,
+      to: "settings",
+      label: "Settings",
       end: true,
     },
   ];
