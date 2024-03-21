@@ -5,8 +5,8 @@
 # run, which is why this file exists in the first place.
 # Learn more: https://community.fly.io/t/sqlite-not-getting-setup-properly/4386
 
-# Generate schema and deploy
-npm run setup:db
+# Deploy database schema
+npm run db:deploy
 
 # Start the app
 npm run start
