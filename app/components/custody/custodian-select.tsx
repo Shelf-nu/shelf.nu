@@ -7,9 +7,9 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
-} from "../forms";
-import { UserIcon } from "../icons";
-import { Button } from "../shared";
+} from "../forms/select";
+import { UserIcon } from "../icons/library";
+import { Button } from "../shared/button";
 
 export default function CustodianSelect(
   {

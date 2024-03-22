@@ -4,7 +4,7 @@ import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
-import { SuccessIcon } from "~/components/icons";
+import { SuccessIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import { usePosition } from "~/hooks";

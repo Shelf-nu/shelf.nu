@@ -1,5 +1,8 @@
 import { useLoaderData } from "@remix-run/react";
-import { ChevronRight, ChevronLeftDoubleIcon } from "~/components/icons";
+import {
+  ChevronRight,
+  ChevronLeftDoubleIcon,
+} from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { usePagination } from "~/hooks";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";

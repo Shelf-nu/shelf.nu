@@ -9,8 +9,8 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
-} from "~/components/forms";
-import { Button } from "~/components/shared";
+} from "~/components/forms/select";
+import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import ProfilePicture from "~/components/user/profile-picture";
 import type { loader } from "~/routes/_layout+/_layout";

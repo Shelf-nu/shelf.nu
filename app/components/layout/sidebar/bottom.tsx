@@ -3,9 +3,9 @@ import type { User } from "@prisma/client";
 import { Form } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
-import { ChevronRight, QuestionsIcon } from "~/components/icons";
+import { ChevronRight, QuestionsIcon } from "~/components/icons/library";
 import { CrispButton } from "~/components/marketing/crisp";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import {
   DropdownMenuItem,
   DropdownMenu,

@@ -22,7 +22,7 @@ import styles from "~/components/booking/styles.css";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import Input from "~/components/forms/input";
 import { List } from "~/components/list";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 
 import { Td } from "~/components/table";
 import { createNotes, getPaginatedAndFilterableAssets } from "~/modules/asset";

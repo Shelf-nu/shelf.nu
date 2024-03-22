@@ -6,7 +6,7 @@ import {
   RemoveUserIcon,
   UserXIcon,
   VerticalDotsIcon,
-} from "~/components/icons";
+} from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,7 +14,7 @@ import {
 } from "~/components/shared/dropdown";
 
 import { isFormProcessing } from "~/utils";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
 export function TeamUsersActionsDropdown({

@@ -8,13 +8,15 @@ import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
 
-import { ChevronRight } from "~/components/icons";
+import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import { Badge, Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
+import { Badge } from "~/components/shared/badge";
 import { Td, Th } from "~/components/table";
 import { getBookings } from "~/modules/booking";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";

@@ -4,7 +4,7 @@ import { Link, useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/settings.team";
 import { tw } from "~/utils";
 import { TeamUsersActionsDropdown } from "./users-actions-dropdown";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 import { Table, Td, Th } from "../table";
 
 export const UsersTable = () => {

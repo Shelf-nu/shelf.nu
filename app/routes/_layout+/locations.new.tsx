@@ -15,7 +15,10 @@ import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
 import Header from "~/components/layout/header";
-import { LocationForm, NewLocationFormSchema } from "~/components/location";
+import {
+  LocationForm,
+  NewLocationFormSchema,
+} from "~/components/location/form";
 
 import { createLocation } from "~/modules/location";
 import { data, error, makeShelfError, parseData } from "~/utils";

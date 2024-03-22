@@ -10,12 +10,12 @@ import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { BookingPageContent } from "~/components/booking";
+import { BookingPageContent } from "~/components/booking/page-content";
 import { NewBookingFormSchema } from "~/components/booking/form";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Badge } from "~/components/shared";
+import { Badge } from "~/components/shared/badge";
 import { db } from "~/database";
 import { createNotes } from "~/modules/asset";
 import {

@@ -12,7 +12,7 @@ import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";

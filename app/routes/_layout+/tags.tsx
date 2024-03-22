@@ -10,7 +10,7 @@ import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
@@ -36,6 +36,7 @@ import {
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
+import { Filters } from "~/components/list/filters";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

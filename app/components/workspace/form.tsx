@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../forms/select";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
 

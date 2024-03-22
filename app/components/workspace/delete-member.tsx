@@ -15,7 +15,7 @@ import {
 } from "~/components/shared/modal";
 
 import { isFormProcessing, tw } from "~/utils";
-import { TrashIcon, XIcon } from "../icons";
+import { TrashIcon, XIcon } from "../icons/library";
 
 export const DeleteMember = ({
   teamMember,

@@ -13,7 +13,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { isFormProcessing } from "~/utils";
-import { TrashIcon } from "../icons";
+import { TrashIcon } from "../icons/library";
 
 export const DeleteLocation = ({
   location,

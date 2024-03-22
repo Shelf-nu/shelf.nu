@@ -1,6 +1,6 @@
 import type { Asset } from "@prisma/client";
 
-import { VerticalDotsIcon } from "~/components/icons";
+import { VerticalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,

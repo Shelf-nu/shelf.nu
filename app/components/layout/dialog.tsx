@@ -1,8 +1,8 @@
 import { useCallback, type ReactNode } from "react";
 import { useMatches, useNavigate } from "@remix-run/react";
 import { tw } from "~/utils";
-import { XIcon } from "../icons";
-import { Button } from "../shared";
+import { XIcon } from "../icons/library";
+import { Button } from "../shared/button";
 
 export const Dialog = ({
   children,

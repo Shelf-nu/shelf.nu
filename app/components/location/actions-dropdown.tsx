@@ -1,6 +1,6 @@
 import type { Location } from "@prisma/client";
 
-import { ChevronRight } from "~/components/icons";
+import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,7 +9,7 @@ import {
 } from "~/components/shared/dropdown";
 import { tw } from "~/utils";
 import { DeleteLocation } from "./delete-location";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 
 interface Props {
   location: {

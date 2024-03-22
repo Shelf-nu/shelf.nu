@@ -6,7 +6,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../forms";
+} from "../forms/select";
 
 export function StatusFilter({
   statusItems,

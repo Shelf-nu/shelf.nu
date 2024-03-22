@@ -19,7 +19,7 @@ import {
 import { withSentry } from "@sentry/remix";
 
 import { ErrorContent } from "./components/errors";
-import { HomeIcon } from "./components/icons";
+import { HomeIcon } from "./components/icons/library";
 import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";

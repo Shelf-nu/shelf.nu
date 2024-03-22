@@ -1,4 +1,4 @@
-import { MapIcon } from "~/components/icons";
+import { MapIcon } from "~/components/icons/library";
 import { tw } from "~/utils";
 
 export const MapPlaceholder = ({

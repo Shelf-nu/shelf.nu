@@ -11,7 +11,7 @@ import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import Input from "~/components/forms/input";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
 import { duplicateAsset } from "~/modules/asset";

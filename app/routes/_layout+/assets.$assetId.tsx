@@ -20,9 +20,9 @@ import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { ScanDetails } from "~/components/location";
+import { ScanDetails } from "~/components/location/scan-details";
 
-import { Badge } from "~/components/shared";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";

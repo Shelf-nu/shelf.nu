@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { Crisp } from "crisp-sdk-web";
 import { useUserData } from "~/hooks";
-import type { ButtonProps } from "../shared";
-import { Button } from "../shared";
+import type { ButtonProps } from "../shared/button";
+import { Button } from "../shared/button";
 
 export function useCrisp() {
   const user = useUserData();

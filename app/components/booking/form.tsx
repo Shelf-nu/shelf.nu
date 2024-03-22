@@ -12,15 +12,15 @@ import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import { isFormProcessing, tw } from "~/utils";
-import type { BookingFormData } from ".";
 import { ActionsDropdown } from "./actions-dropdown";
 import CustodianUserSelect from "../custody/custodian-user-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { ControlledActionButton } from "../shared/controlled-action-button";
+import type { BookingFormData } from "./page-content";
 /**
  * Important note is that the fields are only valudated when they are not disabled
  */

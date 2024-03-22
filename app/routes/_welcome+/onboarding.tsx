@@ -15,7 +15,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { onboardingEmailText } from "~/emails/onboarding-email";
 import { getAuthUserById } from "~/modules/auth/service.server";

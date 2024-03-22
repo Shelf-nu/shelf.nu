@@ -2,8 +2,8 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useNavigation } from "@remix-run/react";
 import { z } from "zod";
-import { LocationMarkerIcon } from "~/components/icons";
-import { LocationSelect } from "~/components/location";
+import { LocationMarkerIcon } from "~/components/icons/library";
+import { LocationSelect } from "~/components/location/location-select";
 import { Button } from "~/components/shared/button";
 import {
   getAllEntriesForCreateAndEdit,

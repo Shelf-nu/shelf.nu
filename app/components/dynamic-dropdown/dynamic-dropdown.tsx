@@ -6,8 +6,8 @@ import { useModelFilters } from "~/hooks";
 import { isFormProcessing, tw } from "~/utils";
 import { EmptyState } from "./empty-state";
 import Input from "../forms/input";
-import { CheckIcon } from "../icons";
-import { Button } from "../shared";
+import { CheckIcon } from "../icons/library";
+import { Button } from "../shared/button";
 import {
   DropdownMenu,
   DropdownMenuContent,

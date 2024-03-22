@@ -3,7 +3,7 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import Input from "~/components/forms/input";
-import { UserIcon } from "~/components/icons";
+import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
 import styles from "~/styles/layout/custom-modal.css";

@@ -10,7 +10,7 @@ import {
   DoubleLayerIcon,
   MultiLayerIcon,
   SingleLayerIcon,
-} from "../icons";
+} from "../icons/library";
 
 export type PriceWithProduct = Stripe.Price & {
   product: Stripe.Product;

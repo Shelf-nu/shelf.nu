@@ -5,7 +5,7 @@ import { Link, useLoaderData } from "@remix-run/react";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
-import { Badge } from "~/components/shared";
+import { Badge } from "~/components/shared/badge";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { Td, Th } from "~/components/table";
 import {

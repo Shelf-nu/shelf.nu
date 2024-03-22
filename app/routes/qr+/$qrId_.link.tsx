@@ -1,8 +1,8 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import { UnlinkIcon } from "~/components/icons";
-import { Button } from "~/components/shared";
+import { UnlinkIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
 import { data, error, getParams, makeShelfError } from "~/utils";
 
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";

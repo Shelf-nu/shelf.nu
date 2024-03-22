@@ -9,6 +9,7 @@ import {
 } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import z from "zod";
+import Input from "~/components/forms/input";
 import {
   Select,
   SelectGroup,
@@ -17,10 +18,9 @@ import {
   SelectLabel,
   SelectValue,
   SelectTrigger,
-} from "~/components/forms";
-import Input from "~/components/forms/input";
-import { UserIcon } from "~/components/icons";
-import { Button } from "~/components/shared";
+} from "~/components/forms/select";
+import { UserIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { db } from "~/database";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";

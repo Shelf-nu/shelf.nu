@@ -15,7 +15,10 @@ import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { LocationForm, NewLocationFormSchema } from "~/components/location";
+import {
+  LocationForm,
+  NewLocationFormSchema,
+} from "~/components/location/form";
 import { getLocation, updateLocation } from "~/modules/location";
 import { data, error, getParams, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";

@@ -6,8 +6,8 @@ import { changeDpiDataUrl } from "changedpi";
 import domtoimage from "dom-to-image";
 import { useReactToPrint } from "react-to-print";
 import { z } from "zod";
-import { XIcon } from "~/components/icons";
-import { Button } from "~/components/shared";
+import { XIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
 import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
 import type { loader as assetLoader } from "~/routes/_layout+/assets.$assetId";
 import {

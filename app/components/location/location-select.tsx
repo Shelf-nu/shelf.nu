@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useLoaderData } from "@remix-run/react";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import type { loader } from "~/routes/_layout+/assets.$assetId.update-location";
 import { tw } from "~/utils";
 import { SearchInput } from "./search-input";
@@ -11,8 +11,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../forms";
-import { XIcon } from "../icons";
+} from "../forms/select";
+import { XIcon } from "../icons/library";
 import { Image } from "../shared/image";
 
 export const LocationSelect = () => {

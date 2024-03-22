@@ -5,7 +5,7 @@ import type { action } from "~/routes/_layout+/assets.import";
 import { isFormProcessing, tw } from "~/utils";
 import Input from "../forms/input";
 import { CrispButton } from "../marketing/crisp";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 import {
   AlertDialog,
   AlertDialogCancel,

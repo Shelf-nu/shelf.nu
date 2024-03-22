@@ -2,8 +2,8 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { z } from "zod";
-import { CuboidIcon } from "~/components/icons";
-import { Button } from "~/components/shared";
+import { CuboidIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
 import { usePosition } from "~/hooks";
 import { data, getParams } from "~/utils";
 

@@ -6,7 +6,7 @@ import { useLoaderData } from "@remix-run/react";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
-import { Badge } from "~/components/shared";
+import { Badge } from "~/components/shared/badge";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { Image } from "~/components/shared/image";
 import { UserBadge } from "~/components/shared/user-badge";

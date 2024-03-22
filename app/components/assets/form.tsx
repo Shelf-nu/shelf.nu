@@ -23,7 +23,7 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { Image } from "../shared/image";

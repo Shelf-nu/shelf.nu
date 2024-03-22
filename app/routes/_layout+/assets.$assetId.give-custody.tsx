@@ -10,7 +10,7 @@ import {
 } from "@remix-run/react";
 import { z } from "zod";
 import CustodianSelect from "~/components/custody/custodian-select";
-import { UserIcon } from "~/components/icons";
+import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database";

@@ -5,8 +5,9 @@ import { useNavigate } from "@remix-run/react";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";

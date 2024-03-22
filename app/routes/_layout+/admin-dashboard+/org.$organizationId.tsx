@@ -6,7 +6,7 @@ import {
 import { Form, Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database";
 import { generateOrphanedCodes } from "~/modules/qr";

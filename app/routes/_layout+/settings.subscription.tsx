@@ -6,7 +6,7 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import { InfoIcon } from "~/components/icons";
+import { InfoIcon } from "~/components/icons/library";
 import {
   Tabs,
   TabsContent,

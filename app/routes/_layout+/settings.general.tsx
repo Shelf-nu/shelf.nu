@@ -25,11 +25,11 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "~/components/forms";
+} from "~/components/forms/select";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database";
