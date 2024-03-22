@@ -13,6 +13,18 @@ export default defineConfig({
     //   key: "./server/dev/key.pem",
     //   cert: "./server/dev/cert.pem",
     // },
+    // https://github.com/remix-run/remix/discussions/8917#discussioncomment-8640023
+    warmup: {
+      clientFiles: [
+        "./app/entry.client.tsx",
+        "./app/root.tsx",
+        "./app/routes/**/*",
+      ],
+    },
+  },
+  // https://github.com/remix-run/remix/discussions/8917#discussioncomment-8640023
+  optimizeDeps: {
+    include: ["./app/entry.client.tsx", "./app/root.tsx", "./app/routes/**/*"],
   },
   plugins: [
     cjsInterop({
