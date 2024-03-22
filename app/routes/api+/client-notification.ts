@@ -15,10 +15,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const payload = parseData(
-      await request.formData(),
-      ClientNotificationSchema
-    );
+    const payload = parseData(await request.json(), ClientNotificationSchema);
 
     const { title, message, icon } = payload;
 
