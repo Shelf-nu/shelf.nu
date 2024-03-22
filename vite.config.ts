@@ -28,7 +28,6 @@ export default defineConfig({
       entry: "server/index.ts", // The file path of your server.
       exclude: [/^\/(app)\/.+/, ...defaultOptions.exclude],
     }),
-    tsconfigPaths(),
     remix({
       serverBuildFile: "remix.js",
       ignoredRouteFiles: ["**/.*"],
@@ -58,5 +57,6 @@ export default defineConfig({
           });
       },
     }),
+    tsconfigPaths(),
   ],
 });

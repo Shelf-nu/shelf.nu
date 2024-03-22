@@ -5,6 +5,7 @@ const viteDevServer =
     : await import("vite").then((vite) =>
         vite.createServer({
           server: { middlewareMode: true },
+          appType: "custom",
         })
       );
 
