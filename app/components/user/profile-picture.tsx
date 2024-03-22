@@ -1,4 +1,4 @@
-import { useUserData } from "~/hooks";
+import { useUserData } from "~/hooks/use-user-data";
 import { tw } from "~/utils";
 
 /** Returns the current user's profile picture */

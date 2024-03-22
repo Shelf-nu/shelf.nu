@@ -6,8 +6,11 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { useNavigation } from "@remix-run/react";
-import { useModelFilters } from "~/hooks";
-import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
+import { useModelFilters } from "~/hooks/use-model-filters";
+import type {
+  ModelFilterItem,
+  ModelFilterProps,
+} from "~/hooks/use-model-filters";
 import { isFormProcessing, tw } from "~/utils";
 import { EmptyState } from "../dynamic-dropdown/empty-state";
 import Input from "../forms/input";

@@ -4,7 +4,7 @@ import {
   ChevronLeftDoubleIcon,
 } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { usePagination } from "~/hooks";
+import { usePagination } from "~/hooks/use-pagination";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils";
 import PerPageItemsSelect from "./per-page-items-select";

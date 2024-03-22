@@ -27,7 +27,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
-import { usePosition } from "~/hooks";
+import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   deleteAsset,

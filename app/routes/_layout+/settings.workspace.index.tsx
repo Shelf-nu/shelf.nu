@@ -13,7 +13,7 @@ import { UserBadge } from "~/components/shared/user-badge";
 import { Table, Td, Th } from "~/components/table";
 import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
 import { db } from "~/database/db.server";
-import { useUserData } from "~/hooks";
+import { useUserData } from "~/hooks/use-user-data";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
