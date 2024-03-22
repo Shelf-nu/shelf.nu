@@ -14,13 +14,7 @@ import {
 } from "~/modules/custom-field/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParamsValues,
-  makeShelfError,
-} from "~/utils";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -28,9 +22,14 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
+import { getParamsValues } from "~/utils/list";
+import { makeShelfError } from "~/utils/error";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },

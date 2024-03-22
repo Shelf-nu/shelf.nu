@@ -7,15 +7,9 @@ import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database/db.server";
 import { deleteUser } from "~/modules/user/service.server";
-import {
-  ShelfError,
-  getParams,
-  data,
-  error,
-  isDelete,
-  makeShelfError,
-} from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { data, error, getParams, isDelete } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export type QrCodeWithAsset = Qr & {

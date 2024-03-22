@@ -1,8 +1,9 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { error, getParams, makeShelfError } from "~/utils";
+import { error, getParams } from "~/utils/http.server";
 import { exportAssetsToCsv } from "~/utils/csv.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { makeShelfError } from "~/utils/error";
 
 export async function loader({ context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

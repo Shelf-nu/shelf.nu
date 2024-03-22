@@ -1,4 +1,4 @@
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { getDifferenceInSeconds } from "~/utils/date-fns";
 
 const FORCE_RELOAD_WITHIN_SECONDS = 30;

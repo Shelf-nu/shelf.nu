@@ -20,19 +20,16 @@ import {
   updateCustomField,
 } from "~/modules/custom-field/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
-import {
-  ShelfError,
-  data,
-  error,
-  getParams,
-  makeShelfError,
-  parseData,
-} from "~/utils";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
+import { makeShelfError, ShelfError } from "~/utils/error";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

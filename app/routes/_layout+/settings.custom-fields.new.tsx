@@ -11,12 +11,16 @@ import Header from "~/components/layout/header";
 
 import { createCustomField } from "~/modules/custom-field/service.server";
 import { assertUserCanCreateMoreCustomFields } from "~/modules/tier/service.server";
-import { data, error, makeShelfError, parseData } from "~/utils";
+import { data, error, parseData } from "~/utils/http.server";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { makeShelfError } from "~/utils/error";
 
 const title = "New Custom Field";
 

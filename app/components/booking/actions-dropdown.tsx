@@ -10,7 +10,7 @@ import {
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { DeleteBooking } from "./delete-booking";
 import { Button } from "../shared/button";
 

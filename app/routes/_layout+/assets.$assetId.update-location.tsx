@@ -11,16 +11,14 @@ import {
   updateAsset,
 } from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css";
-import {
-  assertIsPost,
-  getParams,
-  error,
-  isFormProcessing,
-  makeShelfError,
-  parseData,
-} from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { assertIsPost, getParams, error, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

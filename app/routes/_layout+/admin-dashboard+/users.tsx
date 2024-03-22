@@ -9,7 +9,8 @@ import { Filters } from "~/components/list/filters";
 import { Pagination } from "~/components/list/pagination";
 import { Td } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user/service.server";
-import { data, error, makeShelfError } from "~/utils";
+import { makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

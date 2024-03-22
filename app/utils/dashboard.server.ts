@@ -6,7 +6,7 @@ import {
 import { db } from "~/database/db.server";
 import type { TeamMemberWithUser } from "~/modules/team-member/types";
 import { defaultUserCategories } from "~/modules/user/service.server";
-import { ShelfError } from ".";
+import { ShelfError } from "./error";
 
 type Asset = Prisma.AssetGetPayload<{
   include: {

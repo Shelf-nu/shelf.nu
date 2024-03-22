@@ -20,19 +20,16 @@ import {
 } from "~/modules/user/service.server";
 import type { UpdateUserPayload } from "~/modules/user/types";
 
-import {
-  data,
-  error,
-  isFormProcessing,
-  makeShelfError,
-  parseData,
-} from "~/utils";
+import { data, error, parseData } from "~/utils/http.server";
+
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { getValidationErrors } from "~/utils/http";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 
 export const UpdateFormSchema = z.object({
   email: z

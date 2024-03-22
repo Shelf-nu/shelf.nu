@@ -7,7 +7,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
 import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";

@@ -38,14 +38,18 @@ import {
 } from "~/modules/asset/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css";
-import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription";
+import { tw } from "~/utils/tw";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */

@@ -1,6 +1,6 @@
 import { useCallback, type ReactNode } from "react";
 import { useMatches, useNavigate } from "@remix-run/react";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
 

@@ -22,14 +22,6 @@ import {
 
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
-import {
-  assertIsPost,
-  data,
-  error,
-  getParams,
-  parseData,
-  slugify,
-} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   extractCustomFieldValuesFromPayload,
@@ -37,8 +29,19 @@ import {
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  assertIsPost,
+  data,
+  error,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { slugify } from "~/utils/slugify";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

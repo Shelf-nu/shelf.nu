@@ -1,5 +1,5 @@
 import { useNavigation, useSearchParams } from "@remix-run/react";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils/form";
 import {
   Select,
   SelectContent,

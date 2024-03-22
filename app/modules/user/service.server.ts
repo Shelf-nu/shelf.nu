@@ -15,20 +15,18 @@ import {
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 
-import {
-  dateTimeInUnix,
-  getCurrentSearchParams,
-  getParamsValues,
-  randomUsernameFromEmail,
-} from "~/utils";
+import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import type { ValidationError } from "~/utils/http";
+import { getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   deleteProfilePicture,
   getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
+import { randomUsernameFromEmail } from "~/utils/user";
 import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
 

@@ -8,9 +8,9 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createScan, updateScan } from "~/modules/scan/service.server";
-import { assertIsPost, data, error, getParams } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { assertIsPost, data, error, getParams } from "~/utils/http.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.isAuthenticated

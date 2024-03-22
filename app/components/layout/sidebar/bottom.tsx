@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import ProfilePicture from "~/components/user/profile-picture";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 interface Props {
   user: Pick<User, "username" | "email">;

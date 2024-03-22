@@ -1,6 +1,6 @@
 import { Link, useFetcher, useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import {
   AddUserIcon,
   AssetsIcon,

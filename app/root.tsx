@@ -25,9 +25,9 @@ import { Clarity } from "./components/marketing/clarity";
 import fontsStylesheetUrl from "./styles/fonts.css";
 import globalStylesheetUrl from "./styles/global.css";
 import styles from "./tailwind.css";
-import { data } from "./utils";
 import { ClientHintCheck, getHints } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
+import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { splashScreenLinks } from "./utils/splash-screen-links";
 

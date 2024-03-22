@@ -27,19 +27,18 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { createInvite } from "~/modules/invite/service.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier/service.server";
 import styles from "~/styles/layout/custom-modal.css";
-import {
-  data,
-  error,
-  isFormProcessing,
-  parseData,
-  tw,
-  validEmail,
-} from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { data, error, parseData } from "~/utils/http.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import type { UserFriendlyRoles } from "./settings.team";
+import { validEmail } from "~/utils/misc";
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 
 const InviteUserFormSchema = z.object({
   email: z

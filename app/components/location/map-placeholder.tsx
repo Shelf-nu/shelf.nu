@@ -1,5 +1,5 @@
 import { MapIcon } from "~/components/icons/library";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 export const MapPlaceholder = ({
   title = "Unable to generate map",

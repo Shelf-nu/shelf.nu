@@ -20,11 +20,14 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 import { getLocation, updateLocation } from "~/modules/location/service.server";
-import { data, error, getParams, parseData } from "~/utils";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { MAX_SIZE } from "./locations.new";
 

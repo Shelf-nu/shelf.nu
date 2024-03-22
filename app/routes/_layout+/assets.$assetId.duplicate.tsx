@@ -16,13 +16,17 @@ import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database/db.server";
 import { duplicateAsset } from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css";
-import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { getValidationErrors } from "~/utils/http";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { isFormProcessing } from "~/utils/form";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

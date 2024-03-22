@@ -3,8 +3,8 @@ import { json, redirect } from "@remix-run/node";
 
 import { SendOtpSchema } from "~/modules/auth/components/continue-with-email-form";
 import { sendOTP } from "~/modules/auth/service.server";
-import { makeShelfError, error, notAllowedMethod } from "~/utils";
-import { getActionMethod, parseData } from "~/utils/http.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { error, getActionMethod, parseData } from "~/utils/http.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   try {

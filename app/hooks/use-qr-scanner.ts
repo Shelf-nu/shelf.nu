@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "@remix-run/react";
 import { useMediaDevices } from "react-media-devices";
 import { useZxing } from "react-zxing";
-import { ShelfError } from "~/utils";
+import { ShelfError } from "~/utils/error";
 import { useClientNotification } from "./use-client-notification";
 
 // Custom hook to handle video devices

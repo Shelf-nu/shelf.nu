@@ -14,7 +14,8 @@ import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
-import { ShelfError, data, error, makeShelfError } from "~/utils";
+import { data, error } from "~/utils/http.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import {
   initializePerPageCookieOnLayout,
   setCookie,

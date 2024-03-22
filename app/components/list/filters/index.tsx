@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Form, useLoaderData, useSearchParams } from "@remix-run/react";
 
 import type { SearchableIndexResponse } from "~/modules/types";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 import { SearchForm } from "./search-form";
 

@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import { forwardRef } from "react";
 
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import type { Icon } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 

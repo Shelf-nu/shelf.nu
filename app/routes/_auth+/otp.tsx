@@ -23,19 +23,18 @@ import {
   data,
   error,
   getActionMethod,
-  isFormProcessing,
-  makeShelfError,
-  notAllowedMethod,
   parseData,
-  randomUsernameFromEmail,
   safeRedirect,
-  tw,
-  validEmail,
-} from "~/utils";
+} from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { isErrorResponse } from "~/utils/http";
 import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
+import { randomUsernameFromEmail } from "~/utils/user";
+import { validEmail } from "~/utils/misc";
+import { isFormProcessing } from "~/utils/form";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { tw } from "~/utils/tw";
 
 export function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);

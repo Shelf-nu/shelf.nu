@@ -7,7 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { DeleteLocation } from "./delete-location";
 import { Button } from "../shared/button";
 

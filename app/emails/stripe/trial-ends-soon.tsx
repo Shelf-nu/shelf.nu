@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import { SERVER_URL } from "~/utils";
+import { SERVER_URL } from "~/utils/env";
 interface Props {
   user: { firstName?: string | null; lastName?: string | null; email: string };
   subscription: Stripe.Subscription;

@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
-import { tw } from "~/utils/tw-classes";
+import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import { Button } from "../shared/button";
 

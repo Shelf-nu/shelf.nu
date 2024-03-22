@@ -25,10 +25,8 @@ import {
   data,
   error,
   getCurrentSearchParams,
-  getParamsValues,
-  makeShelfError,
   parseData,
-} from "~/utils";
+} from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -36,8 +34,13 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { getParamsValues } from "~/utils/list";
+import { makeShelfError } from "~/utils/error";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

@@ -4,7 +4,8 @@ import JSZip from "jszip";
 import QRCode from "qrcode-generator";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { error, getParams, makeShelfError, ShelfError } from "~/utils";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

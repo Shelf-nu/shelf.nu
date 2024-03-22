@@ -2,8 +2,8 @@
 import { json } from "@remix-run/node";
 
 import { db } from "~/database/db.server";
-import { data, error } from "~/utils";
 import { ShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 
 export async function loader() {
   try {

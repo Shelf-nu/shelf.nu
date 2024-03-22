@@ -21,9 +21,10 @@ import {
 } from "~/modules/organization/context.server";
 import { createOrganization } from "~/modules/organization/service.server";
 import { assertUserCanCreateMoreOrganizations } from "~/modules/tier/service.server";
-import { assertIsPost, data, error, makeShelfError, parseData } from "~/utils";
+import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

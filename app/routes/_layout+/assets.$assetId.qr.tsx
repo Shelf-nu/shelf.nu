@@ -19,11 +19,14 @@ import {
   error,
   getCurrentSearchParams,
   getParams,
-  makeShelfError,
-  slugify,
-} from "~/utils";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+} from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { makeShelfError } from "~/utils/error";
+import { slugify } from "~/utils/slugify";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

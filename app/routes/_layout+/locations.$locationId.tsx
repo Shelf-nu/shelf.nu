@@ -31,12 +31,9 @@ import assetCss from "~/styles/asset.css";
 import {
   data,
   error,
-  geolocate,
   getCurrentSearchParams,
   getParams,
-  getParamsValues,
-  tw,
-} from "~/utils";
+} from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -45,8 +42,14 @@ import {
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { geolocate } from "~/utils/geolocate.server";
+import { tw } from "~/utils/tw";
+import { getParamsValues } from "~/utils/list";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

@@ -1,4 +1,4 @@
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import type { ButtonProps } from "./button";
 import { Button } from "./button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";

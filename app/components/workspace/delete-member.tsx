@@ -14,7 +14,8 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 
-import { isFormProcessing, tw } from "~/utils";
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 import { TrashIcon, XIcon } from "../icons/library";
 
 export const DeleteMember = ({

@@ -6,7 +6,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { RemoveAssetFromBooking } from "./remove-asset-from-booking";
 
 interface Props {

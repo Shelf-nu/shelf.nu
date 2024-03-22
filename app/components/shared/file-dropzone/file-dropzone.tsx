@@ -7,11 +7,13 @@ import type { DropzoneOptions, FileRejection } from "react-dropzone";
 import { useDropzone } from "react-dropzone";
 
 import { FileUploadIcon } from "~/components/icons/library";
-import type { DataOrErrorResponse } from "~/utils";
-import { formatBytes, isFormProcessing, tw } from "~/utils";
 import { derivedFileInfoAtom } from "./atoms";
 
 import { StatusMessage } from "./status-message";
+import { DataOrErrorResponse } from "~/utils/http.server";
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
+import { formatBytes } from "~/utils/format-bytes";
 
 export function FileDropzone({
   fetcher,

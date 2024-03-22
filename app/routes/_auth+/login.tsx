@@ -25,14 +25,14 @@ import {
   data,
   error,
   getActionMethod,
-  isFormProcessing,
   parseData,
   safeRedirect,
-  validEmail,
-} from "~/utils";
+} from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { validEmail } from "~/utils/misc";
+import { isFormProcessing } from "~/utils/form";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";

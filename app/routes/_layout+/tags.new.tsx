@@ -8,19 +8,17 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
 import { createTag } from "~/modules/tag/service.server";
-import {
-  assertIsPost,
-  data,
-  error,
-  isFormProcessing,
-  makeShelfError,
-  parseData,
-} from "~/utils";
+import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 
 export const NewTagFormSchema = z.object({
   name: z.string().min(3, "Name is required"),

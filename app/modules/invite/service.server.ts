@@ -5,7 +5,7 @@ import type { Params } from "@remix-run/react";
 import jwt from "jsonwebtoken";
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
-import { INVITE_TOKEN_SECRET } from "~/utils";
+import { INVITE_TOKEN_SECRET } from "~/utils/env";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";

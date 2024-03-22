@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 export const Badge = ({
   children,

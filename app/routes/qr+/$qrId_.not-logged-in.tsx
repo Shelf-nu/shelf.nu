@@ -5,7 +5,7 @@ import { z } from "zod";
 import { CuboidIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { usePosition } from "~/hooks/use-position";
-import { data, getParams } from "~/utils";
+import { data, getParams } from "~/utils/http.server";
 
 export function loader({ params }: LoaderFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));

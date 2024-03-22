@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import type { loader } from "~/routes/_layout+/assets.$assetId.update-location";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { SearchInput } from "./search-input";
 import { useLocationSearch } from "./useLocationSearch";
 import {

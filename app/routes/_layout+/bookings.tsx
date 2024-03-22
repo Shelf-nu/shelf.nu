@@ -20,13 +20,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { getBookings } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParamsValues,
-  makeShelfError,
-} from "~/utils";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
@@ -34,8 +28,13 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { makeShelfError } from "~/utils/error";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
