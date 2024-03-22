@@ -1,7 +1,7 @@
 import { type ActionFunctionArgs, json } from "@remix-run/node";
+import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
-import { setCookie, userPrefs } from "~/utils/cookies.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();

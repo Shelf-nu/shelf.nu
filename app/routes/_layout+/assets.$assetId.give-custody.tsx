@@ -17,9 +17,10 @@ import { db } from "~/database/db.server";
 import { createNote } from "~/modules/asset/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css";
-import { data, error, getParams, parseData } from "~/utils/http.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -27,7 +28,6 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
-import { isFormProcessing } from "~/utils/form";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

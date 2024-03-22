@@ -14,13 +14,13 @@ import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
-import { data, error } from "~/utils/http.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
 import {
   initializePerPageCookieOnLayout,
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {

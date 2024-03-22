@@ -21,15 +21,15 @@ import {
 } from "~/components/location/form";
 
 import { createLocation } from "~/modules/location/service.server";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { data, error, parseData } from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
+import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { makeShelfError } from "~/utils/error";
 const title = "New Location";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

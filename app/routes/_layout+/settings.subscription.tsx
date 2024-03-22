@@ -20,11 +20,11 @@ import SuccessfulSubscriptionModal from "~/components/subscription/successful-su
 import { db } from "~/database/db.server";
 
 import { getUserByID } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfError, makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,

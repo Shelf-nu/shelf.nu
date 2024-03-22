@@ -19,13 +19,6 @@ import { Th, Td } from "~/components/table";
 import { DeleteTag } from "~/components/tag/delete-tag";
 
 import { deleteTag, getTags } from "~/modules/tag/service.server";
-import {
-  assertIsDelete,
-  data,
-  error,
-  getCurrentSearchParams,
-  parseData,
-} from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -33,13 +26,20 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
+import {
+  assertIsDelete,
+  data,
+  error,
+  getCurrentSearchParams,
+  parseData,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { getParamsValues } from "~/utils/list";
-import { makeShelfError } from "~/utils/error";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

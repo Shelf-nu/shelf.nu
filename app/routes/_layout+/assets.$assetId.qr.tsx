@@ -14,6 +14,7 @@ import {
   getQrByAssetId,
 } from "~/modules/qr/service.server";
 import type { loader as assetLoader } from "~/routes/_layout+/assets.$assetId";
+import { makeShelfError } from "~/utils/error";
 import {
   data,
   error,
@@ -25,7 +26,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { makeShelfError } from "~/utils/error";
 import { slugify } from "~/utils/slugify";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 

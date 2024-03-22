@@ -28,17 +28,17 @@ import { createInvite } from "~/modules/invite/service.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier/service.server";
 import styles from "~/styles/layout/custom-modal.css";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { data, error, parseData } from "~/utils/http.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, parseData } from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import type { UserFriendlyRoles } from "./settings.team";
-import { validEmail } from "~/utils/misc";
-import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
+import type { UserFriendlyRoles } from "./settings.team";
 
 const InviteUserFormSchema = z.object({
   email: z

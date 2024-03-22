@@ -19,10 +19,10 @@ import { Button } from "~/components/shared/button";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { findUserByEmail } from "~/modules/user/service.server";
-import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
+import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Create an account";

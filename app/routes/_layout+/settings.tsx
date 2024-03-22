@@ -6,9 +6,8 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
-import { data } from "~/utils/http.server";
-
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { data } from "~/utils/http.server";
 
 export const handle = {
   breadcrumb: () => <Link to="/settings">Settings</Link>,

@@ -19,6 +19,11 @@ import { verifyOtpAndSignin } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { isErrorResponse } from "~/utils/http";
 import {
   data,
   error,
@@ -26,15 +31,10 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
-import { isErrorResponse } from "~/utils/http";
-import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
-import { randomUsernameFromEmail } from "~/utils/user";
 import { validEmail } from "~/utils/misc";
-import { isFormProcessing } from "~/utils/form";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
 import { tw } from "~/utils/tw";
+import { randomUsernameFromEmail } from "~/utils/user";
 
 export function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);

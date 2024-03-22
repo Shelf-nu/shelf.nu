@@ -12,20 +12,20 @@ import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
 import { getLocations } from "~/modules/location/service.server";
-import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { makeShelfError } from "~/utils/error";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { getParamsValues } from "~/utils/list";
-import { makeShelfError } from "~/utils/error";
 import { tw } from "~/utils/tw";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

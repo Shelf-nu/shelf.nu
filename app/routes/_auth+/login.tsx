@@ -21,6 +21,10 @@ import { signInWithEmail } from "~/modules/auth/service.server";
 
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 import {
   data,
   error,
@@ -28,11 +32,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { validEmail } from "~/utils/misc";
-import { isFormProcessing } from "~/utils/form";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";

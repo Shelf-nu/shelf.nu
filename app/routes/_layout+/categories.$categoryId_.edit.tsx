@@ -15,17 +15,17 @@ import { Button } from "~/components/shared/button";
 
 import { getCategory, updateCategory } from "~/modules/category/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
-import { makeShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 
 export const UpdateCategoryFormSchema = z.object({
   name: z.string().min(3, "Name is required"),

@@ -20,10 +20,10 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 import { getLocation, updateLocation } from "~/modules/location/service.server";
-import { data, error, getParams, parseData } from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,

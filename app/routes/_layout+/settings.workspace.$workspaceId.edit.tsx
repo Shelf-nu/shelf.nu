@@ -23,6 +23,9 @@ import {
 
 import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   assertIsPost,
   data,
@@ -31,15 +34,12 @@ import {
   parseData,
 } from "~/utils/http.server";
 
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { MAX_SIZE } from "./settings.workspace.new";
-import { makeShelfError, ShelfError } from "~/utils/error";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

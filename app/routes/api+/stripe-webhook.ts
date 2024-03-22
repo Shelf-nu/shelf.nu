@@ -4,8 +4,8 @@ import { json } from "@remix-run/node";
 import type Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
-import { error } from "~/utils/http.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
 import { sendEmail } from "~/utils/mail.server";
 import {
   fetchStripeSubscription,

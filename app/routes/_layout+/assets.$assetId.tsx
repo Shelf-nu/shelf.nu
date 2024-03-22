@@ -39,15 +39,16 @@ import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
 
-import { error, getParams, data, parseData } from "~/utils/http.server";
-
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { error, getParams, data, parseData } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
+import { isLink } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
@@ -55,8 +56,6 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 import { tw } from "~/utils/tw";
-import { isFormProcessing } from "~/utils/form";
-import { isLink } from "~/utils/misc";
 
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z

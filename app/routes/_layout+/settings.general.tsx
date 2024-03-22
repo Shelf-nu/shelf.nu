@@ -34,10 +34,11 @@ import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization/service.server";
-import { data, error, parseData } from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -46,7 +47,6 @@ import { requirePermission } from "~/utils/roles.server";
 import { canExportAssets } from "~/utils/subscription";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { MAX_SIZE } from "./settings.workspace.new";
-import { isFormProcessing } from "~/utils/form";
 
 const EditWorkspaceFormSchema = z.object({
   logo: z.any().optional(),

@@ -10,11 +10,11 @@ import {
   updateInviteStatus,
 } from "~/modules/invite/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { error, parseData, safeRedirect } from "~/utils/http.server";
 import { setCookie } from "~/utils/cookies.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
-import jwt from "~/utils/jsonwebtoken.server";
 import { INVITE_TOKEN_SECRET } from "~/utils/env";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { error, parseData, safeRedirect } from "~/utils/http.server";
+import jwt from "~/utils/jsonwebtoken.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {

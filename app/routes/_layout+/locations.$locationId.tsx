@@ -28,12 +28,6 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
 import assetCss from "~/styles/asset.css";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-} from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -42,14 +36,20 @@ import {
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
+import { geolocate } from "~/utils/geolocate.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { geolocate } from "~/utils/geolocate.server";
 import { tw } from "~/utils/tw";
-import { getParamsValues } from "~/utils/list";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

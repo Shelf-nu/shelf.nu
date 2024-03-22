@@ -26,13 +26,6 @@ import {
 } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -45,12 +38,19 @@ import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings";
-import { getParamsValues } from "~/utils/list";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

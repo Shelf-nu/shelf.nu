@@ -3,9 +3,9 @@ import { Link, Outlet, json } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
-import { requireAdmin } from "~/utils/roles.server";
-import { data, error } from "~/utils/http.server";
 import { makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
+import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();

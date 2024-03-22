@@ -16,11 +16,11 @@ import {
 } from "mocks/user";
 import { db } from "~/database/db.server";
 
+import { randomUsernameFromEmail } from "~/utils/user";
 import {
   createUserAccountForTesting,
   defaultUserCategories,
 } from "./service.server";
-import { randomUsernameFromEmail } from "~/utils/user";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
