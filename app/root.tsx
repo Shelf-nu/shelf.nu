@@ -9,7 +9,6 @@ import { json } from "@remix-run/node";
 import {
   Link,
   Links,
-  LiveReload,
   Meta,
   Outlet,
   Scripts,
@@ -97,7 +96,6 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
           }}
         />
         <Scripts />
-        <LiveReload />
       </body>
     </html>
   );
