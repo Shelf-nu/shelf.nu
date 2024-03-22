@@ -8,7 +8,7 @@ import { db } from "~/database/db.server";
 import { createNote } from "~/modules/asset/service.server";
 import { releaseCustody } from "~/modules/custody/service.server";
 import { getUserByID } from "~/modules/user/service.server";
-import styles from "~/styles/layout/custom-modal.css";
+import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";

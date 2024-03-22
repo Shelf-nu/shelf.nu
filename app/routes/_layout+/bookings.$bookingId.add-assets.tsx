@@ -18,7 +18,7 @@ import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
-import styles from "~/components/booking/styles.css";
+import styles from "~/components/booking/styles.css?url";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import Input from "~/components/forms/input";
 import { List } from "~/components/list";

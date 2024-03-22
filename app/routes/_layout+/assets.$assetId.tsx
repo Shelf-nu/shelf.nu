@@ -7,7 +7,7 @@ import type {
 import { redirect, json } from "@remix-run/node";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 
-import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
@@ -37,7 +37,7 @@ import {
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
-import assetCss from "~/styles/asset.css";
+import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";

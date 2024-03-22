@@ -10,7 +10,7 @@ import {
   getAsset,
   updateAsset,
 } from "~/modules/asset/service.server";
-import styles from "~/styles/layout/custom-modal.css";
+import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";

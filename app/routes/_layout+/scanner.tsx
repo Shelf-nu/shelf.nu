@@ -6,7 +6,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Spinner } from "~/components/shared/spinner";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
-import scannerCss from "~/styles/scanner.css";
+import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
