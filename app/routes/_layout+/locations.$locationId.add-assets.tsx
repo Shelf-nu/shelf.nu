@@ -8,8 +8,10 @@ import { z } from "zod";
 import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
+import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { Td } from "~/components/table";
 import { db } from "~/database";
 import {
   createBulkLocationChangeNotes,
@@ -20,8 +22,6 @@ import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
-import { List } from "~/components/list";
-import { Td } from "~/components/table";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

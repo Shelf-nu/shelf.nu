@@ -5,6 +5,8 @@ import { useAtom, useAtomValue } from "jotai";
 
 import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
 
+import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import type { WithDateFields } from "~/modules/types";
 import { useCategorySearch } from "../../../category/useCategorySearch";
 import Input from "../../../forms/input";
@@ -22,8 +24,6 @@ import {
   selectedCategoriesAtom,
   toggleIsFilteringCategoriesAtom,
 } from "../atoms/category";
-import { Badge } from "~/components/shared/badge";
-import { Button } from "~/components/shared/button";
 
 export const CategoryCheckboxDropdown = () => {
   const [params] = useSearchParams();
