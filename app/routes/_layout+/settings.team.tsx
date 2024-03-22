@@ -15,7 +15,7 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { TeamMembersTable } from "~/components/workspace/team-members-table";
 import { UsersTable } from "~/components/workspace/users-table";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { createInvite } from "~/modules/invite";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
 import { revokeAccessToOrganization } from "~/modules/user";

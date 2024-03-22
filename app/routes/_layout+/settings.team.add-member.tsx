@@ -5,7 +5,7 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import styles from "~/styles/layout/custom-modal.css";
 import { data, error, isFormProcessing, parseData } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

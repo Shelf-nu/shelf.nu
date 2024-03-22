@@ -5,8 +5,8 @@ import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import sharp from "sharp";
 import type { AuthSession } from "server/session";
-import type { ExtendedPrismaClient } from "~/database";
-import { db } from "~/database";
+import type { ExtendedPrismaClient } from "~/database/db.server";
+import { db } from "~/database/db.server";
 
 import {
   deleteAuthAccount,

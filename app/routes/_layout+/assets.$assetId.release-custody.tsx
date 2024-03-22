@@ -4,7 +4,7 @@ import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { createNote } from "~/modules/asset";
 import { releaseCustody } from "~/modules/custody";
 import { getUserByID } from "~/modules/user";

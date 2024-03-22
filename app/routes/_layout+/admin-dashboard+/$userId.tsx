@@ -5,7 +5,7 @@ import { useLoaderData, Link } from "@remix-run/react";
 import { z } from "zod";
 import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { deleteUser } from "~/modules/user";
 import {
   ShelfError,

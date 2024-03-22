@@ -1,6 +1,6 @@
 import type { Organization, Qr, User } from "@prisma/client";
 import QRCode from "qrcode-generator";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { getCurrentSearchParams, gifToPng } from "~/utils";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";

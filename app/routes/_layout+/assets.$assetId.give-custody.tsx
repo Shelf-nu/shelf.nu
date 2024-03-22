@@ -13,7 +13,7 @@ import CustodianSelect from "~/components/custody/custodian-select";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { createNote } from "~/modules/asset";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";

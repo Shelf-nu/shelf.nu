@@ -16,7 +16,7 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared/badge";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { createNotes } from "~/modules/asset";
 import {
   deleteBooking,

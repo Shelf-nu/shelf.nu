@@ -1,5 +1,5 @@
 import type { Asset, ReportFound, User } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils";
 import { sendEmail } from "~/utils/mail.server";
 

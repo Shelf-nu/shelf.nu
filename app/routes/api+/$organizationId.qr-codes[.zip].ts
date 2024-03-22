@@ -3,7 +3,7 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import JSZip from "jszip";
 import QRCode from "qrcode-generator";
 import { z } from "zod";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { error, getParams, makeShelfError, ShelfError } from "~/utils";
 import { requireAdmin } from "~/utils/roles.server";
 

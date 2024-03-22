@@ -12,7 +12,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import {
   createBulkLocationChangeNotes,
   getPaginatedAndFilterableAssets,

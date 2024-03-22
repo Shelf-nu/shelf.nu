@@ -9,7 +9,7 @@ import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
 import { upsertBooking } from "~/modules/booking";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";

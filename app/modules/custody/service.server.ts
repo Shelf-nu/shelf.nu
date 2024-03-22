@@ -1,6 +1,6 @@
 import type { Asset } from "@prisma/client";
 import { AssetStatus } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils";
 
 export async function releaseCustody({ assetId }: { assetId: Asset["id"] }) {

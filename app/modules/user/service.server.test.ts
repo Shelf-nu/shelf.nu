@@ -14,7 +14,7 @@ import {
   USER_ID,
   USER_PASSWORD,
 } from "mocks/user";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
 import { randomUsernameFromEmail } from "~/utils";
 import {

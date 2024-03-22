@@ -32,7 +32,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Button } from "~/components/shared/button";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Spinner } from "~/components/shared/spinner";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization";
 import { data, error, isFormProcessing, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";

@@ -3,7 +3,7 @@ import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext } from "@remix-run/node";
 import type { Params } from "@remix-run/react";
 import jwt from "jsonwebtoken";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { INVITE_TOKEN_SECRET } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";

@@ -6,7 +6,7 @@ import {
   BookingStatus,
   AssetStatus,
 } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { calcTimeDifference } from "~/utils/date-fns";
 import type { ErrorLabel } from "~/utils/error";

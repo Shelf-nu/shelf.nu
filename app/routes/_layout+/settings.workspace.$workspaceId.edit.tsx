@@ -21,7 +21,7 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization";
 import {
   ShelfError,

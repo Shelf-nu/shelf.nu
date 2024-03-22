@@ -1,6 +1,6 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { createAssetsFromBackupImport } from "~/modules/asset";
 import { data, error, getParams } from "~/utils";
 import { csvDataFromRequest } from "~/utils/csv.server";

@@ -12,7 +12,7 @@ import { Image } from "~/components/shared/image";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Table, Td, Th } from "~/components/table";
 import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { useUserData } from "~/hooks";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { data, error, tw } from "~/utils";

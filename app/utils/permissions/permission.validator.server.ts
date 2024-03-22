@@ -1,5 +1,5 @@
 import { OrganizationRoles } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import type { PermissionCheckProps } from "./types";
 import { PermissionAction, PermissionEntity } from "./types";
 import { ShelfError } from "../error";

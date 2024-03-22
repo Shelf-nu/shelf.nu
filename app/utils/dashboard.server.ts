@@ -3,7 +3,7 @@ import {
   assetStatusColorMap,
   userFriendlyAssetStatus,
 } from "~/components/assets/asset-status-badge";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import type { TeamMemberWithUser } from "~/modules/team-member/types";
 import { defaultUserCategories } from "~/modules/user";
 import { ShelfError } from ".";

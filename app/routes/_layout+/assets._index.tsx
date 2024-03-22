@@ -26,7 +26,7 @@ import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {

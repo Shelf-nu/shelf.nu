@@ -1,5 +1,5 @@
 import type { Scan } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils";
 import { ShelfError } from "~/utils";
 

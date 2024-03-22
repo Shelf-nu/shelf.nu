@@ -1,6 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { error, getParams } from "~/utils";
 import { ShelfError, makeShelfError } from "~/utils/error";
 

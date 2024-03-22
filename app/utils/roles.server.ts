@@ -1,5 +1,5 @@
 import { Roles } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { ShelfError } from ".";
 import type { PermissionAction, PermissionEntity } from "./permissions";

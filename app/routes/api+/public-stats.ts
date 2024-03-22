@@ -1,5 +1,5 @@
 import { json } from "@remix-run/node";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { data, error, makeShelfError } from "~/utils";
 
 export async function loader() {

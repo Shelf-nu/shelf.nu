@@ -2,7 +2,7 @@ import type { User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import type { ErrorLabel } from ".";
 import { ShelfError } from ".";
 import { STRIPE_SECRET_KEY } from "./env";

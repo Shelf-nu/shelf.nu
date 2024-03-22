@@ -1,5 +1,5 @@
 import type { Category, Organization, Prisma, User } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { getRandomColor } from "~/utils";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";

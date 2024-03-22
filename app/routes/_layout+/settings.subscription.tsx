@@ -17,7 +17,7 @@ import { CurrentPlanDetails } from "~/components/subscription/current-plan-detai
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import { Prices } from "~/components/subscription/prices";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
 import { getUserByID } from "~/modules/user";
 import { ENABLE_PREMIUM_FEATURES, data, error, parseData } from "~/utils";

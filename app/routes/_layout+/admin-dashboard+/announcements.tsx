@@ -6,7 +6,7 @@ import { Switch } from "~/components/forms/switch";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Button } from "~/components/shared/button";
 import { Table, Td, Th, Tr } from "~/components/table";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { ShelfError, data, error, makeShelfError, parseData } from "~/utils";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { requireAdmin } from "~/utils/roles.server";

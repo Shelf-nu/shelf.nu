@@ -6,7 +6,7 @@ import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
 import { MarkdownEditor } from "~/components/markdown/markdown-editor";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { ShelfError, data, error, makeShelfError, parseData } from "~/utils";
 import { requireAdmin } from "~/utils/roles.server";
 

@@ -1,6 +1,6 @@
 import type { Organization, Prisma, TeamMember } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils";
 import { ShelfError, getCurrentSearchParams, getParamsValues } from "~/utils";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";

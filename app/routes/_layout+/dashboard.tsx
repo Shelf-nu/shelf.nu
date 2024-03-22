@@ -18,7 +18,7 @@ import MostScannedCategories from "~/components/dashboard/most-scanned-categorie
 import NewestAssets from "~/components/dashboard/newest-assets";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
 import styles from "~/styles/layout/skeleton-loading.css";
 import { data, error } from "~/utils";

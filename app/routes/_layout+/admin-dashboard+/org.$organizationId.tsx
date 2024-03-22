@@ -8,7 +8,7 @@ import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
 import { Button } from "~/components/shared/button";
 import { Table, Td, Tr } from "~/components/table";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { generateOrphanedCodes } from "~/modules/qr";
 import { getParams, data, error, parseData } from "~/utils";
 import { ShelfError, makeShelfError } from "~/utils/error";

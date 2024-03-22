@@ -9,7 +9,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
 import { sendResetPasswordLink } from "~/modules/auth";
 import {

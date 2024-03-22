@@ -1,6 +1,6 @@
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs } from "@remix-run/node";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { ShelfError, error, makeShelfError } from "~/utils";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
