@@ -18,7 +18,7 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
-import { getBookings } from "~/modules/booking";
+import { getBookings } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
   data,

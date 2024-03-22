@@ -33,9 +33,9 @@ import {
   deleteAsset,
   getAsset,
   updateAssetBookingAvailability,
-} from "~/modules/asset";
+} from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import { getScanByQrId } from "~/modules/scan";
+import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css";
 

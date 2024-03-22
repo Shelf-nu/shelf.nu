@@ -17,7 +17,10 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
-import { deleteCategory, getCategories } from "~/modules/category";
+import {
+  deleteCategory,
+  getCategories,
+} from "~/modules/category/service.server";
 import {
   data,
   error,

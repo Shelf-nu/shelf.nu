@@ -2,7 +2,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { NewNoteSchema } from "~/components/assets/notes/new";
-import { createNote, deleteNote } from "~/modules/asset";
+import { createNote, deleteNote } from "~/modules/asset/service.server";
 import {
   data,
   error,

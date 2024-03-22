@@ -33,7 +33,7 @@ import { Button } from "~/components/shared/button";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database/db.server";
-import { updateOrganization } from "~/modules/organization";
+import { updateOrganization } from "~/modules/organization/service.server";
 import { data, error, isFormProcessing, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

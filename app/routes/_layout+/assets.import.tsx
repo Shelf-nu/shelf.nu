@@ -17,8 +17,8 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
-import { createAssetsFromContentImport } from "~/modules/asset";
-import { assertUserCanImportAssets } from "~/modules/tier";
+import { createAssetsFromContentImport } from "~/modules/asset/service.server";
+import { assertUserCanImportAssets } from "~/modules/tier/service.server";
 import { data, error, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";

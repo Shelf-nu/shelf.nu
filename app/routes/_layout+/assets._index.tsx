@@ -35,8 +35,8 @@ import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
-} from "~/modules/asset";
-import { getOrganizationTierLimit } from "~/modules/tier";
+} from "~/modules/asset/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css";
 import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";

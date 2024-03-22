@@ -1,7 +1,7 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { createAssetsFromBackupImport } from "~/modules/asset";
+import { createAssetsFromBackupImport } from "~/modules/asset/service.server";
 import { data, error, getParams } from "~/utils";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";

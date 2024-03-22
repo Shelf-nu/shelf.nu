@@ -23,8 +23,8 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
-import { createNotes } from "../asset";
-import { getOrganizationAdminsEmails } from "../organization";
+import { createNotes } from "../asset/service.server";
+import { getOrganizationAdminsEmails } from "../organization/service.server";
 
 const label: ErrorLabel = "Booking";
 

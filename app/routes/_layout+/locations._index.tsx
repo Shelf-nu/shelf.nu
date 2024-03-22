@@ -11,7 +11,7 @@ import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
-import { getLocations } from "~/modules/location";
+import { getLocations } from "~/modules/location/service.server";
 import {
   data,
   error,

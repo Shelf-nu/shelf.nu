@@ -26,7 +26,7 @@ import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
-import { deleteLocation, getLocation } from "~/modules/location";
+import { deleteLocation, getLocation } from "~/modules/location/service.server";
 import assetCss from "~/styles/asset.css";
 import {
   data,

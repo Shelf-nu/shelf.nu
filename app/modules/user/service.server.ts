@@ -13,7 +13,7 @@ import {
   createEmailAuthAccount,
   signInWithEmail,
   updateAccountPassword,
-} from "~/modules/auth";
+} from "~/modules/auth/service.server";
 
 import {
   dateTimeInUnix,

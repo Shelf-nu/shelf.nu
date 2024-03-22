@@ -1,6 +1,6 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { updateAsset } from "~/modules/asset";
+import { updateAsset } from "~/modules/asset/service.server";
 import {
   ShelfError,
   data,

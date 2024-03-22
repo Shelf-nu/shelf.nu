@@ -12,8 +12,8 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { generateRandomCode, inviteEmailText } from "./helpers";
-import { createTeamMember } from "../team-member";
-import { createUserOrAttachOrg } from "../user";
+import { createTeamMember } from "../team-member/service.server";
+import { createUserOrAttachOrg } from "../user/service.server";
 
 const label: ErrorLabel = "Invite";
 

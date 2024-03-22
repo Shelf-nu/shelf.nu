@@ -16,9 +16,9 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { ContinueWithEmailForm } from "~/modules/auth";
+import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
-import { findUserByEmail } from "~/modules/user";
+import { findUserByEmail } from "~/modules/user/service.server";
 import {
   data,
   error,

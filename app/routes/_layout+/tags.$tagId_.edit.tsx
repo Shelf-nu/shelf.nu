@@ -12,7 +12,7 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { getTag, updateTag } from "~/modules/tag";
+import { getTag, updateTag } from "~/modules/tag/service.server";
 import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 

@@ -11,7 +11,7 @@ import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css";
 import { db } from "~/database/db.server";
 
-import { upsertBooking } from "~/modules/booking";
+import { upsertBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { data, error, makeShelfError, parseData } from "~/utils";
 import { getClientHint, getHints } from "~/utils/client-hints";

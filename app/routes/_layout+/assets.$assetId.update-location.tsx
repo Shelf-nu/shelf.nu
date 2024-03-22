@@ -9,7 +9,7 @@ import {
   getAllEntriesForCreateAndEdit,
   getAsset,
   updateAsset,
-} from "~/modules/asset";
+} from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css";
 import {
   assertIsPost,

@@ -11,8 +11,8 @@ import { Td, Th } from "~/components/table";
 import {
   countActiveCustomFields,
   getFilteredAndPaginatedCustomFields,
-} from "~/modules/custom-field";
-import { getOrganizationTierLimit } from "~/modules/tier";
+} from "~/modules/custom-field/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 
 import {
   data,

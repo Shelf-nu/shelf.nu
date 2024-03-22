@@ -7,7 +7,7 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { createTag } from "~/modules/tag";
+import { createTag } from "~/modules/tag/service.server";
 import {
   assertIsPost,
   data,

@@ -24,8 +24,8 @@ import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
-import { createInvite } from "~/modules/invite";
-import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier";
+import { createInvite } from "~/modules/invite/service.server";
+import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier/service.server";
 import styles from "~/styles/layout/custom-modal.css";
 import {
   data,

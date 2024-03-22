@@ -9,7 +9,7 @@ import {
   canExportAssets,
   canImportAssets,
 } from "~/utils/subscription";
-import { countActiveCustomFields } from "../custom-field";
+import { countActiveCustomFields } from "../custom-field/service.server";
 
 const label: ErrorLabel = "Tier";
 

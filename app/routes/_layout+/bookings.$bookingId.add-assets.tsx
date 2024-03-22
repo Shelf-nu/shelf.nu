@@ -25,9 +25,16 @@ import { List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 
 import { Td } from "~/components/table";
-import { createNotes, getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
-import { getUserByID } from "~/modules/user";
+import {
+  createNotes,
+  getPaginatedAndFilterableAssets,
+} from "~/modules/asset/service.server";
+import {
+  getBooking,
+  removeAssets,
+  upsertBooking,
+} from "~/modules/booking/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";

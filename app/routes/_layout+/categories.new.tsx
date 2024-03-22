@@ -13,7 +13,7 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { createCategory } from "~/modules/category";
+import { createCategory } from "~/modules/category/service.server";
 import {
   data,
   error,

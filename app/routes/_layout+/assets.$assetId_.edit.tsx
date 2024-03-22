@@ -18,10 +18,10 @@ import {
   getAsset,
   updateAsset,
   updateAssetMainImage,
-} from "~/modules/asset";
+} from "~/modules/asset/service.server";
 
-import { getActiveCustomFields } from "~/modules/custom-field";
-import { buildTagsSet } from "~/modules/tag";
+import { getActiveCustomFields } from "~/modules/custom-field/service.server";
+import { buildTagsSet } from "~/modules/tag/service.server";
 import {
   assertIsPost,
   data,

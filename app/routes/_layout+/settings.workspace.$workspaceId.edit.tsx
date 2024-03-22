@@ -22,7 +22,7 @@ import {
 } from "~/components/workspace/form";
 
 import { db } from "~/database/db.server";
-import { updateOrganization } from "~/modules/organization";
+import { updateOrganization } from "~/modules/organization/service.server";
 import {
   ShelfError,
   assertIsPost,

@@ -17,15 +17,15 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared/badge";
 import { db } from "~/database/db.server";
-import { createNotes } from "~/modules/asset";
+import { createNotes } from "~/modules/asset/service.server";
 import {
   deleteBooking,
   getBooking,
   removeAssets,
   upsertBooking,
-} from "~/modules/booking";
+} from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getUserByID } from "~/modules/user";
+import { getUserByID } from "~/modules/user/service.server";
 import {
   data,
   error,

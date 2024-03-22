@@ -20,7 +20,7 @@ import { config } from "~/config/shelf.config";
 import { onboardingEmailText } from "~/emails/onboarding-email";
 import { getAuthUserById } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getUserByID, updateUser } from "~/modules/user";
+import { getUserByID, updateUser } from "~/modules/user/service.server";
 import {
   SMTP_FROM,
   assertIsPost,

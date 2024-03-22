@@ -11,7 +11,7 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 
-import { sendResetPasswordLink } from "~/modules/auth";
+import { sendResetPasswordLink } from "~/modules/auth/service.server";
 import {
   ShelfError,
   data,

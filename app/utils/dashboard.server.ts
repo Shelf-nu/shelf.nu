@@ -5,7 +5,7 @@ import {
 } from "~/components/assets/asset-status-badge";
 import { db } from "~/database/db.server";
 import type { TeamMemberWithUser } from "~/modules/team-member/types";
-import { defaultUserCategories } from "~/modules/user";
+import { defaultUserCategories } from "~/modules/user/service.server";
 import { ShelfError } from ".";
 
 type Asset = Prisma.AssetGetPayload<{

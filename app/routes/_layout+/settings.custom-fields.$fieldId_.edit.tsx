@@ -18,8 +18,8 @@ import {
   countActiveCustomFields,
   getCustomField,
   updateCustomField,
-} from "~/modules/custom-field";
-import { getOrganizationTierLimit } from "~/modules/tier";
+} from "~/modules/custom-field/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import {
   ShelfError,
   data,

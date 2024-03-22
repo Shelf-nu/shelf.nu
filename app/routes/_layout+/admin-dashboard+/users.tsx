@@ -8,7 +8,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Pagination } from "~/components/list/pagination";
 import { Td } from "~/components/table";
-import { getPaginatedAndFilterableUsers } from "~/modules/user";
+import { getPaginatedAndFilterableUsers } from "~/modules/user/service.server";
 import { data, error, makeShelfError } from "~/utils";
 import { requireAdmin } from "~/utils/roles.server";
 

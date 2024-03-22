@@ -18,7 +18,7 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import { DeleteTag } from "~/components/tag/delete-tag";
 
-import { deleteTag, getTags } from "~/modules/tag";
+import { deleteTag, getTags } from "~/modules/tag/service.server";
 import {
   assertIsDelete,
   data,

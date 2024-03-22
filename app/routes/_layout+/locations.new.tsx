@@ -20,7 +20,7 @@ import {
   NewLocationFormSchema,
 } from "~/components/location/form";
 
-import { createLocation } from "~/modules/location";
+import { createLocation } from "~/modules/location/service.server";
 import { data, error, makeShelfError, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

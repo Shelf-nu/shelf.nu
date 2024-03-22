@@ -16,7 +16,7 @@ import { db } from "~/database/db.server";
 import {
   createBulkLocationChangeNotes,
   getPaginatedAndFilterableAssets,
-} from "~/modules/asset";
+} from "~/modules/asset/service.server";
 
 import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { ShelfError, makeShelfError } from "~/utils/error";

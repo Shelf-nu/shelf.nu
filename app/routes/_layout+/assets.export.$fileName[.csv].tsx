@@ -1,5 +1,5 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { assertUserCanExportAssets } from "~/modules/tier";
+import { assertUserCanExportAssets } from "~/modules/tier/service.server";
 import { error, makeShelfError } from "~/utils";
 import { exportAssetsToCsv } from "~/utils/csv.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";

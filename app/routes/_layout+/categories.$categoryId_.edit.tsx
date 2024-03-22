@@ -13,7 +13,7 @@ import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { getCategory, updateCategory } from "~/modules/category";
+import { getCategory, updateCategory } from "~/modules/category/service.server";
 import {
   isFormProcessing,
   makeShelfError,

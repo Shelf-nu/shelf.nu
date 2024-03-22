@@ -15,12 +15,12 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { createOrganization } from "~/modules/organization";
+import { createOrganization } from "~/modules/organization/service.server";
 import {
   getSelectedOrganisation,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
-import { assertUserCanCreateMoreOrganizations } from "~/modules/tier";
+import { assertUserCanCreateMoreOrganizations } from "~/modules/tier/service.server";
 import { assertIsPost, data, error, makeShelfError, parseData } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

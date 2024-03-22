@@ -8,7 +8,11 @@ import { useReactToPrint } from "react-to-print";
 import { z } from "zod";
 import { XIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
+import {
+  createQr,
+  generateCode,
+  getQrByAssetId,
+} from "~/modules/qr/service.server";
 import type { loader as assetLoader } from "~/routes/_layout+/assets.$assetId";
 import {
   data,

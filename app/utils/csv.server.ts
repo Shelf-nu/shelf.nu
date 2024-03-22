@@ -7,7 +7,7 @@ import {
 import chardet from "chardet";
 import { parse } from "csv-parse";
 import iconv from "iconv-lite";
-import { fetchAssetsForExport } from "~/modules/asset";
+import { fetchAssetsForExport } from "~/modules/asset/service.server";
 import { ShelfError } from ".";
 
 export type CSVData = [string[], ...string[][]] | [];

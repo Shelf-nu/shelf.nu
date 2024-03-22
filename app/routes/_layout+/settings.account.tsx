@@ -13,8 +13,11 @@ import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
 
 import { useUserData } from "~/hooks/use-user-data";
-import { sendResetPasswordLink } from "~/modules/auth";
-import { updateProfilePicture, updateUser } from "~/modules/user";
+import { sendResetPasswordLink } from "~/modules/auth/service.server";
+import {
+  updateProfilePicture,
+  updateUser,
+} from "~/modules/user/service.server";
 import type { UpdateUserPayload } from "~/modules/user/types";
 
 import {
