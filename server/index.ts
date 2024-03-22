@@ -1,9 +1,7 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import * as serverBuild from "@remix-run/dev/server-build";
 import type { AppLoadContext, ServerBuild } from "@remix-run/node";
 import { createCookieSessionStorage } from "@remix-run/node";
-import { broadcastDevReady } from "@remix-run/server-runtime";
 import { Hono } from "hono";
 import { remix } from "remix-hono/handler";
 import { getSession, session } from "remix-hono/session";
@@ -11,6 +9,7 @@ import { getSession, session } from "remix-hono/session";
 import { initEnv, env } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 
+import { importDevBuild } from "./dev/server";
 import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey } from "./session";
@@ -19,17 +18,18 @@ import type { FlashData, SessionData } from "./session";
 /** For some reason the globals like File only work on production build
  * In development, we need to install them manually
  */
-if (env.NODE_ENV !== "production") {
-  var webFetch = require("@remix-run/web-fetch");
-  global.File = webFetch.File;
-}
+// FIXME: look at this again
+// if (env.NODE_ENV !== "production") {
+//   var webFetch = require("@remix-run/web-fetch");
+//   global.File = webFetch.File;
+// }
 
 // Server will not start if the env is not valid
 initEnv();
 
-const build = serverBuild as ServerBuild;
-
 const mode = env.NODE_ENV === "test" ? "development" : env.NODE_ENV;
+
+const isProductionMode = mode === "production";
 
 const app = new Hono();
 
@@ -60,7 +60,6 @@ app.use("*", logger());
  * Add session middleware
  */
 app.use(
-  //@ts-expect-error fixed soon
   session({
     autoCommit: true,
     createSessionStorage() {
@@ -128,10 +127,15 @@ app.use(
 /**
  * Add remix middleware to Hono server
  */
-app.use(
-  //@ts-expect-error fixed soon
-  remix({
-    // @ts-ignore
+app.use(async (c, next) => {
+  const build = (isProductionMode
+    ? // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      // eslint-disable-next-line import/no-unresolved -- this expected until you build the app
+      await import("../build/server/remix.js")
+    : await importDevBuild()) as unknown as ServerBuild;
+
+  return remix({
     build,
     mode,
     getLoadContext(context) {
@@ -141,7 +145,7 @@ app.use(
         // Nice to have if you want to display the app version or do something in the app when deploying a new version
         // Exemple: on navigate, check if the app version is the same as the one in the build assets and if not, display a toast to the user to refresh the page
         // Prevent the user to use an old version of the client side code (it is only downloaded on document request)
-        appVersion: build.assets.version,
+        appVersion: isProductionMode ? build.assets.version : "dev",
         isAuthenticated: session.has(authSessionKey),
         // we could ensure that session.get() match a specific shape
         // let's trust our system for now
@@ -169,8 +173,8 @@ app.use(
         errorMessage: session.get("errorMessage") || null,
       } satisfies AppLoadContext;
     },
-  })
-);
+  })(c, next);
+});
 
 /**
  * Declare our loaders and actions context type
@@ -217,43 +221,17 @@ declare module "@remix-run/node" {
 /**
  * Start the server
  */
-serve(
-  mode === "production"
-    ? {
-        ...app,
-        port: Number(process.env.PORT) || 3000,
-      }
-    : {
-        ...app, // 👇 is for https dev server. If you go that route, remove `...app`
-        // fetch: app.fetch,
-        // createServer: createSecureServer, // import { createSecureServer } from "node:http2";
-        // serverOptions: {
-        // 	key: fs.readFileSync("./server/dev/key.pem"), // import fs from "node:fs";
-        // 	cert: fs.readFileSync("./server/dev/cert.pem"),
-        // },
-        port: Number(process.env.PORT) || 3000,
-      },
-  async (info) => {
-    // eslint-disable-next-line no-console
-    console.log(`🚀 Server started on port ${info.port}`);
-
-    if (mode === "development") {
-      const os = await import("node:os");
-      const dns = await import("node:dns");
-      await new Promise((resolve) => {
-        dns.lookup(os.hostname(), 4, (_, address) => {
-          // If you want to use https dev server, you need to change http to https
-          // eslint-disable-next-line no-console
-          console.log(
-            `🌍 http://localhost:${info.port} - http://${
-              address || info.address
-            }:${info.port}`
-          );
-
-          resolve(null);
-        });
-      });
-      void broadcastDevReady(build);
+if (isProductionMode) {
+  serve(
+    {
+      ...app,
+      port: Number(process.env.PORT) || 3000,
+    },
+    (info) => {
+      // eslint-disable-next-line no-console
+      console.log(`🚀 Server started on port ${info.port}`);
     }
-  }
-);
+  );
+}
+
+export default app;
