@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { supabaseClient } from "~/integrations/supabase";
+import { supabaseClient } from "~/integrations/supabase/client";
 
 import { refreshAccessToken, updateAccountPassword } from "~/modules/auth";
 import {

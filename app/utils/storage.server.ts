@@ -4,7 +4,7 @@ import {
 } from "@remix-run/node";
 import type { ResizeOptions } from "sharp";
 
-import { getSupabaseAdmin } from "~/integrations/supabase";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { cropImage, extractImageNameFromSupabaseUrl } from ".";
 import { SUPABASE_URL } from "./env";
 import type { ErrorLabel } from "./error";

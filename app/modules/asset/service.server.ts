@@ -14,7 +14,7 @@ import type {
 import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
-import { getSupabaseAdmin } from "~/integrations/supabase";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import {
   dateTimeInUnix,
