@@ -13,22 +13,31 @@ import type {
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { db } from "~/database";
-import { getSupabaseAdmin } from "~/integrations/supabase";
-import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
-  dateTimeInUnix,
-  getCurrentSearchParams,
-  getParamsValues,
-  oneDayFromNow,
-} from "~/utils";
+  createCustomFieldsIfNotExists,
+  upsertCustomField,
+} from "~/modules/custom-field/service.server";
+import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
+import { createLocationsIfNotExists } from "~/modules/location/service.server";
+import { getQr } from "~/modules/qr/service.server";
+import { createTagsIfNotExists } from "~/modules/tag/service.server";
+import { createTeamMemberIfNotExists } from "~/modules/team-member/service.server";
+import type { AllowedModelNames } from "~/routes/api+/model-filters";
+
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
+import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
 import type {
@@ -37,17 +46,6 @@ import type {
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
-import { createCategoriesIfNotExists } from "../category";
-
-import {
-  createCustomFieldsIfNotExists,
-  upsertCustomField,
-} from "../custom-field";
-import type { CustomFieldDraftPayload } from "../custom-field/types";
-import { createLocationsIfNotExists } from "../location";
-import { getQr } from "../qr";
-import { createTagsIfNotExists } from "../tag";
-import { createTeamMemberIfNotExists } from "../team-member";
 
 const label: ErrorLabel = "Assets";
 

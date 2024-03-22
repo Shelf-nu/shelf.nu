@@ -5,12 +5,12 @@ import { useAtom, useAtomValue } from "jotai";
 
 import { CategorySelectNoCategories } from "~/components/category/category-select-no-categories";
 
+import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import type { WithDateFields } from "~/modules/types";
 import { useCategorySearch } from "../../../category/useCategorySearch";
 import Input from "../../../forms/input";
-import { CheckIcon, ChevronRight } from "../../../icons";
-
-import { Badge, Button } from "../../../shared";
+import { CheckIcon, ChevronRight } from "../../../icons/library";
 
 import {
   DropdownMenu,
@@ -23,7 +23,7 @@ import {
   clearCategoryFiltersAtom,
   selectedCategoriesAtom,
   toggleIsFilteringCategoriesAtom,
-} from "../atoms";
+} from "../atoms/category";
 
 export const CategoryCheckboxDropdown = () => {
   const [params] = useSearchParams();

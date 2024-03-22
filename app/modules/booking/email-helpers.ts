@@ -1,8 +1,9 @@
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import type { BookingForEmail } from "~/emails/types";
-import { SERVER_URL, ShelfError } from "~/utils";
 import { getDateTimeFormatFromHints } from "~/utils/client-hints";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
+import { SERVER_URL } from "~/utils/env";
+import { ShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import type { ClientHint } from "./types";
 

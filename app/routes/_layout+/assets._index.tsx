@@ -14,34 +14,42 @@ import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { ChevronRight } from "~/components/icons";
+import { ChevronRight } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
-import { db } from "~/database";
-import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
+import { db } from "~/database/db.server";
+import {
+  useClearValueFromParams,
+  useSearchParamHasValue,
+} from "~/hooks/use-search-param-utils";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
-} from "~/modules/asset";
-import { getOrganizationTierLimit } from "~/modules/tier";
+} from "~/modules/asset/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css";
-import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription";
+import { tw } from "~/utils/tw";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */

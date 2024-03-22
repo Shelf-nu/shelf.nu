@@ -4,7 +4,7 @@ import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ScanQRIcon, ShelfTypography } from "~/components/icons/library";
 import type { loader } from "~/routes/_layout+/_layout";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 import { toggleMobileNavAtom } from "./atoms";
 import SidebarBottom from "./bottom";

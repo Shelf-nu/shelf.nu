@@ -5,22 +5,15 @@ import { Link, useLoaderData } from "@remix-run/react";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
-import { Badge } from "~/components/shared";
+import { Badge } from "~/components/shared/badge";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { Td, Th } from "~/components/table";
 import {
   countActiveCustomFields,
   getFilteredAndPaginatedCustomFields,
-} from "~/modules/custom-field";
-import { getOrganizationTierLimit } from "~/modules/tier";
+} from "~/modules/custom-field/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParamsValues,
-  makeShelfError,
-} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -28,7 +21,13 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { makeShelfError } from "~/utils/error";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
 

@@ -1,5 +1,6 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { assertIsPost, data, error, makeShelfError } from "~/utils";
+import { makeShelfError } from "~/utils/error";
+import { assertIsPost, data, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {

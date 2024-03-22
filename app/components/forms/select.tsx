@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { CheckIcon, ChevronRight } from "../icons/library";
 
 const Select = SelectPrimitive.Root;

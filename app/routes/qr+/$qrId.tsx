@@ -4,13 +4,13 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { z } from "zod";
 import { QrNotFound } from "~/components/qr/not-found";
-import { getUserOrganizations } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getQr } from "~/modules/qr";
-import { createScan, updateScan } from "~/modules/scan";
-import { assertIsPost, data, error, getParams } from "~/utils";
+import { getUserOrganizations } from "~/modules/organization/service.server";
+import { getQr } from "~/modules/qr/service.server";
+import { createScan, updateScan } from "~/modules/scan/service.server";
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { assertIsPost, data, error, getParams } from "~/utils/http.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.isAuthenticated

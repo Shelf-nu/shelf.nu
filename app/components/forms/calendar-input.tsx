@@ -3,7 +3,7 @@
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import { DayPicker } from "react-day-picker";
 
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 type CalendarProps = {
   className?: any;

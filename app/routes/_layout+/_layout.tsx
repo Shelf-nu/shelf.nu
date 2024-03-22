@@ -11,15 +11,16 @@ import { useCrisp } from "~/components/marketing/crisp";
 import { Spinner } from "~/components/shared/spinner";
 import { Toaster } from "~/components/shared/toast";
 import { config } from "~/config/shelf.config";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import styles from "~/styles/layout/index.css";
-import { ShelfError, data, error, makeShelfError } from "~/utils";
 import {
   initializePerPageCookieOnLayout,
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
