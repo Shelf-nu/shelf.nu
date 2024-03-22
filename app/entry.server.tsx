@@ -12,11 +12,11 @@ import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import { registerBookingWorkers } from "./modules/booking/worker.server";
 import { SENTRY_DSN, ShelfError } from "./utils";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
 import { initSentry } from "./utils/sentry.server";
-import { registerBookingWorkers } from "./modules/booking/worker.server";
 
 initSentry();
 

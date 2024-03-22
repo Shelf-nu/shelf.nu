@@ -16,8 +16,8 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
-import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getOrganizationByUserId } from "~/modules/organization/service.server";
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import {
   data,
