@@ -15,15 +15,16 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { createOrganization } from "~/modules/organization";
 import {
   getSelectedOrganisation,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
-import { assertUserCanCreateMoreOrganizations } from "~/modules/tier";
-import { assertIsPost, data, error, makeShelfError, parseData } from "~/utils";
+import { createOrganization } from "~/modules/organization/service.server";
+import { assertUserCanCreateMoreOrganizations } from "~/modules/tier/service.server";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
+import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

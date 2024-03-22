@@ -10,30 +10,22 @@ import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { BookingPageContent } from "~/components/booking";
 import { NewBookingFormSchema } from "~/components/booking/form";
+import { BookingPageContent } from "~/components/booking/page-content";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Badge } from "~/components/shared";
-import { db } from "~/database";
-import { createNotes } from "~/modules/asset";
+import { Badge } from "~/components/shared/badge";
+import { db } from "~/database/db.server";
+import { createNotes } from "~/modules/asset/service.server";
 import {
   deleteBooking,
   getBooking,
   removeAssets,
   upsertBooking,
-} from "~/modules/booking";
+} from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getUserByID } from "~/modules/user";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-  getParamsValues,
-  parseData,
-} from "~/utils";
+import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint, getHints } from "~/utils/client-hints";
@@ -45,7 +37,18 @@ import {
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings";
 

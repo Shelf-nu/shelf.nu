@@ -1,5 +1,5 @@
 import { useLoaderData } from "@remix-run/react";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";

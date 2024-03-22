@@ -5,7 +5,8 @@ import { ClientOnly } from "remix-utils/client-only";
 import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
-import { Badge, Button } from "../shared";
+import { Badge } from "../shared/badge";
+import { Button } from "../shared/button";
 import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function AssetsByCategoryChart() {

@@ -8,7 +8,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../forms";
+} from "../forms/select";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 

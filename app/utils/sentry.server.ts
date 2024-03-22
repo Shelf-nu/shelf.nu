@@ -2,8 +2,8 @@ import { type Event, type EventHint } from "@sentry/remix";
 import * as Sentry from "@sentry/remix";
 
 import { SENTRY_DSN } from "~/utils/env";
-import type { ShelfError } from ".";
-import { isLikeShelfError } from ".";
+import type { ShelfError } from "./error";
+import { isLikeShelfError } from "./error";
 
 export function initSentry() {
   if (SENTRY_DSN) {

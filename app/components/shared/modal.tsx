@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 const AlertDialog = AlertDialogPrimitive.Root;
 

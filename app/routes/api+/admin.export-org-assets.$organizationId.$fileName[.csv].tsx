@@ -1,7 +1,8 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { error, getParams, makeShelfError } from "~/utils";
 import { exportAssetsToCsv } from "~/utils/csv.server";
+import { makeShelfError } from "~/utils/error";
+import { error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, params }: LoaderFunctionArgs) {

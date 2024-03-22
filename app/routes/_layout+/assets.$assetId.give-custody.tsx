@@ -10,17 +10,21 @@ import {
 } from "@remix-run/react";
 import { z } from "zod";
 import CustodianSelect from "~/components/custody/custodian-select";
-import { UserIcon } from "~/components/icons";
+import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
-import { db } from "~/database";
-import { createNote } from "~/modules/asset";
-import { getUserByID } from "~/modules/user";
+import { db } from "~/database/db.server";
+import { createNote } from "~/modules/asset/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css";
-import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";

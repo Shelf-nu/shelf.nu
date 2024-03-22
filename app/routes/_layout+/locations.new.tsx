@@ -15,13 +15,20 @@ import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
 import Header from "~/components/layout/header";
-import { LocationForm, NewLocationFormSchema } from "~/components/location";
+import {
+  LocationForm,
+  NewLocationFormSchema,
+} from "~/components/location/form";
 
-import { createLocation } from "~/modules/location";
-import { data, error, makeShelfError, parseData } from "~/utils";
+import { createLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { makeShelfError } from "~/utils/error";
+import { data, error, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 const title = "New Location";
 

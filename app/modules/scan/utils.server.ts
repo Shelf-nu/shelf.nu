@@ -1,6 +1,6 @@
 import type { Scan } from ".prisma/client";
-import { ShelfError } from "~/utils";
 import { getDateTimeFormat } from "~/utils/client-hints";
+import { ShelfError } from "~/utils/error";
 var parser = require("ua-parser-js");
 
 export function parseScanData({

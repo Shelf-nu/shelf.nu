@@ -3,14 +3,18 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import Input from "~/components/forms/input";
-import { UserIcon } from "~/components/icons";
+import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import styles from "~/styles/layout/custom-modal.css";
-import { data, error, isFormProcessing, parseData } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

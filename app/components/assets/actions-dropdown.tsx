@@ -8,7 +8,7 @@ import {
   PenIcon,
   UserIcon,
   UserXIcon,
-} from "~/components/icons";
+} from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,9 +16,9 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
-import { tw } from "~/utils/tw-classes";
+import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
