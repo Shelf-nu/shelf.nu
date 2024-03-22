@@ -26,7 +26,7 @@ export function parseScanData({
           : "Unknown location";
 
       const dateTime = getDateTimeFormat(request).format(scan.createdAt);
-      const ua = parser(scan.userAgent);
+      const ua = parser(scan.userAgent || "");
 
       return {
         scannedBy,
