@@ -6,11 +6,14 @@ import { ShelfError } from "~/utils";
 import { useClientNotification } from "./use-client-notification";
 
 // Custom hook to handle video devices
-export const useQrScanner = () => {
+export const useQrScanner = (scannerCameraId: string) => {
   const navigate = useNavigate();
+  /** Get the default id from the loader
+   * This is the default camera that the user has selected on previous use of the scanner
+   * It comes from a cookie
+   */
   const [sendNotification] = useClientNotification();
-  const [selectedDevice, setSelectedDevice] = useState("");
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  // const [hasPermission, setHasPermission] = useState<boolean | null>(null);
 
   const { devices } = useMediaDevices({
     constraints: {
@@ -36,20 +39,17 @@ export const useQrScanner = () => {
 
       setVideoMediaDevices(videoDevices);
 
-      // Set the selected device to the first video device
-      setSelectedDevice(videoDevices[0]?.deviceId || "");
-
       // Set hasPermission to true as devices are available
-      setHasPermission(true);
+      // setHasPermission(true);
     } else {
       // Set hasPermission to false as devices are not available
-      setHasPermission(false);
+      // setHasPermission(false);
     }
   }, [devices]);
 
   // Use the useZxing hook to access the camera and scan for QR codes
   const { ref } = useZxing({
-    deviceId: selectedDevice,
+    deviceId: scannerCameraId,
     constraints: { video: true, audio: false },
     onDecodeResult(result) {
       decodeQRCodes(result.getText());
@@ -97,8 +97,6 @@ export const useQrScanner = () => {
   return {
     ref,
     videoMediaDevices,
-    selectedDevice,
-    setSelectedDevice,
-    hasPermission,
+    // hasPermission,
   };
 };
