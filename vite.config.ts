@@ -24,7 +24,7 @@ export default defineConfig({
   },
   // https://github.com/remix-run/remix/discussions/8917#discussioncomment-8640023
   optimizeDeps: {
-    include: ["./app/entry.client.tsx", "./app/root.tsx", "./app/routes/**/*"],
+    include: ["./app/routes/**/*"],
   },
   plugins: [
     cjsInterop({
