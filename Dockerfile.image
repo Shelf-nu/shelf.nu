@@ -35,7 +35,6 @@ FROM base AS release
 COPY --from=build /src/node_modules /src/node_modules
 COPY --from=build /src/app/database /src/app/database
 COPY --from=build /src/build /src/build
-COPY --from=build /src/public /src/public
 COPY --from=build /src/package.json /src/package.json
 COPY --from=build /src/docker-entrypoint.sh /src/docker-entrypoint.sh
 
