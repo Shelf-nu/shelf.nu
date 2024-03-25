@@ -44,7 +44,7 @@ export default defineConfig({
     devServer({
       injectClientScript: false,
       entry: "server/index.ts", // The file path of your server.
-      exclude: [/^\/(app)\/.+/, ...defaultOptions.exclude],
+      exclude: [/^\/(app)\/.+/, /^\/@.+$/, /^\/node_modules\/.*/],
     }),
     remix({
       serverBuildFile: "remix.js",
