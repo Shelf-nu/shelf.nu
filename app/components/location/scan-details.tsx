@@ -36,8 +36,8 @@ export function ScanDetails() {
             <p>Date/Time: {lastScan.dateTime}</p>
             <p>
               Device:{" "}
-              {lastScan.ua.device.name
-                ? lastScan.ua.device.name
+              {lastScan.ua.device.model && lastScan.ua.device.vendor
+                ? `${lastScan.ua.device.vendor} - ${lastScan.ua.device.model}`
                 : "Unknown device"}
             </p>
             <p>Browser: {lastScan.ua.browser.name}</p>
