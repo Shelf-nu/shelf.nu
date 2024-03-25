@@ -37,7 +37,8 @@ COPY --from=build /src/app/database /src/app/database
 COPY --from=build /src/build /src/build
 COPY --from=build /src/public /src/public
 COPY --from=build /src/package.json /src/package.json
-COPY --from=build /src/start.sh /src/start.sh
-RUN chmod +x /src/start.sh
+COPY --from=build /src/docker-entrypoint.sh /src/docker-entrypoint.sh
 
-ENTRYPOINT [ "/src/start.sh" ]
+RUN chmod +x /src/docker-entrypoint.sh
+
+ENTRYPOINT [ "/src/docker-entrypoint.sh" ]
