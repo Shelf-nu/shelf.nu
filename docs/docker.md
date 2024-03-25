@@ -43,6 +43,33 @@ This will make sure you have a DATABASE that you are ready to connect to.
    docker exec -it shelf npm run setup:seed
    ```
 
+## Development
+
+> [!CAUTION]
+> During development involving Dockerfile changes, make sure to **address the correct Dockerfile** in your builds:
+> - Fly.io will be built via `Dockerfile`
+> - ghcr.io will be built via `Dockerfile.image`
+
+By default both Fly.io and Docker will build via `Dockerfile` unless specifically instructed. Learn more [about Fly.io Config](https://fly.io/docs/reference/configuration/#specify-a-dockerfile) and [Docker image builds](https://docs.docker.com/reference/cli/docker/image/build/#file).
+
+In order to build a local Docker image just as the one we provide for self-hosting, you'll have to build `Dockerfile.image` using buildx as follows:
+
+```sh
+docker buildx build \
+   --platform linux/amd64,linux/arm64 `# use --platform to instruct x86 and ARM build` \
+   --tag shelf-local \
+   --file Dockerfile.image .
+```
+
+Then running the locally-built image should be as simple as:
+
+```sh
+docker run -d \
+   --name "shelf" \
+   -e ... `# your env vars` \
+   shelf-local
+```
+
 ### ARM processors
 
 You can also run shelf on ARM64 processors.
