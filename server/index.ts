@@ -34,22 +34,18 @@ const isProductionMode = mode === "production";
 const app = new Hono();
 
 /**
- * Serve build files from public/build
+ * Serve assets files from build/client/assets
  */
 app.use(
-  "/build/*",
+  "/assets/*",
   cache(60 * 60 * 24 * 365), // 1 year
-  serveStatic({ root: "./public" })
+  serveStatic({ root: "./build/client" })
 );
 
 /**
- * Serve static files from public
+ * Serve public files
  */
-app.use(
-  "/static/*",
-  cache(60 * 60), // cache for 1 hour
-  serveStatic({ root: "./public" })
-);
+app.use("*", cache(60 * 60), serveStatic({ root: "./build/client" })); // 1 hour
 
 /**
  * Add logger middleware

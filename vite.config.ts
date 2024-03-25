@@ -26,6 +26,12 @@ export default defineConfig({
   optimizeDeps: {
     include: ["./app/routes/**/*"],
   },
+  resolve: {
+    alias: {
+      ".prisma/client/index-browser":
+        "./node_modules/.prisma/client/index-browser.js",
+    },
+  },
   plugins: [
     cjsInterop({
       // List of CJS dependencies that require interop
@@ -49,6 +55,7 @@ export default defineConfig({
       buildEnd: async () => {
         await esbuild
           .build({
+            alias: { "~": "./app" },
             // The final file name
             outfile: "build/server/index.js",
             // Our server entry point
