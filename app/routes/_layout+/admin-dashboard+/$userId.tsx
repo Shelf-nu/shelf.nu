@@ -59,12 +59,13 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         });
       });
 
-    const organizations = await db.organization
+    const userOrganizations = await db.userOrganization
       .findMany({
         where: {
-          owner: {
-            id: userId,
-          },
+          userId: shelfUserId,
+        },
+        select: {
+          organization: true,
         },
       })
       .catch((cause) => {
@@ -76,7 +77,12 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         });
       });
 
-    return json(data({ user, organizations }));
+    return json(
+      data({
+        user,
+        organizations: userOrganizations.map((uo) => uo.organization),
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, shelfUserId });
     throw json(error(reason), { status: reason.status });
@@ -159,6 +165,9 @@ export default function Area51UserPage() {
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 Created at
               </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                Is Owner
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -174,6 +183,7 @@ export default function Area51UserPage() {
                 </Td>
                 <Td>{org.type}</Td>
                 <Td>{org.createdAt}</Td>
+                <Td>{org.userId === user.id ? "yes" : "no"}</Td>
               </Tr>
             ))}
           </tbody>

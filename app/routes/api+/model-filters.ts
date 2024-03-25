@@ -60,7 +60,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           },
         ],
       },
-      take: 6,
     })) as Array<Record<string, string>>;
 
     return json(

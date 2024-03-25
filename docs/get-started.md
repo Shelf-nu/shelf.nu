@@ -107,6 +107,11 @@ The database seed script creates a new user with some data you can use to get st
 - Email: `hello@supabase.com`
 - Password: `supabase`
 
+> [!CAUTION]
+> During development involving Dockerfile changes, make sure to **address the correct file** in your builds:
+> - Fly.io will be built via `Dockerfile`
+> - ghcr.io will be built via `Dockerfile.image`
+
 ## Authentication
 
 For authentication to work in your Project, you need so setup some settings related to One Time Passwords in Supabase.
