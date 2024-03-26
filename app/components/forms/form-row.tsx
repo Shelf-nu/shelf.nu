@@ -1,5 +1,5 @@
 import React from "react";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import SubHeading from "../shared/sub-heading";
 
 interface Props {

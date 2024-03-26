@@ -5,7 +5,8 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 
 import type { action } from "~/routes/_auth+/send-otp";
-import { tw, validEmail } from "~/utils";
+import { validEmail } from "~/utils/misc";
+import { tw } from "~/utils/tw";
 export const SendOtpSchema = z.object({
   /**
    * .email() has an issue with validating email

@@ -10,7 +10,7 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
-} from "~/components/forms";
+} from "~/components/forms/select";
 import type { loader } from "~/routes/_layout+/assets._index";
 
 export default function PerPageItemsSelect() {

@@ -1,6 +1,7 @@
 import maplibregl from "maplibre-gl";
 import { Marker, ScaleControl } from "react-map-gl";
-import Map from "react-map-gl/maplibre";
+// https://github.com/visgl/react-map-gl/issues/2272
+import Map from "react-map-gl/dist/es5/exports-maplibre.js";
 import { ClientOnly } from "remix-utils/client-only";
 
 export const ShelfMap = ({

@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
 
-import { assertIsPost } from "~/utils";
+import { assertIsPost } from "~/utils/http.server";
 
 export function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);

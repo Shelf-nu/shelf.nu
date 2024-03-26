@@ -1,8 +1,12 @@
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs } from "@remix-run/node";
-import { db } from "~/database";
-import { ShelfError, error, makeShelfError } from "~/utils";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { db } from "~/database/db.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { createBillingPortalSession } from "~/utils/stripe.server";
 

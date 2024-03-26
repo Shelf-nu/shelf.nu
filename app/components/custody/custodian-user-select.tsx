@@ -1,15 +1,15 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/assets.$assetId.give-custody";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "../forms";
-import { UserIcon } from "../icons";
-import { Button } from "../shared";
+} from "../forms/select";
+import { UserIcon } from "../icons/library";
+import { Button } from "../shared/button";
 
 /** Custodian select that works only for with users and doesnt support team members
  * This is used for something like bookings where the custodian can only be a team member

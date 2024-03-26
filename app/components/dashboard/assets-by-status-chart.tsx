@@ -5,7 +5,7 @@ import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
 import FallbackLoading from "./fallback-loading";
 
-import { Badge } from "../shared";
+import { Badge } from "../shared/badge";
 import { InfoTooltip } from "../shared/info-tooltip";
 
 export default function AssetsByStatusChart() {

@@ -3,8 +3,9 @@ import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import JSZip from "jszip";
 import QRCode from "qrcode-generator";
 import { z } from "zod";
-import { db } from "~/database";
-import { error, getParams, makeShelfError, ShelfError } from "~/utils";
+import { db } from "~/database/db.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

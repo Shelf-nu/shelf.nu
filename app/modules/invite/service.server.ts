@@ -3,17 +3,17 @@ import { InviteStatuses } from "@prisma/client";
 import type { AppLoadContext } from "@remix-run/node";
 import type { Params } from "@remix-run/react";
 import jwt from "jsonwebtoken";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
-import { INVITE_TOKEN_SECRET } from "~/utils";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { INVITE_TOKEN_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { generateRandomCode, inviteEmailText } from "./helpers";
-import { createTeamMember } from "../team-member";
-import { createUserOrAttachOrg } from "../user";
+import { createTeamMember } from "../team-member/service.server";
+import { createUserOrAttachOrg } from "../user/service.server";
 
 const label: ErrorLabel = "Invite";
 

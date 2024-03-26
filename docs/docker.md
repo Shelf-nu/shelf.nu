@@ -36,8 +36,7 @@ This will make sure you have a DATABASE that you are ready to connect to.
      --restart unless-stopped \
      ghcr.io/shelf-nu/shelf.nu:latest
    ```
-> [!NOTE]
-> `DATABASE_URL` and `DIRECT_URL` are mandatory when using Supabase Cloud. Learn more in [Get Started > Development](./get-started.md#development) section.
+   > [!NOTE] > `DATABASE_URL` and `DIRECT_URL` are mandatory when using Supabase Cloud. Learn more in [Get Started > Development](./get-started.md#development) section.
 3. Run the following command to seed the database (create initial user), **only once after the first deployment**:
    ```sh
    docker exec -it shelf npm run setup:seed
@@ -47,6 +46,7 @@ This will make sure you have a DATABASE that you are ready to connect to.
 
 > [!CAUTION]
 > During development involving Dockerfile changes, make sure to **address the correct Dockerfile** in your builds:
+>
 > - Fly.io will be built via `Dockerfile`
 > - ghcr.io will be built via `Dockerfile.image`
 
@@ -75,6 +75,7 @@ docker run -d \
 You can also run shelf on ARM64 processors.
 
 1. Linux / Pine A64
+
    ```sh
    root@DietPi:~#
    docker run -it --rm --entrypoint /usr/bin/uname ghcr.io/shelf-nu/shelf.nu:latest -a

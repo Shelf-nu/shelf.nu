@@ -2,7 +2,7 @@ import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
 
-import { refreshAccessToken } from "~/modules/auth";
+import { refreshAccessToken } from "~/modules/auth/service.server";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
 

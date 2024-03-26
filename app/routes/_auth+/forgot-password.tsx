@@ -9,22 +9,15 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
-import { sendResetPasswordLink } from "~/modules/auth";
-import {
-  ShelfError,
-  data,
-  error,
-  getActionMethod,
-  isFormProcessing,
-  makeShelfError,
-  notAllowedMethod,
-  parseData,
-  tw,
-  validEmail,
-} from "~/utils";
+import { sendResetPasswordLink } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
+import { tw } from "~/utils/tw";
 
 const ForgotPasswordSchema = z.object({
   email: z

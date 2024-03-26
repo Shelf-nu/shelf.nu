@@ -1,4 +1,4 @@
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 interface Props {
   children: React.ReactNode;

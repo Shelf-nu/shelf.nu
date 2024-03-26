@@ -1,6 +1,6 @@
 import { isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "server/session";
-import { getSupabaseAdmin } from "~/integrations/supabase";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";

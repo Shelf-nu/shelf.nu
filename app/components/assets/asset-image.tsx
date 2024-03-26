@@ -3,7 +3,7 @@ import type { Asset } from "@prisma/client";
 
 import { useFetcher } from "@remix-run/react";
 import type { action } from "~/routes/api+/asset.refresh-main-image";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 export const AssetImage = ({
   asset,

@@ -1,5 +1,5 @@
 import { Link, Outlet } from "@remix-run/react";
-import { usePosition } from "~/hooks";
+import { usePosition } from "~/hooks/use-position";
 
 export default function QR() {
   usePosition();

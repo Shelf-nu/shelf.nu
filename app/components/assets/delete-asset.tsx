@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import { TrashIcon } from "../icons";
+import { TrashIcon } from "../icons/library";
 
 export const DeleteAsset = ({
   asset,

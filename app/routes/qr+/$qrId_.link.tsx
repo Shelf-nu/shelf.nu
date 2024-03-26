@@ -1,11 +1,15 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import { UnlinkIcon } from "~/components/icons";
-import { Button } from "~/components/shared";
-import { data, error, getParams, makeShelfError } from "~/utils";
+import { UnlinkIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
+import { makeShelfError } from "~/utils/error";
+import { data, error, getParams } from "~/utils/http.server";
 
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

@@ -109,6 +109,7 @@ The database seed script creates a new user with some data you can use to get st
 
 > [!CAUTION]
 > During development involving Dockerfile changes, make sure to **address the correct file** in your builds:
+>
 > - Fly.io will be built via `Dockerfile`
 > - ghcr.io will be built via `Dockerfile.image`
 

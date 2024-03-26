@@ -1,6 +1,6 @@
 import type { LinksFunction } from "@remix-run/node";
 import WelcomeCarousel from "~/components/welcome/carousel";
-import carouselStyles from "~/styles/layout/carousel.css";
+import carouselStyles from "~/styles/layout/carousel.css?url";
 
 export const links: LinksFunction = () => [
   {

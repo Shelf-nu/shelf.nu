@@ -9,13 +9,17 @@ import {
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 
-import { createCustomField } from "~/modules/custom-field";
-import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
-import { data, error, makeShelfError, parseData } from "~/utils";
-
+import { createCustomField } from "~/modules/custom-field/service.server";
+import { assertUserCanCreateMoreCustomFields } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { makeShelfError } from "~/utils/error";
+import { data, error, parseData } from "~/utils/http.server";
+
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 const title = "New Custom Field";

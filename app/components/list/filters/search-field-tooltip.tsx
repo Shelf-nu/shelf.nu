@@ -1,5 +1,5 @@
 import { useLoaderData } from "@remix-run/react";
-import { HelpIcon } from "~/components/icons";
+import { HelpIcon } from "~/components/icons/library";
 import {
   Tooltip,
   TooltipContent,

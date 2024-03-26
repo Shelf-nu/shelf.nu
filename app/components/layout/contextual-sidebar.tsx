@@ -1,6 +1,6 @@
 import { Link, Outlet, useMatches } from "@remix-run/react";
 import { motion, AnimatePresence } from "framer-motion";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 export default function ContextualSidebar() {
   const matches = useMatches();

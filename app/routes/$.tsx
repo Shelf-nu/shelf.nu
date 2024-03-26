@@ -1,4 +1,4 @@
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 
 /** This route is meant for handling 404 errors for logged in users  */
 export default function LayoutSplat() {

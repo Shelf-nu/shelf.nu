@@ -1,9 +1,12 @@
 import { Roles } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
-import { ShelfError } from ".";
-import type { PermissionAction, PermissionEntity } from "./permissions";
-import { validatePermission } from "./permissions";
+import { ShelfError } from "./error";
+import type {
+  PermissionAction,
+  PermissionEntity,
+} from "./permissions/permission.validator.server";
+import { validatePermission } from "./permissions/permission.validator.server";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
   try {

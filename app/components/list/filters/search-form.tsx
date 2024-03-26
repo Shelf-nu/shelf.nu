@@ -8,7 +8,7 @@ import {
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import type { SearchableIndexResponse } from "~/modules/types";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils/form";
 import { SearchFieldTooltip } from "./search-field-tooltip";
 
 export const SearchForm = () => {

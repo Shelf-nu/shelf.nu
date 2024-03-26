@@ -1,6 +1,6 @@
 import type { ChangeEvent } from "react";
 import { atom } from "jotai";
-import { verifyAccept } from "~/utils";
+import { verifyAccept } from "~/utils/verify-file-accept";
 
 export const fileErrorAtom = atom<string | undefined>(undefined);
 

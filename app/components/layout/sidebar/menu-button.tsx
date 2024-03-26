@@ -1,5 +1,5 @@
 import { useAtom } from "jotai";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { toggleMobileNavAtom } from "./atoms";
 
 const MenuButton = () => {

@@ -12,20 +12,17 @@ import { z } from "zod";
 
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { supabaseClient } from "~/integrations/supabase";
+import { supabaseClient } from "~/integrations/supabase/client";
 
-import { refreshAccessToken, updateAccountPassword } from "~/modules/auth";
 import {
-  data,
-  error,
-  getActionMethod,
-  isFormProcessing,
-  makeShelfError,
-  notAllowedMethod,
-  parseData,
-  tw,
-} from "~/utils";
+  refreshAccessToken,
+  updateAccountPassword,
+} from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import { tw } from "~/utils/tw";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Set new password";

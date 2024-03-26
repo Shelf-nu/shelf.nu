@@ -1,12 +1,12 @@
 import type { Asset } from "@prisma/client";
 
-import { VerticalDotsIcon } from "~/components/icons";
+import { VerticalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { RemoveAssetFromBooking } from "./remove-asset-from-booking";
 
 interface Props {

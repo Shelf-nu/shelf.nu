@@ -1,5 +1,5 @@
-import { SadFaceIcon } from "~/components/icons";
-import { Button } from "~/components/shared";
+import { SadFaceIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
 export const QrNotFound = () => (
   <>
     <div className="flex flex-1 justify-center py-8">
@@ -14,35 +14,6 @@ export const QrNotFound = () => (
             are scanning is registered by a Shelf user.
           </p>
         </div>
-        <ul className="useful-links">
-          <li>
-            <Button
-              variant="link"
-              className="mb-3 text-text-md font-normal text-gray-600 underline"
-              to={{ pathName: "#" }}
-            >
-              Useful link 1
-            </Button>
-          </li>
-          <li>
-            <Button
-              variant="link"
-              className="mb-3 text-text-md font-normal text-gray-600 underline"
-              to={{ pathName: "#" }}
-            >
-              Useful link 2
-            </Button>
-          </li>
-          <li>
-            <Button
-              variant="link"
-              className="mb-3 text-text-md font-normal text-gray-600 underline"
-              to={{ pathName: "#" }}
-            >
-              Useful link 3
-            </Button>
-          </li>
-        </ul>
       </div>
     </div>
     <div className="mt-6 text-center text-sm text-gray-500">

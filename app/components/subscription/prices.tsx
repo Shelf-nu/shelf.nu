@@ -1,8 +1,8 @@
 import { useLoaderData } from "@remix-run/react";
 import type Stripe from "stripe";
 import type { loader } from "~/routes/_layout+/settings.subscription";
-import { tw } from "~/utils";
 import { shortenIntervalString } from "~/utils/shorten-interval-string";
+import { tw } from "~/utils/tw";
 import { FREE_PLAN } from "./helpers";
 import { PriceCta } from "./price-cta";
 import {
@@ -10,7 +10,7 @@ import {
   DoubleLayerIcon,
   MultiLayerIcon,
   SingleLayerIcon,
-} from "../icons";
+} from "../icons/library";
 
 export type PriceWithProduct = Stripe.Price & {
   product: Stripe.Product;

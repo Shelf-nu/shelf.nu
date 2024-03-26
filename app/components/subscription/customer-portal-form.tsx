@@ -1,6 +1,6 @@
 import { useFetcher } from "@remix-run/react";
-import { isFormProcessing } from "~/utils";
-import { Button } from "../shared";
+import { isFormProcessing } from "~/utils/form";
+import { Button } from "../shared/button";
 
 export const CustomerPortalForm = ({
   buttonText = "Go to Customer Portal",
