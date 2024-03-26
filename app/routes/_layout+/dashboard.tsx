@@ -124,7 +124,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const cookieHeader = request.headers.get("Cookie");
     const cookie = (await userPrefs.parse(cookieHeader)) || {};
 
-    // @TODO this needs double checking because merge was messy
     return json(
       data({
         assets,

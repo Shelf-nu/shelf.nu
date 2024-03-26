@@ -461,7 +461,7 @@ const ListAssetContent = ({
                     alt=""
                   />
                 ) : null}
-                <span className="mt-[1px]">{custody.custodian.name}</span>
+                <span className="mt-px">{custody.custodian.name}</span>
               </>
             </GrayBadge>
           ) : null}

@@ -197,7 +197,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
-  /** @TODO needs testing again due to messy merge */
   const authSession = context.getSession();
   const { userId } = authSession;
 
