@@ -753,6 +753,26 @@ export function UnlinkIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function LinkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={22}
+      height={22}
+      fill="none"
+      {...props}
+    >
+      <path
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M9 12a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M13 10a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+      />
+    </svg>
+  );
+}
+
 export function MapIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg

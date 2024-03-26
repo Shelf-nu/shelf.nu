@@ -1952,31 +1952,50 @@ export async function updateAssetQrCode({
   newQrId: string;
 }) {
   // Disconnect all existing QR codes
-  const assetWithQrCodes = await db.asset.findUnique({
-    where: { id: assetId, organizationId },
-    include: { qrCodes: true },
-  });
-
-  if (assetWithQrCodes) {
-    for (const qrCode of assetWithQrCodes.qrCodes) {
-      await db.asset.update({
+  try {
+    // Disconnect all existing QR codes
+    await db.asset
+      .update({
         where: { id: assetId },
         data: {
           qrCodes: {
-            disconnect: { id: qrCode.id },
+            set: [],
           },
         },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Couldn't disconnect existing codes",
+          label,
+          additionalData: { assetId, organizationId, newQrId },
+        });
       });
-    }
-  }
 
-  // Connect the new QR code
-  return db.asset.update({
-    where: { id: assetId },
-    data: {
-      qrCodes: {
-        connect: { id: newQrId },
-      },
-    },
-  });
+    // Connect the new QR code
+    return await db.asset
+      .update({
+        where: { id: assetId },
+        data: {
+          qrCodes: {
+            connect: { id: newQrId },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Couldn't connect the new QR code",
+          label,
+          additionalData: { assetId, organizationId, newQrId },
+        });
+      });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating asset QR code",
+      label,
+      additionalData: { assetId, organizationId, newQrId },
+    });
+  }
 }

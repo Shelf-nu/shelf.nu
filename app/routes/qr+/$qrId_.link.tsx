@@ -24,7 +24,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       entity: PermissionEntity.qr,
       action: PermissionAction.update,
     });
-    /** @TODO here we have to double check if the QR is orpaned, and if its not, redirect */
 
     const qr = await db.qr.findUnique({
       where: {

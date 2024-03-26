@@ -1,27 +1,49 @@
+import { useState } from "react";
 import { AssetStatus, type Asset } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
+import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { ChevronRight } from "~/components/icons";
-import { Filters, List } from "~/components/list";
+import { ErrorContent } from "~/components/errors";
+import { ChevronRight, LinkIcon } from "~/components/icons/library";
+import { List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "~/components/shared/modal";
 import { Td } from "~/components/table";
-import { db } from "~/database";
 import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
 import {
   getPaginatedAndFilterableAssets,
   updateAssetQrCode,
 } from "~/modules/asset";
-import { ShelfError } from "~/utils";
+import { getQr } from "~/modules/qr";
+import { isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { userPrefs } from "~/utils/cookies.server";
+import { setCookie, userPrefs } from "~/utils/cookies.server";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import {
+  data,
+  error,
+  getActionMethod,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw-classes";
 
 export const loader = async ({
   context,
@@ -29,78 +51,97 @@ export const loader = async ({
   params,
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermission({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.qr,
-    action: PermissionAction.update,
-  });
+  const { userId } = authSession;
+  const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
-  const { qrId } = params;
+  try {
+    const qr = await getQr(qrId);
+    if (qr?.assetId) {
+      throw new ShelfError({
+        message: "This QR code is already linked to an asset.",
+        title: "QR already linked",
+        label: "QR",
+        status: 403,
+        cause: null,
+      });
+    }
 
-  let {
-    search,
-    totalAssets,
-    perPage,
-    page,
-    categories,
-    tags,
-    assets,
-    totalPages,
-    cookie,
-    totalCategories,
-    totalTags,
-  } = await getPaginatedAndFilterableAssets({
-    request,
-    organizationId,
-  });
-
-  if (totalPages !== 0 && page > totalPages) {
-    return redirect(".");
-  }
-
-  if (!assets) {
-    throw new ShelfError({
-      title: "Hey!",
-      message: `No assets found`,
-      label: "QR",
-      cause: null,
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.qr,
+      action: PermissionAction.update,
     });
-  }
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
 
-  return json(
-    {
-      header: {
-        title: "Link QR with asset",
-        subHeading: "Choose an item to link this QR with",
-      },
-      showModal: true,
-      qrId,
-      items: assets,
+    let {
+      search,
+      totalAssets,
+      perPage,
+      page,
       categories,
       tags,
-      search,
-      page,
-      totalItems: totalAssets,
-      perPage,
+      assets,
       totalPages,
-      modelName,
-      searchFieldLabel: "Search assets",
-      searchFieldTooltip: {
-        title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-      },
+      cookie,
       totalCategories,
       totalTags,
-    },
-    {
-      headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+    });
+
+    if (totalPages !== 0 && page > totalPages) {
+      return redirect(".");
     }
-  );
+
+    if (!assets) {
+      throw new ShelfError({
+        title: "Assets not found",
+        message:
+          "The assets you are trying to access do not exist or you do not have permission to access them.",
+        additionalData: { qrId, organizationId, userId },
+        cause: null,
+        label: "Assets",
+      });
+    }
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    return json(
+      data({
+        header: {
+          title: "Link QR with asset",
+          subHeading: "Choose an item to link this QR with",
+        },
+        showModal: true,
+        qrId,
+        items: assets,
+        categories,
+        tags,
+        search,
+        page,
+        totalItems: totalAssets,
+        perPage,
+        totalPages,
+        modelName,
+        searchFieldLabel: "Search assets",
+        searchFieldTooltip: {
+          title: "Search your asset database",
+          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        },
+        totalCategories,
+        totalTags,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, qrId });
+    throw json(error(reason));
+  }
 };
 
 export const action = async ({
@@ -109,49 +150,34 @@ export const action = async ({
   params,
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermission({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.qr,
-    action: PermissionAction.update,
-  });
-  const formData = await request.formData();
-  const assetId = formData.get("assetId") as string;
-  // @TODO change this to new style of getting params
-  // @ts-ignore
-  const qrId = getRequiredParam(params, "qrId") as string;
-  const asset = await db.asset.findUnique({
-    where: {
-      id: assetId,
-      organizationId,
-    },
-    select: {
-      id: true,
-      qrCodes: {
-        select: {
-          id: true,
-        },
-      },
-    },
-  });
+  const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
-  if (!asset) {
-    throw new ShelfError({
-      title: "Hey!",
-      message: `No asset found with id ${assetId}`,
-      label: "QR",
-      cause: null,
+  try {
+    const method = getActionMethod(request);
+    if (method !== "POST") throw notAllowedMethod(method);
+
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.qr,
+      action: PermissionAction.update,
     });
+    const { assetId } = parseData(
+      await request.formData(),
+      z.object({ assetId: z.string() })
+    );
+
+    await updateAssetQrCode({
+      newQrId: qrId,
+      assetId,
+      organizationId,
+    });
+
+    return redirect(`/qr/${qrId}/successful-link`);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
   }
-
-  const updatedAsset = await updateAssetQrCode({
-    newQrId: qrId,
-    assetId,
-    organizationId,
-  });
-  // console.log("updatedAsset", updatedAsset);
-
-  return json({ success: true });
 };
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -163,103 +189,104 @@ export default function QrLinkExisting() {
   const { qrId } = useParams();
   const hasFiltersToClear = useSearchParamHasValue("category", "tag");
   const clearFilters = useClearValueFromParams("category", "tag");
-  const fetcher = useFetcher();
+  const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
+
+  /** The id of the asset the user selected to update */
+  const [selectedAssetId, setSelectedAssetId] = useState<string>("");
 
   function handleSelectAsset(assetId: string) {
-    fetcher.submit(
-      {
-        assetId,
-      },
-      {
-        method: "POST",
-      }
-    );
+    setConfirmOpen(true);
+    setSelectedAssetId(assetId);
   }
 
   return (
-    <>
-      <div className="flex max-h-full flex-col">
-        <header className="mb-3 text-left">
-          <h2>{header.title}</h2>
-          <p>{header.subHeading}</p>
-        </header>
+    <div className="mt-4 flex max-h-full flex-1 flex-col">
+      <header className="mb-3 text-left">
+        <h2>{header.title}</h2>
+        <p>{header.subHeading}</p>
+      </header>
 
-        <Filters
-          slots={{
-            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-          }}
-        >
-          <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
-            {hasFiltersToClear ? (
-              <div className="hidden gap-6 md:flex">
-                <Button
-                  as="button"
-                  onClick={clearFilters}
-                  variant="link"
-                  className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
-                  type="button"
-                >
-                  Clear all filters
-                </Button>
-                <div className="text-gray-500"> | </div>
-              </div>
-            ) : null}
-
-            <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Categories{" "}
-                    <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{ name: "category", key: "name" }}
-                label="Filter by category"
-                initialDataKey="categories"
-                countKey="totalCategories"
-              />
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Tags <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{ name: "tag", key: "name" }}
-                label="Filter by tags"
-                initialDataKey="tags"
-                countKey="totalTags"
-              />
+      <Filters
+        slots={{
+          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+        }}
+      >
+        <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
+          {hasFiltersToClear ? (
+            <div className="hidden gap-6 md:flex">
+              <Button
+                as="button"
+                onClick={clearFilters}
+                variant="link"
+                className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+                type="button"
+              >
+                Clear all filters
+              </Button>
+              <div className="text-gray-500"> | </div>
             </div>
-          </div>
-        </Filters>
+          ) : null}
 
-        {/* Body of the modal*/}
-        <div
-        // className="mx-[-24px]"
-        >
-          <div className="flex-1 overflow-y-auto pb-4">
-            <List
-              ItemComponent={RowComponent}
-              /** Clicking on the row will add the current asset to the atom of selected assets */
-              navigate={handleSelectAsset}
-              customEmptyStateContent={{
-                title: "You haven't added any assets yet.",
-                text: "What are you waiting for? Create your first asset now!",
-                newButtonRoute: "/assets/new",
-                newButtonContent: "New asset",
-              }}
+          <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Categories{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "category", key: "name" }}
+              label="Filter by category"
+              initialDataKey="categories"
+              countKey="totalCategories"
+            />
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "tag", key: "name" }}
+              label="Filter by tags"
+              initialDataKey="tags"
+              countKey="totalTags"
             />
           </div>
         </div>
+      </Filters>
 
-        {/* Footer of the modal */}
-        <footer className="flex justify-between border-t pt-3">
-          <Button variant="secondary" to={`/qr/${qrId}/link`} width="full">
-            Close
-          </Button>
-        </footer>
+      {/* Body of the modal*/}
+
+      <div className="flex-1 overflow-y-auto pb-4">
+        <List
+          ItemComponent={RowComponent}
+          /** Clicking on the row will add the current asset to the atom of selected assets */
+          navigate={handleSelectAsset}
+          customEmptyStateContent={{
+            title: "You haven't added any assets yet.",
+            text: "What are you waiting for? Create your first asset now!",
+            newButtonRoute: "/assets/new",
+            newButtonContent: "New asset",
+          }}
+        />
       </div>
-    </>
+      <ConfirmLinkingAssetModal
+        open={confirmOpen}
+        assetId={selectedAssetId}
+        onCancel={() => {
+          // Reset the selected asset id and close the modal
+          setSelectedAssetId("");
+          setConfirmOpen(false);
+        }}
+      />
+
+      {/* Footer of the modal */}
+      <footer className="flex justify-between border-t pt-3">
+        <Button variant="secondary" to={`/qr/${qrId}/link`} width="full">
+          Close
+        </Button>
+      </footer>
+    </div>
   );
 }
 
@@ -299,3 +326,77 @@ const RowComponent = ({ item }: { item: Asset }) => (
     </Td>
   </>
 );
+
+export const ConfirmLinkingAssetModal = ({
+  assetId,
+  open = false,
+  onCancel,
+}: {
+  assetId: string;
+  open: boolean;
+  /**
+   * Runs when the modal is closed
+   */
+  onCancel: () => void;
+}) => {
+  const { items: assets } = useLoaderData<typeof loader>();
+  const asset = assets.find((a) => a.id === assetId);
+  const fetcher = useFetcher<typeof action>();
+  const { data, state } = fetcher;
+  const disabled = isFormProcessing(state);
+
+  return asset ? (
+    <AlertDialog
+      open={open}
+      /**
+       * When the modal is closed, we want to set the state to false by using the callback
+       */
+      onOpenChange={(v) => (!v ? onCancel() : null)}
+    >
+      <AlertDialogContent className="w-[calc(100vw-32px)]">
+        <AlertDialogHeader>
+          <span className="flex size-12 items-center justify-center rounded-full bg-primary-50 p-2 text-primary-600">
+            <LinkIcon />
+          </span>
+          <AlertDialogTitle className="text-left">
+            Link QR code with ‘{asset.title}’
+          </AlertDialogTitle>
+          <AlertDialogDescription className="text-left">
+            Are you sure that you want to do this? The current QR code that is
+            linked to this Item will be unlinked. You can always re-link it with
+            the old QR code.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel asChild>
+            <Button variant="secondary" disabled={disabled}>
+              Cancel
+            </Button>
+          </AlertDialogCancel>
+
+          <fetcher.Form method="post">
+            <input type="hidden" name="assetId" value={asset.id} />
+            <Button
+              className=" mb-3"
+              type="submit"
+              data-test-id="confirmLinkAssetButton"
+              width="full"
+              disabled={disabled}
+            >
+              Confirm
+            </Button>
+          </fetcher.Form>
+          {data?.error ? (
+            <div className="flex flex-col items-center">
+              <div className={tw(`mb-2 h-6 text-center text-red-600`)}>
+                {data.error.message}
+              </div>
+            </div>
+          ) : null}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  ) : null;
+};
+
+export const ErrorBoundary = () => <ErrorContent />;
