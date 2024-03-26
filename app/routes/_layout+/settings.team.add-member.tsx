@@ -6,7 +6,7 @@ import Input from "~/components/forms/input";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
-import styles from "~/styles/layout/custom-modal.css";
+import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";

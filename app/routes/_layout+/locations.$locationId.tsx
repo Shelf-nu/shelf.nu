@@ -7,7 +7,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ChevronRight } from "~/components/icons/library";
@@ -27,7 +27,7 @@ import { Tag as TagBadge } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { deleteLocation, getLocation } from "~/modules/location/service.server";
-import assetCss from "~/styles/asset.css";
+import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,

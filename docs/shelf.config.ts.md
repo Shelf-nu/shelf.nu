@@ -4,7 +4,7 @@ This file has a few configuration options, that are used to adjust and disable c
 
 ```ts
 // remix.config.ts
-import { ENABLE_PREMIUM_FEATURES } from "~/utils";
+import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { Config } from "./types";
 
 export const config: Config = {

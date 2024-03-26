@@ -11,7 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Spinner } from "~/components/shared/spinner";
 import { ZXingScanner } from "~/components/zxing-scanner";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
-import scannerCss from "~/styles/scanner.css";
+import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";

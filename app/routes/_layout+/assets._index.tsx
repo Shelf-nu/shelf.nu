@@ -37,7 +37,7 @@ import {
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset/service.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
-import assetCss from "~/styles/assets.css";
+import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";

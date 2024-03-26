@@ -20,7 +20,7 @@ import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import { db } from "~/database/db.server";
 
-import styles from "~/styles/layout/skeleton-loading.css";
+import styles from "~/styles/layout/skeleton-loading.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getLocale } from "~/utils/client-hints";
 import { userPrefs } from "~/utils/cookies.server";

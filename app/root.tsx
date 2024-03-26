@@ -9,7 +9,6 @@ import { json } from "@remix-run/node";
 import {
   Link,
   Links,
-  LiveReload,
   Meta,
   Outlet,
   Scripts,
@@ -22,9 +21,9 @@ import { ErrorContent } from "./components/errors";
 import { HomeIcon } from "./components/icons/library";
 import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
-import fontsStylesheetUrl from "./styles/fonts.css";
-import globalStylesheetUrl from "./styles/global.css";
-import styles from "./tailwind.css";
+import fontsStylesheetUrl from "./styles/fonts.css?url";
+import globalStylesheetUrl from "./styles/global.css?url";
+import styles from "./tailwind.css?url";
 import { ClientHintCheck, getHints } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
 import { data } from "./utils/http.server";
@@ -97,7 +96,6 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
           }}
         />
         <Scripts />
-        <LiveReload />
       </body>
     </html>
   );

@@ -15,7 +15,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database/db.server";
 import { duplicateAsset } from "~/modules/asset/service.server";
-import styles from "~/styles/layout/custom-modal.css";
+import styles from "~/styles/layout/custom-modal.css?url";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";

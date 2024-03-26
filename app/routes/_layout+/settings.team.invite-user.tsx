@@ -26,7 +26,7 @@ import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { createInvite } from "~/modules/invite/service.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier/service.server";
-import styles from "~/styles/layout/custom-modal.css";
+import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
