@@ -103,7 +103,7 @@ export function BookingAssetsColumn() {
                 disabled: !booking.from || !booking.to,
               },
             }}
-            className="md:rounded-t-[0px]"
+            className="md:rounded-t-none"
           />
         </div>
       </div>

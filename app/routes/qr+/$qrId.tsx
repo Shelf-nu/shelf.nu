@@ -1,9 +1,8 @@
 import type { Organization } from "@prisma/client";
 import { redirect, json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
 import { z } from "zod";
-import { QrNotFound } from "~/components/qr/not-found";
+import { ErrorContent } from "~/components/errors";
 import { getUserOrganizations } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getQr } from "~/modules/qr";
@@ -21,7 +20,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     additionalData: { userId },
   });
 
-  /* @TODO - double check because of messy merge*/
   try {
     /* Find the QR in the database */
     const qr = await getQr(id);
@@ -149,14 +147,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
-export function ErrorBoundary() {
-  const error = useRouteError();
-
-  /** 404 error */
-  if (isRouteErrorResponse(error)) {
-    return <QrNotFound />;
-  }
-}
+export const ErrorBoundary = () => <ErrorContent />;
 
 export default function Qr() {
   return null;

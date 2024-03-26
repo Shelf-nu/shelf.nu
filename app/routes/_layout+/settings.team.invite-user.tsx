@@ -203,7 +203,7 @@ export default function InviteUser() {
                         className={tw("size-6 rounded-[2px] object-cover")}
                       />
 
-                      <div className=" ml-[1px] text-sm text-gray-900">
+                      <div className=" ml-px text-sm text-gray-900">
                         {organization.name}
                       </div>
                     </div>
@@ -228,7 +228,7 @@ export default function InviteUser() {
                   {Object.entries(organizationRolesMap).map(([k, v]) => (
                     <SelectItem value={k} key={k} className="p-2">
                       <div className="flex items-center gap-2">
-                        <div className=" ml-[1px] block text-sm lowercase text-gray-900 first-letter:uppercase">
+                        <div className=" ml-px block text-sm lowercase text-gray-900 first-letter:uppercase">
                           {v}
                         </div>
                       </div>

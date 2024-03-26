@@ -215,7 +215,7 @@ export default function AssetCustomFields({
         })
       ) : (
         <div>
-          <div className=" mx-auto max-w-[640px] rounded-xl border border-gray-300 bg-white px-5 py-10 text-center">
+          <div className=" mx-auto max-w-screen-sm rounded-xl border border-gray-300 bg-white px-5 py-10 text-center">
             <div>
               <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-gray-50 bg-gray-100 p-2 text-gray-600">
                 <SearchIcon />
