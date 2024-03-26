@@ -1,14 +1,7 @@
 import { AssetStatus, type Asset } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import {
-  Form,
-  useFetcher,
-  useLoaderData,
-  useNavigation,
-  useParams,
-  useSearchParams,
-} from "@remix-run/react";
+import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -20,17 +13,15 @@ import { Td } from "~/components/table";
 import { db } from "~/database";
 import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
 import {
-  getAsset,
   getPaginatedAndFilterableAssets,
   updateAssetQrCode,
 } from "~/modules/asset";
-import { getRequiredParam, isFormProcessing } from "~/utils";
+import { ShelfError } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
 
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const loader = async ({
   context,
@@ -38,7 +29,7 @@ export const loader = async ({
   params,
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.qr,
@@ -69,10 +60,11 @@ export const loader = async ({
   }
 
   if (!assets) {
-    throw new ShelfStackError({
+    throw new ShelfError({
       title: "Hey!",
       message: `No assets found`,
-      status: 404,
+      label: "QR",
+      cause: null,
     });
   }
   const modelName = {
@@ -117,7 +109,7 @@ export const action = async ({
   params,
 }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
+  const { organizationId } = await requirePermission({
     userId: authSession.userId,
     request,
     entity: PermissionEntity.qr,
@@ -125,7 +117,9 @@ export const action = async ({
   });
   const formData = await request.formData();
   const assetId = formData.get("assetId") as string;
-  const qrId = getRequiredParam(params, "qrId");
+  // @TODO change this to new style of getting params
+  // @ts-ignore
+  const qrId = getRequiredParam(params, "qrId") as string;
   const asset = await db.asset.findUnique({
     where: {
       id: assetId,
@@ -142,10 +136,11 @@ export const action = async ({
   });
 
   if (!asset) {
-    throw new ShelfStackError({
+    throw new ShelfError({
       title: "Hey!",
       message: `No asset found with id ${assetId}`,
-      status: 404,
+      label: "QR",
+      cause: null,
     });
   }
 

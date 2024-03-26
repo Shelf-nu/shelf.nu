@@ -3,90 +3,102 @@ import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
-import { ErrorBoundryComponent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { Td, Th } from "~/components/table";
 import {
-  countAcviteCustomFields,
+  countActiveCustomFields,
   getFilteredAndPaginatedCustomFields,
 } from "~/modules/custom-field";
 import { getOrganizationTierLimit } from "~/modules/tier";
 
-import { getCurrentSearchParams, getParamsValues } from "~/utils";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParamsValues,
+  makeShelfError,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
-
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId, organizations } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.customField,
-    action: PermissionAction.read,
-  });
+  const { userId } = authSession;
 
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search } = getParamsValues(searchParams);
-  const cookie = await updateCookieWithPerPage(request, perPageParam);
-  const { perPage } = cookie;
-
-  const { customFields, totalCustomFields } =
-    await getFilteredAndPaginatedCustomFields({
-      organizationId,
-      page,
-      perPage,
-      search,
+  try {
+    const { organizationId, organizations } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.customField,
+      action: PermissionAction.read,
     });
 
-  const tierLimit = await getOrganizationTierLimit({
-    organizationId,
-    organizations,
-  });
+    const searchParams = getCurrentSearchParams(request);
+    const { page, perPageParam, search } = getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
 
-  const totalPages = Math.ceil(totalCustomFields / perPageParam);
+    const { customFields, totalCustomFields } =
+      await getFilteredAndPaginatedCustomFields({
+        organizationId,
+        page,
+        perPage,
+        search,
+      });
 
-  const header: HeaderData = {
-    title: "Custom Fields",
-  };
-  const modelName = {
-    singular: "custom fields",
-    plural: "custom Fields",
-  };
+    const tierLimit = await getOrganizationTierLimit({
+      organizationId,
+      organizations,
+    });
 
-  return json(
-    {
-      header,
-      items: customFields,
-      search,
-      page,
-      totalItems: totalCustomFields,
-      totalPages,
-      perPage,
-      modelName,
-      canCreateMoreCustomFields: canCreateMoreCustomFields({
-        tierLimit,
-        totalCustomFields: await countAcviteCustomFields({ organizationId }),
+    const totalPages = Math.ceil(totalCustomFields / perPageParam);
+
+    const header: HeaderData = {
+      title: "Custom Fields",
+    };
+    const modelName = {
+      singular: "custom fields",
+      plural: "custom Fields",
+    };
+
+    return json(
+      data({
+        header,
+        items: customFields,
+        search,
+        page,
+        totalItems: totalCustomFields,
+        totalPages,
+        perPage,
+        modelName,
+        canCreateMoreCustomFields: canCreateMoreCustomFields({
+          tierLimit,
+          totalCustomFields: await countActiveCustomFields({ organizationId }),
+        }),
       }),
-    },
-    {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
-    }
-  );
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export default function CustomFieldsIndexPage() {

@@ -12,33 +12,40 @@ import {
 } from "@remix-run/node";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
-import { parseFormAny } from "react-zorm";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 
 import Header from "~/components/layout/header";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
 
 import { createLocation } from "~/modules/location";
+import { data, error, makeShelfError, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 const title = "New Location";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.location,
-    action: PermissionAction.create,
-  });
+  const { userId } = authSession;
 
-  const header = {
-    title,
-  };
+  try {
+    await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.create,
+    });
 
-  return json({ header });
+    const header = {
+      title,
+    };
+
+    return json(data({ header }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -53,85 +60,69 @@ export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.location,
-    action: PermissionAction.create,
-  });
+  const { userId } = authSession;
 
-  /** Here we need to clone the request as we need 2 different streams:
-   * 1. Access form data for creating asset
-   * 2. Access form data via upload handler to be able to upload the file
-   *
-   * This solution is based on : https://github.com/remix-run/remix/issues/3971#issuecomment-1222127635
-   */
-  const clonedRequest = request.clone();
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.create,
+    });
 
-  const formData = await clonedRequest.formData();
+    /** Here we need to clone the request as we need 2 different streams:
+     * 1. Access form data for creating asset
+     * 2. Access form data via upload handler to be able to upload the file
+     *
+     * This solution is based on : https://github.com/remix-run/remix/issues/3971#issuecomment-1222127635
+     */
+    const clonedRequest = request.clone();
 
-  const result = await NewLocationFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
-
-  if (!result.success) {
-    return json(
+    const payload = parseData(
+      await clonedRequest.formData(),
+      NewLocationFormSchema,
       {
-        errors: result.error,
-      },
-      {
-        status: 400,
+        additionalData: { userId, organizationId },
       }
     );
-  }
 
-  const { name, description, address, addAnother } = result.data;
-  /** This checks if tags are passed and build the  */
+    const { name, description, address, addAnother } = payload;
+    /** This checks if tags are passed and build the  */
 
-  const formDataFile = await unstable_parseMultipartFormData(
-    request,
-    unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
-  );
-
-  const file = formDataFile.get("image") as File | null;
-  invariant(file instanceof File, "file not the right type");
-
-  const rsp = await createLocation({
-    name,
-    description,
-    address,
-    userId: authSession.userId,
-    organizationId,
-    image: file || null,
-  });
-
-  // Handle unique constraint error for name
-  if (rsp.error) {
-    return json(
-      {
-        errors: {
-          name: rsp.error,
-        },
-      },
-      {
-        status: 400,
-      }
+    const formDataFile = await unstable_parseMultipartFormData(
+      request,
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
     );
-  }
-  const { location } = rsp;
 
-  sendNotification({
-    title: "Location created",
-    message: "Your location has been created successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
+    const file = formDataFile.get("image") as File | null;
+    invariant(file instanceof File, "file not the right type");
 
-  /** If the user clicked add-another, reload the document to clear the form */
-  if (addAnother) {
-    return redirectDocument("/locations/new");
+    const location = await createLocation({
+      name,
+      description,
+      address,
+      userId: authSession.userId,
+      organizationId,
+      image: file || null,
+    });
+
+    sendNotification({
+      title: "Location created",
+      message: "Your location has been created successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    /** If the user clicked add-another, reload the document to clear the form */
+    if (addAnother) {
+      return redirectDocument("/locations/new");
+    }
+
+    return redirect(`/locations/${location.id}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-  return redirect(`/locations/${location.id}`);
 }
 
 export default function NewLocationPage() {

@@ -5,6 +5,8 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
+import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
 import { isFormProcessing } from "~/utils";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
@@ -46,13 +48,9 @@ export const LocationForm = ({ name, address, description }: Props) => {
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   const [, updateName] = useAtom(updateDynamicTitleAtom);
-  const actionData = useActionData<{
-    errors?: {
-      name?: {
-        message: string;
-      };
-    };
-  }>();
+  const actionData = useActionData<
+    typeof newLocationAction | typeof editLocationAction
+  >();
 
   return (
     <Card className="md:w-min">
@@ -75,9 +73,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
             hideLabel
             name={zo.fields.name()}
             disabled={disabled}
-            error={
-              actionData?.errors?.name?.message || zo.errors.name()?.message
-            }
+            error={actionData?.error?.message || zo.errors.name()?.message}
             autoFocus
             onChange={updateName}
             className="w-full"

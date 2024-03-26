@@ -21,4 +21,5 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
     searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
       ? null
       : (searchParams.get("status") as BookingStatus | null),
+  locationIds: searchParams.getAll("location"),
 });

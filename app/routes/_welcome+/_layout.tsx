@@ -1,4 +1,5 @@
 import { Outlet } from "react-router";
+import { ErrorContent } from "~/components/errors";
 
 export default function OnboardingLayout() {
   return (
@@ -18,3 +19,5 @@ export default function OnboardingLayout() {
     </div>
   );
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

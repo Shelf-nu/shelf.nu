@@ -23,7 +23,8 @@ Shelf's basic setup is based on a Remix stack by [rphlmr](https://github.com/rph
 
 If you prefer to run shelf locally or host your live app via docker, please check our [Docker](./docker.md) documentation.
 
-_**Note**: Currently we dont have a docker setup that also includes self hositng supabase. Once released the docker documentation will be updated to include it as well._
+> [!NOTE]
+> Currently we dont have a docker setup that also includes self hositng supabase. Once released the docker documentation will be updated to include it as well.
 
 ## Development
 
@@ -63,6 +64,7 @@ SERVER_URL="http://localhost:3000"
 SMTP_HOST="smtp.yourhost.com"
 SMTP_USER="you@example.com"
 SMTP_PWD="yourSMTPpassword"
+SMTP_FROM="You from example.com" <you@example.com>
 
 # Set this to false to disable requirement of subscription for premium features. This will make premium features available for all users
 # You can also directly adjust this in remix.config.js and set it to false
@@ -104,6 +106,12 @@ The database seed script creates a new user with some data you can use to get st
 
 - Email: `hello@supabase.com`
 - Password: `supabase`
+
+> [!CAUTION]
+> During development involving Dockerfile changes, make sure to **address the correct file** in your builds:
+>
+> - Fly.io will be built via `Dockerfile`
+> - ghcr.io will be built via `Dockerfile.image`
 
 ## Authentication
 
@@ -173,6 +181,7 @@ Prior to your first deployment, you'll need to do a few things:
   fly secrets set SMTP_HOST="smtp.yourhost.com"
   fly secrets set SMTP_USER="you@example.com"
   fly secrets set SMTP_PWD="yourSMTPpassword"
+  fly secrets set SMTP_FROM="Carlos from shelf.nu" <carlos@shelf.nu>
 
 
   # staging (specify --app name) ** not mandatory if you don't want a staging environnement **

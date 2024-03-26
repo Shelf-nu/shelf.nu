@@ -9,7 +9,7 @@ export function ProfilePictureUpload() {
   const [, setFileInfo] = useAtom(updateFileInfoFromFileAtom);
 
   const onDropAccepted = useCallback(
-    async (acceptedFiles: File[]) => {
+    (acceptedFiles: File[]) => {
       // Do something with the files
       if (acceptedFiles) {
         const file = acceptedFiles[0];

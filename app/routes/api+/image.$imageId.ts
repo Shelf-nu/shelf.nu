@@ -1,44 +1,73 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { z } from "zod";
 import { db } from "~/database";
-import { ShelfStackError } from "~/utils/error";
+import { error, getParams } from "~/utils";
+import { ShelfError, makeShelfError } from "~/utils/error";
 
 export async function loader({ context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-
-  if (!authSession)
-    throw new ShelfStackError({
-      message: "Unauthorized. You are not allowed to view this resource",
-      status: 403,
-    });
-  const image = await db.image.findUnique({
-    where: { id: params.imageId },
-    select: { ownerOrgId: true, contentType: true, blob: true, userId: true },
+  const { userId } = authSession;
+  const { imageId } = getParams(params, z.object({ imageId: z.string() }), {
+    additionalData: { userId },
   });
-  if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
 
-  const userOrganizations = await db.userOrganization.findMany({
-    where: { userId: authSession.userId },
-    select: {
-      organization: {
-        select: { id: true },
+  try {
+    const image = await db.image
+      .findFirstOrThrow({
+        where: { id: imageId },
+        select: {
+          ownerOrgId: true,
+          contentType: true,
+          blob: true,
+          userId: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          title: "Image not found",
+          message:
+            "The image you are trying to access does not exist or you do not have permission to access it.",
+          additionalData: { userId, imageId },
+          status: 404,
+          label: "Image",
+        });
+      });
+
+    const userOrganizations = await db.userOrganization.findMany({
+      where: { userId: authSession.userId },
+      select: {
+        organization: {
+          select: { id: true },
+        },
       },
-    },
-  });
-  const orgIds = userOrganizations.map((uo) => uo.organization.id);
-
-  if (!orgIds.includes(image.ownerOrgId)) {
-    throw new ShelfStackError({
-      message: "Unauthorized. This resource doesn't belong to you.",
-      status: 403,
     });
+
+    const orgIds = userOrganizations.map((uo) => uo.organization.id);
+
+    if (!orgIds.includes(image.ownerOrgId)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Unauthorized. This resource doesn't belong to you.",
+        additionalData: {
+          userId,
+          imageId,
+          orgIds,
+          ownerOrgId: image.ownerOrgId,
+        },
+        status: 403,
+        label: "Image",
+      });
+    }
+
+    return new Response(image.blob, {
+      headers: {
+        "Content-Type": image.contentType,
+        "Cache-Control": "max-age=31536000",
+      },
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-
-  if (!image) throw new ShelfStackError({ message: "Not found", status: 404 });
-
-  return new Response(image.blob, {
-    headers: {
-      "Content-Type": image.contentType,
-      "Cache-Control": "max-age=31536000",
-    },
-  });
 }

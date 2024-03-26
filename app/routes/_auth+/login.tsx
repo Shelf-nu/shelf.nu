@@ -10,7 +10,7 @@ import {
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 
 import Input from "~/components/forms/input";
@@ -21,20 +21,27 @@ import { signInWithEmail, ContinueWithEmailForm } from "~/modules/auth";
 import { getOrganizationByUserId } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
-  assertIsPost,
+  data,
+  error,
+  getActionMethod,
   isFormProcessing,
+  parseData,
   safeRedirect,
   validEmail,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
-  if (context.isAuthenticated) return redirect("/assets");
 
-  return json({ title, subHeading });
+  if (context.isAuthenticated) {
+    return redirect("/assets");
+  }
+
+  return json(data({ title, subHeading }));
 }
 
 const LoginFormSchema = z.object({
@@ -49,89 +56,45 @@ const LoginFormSchema = z.object({
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  assertIsPost(request);
-  const formData = await request.formData();
-  /** Check the zo validations */
-  const result = await LoginFormSchema.safeParseAsync(parseFormAny(formData));
+  try {
+    const method = getActionMethod(request);
 
-  /** If there are some zo validation errors, show them */
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-      },
-      { status: 400 }
-    );
+    switch (method) {
+      case "POST": {
+        const { email, password, redirectTo } = parseData(
+          await request.formData(),
+          LoginFormSchema
+        );
+
+        const authSession = await signInWithEmail(email, password);
+
+        if (!authSession) {
+          return redirect(`/otp?email=${encodeURIComponent(email)}&mode=login`);
+        }
+
+        const personalOrganization = await getOrganizationByUserId({
+          userId: authSession.userId,
+          orgType: "PERSONAL",
+        });
+
+        // Set the auth session and redirect to the assets page
+        context.setSession(authSession);
+
+        return redirect(safeRedirect(redirectTo || "/assets"), {
+          headers: [
+            setCookie(
+              await setSelectedOrganizationIdCookie(personalOrganization.id)
+            ),
+          ],
+        });
+      }
+    }
+
+    throw notAllowedMethod(method);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
   }
-
-  const { email, password, redirectTo } = result.data;
-
-  const signInResult = await signInWithEmail(email, password);
-
-  if (
-    signInResult.status === "error" &&
-    signInResult.message === "Email not confirmed"
-  ) {
-    return redirect(`/otp?email=${encodeURIComponent(email)}&mode=login`);
-  }
-
-  if (
-    signInResult.status === "error" &&
-    signInResult.message === "Invalid login credentials"
-  ) {
-    return json(
-      {
-        errors: {
-          email: null,
-          password: "Incorrect email or password",
-        },
-      },
-      { status: 400 }
-    );
-  }
-
-  if (signInResult.status === "error") {
-    return json(
-      {
-        errors: {
-          email: signInResult.message,
-          password: null,
-        },
-      },
-      { status: 400 }
-    );
-  }
-
-  // Ensure that user property exists before proceeding
-  if (signInResult.status === "success" && signInResult.authSession) {
-    const { authSession } = signInResult;
-    const personalOrganization = await getOrganizationByUserId({
-      userId: authSession.userId,
-      orgType: "PERSONAL",
-    });
-
-    // Set the auth session and redirect to the assets page
-    context.setSession({ ...authSession });
-
-    return redirect(safeRedirect(redirectTo || "/assets"), {
-      headers: [
-        setCookie(
-          await setSelectedOrganizationIdCookie(personalOrganization.id)
-        ),
-      ],
-    });
-  }
-
-  // Handle any unexpected scenarios
-  return json(
-    {
-      errors: {
-        email: "Something went wrong. Please try again later.",
-        password: null,
-      },
-    },
-    { status: 500 }
-  );
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -143,9 +106,7 @@ export default function IndexLoginForm() {
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
   const acceptedInvite = searchParams.get("acceptedInvite");
-  const data = useActionData<{
-    errors: { email: string; password: string };
-  }>();
+  const data = useActionData<typeof action>();
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -171,7 +132,7 @@ export default function IndexLoginForm() {
             autoComplete="email"
             disabled={disabled}
             inputClassName="w-full"
-            error={zo.errors.email()?.message || data?.errors?.email}
+            error={zo.errors.email()?.message || data?.error.message}
           />
         </div>
         <PasswordInput
@@ -182,7 +143,7 @@ export default function IndexLoginForm() {
           autoComplete="new-password"
           disabled={disabled}
           inputClassName="w-full"
-          error={zo.errors.password()?.message || data?.errors?.password}
+          error={zo.errors.password()?.message || data?.error.message}
         />
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
         <Button

@@ -1,22 +1,24 @@
 import type { AuthSession } from "server/session";
 import type { SupabaseAuthSession } from "~/integrations/supabase";
 
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
-export async function mapAuthSession(
-  supabaseAuthSession: SupabaseAuthSession | null
-): Promise<AuthSession> {
-  if (!supabaseAuthSession) {
-    throw new ShelfStackError({
-      message: "Supabase auth session is null",
+const label: ErrorLabel = "Auth";
+
+export function mapAuthSession(
+  supabaseAuthSession: SupabaseAuthSession
+): AuthSession {
+  if (!supabaseAuthSession.user.email) {
+    throw new ShelfError({
+      cause: null,
+      message: "User should have an email",
+      additionalData: {
+        userId: supabaseAuthSession.user.id,
+      },
+      label,
     });
   }
-
-  if (!supabaseAuthSession.refresh_token)
-    throw new ShelfStackError({ message: "User should have a refresh token" });
-
-  if (!supabaseAuthSession.user?.email)
-    throw new ShelfStackError({ message: "User should have an email" });
 
   return {
     accessToken: supabaseAuthSession.access_token,

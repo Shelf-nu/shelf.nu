@@ -1,50 +1,36 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { parseFormAny } from "react-zorm";
+import { json } from "@remix-run/node";
 import { z } from "zod";
 import { resendVerificationEmail } from "~/modules/auth/service.server";
 
-import { validEmail } from "~/utils";
-import { assertIsPost } from "~/utils/http.server";
+import { makeShelfError, notAllowedMethod, validEmail } from "~/utils";
+import { error, getActionMethod, parseData } from "~/utils/http.server";
 
 export async function action({ request }: ActionFunctionArgs) {
-  assertIsPost(request);
+  try {
+    const method = getActionMethod(request);
 
-  const formData = await request.formData();
-  const result = await z
-    .object({
-      email: z
-        .string()
-        .transform((email) => email.toLowerCase())
-        .refine(validEmail, () => ({
-          message: "Please enter a valid email",
-        })),
-    })
-    .safeParseAsync(parseFormAny(formData));
+    switch (method) {
+      case "POST": {
+        const { email } = parseData(
+          await request.formData(),
+          z.object({
+            email: z
+              .string()
+              .transform((email) => email.toLowerCase())
+              .refine(validEmail, () => ({
+                message: "Please enter a valid email",
+              })),
+          })
+        );
 
-  if (!result.success) {
-    return json(
-      {
-        error: "Please enter a valid email.",
-      },
-      { status: 400 }
-    );
-  }
+        await resendVerificationEmail(email);
+      }
+    }
 
-  const { status, error, message } = await resendVerificationEmail(
-    result.data.email
-  );
-
-  if (status === "success") {
-    // Assuming you want to redirect to a success page after resending the email.
-    return redirect("/confirmation-email-sent");
-  } else {
-    return json(
-      {
-        error: error || "Something went wrong. Please try again.",
-        message: message || "",
-      },
-      { status: 500 }
-    );
+    throw notAllowedMethod(method);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
   }
 }

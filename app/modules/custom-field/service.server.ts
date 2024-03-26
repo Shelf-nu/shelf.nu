@@ -1,10 +1,12 @@
 import type { CustomField, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database";
-import { badRequest } from "~/utils";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
-import { handleUniqueConstraintError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+
+const label: ErrorLabel = "Custom fields";
 
 export async function createCustomField({
   name,
@@ -17,7 +19,7 @@ export async function createCustomField({
   options = [],
 }: CustomFieldDraftPayload) {
   try {
-    const customField = await db.customField.create({
+    return await db.customField.create({
       data: {
         name,
         helpText,
@@ -37,56 +39,60 @@ export async function createCustomField({
         },
       },
     });
-    return { customField, error: null };
   } catch (cause) {
-    return handleUniqueConstraintError(cause, "Custom field");
+    throw maybeUniqueConstraintViolation(cause, "Custom field", {
+      additionalData: { userId, organizationId },
+    });
   }
 }
 
-export async function getFilteredAndPaginatedCustomFields({
-  organizationId,
-  page = 1,
-  perPage = 8,
-  search,
-}: {
+export async function getFilteredAndPaginatedCustomFields(params: {
   organizationId: Organization["id"];
-
   /** Page number. Starts at 1 */
   page?: number;
-
   /** Items to be loaded per page */
   perPage?: number;
-
   search?: string | null;
 }) {
-  const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
+  const { organizationId, page = 1, perPage = 8, search } = params;
 
-  /** Default value of where. Takes the items belonging to current user */
-  let where: Prisma.CustomFieldWhereInput = { organizationId };
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-  /** If the search string exists, add it to the where object */
-  if (search) {
-    where.name = {
-      contains: search,
-      mode: "insensitive",
-    };
+    /** Default value of where. Takes the items belonging to current user */
+    let where: Prisma.CustomFieldWhereInput = { organizationId };
+
+    /** If the search string exists, add it to the where object */
+    if (search) {
+      where.name = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    const [customFields, totalCustomFields] = await Promise.all([
+      /** Get the items */
+      db.customField.findMany({
+        skip,
+        take,
+        where,
+        orderBy: [{ active: "desc" }, { updatedAt: "desc" }],
+      }),
+
+      /** Count them */
+      db.customField.count({ where }),
+    ]);
+
+    return { customFields, totalCustomFields };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching the custom fields",
+      additionalData: { ...params },
+      label,
+    });
   }
-
-  const [customFields, totalCustomFields] = await db.$transaction([
-    /** Get the items */
-    db.customField.findMany({
-      skip,
-      take,
-      where,
-      orderBy: [{ active: "desc" }, { updatedAt: "desc" }],
-    }),
-
-    /** Count them */
-    db.customField.count({ where }),
-  ]);
-
-  return { customFields, totalCustomFields };
 }
 
 export async function getCustomField({
@@ -95,14 +101,20 @@ export async function getCustomField({
 }: Pick<CustomField, "id"> & {
   organizationId: Organization["id"];
 }) {
-  const [customField] = await db.$transaction([
-    /** Get the item */
-    db.customField.findFirst({
+  try {
+    return await db.customField.findFirstOrThrow({
       where: { id, organizationId },
-    }),
-  ]);
-
-  return { customField };
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Custom field not found",
+      message:
+        "The custom field you are trying to access does not exist or you do not have permission to access it.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
 }
 
 export async function updateCustomField(payload: {
@@ -114,8 +126,9 @@ export async function updateCustomField(payload: {
   active?: CustomField["active"];
   options?: CustomField["options"];
 }) {
+  const { id, name, helpText, required, active, options } = payload;
+
   try {
-    const { id, name, helpText, required, active, options } = payload;
     //dont ever update type
     //updating type would require changing all custom field values to that type
     //which might fail when changing to incompatible type hence need a careful definition
@@ -127,68 +140,85 @@ export async function updateCustomField(payload: {
       options,
     };
 
-    const customField = await db.customField.update({
+    return await db.customField.update({
       where: { id },
       data: data,
     });
-    return { customField, error: null };
   } catch (cause) {
-    return handleUniqueConstraintError(cause, "Custom field");
+    throw maybeUniqueConstraintViolation(cause, "Custom field", {
+      additionalData: {
+        id,
+      },
+    });
   }
 }
 
 export async function upsertCustomField(
   definitions: CustomFieldDraftPayload[]
 ): Promise<Record<string, CustomField>> {
-  const customFields: Record<string, CustomField> = {};
+  try {
+    const customFields: Record<string, CustomField> = {};
 
-  for (const def of definitions) {
-    let existingCustomField = await db.customField.findFirst({
-      where: {
-        name: {
-          equals: def.name,
-          mode: "insensitive",
+    for (const def of definitions) {
+      let existingCustomField = await db.customField.findFirst({
+        where: {
+          name: {
+            equals: def.name,
+            mode: "insensitive",
+          },
+          organizationId: def.organizationId,
         },
-        organizationId: def.organizationId,
-      },
-    });
+      });
 
-    if (!existingCustomField) {
-      // @TODO not sure how to handle this case
-      // @ts-ignore
-      const { customField: newCustomField } = await createCustomField(def);
-      customFields[def.name] = newCustomField;
-    } else {
-      if (existingCustomField.type !== def.type) {
-        throw badRequest(
-          `custom field with name ${def.name} already exist with diffrent type ${existingCustomField.type}`
-        );
-      }
-      if (existingCustomField.type === "OPTION") {
-        const newOptions = def.options?.filter(
-          (op) => !existingCustomField?.options?.includes(op)
-        );
-        if (newOptions?.length) {
-          //create non exisitng options
-          const options = (existingCustomField?.options || []).concat(
-            Array.from(new Set(newOptions))
-          );
-          // @ts-ignore
-          const rsp: {
-            customField: CustomField;
-            error: null;
-          } = await updateCustomField({
-            id: existingCustomField.id,
-            options,
+      if (!existingCustomField) {
+        // @TODO not sure how to handle this case
+        const newCustomField = await createCustomField(def);
+        customFields[def.name] = newCustomField;
+      } else {
+        if (existingCustomField.type !== def.type) {
+          throw new ShelfError({
+            cause: null,
+            message: "Duplicate custom field name with different type",
+            additionalData: {
+              validationErrors: {
+                name: {
+                  message: `${def.name} already exist with different type ${existingCustomField.type}`,
+                },
+              },
+            },
+            label,
           });
-          existingCustomField = rsp.customField;
         }
+        if (existingCustomField.type === "OPTION") {
+          const newOptions = def.options?.filter(
+            (op) => !existingCustomField?.options?.includes(op)
+          );
+          if (newOptions?.length) {
+            //create non existing options
+            const options = (existingCustomField?.options || []).concat(
+              Array.from(new Set(newOptions))
+            );
+            const updatedCustomField = await updateCustomField({
+              id: existingCustomField.id,
+              options,
+            });
+            existingCustomField = updatedCustomField;
+          }
+        }
+        customFields[def.name] = existingCustomField;
       }
-      customFields[def.name] = existingCustomField;
     }
-  }
 
-  return customFields;
+    return customFields;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Failed to update or create custom fields. Please try again or contact support.",
+      additionalData: { definitions },
+      label,
+    });
+  }
 }
 
 export async function createCustomFieldsIfNotExists({
@@ -200,31 +230,41 @@ export async function createCustomFieldsIfNotExists({
   userId: User["id"];
   organizationId: Organization["id"];
 }): Promise<Record<string, CustomField>> {
-  //{CF header:[all options in csv combined]}
-  const optionMap: Record<string, string[]> = {};
-  //{CF header: definition to create}
-  const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {};
-  for (let item of data) {
-    for (let k of Object.keys(item)) {
-      if (k.startsWith("cf:")) {
-        const def = getDefinitionFromCsvHeader(k);
-        if (!fieldToDefDraftMap[k]) {
-          fieldToDefDraftMap[k] = { ...def, userId, organizationId };
-        }
-        if (def.type === "OPTION") {
-          optionMap[k] = (optionMap[k] || []).concat([item[k]]);
+  try {
+    //{CF header:[all options in csv combined]}
+    const optionMap: Record<string, string[]> = {};
+    //{CF header: definition to create}
+    const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {};
+    for (let item of data) {
+      for (let k of Object.keys(item)) {
+        if (k.startsWith("cf:")) {
+          const def = getDefinitionFromCsvHeader(k);
+          if (!fieldToDefDraftMap[k]) {
+            fieldToDefDraftMap[k] = { ...def, userId, organizationId };
+          }
+          if (def.type === "OPTION") {
+            optionMap[k] = (optionMap[k] || []).concat([item[k]]);
+          }
         }
       }
     }
-  }
 
-  for (const [customFieldDefStr, def] of Object.entries(fieldToDefDraftMap)) {
-    if (def.type === "OPTION" && optionMap[customFieldDefStr]?.length) {
-      def.options = optionMap[customFieldDefStr];
+    for (const [customFieldDefStr, def] of Object.entries(fieldToDefDraftMap)) {
+      if (def.type === "OPTION" && optionMap[customFieldDefStr]?.length) {
+        def.options = optionMap[customFieldDefStr];
+      }
     }
-  }
 
-  return upsertCustomField(Object.values(fieldToDefDraftMap));
+    return await upsertCustomField(Object.values(fieldToDefDraftMap));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating custom fields. Please try again or contact support.",
+      additionalData: { userId, organizationId },
+      label,
+    });
+  }
 }
 
 export async function getActiveCustomFields({
@@ -232,20 +272,40 @@ export async function getActiveCustomFields({
 }: {
   organizationId: string;
 }) {
-  return await db.customField.findMany({
-    where: {
-      organizationId,
-      active: true,
-    },
-  });
+  try {
+    return await db.customField.findMany({
+      where: {
+        organizationId,
+        active: true,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Failed to get active custom fields. Please try again or contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
 }
 
-export async function countAcviteCustomFields({
+export async function countActiveCustomFields({
   organizationId,
 }: {
   organizationId: string;
 }) {
-  return await db.customField.count({
-    where: { organizationId, active: true },
-  });
+  try {
+    return await db.customField.count({
+      where: { organizationId, active: true },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching active custom fields. Please try again or contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
 }

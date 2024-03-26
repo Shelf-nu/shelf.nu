@@ -1,7 +1,8 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
-import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import type { AllowedModelNames, loader } from "~/routes/api+/model-filters";
 import useFetcherWithReset from "./use-fetcher-with-reset";
 
 export type ModelFilterItem = {
@@ -45,15 +46,15 @@ export function useModelFilters({
 
   const totalItems = initialData[countKey];
 
-  const fetcher = useFetcherWithReset<Array<ModelFilterItem>>();
+  const fetcher = useFetcherWithReset<SerializeFrom<typeof loader>>();
 
   const items = useMemo(() => {
-    if (fetcher.data) {
-      return fetcher.data;
+    if (searchQuery && fetcher.data && !fetcher.data.error) {
+      return fetcher.data.filters;
     }
 
     return (initialData[initialDataKey] ?? []) as Array<ModelFilterItem>;
-  }, [fetcher.data, initialData, initialDataKey]);
+  }, [fetcher.data, initialData, initialDataKey, searchQuery]);
 
   const handleSelectItemChange = useCallback(
     (value: string) => {
@@ -93,21 +94,19 @@ export function useModelFilters({
   const handleSearchQueryChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
-    if (!e.target.value) {
-      resetModelFiltersFetcher();
+    if (!e.currentTarget.value) {
+      clearFilters();
     } else {
       setSearchQuery(e.currentTarget.value);
-      if (e.currentTarget.value) {
-        fetcher.submit(
-          {
-            model: model.name,
-            queryKey: model.key as string,
-            queryValue: e.currentTarget.value,
-            selectedValues: selectedItems,
-          },
-          { method: "GET", action: "/api/model-filters" }
-        );
-      }
+      fetcher.submit(
+        {
+          model: model.name,
+          queryKey: model.key as string,
+          queryValue: e.currentTarget.value,
+          selectedValues: selectedItems,
+        },
+        { method: "GET", action: "/api/model-filters" }
+      );
     }
   };
 

@@ -1,13 +1,10 @@
-import type { Organization } from "@prisma/client";
-import { useMatchesData } from "./use-matches-data";
+import { useRouteLoaderData } from "@remix-run/react";
+import type { loader } from "~/routes/_layout+/_layout";
 
 /**
  * This base hook is used to access the organizationId from within the _layout route
- * @param {string} id The route id
- * @returns {JSON|undefined} The router data or undefined if not found
  */
-export function useOrganizationId(): Organization["id"] | undefined {
-  return useMatchesData<{
-    currentOrganizationId: Organization["id"];
-  }>("routes/_layout+/_layout")?.currentOrganizationId;
+export function useOrganizationId() {
+  return useRouteLoaderData<typeof loader>("routes/_layout+/_layout")
+    ?.currentOrganizationId;
 }

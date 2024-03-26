@@ -1,58 +1,62 @@
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { z } from "zod";
 import { UnlinkIcon } from "~/components/icons";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { Button } from "~/components/shared";
 import { db } from "~/database";
+import { data, error, getParams, makeShelfError, ShelfError } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfStackError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.qr,
-    action: PermissionAction.update,
-  });
-  const { qrId } = params;
-  /** @TODO here we have to double check if the QR is orpaned, and if its not, redirect */
+  const { userId } = authSession;
+  const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
-  const qr = await db.qr.findUnique({
-    where: {
-      id: qrId,
-      organizationId,
-    },
-  });
-
-  if (!qr) {
-    throw new ShelfStackError({
-      message: "This QR code doesn't belong to your current organization.",
-      title: "Not allowed",
-      status: 403,
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.qr,
+      action: PermissionAction.update,
     });
-  }
+    /** @TODO here we have to double check if the QR is orpaned, and if its not, redirect */
 
-  /** we check if its linked and if it was we just redirect back to qr page and let it handle the logic */
-  if (qr.assetId) {
-    return redirect(`/qr/${qrId}`);
-  }
+    const qr = await db.qr.findUnique({
+      where: {
+        id: qrId,
+        organizationId,
+      },
+    });
 
-  return json({
-    header: {
-      title: "Link QR with asset",
-    },
-    qrId,
-  });
-};
+    if (!qr) {
+      throw new ShelfError({
+        message: "This QR code doesn't belong to your current organization.",
+        title: "Not allowed",
+        label: "QR",
+        status: 403,
+        cause: null,
+      });
+    }
+
+    return json(
+      data({
+        header: {
+          title: "Link QR with asset",
+        },
+        qrId,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];

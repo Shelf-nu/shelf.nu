@@ -1,8 +1,9 @@
 import type { Scan } from ".prisma/client";
+import { ShelfError } from "~/utils";
 import { getDateTimeFormat } from "~/utils/client-hints";
 var parser = require("ua-parser-js");
 
-export const parseScanData = ({
+export function parseScanData({
   scan,
   userId,
   request,
@@ -10,31 +11,40 @@ export const parseScanData = ({
   scan: Scan | null;
   userId: string;
   request: Request;
-}) => {
-  /**
-   * A few things we need to do to prepare the data for the client
-   * 1. Coordinates - if they are null, we don't render the map, print unknown location
-   * 2. User - Scanned by: You || Unknown
-   */
+}) {
+  try {
+    /**
+     * A few things we need to do to prepare the data for the client
+     * 1. Coordinates - if they are null, we don't render the map, print unknown location
+     * 2. User - Scanned by: You || Unknown
+     */
+    if (scan) {
+      const scannedBy = scan.userId === userId ? "You" : "Unknown";
+      const coordinates =
+        scan.latitude && scan.longitude
+          ? `${scan.latitude}, ${scan.longitude}`
+          : "Unknown location";
 
-  if (scan) {
-    const scannedBy = scan.userId === userId ? "You" : "Unknown";
-    const coordinates =
-      scan.latitude && scan.longitude
-        ? `${scan.latitude}, ${scan.longitude}`
-        : "Unknown location";
+      const dateTime = getDateTimeFormat(request).format(scan.createdAt);
+      const ua = parser(scan.userAgent);
 
-    const dateTime = getDateTimeFormat(request).format(scan.createdAt);
-    const ua = parser(scan.userAgent);
+      return {
+        scannedBy,
+        coordinates,
+        dateTime,
+        ua,
+      };
+    }
 
-    return {
-      scannedBy,
-      coordinates,
-      dateTime,
-      ua,
-    };
+    /** If there are no scans, return null */
+    return null;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while parsing the scan data. Please try again.",
+      additionalData: { userId, scan },
+      label: "QR",
+    });
   }
-
-  /** If there are no scans, return null */
-  return null;
-};
+}

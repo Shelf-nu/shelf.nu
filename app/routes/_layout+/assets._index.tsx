@@ -22,6 +22,7 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
@@ -33,12 +34,13 @@ import {
 } from "~/modules/asset";
 import { getOrganizationTierLimit } from "~/modules/tier";
 import assetCss from "~/styles/assets.css";
+import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { userPrefs } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
+import { setCookie, userPrefs } from "~/utils/cookies.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -76,124 +78,146 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId, organizations, currentOrganization, role } =
-    await requirePermision({
-      userId,
-      request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
-    });
-  // @TODO we shouldnt have to do this. We can combine it with the requirePermission
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      userOrganizations: {
-        where: {
+  try {
+    const [{ organizationId, organizations, currentOrganization, role }, user] =
+      await Promise.all([
+        requirePermission({
           userId,
-        },
-        select: {
-          organization: {
+          request,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.read,
+        }),
+        db.user
+          .findUniqueOrThrow({
+            where: {
+              id: userId,
+            },
             select: {
-              id: true,
-              name: true,
-              type: true,
-              owner: {
+              firstName: true,
+              tier: {
+                include: { tierLimit: true },
+              },
+              userOrganizations: {
+                where: {
+                  userId,
+                },
                 select: {
-                  tier: {
-                    include: { tierLimit: true },
+                  organization: {
+                    select: {
+                      id: true,
+                      name: true,
+                      type: true,
+                      owner: {
+                        select: {
+                          tier: {
+                            include: { tierLimit: true },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
             },
-          },
-        },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message:
+                "We can't find your user data. Please try again or contact support.",
+              additionalData: { userId },
+              label: "Assets",
+            });
+          }),
+      ]);
+
+    let [
+      tierLimit,
+      {
+        search,
+        totalAssets,
+        perPage,
+        page,
+        categories,
+        tags,
+        assets,
+        totalPages,
+        cookie,
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
       },
-    },
-  });
-  const tierLimit = await getOrganizationTierLimit({
-    organizationId,
-    organizations,
-  });
+    ] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId,
+        organizations,
+      }),
+      getPaginatedAndFilterableAssets({
+        request,
+        organizationId,
+      }),
+    ]);
 
-  let {
-    search,
-    totalAssets,
-    perPage,
-    page,
-    categories,
-    tags,
-    assets,
-    totalPages,
-    cookie,
-    totalCategories,
-    totalTags,
-  } = await getPaginatedAndFilterableAssets({
-    request,
-    organizationId,
-  });
-
-  if (totalPages !== 0 && page > totalPages) {
-    return redirect("/assets");
-  }
-  if (!assets) {
-    throw new ShelfStackError({
-      title: "Hey!",
-      message: `No assets found`,
-      status: 404,
-    });
-  }
-  if (role === OrganizationRoles.SELF_SERVICE) {
-    /**
-     * For self service users we dont return the assets that are not available to book
-     */
-    assets = assets.filter((a) => a.availableToBook);
-  }
-  assets = await updateAssetsWithBookingCustodians(assets);
-  const header: HeaderData = {
-    title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
-        : `Your inventory`
-      : currentOrganization?.name
-      ? `${currentOrganization?.name}'s inventory`
-      : "Your inventory",
-  };
-
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
-  return json(
-    {
-      header,
-      items: assets,
-      categories,
-      tags,
-      search,
-      page,
-      totalItems: totalAssets,
-      perPage,
-      totalPages,
-      modelName,
-      canImportAssets: canImportAssets(tierLimit),
-      searchFieldLabel: "Search assets",
-      searchFieldTooltip: {
-        title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-      },
-      totalCategories,
-      totalTags,
-    },
-    {
-      headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
+    if (totalPages !== 0 && page > totalPages) {
+      return redirect("/assets");
     }
-  );
+
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      /**
+       * For self service users we dont return the assets that are not available to book
+       */
+      assets = assets.filter((a) => a.availableToBook);
+    }
+
+    assets = await updateAssetsWithBookingCustodians(assets);
+
+    const header: HeaderData = {
+      title: isPersonalOrg(currentOrganization)
+        ? user?.firstName
+          ? `${user.firstName}'s inventory`
+          : `Your inventory`
+        : currentOrganization?.name
+        ? `${currentOrganization?.name}'s inventory`
+        : "Your inventory",
+    };
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    return json(
+      data({
+        header,
+        items: assets,
+        categories,
+        tags,
+        search,
+        page,
+        totalItems: totalAssets,
+        perPage,
+        totalPages,
+        modelName,
+        canImportAssets: canImportAssets(tierLimit),
+        searchFieldLabel: "Search assets",
+        searchFieldTooltip: {
+          title: "Search your asset database",
+          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        },
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export function shouldRevalidate({
@@ -217,9 +241,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
-
-  const hasFiltersToClear = useSearchParamHasValue("category", "tag");
-  const clearFilters = useClearValueFromParams("category", "tag");
+  const hasFiltersToClear = useSearchParamHasValue(
+    "category",
+    "tag",
+    "location"
+  );
+  const clearFilters = useClearValueFromParams("category", "tag", "location");
   const { canImportAssets } = useLoaderData<typeof loader>();
   const isSelfService = useUserIsSelfService();
 
@@ -286,6 +313,31 @@ export default function AssetIndexPage() {
                 label="Filter by tags"
                 initialDataKey="tags"
                 countKey="totalTags"
+              />
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Locations{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "location", key: "name" }}
+                label="Filter by Location"
+                initialDataKey="locations"
+                countKey="totalLocations"
+                renderItem={({ metadata }) => (
+                  <div className="flex items-center gap-2">
+                    <Image
+                      imageId={metadata.imageId}
+                      alt="img"
+                      className={tw(
+                        "size-6 rounded-[2px] object-cover",
+                        metadata.description ? "rounded-b-none border-b-0" : ""
+                      )}
+                    />
+                    <div>{metadata.name}</div>
+                  </div>
+                )}
               />
             </div>
           </div>
@@ -401,7 +453,7 @@ const ListAssetContent = ({
                     alt=""
                   />
                 ) : null}
-                <span className="mt-[1px]">{custody.custodian.name}</span>
+                <span className="mt-px">{custody.custodian.name}</span>
               </>
             </GrayBadge>
           ) : null}

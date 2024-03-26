@@ -1,13 +1,8 @@
-import { useRef, useState } from "react";
-import { Link, useFetcher, useLoaderData } from "@remix-run/react";
+import { useRef } from "react";
+import { Link, NavLink, useFetcher, useLoaderData } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ScanQRIcon, ShelfTypography } from "~/components/icons/library";
-import {
-  useMediaStream,
-  useStopMediaStream,
-} from "~/components/scan-qr/media-stream-provider";
-import QRScanner from "~/components/scan-qr/qrcode-scanner";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils";
 
@@ -24,17 +19,7 @@ export default function Sidebar() {
   const [isMobileNavOpen, toggleMobileNav] = useAtom(toggleMobileNavAtom);
   const mainNavigationRef = useRef<HTMLElement>(null);
 
-  const [showScanner, setShowScanner] = useState(false);
-
-  const { stopMediaStream } = useMediaStream();
-  useStopMediaStream(stopMediaStream);
-
-  const handleScannerClose = () => {
-    stopMediaStream();
-    setShowScanner(false);
-  };
-
-  /** We use optimistic UI for folding of the sidebar
+  /** We use optimistic UI for folding of the scanner.tsx sidebar
    * As we are making a request to the server to store the cookie,
    * we need to use this approach, otherwise the sidebar will close/open
    * only once the response is received from the server
@@ -62,17 +47,21 @@ export default function Sidebar() {
           />
         </Link>
         <div className="flex items-center space-x-4">
-          <button
-            onClick={() => setShowScanner(true)}
+          <NavLink
+            to="/scanner"
             title="Scan QR Code"
-            className="relative flex items-center justify-center px-2 transition"
+            className={({ isActive }) =>
+              tw(
+                "relative flex items-center justify-center px-2 transition",
+                isActive ? "text-primary-600" : "text-gray-500"
+              )
+            }
           >
             <ScanQRIcon />
-          </button>
+          </NavLink>
           <MenuButton />
         </div>
       </header>
-      {showScanner && <QRScanner onClose={handleScannerClose} />}
 
       <Overlay />
       <aside
@@ -83,7 +72,7 @@ export default function Sidebar() {
           optimisticMinimizedSidebar
             ? "collapsed-navigation md:w-[82px] md:overflow-hidden"
             : "md:left-0 md:w-[312px]",
-          isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "left-[-100%]"
+          isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "-left-full"
         )}
       >
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto overflow-x-hidden">
