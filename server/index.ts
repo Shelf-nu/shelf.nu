@@ -45,7 +45,11 @@ app.use(
 /**
  * Serve public files
  */
-app.use("*", cache(60 * 60), serveStatic({ root: "./build/client" })); // 1 hour
+app.use(
+  "*",
+  cache(60 * 60),
+  serveStatic({ root: isProductionMode ? "./build/client" : "./public" })
+); // 1 hour
 
 /**
  * Add logger middleware
