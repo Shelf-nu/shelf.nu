@@ -15,15 +15,6 @@ import { cache, protect, refreshSession } from "./middleware";
 import { authSessionKey } from "./session";
 import type { FlashData, SessionData } from "./session";
 
-/** For some reason the globals like File only work on production build
- * In development, we need to install them manually
- */
-// FIXME: look at this again
-// if (env.NODE_ENV !== "production") {
-//   var webFetch = require("@remix-run/web-fetch");
-//   global.File = webFetch.File;
-// }
-
 // Server will not start if the env is not valid
 initEnv();
 
