@@ -86,7 +86,7 @@ GEOCODE_API_KEY="geocode-api-key"
 
   ```
   # Used for DB Setup
-  ADMIN_EMAIL="admin@localhost"
+  ADMIN_EMAIL="admin@localhost.com"
   ADMIN_USERNAME="admin"
   ADMIN_PASSWORD="changeme"
   ```
