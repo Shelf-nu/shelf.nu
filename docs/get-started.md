@@ -82,6 +82,15 @@ INVITE_TOKEN_SECRET="secret-test-invite"
 GEOCODE_API_KEY="geocode-api-key"
 ```
 
+- Add your `ADMIN_EMAIL`, `ADMIN_USERNAME`and `ADMIN_PASSWORD` in the `.env` file. This will create the first user during the seed of the Database.
+
+  ```
+  # Used for DB Setup
+  ADMIN_EMAIL="admin@localhost.com"
+  ADMIN_USERNAME="admin"
+  ADMIN_PASSWORD="changeme"
+  ```
+
 - This step only applies if you've opted out of having the CLI install dependencies for you:
 
   ```sh
