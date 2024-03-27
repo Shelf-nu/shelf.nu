@@ -78,6 +78,7 @@ export type FailureReason = {
     | "Team Member"
     | "Tier"
     | "User"
+    | "Scanner"
     // Other kinds of errors
     | "Request validation"
     | "DB constrain violation"

@@ -17,6 +17,7 @@ export function useClientNotification() {
       {
         action: "/api/client-notification",
         method: "POST",
+        encType: "application/json",
       }
     );
   };
