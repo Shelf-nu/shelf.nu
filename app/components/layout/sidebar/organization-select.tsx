@@ -9,12 +9,13 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
-} from "~/components/forms";
-import { Button } from "~/components/shared";
+} from "~/components/forms/select";
+import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import ProfilePicture from "~/components/user/profile-picture";
 import type { loader } from "~/routes/_layout+/_layout";
-import { isFormProcessing, tw } from "~/utils";
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 
 export const OrganizationSelect = () => {
   const { organizations, currentOrganizationId } =

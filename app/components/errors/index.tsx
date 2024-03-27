@@ -1,7 +1,7 @@
 import { useLocation, useRouteError } from "@remix-run/react";
 
 import { isRouteError } from "~/utils/http";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 
 export const ErrorContent = () => {
   const loc = useLocation();

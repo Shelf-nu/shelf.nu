@@ -6,7 +6,7 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import { InfoIcon } from "~/components/icons";
+import { InfoIcon } from "~/components/icons/library";
 import {
   Tabs,
   TabsContent,
@@ -17,14 +17,18 @@ import { CurrentPlanDetails } from "~/components/subscription/current-plan-detai
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import { Prices } from "~/components/subscription/prices";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
-import { getUserByID } from "~/modules/user";
-import { ENABLE_PREMIUM_FEATURES, data, error, parseData } from "~/utils";
-
+import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { data, error, parseData } from "~/utils/http.server";
+
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {

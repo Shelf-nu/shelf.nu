@@ -6,12 +6,12 @@ import {
 import { Form, Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import { Table, Td, Tr } from "~/components/table";
-import { db } from "~/database";
-import { generateOrphanedCodes } from "~/modules/qr";
-import { getParams, data, error, parseData } from "~/utils";
+import { db } from "~/database/db.server";
+import { generateOrphanedCodes } from "~/modules/qr/service.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { getParams, data, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {

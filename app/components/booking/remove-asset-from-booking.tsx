@@ -14,8 +14,8 @@ import {
 } from "~/components/shared/modal";
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
-import { tw } from "~/utils";
-import { TrashIcon } from "../icons";
+import { tw } from "~/utils/tw";
+import { TrashIcon } from "../icons/library";
 
 export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();

@@ -1,9 +1,10 @@
 import type { Organization, Qr, User } from "@prisma/client";
 import QRCode from "qrcode-generator";
-import { db } from "~/database";
-import { getCurrentSearchParams, gifToPng } from "~/utils";
+import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { gifToPng } from "~/utils/gif-to-png";
+import { getCurrentSearchParams } from "~/utils/http.server";
 
 const label: ErrorLabel = "QR";
 

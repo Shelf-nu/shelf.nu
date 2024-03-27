@@ -1,7 +1,7 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { StarsIcon } from "../icons";
-import { MarkdownViewer } from "../markdown";
+import { StarsIcon } from "../icons/library";
+import { MarkdownViewer } from "../markdown/markdown-viewer";
 import { Button } from "../shared/button";
 
 export default function AnnouncementBar() {

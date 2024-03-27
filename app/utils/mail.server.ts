@@ -1,6 +1,7 @@
 import type { Attachment } from "nodemailer/lib/mailer";
 import { transporter } from "~/emails/transporter.server";
-import { SMTP_FROM, ShelfError } from ".";
+import { SMTP_FROM } from "./env";
+import { ShelfError } from "./error";
 import logoImg from "../../public/static/images/shelf-symbol.png";
 
 export const sendEmail = async ({

@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 import { AssetStatus } from "@prisma/client";
-import { Badge } from "../shared";
+import { Badge } from "../shared/badge";
 import {
   Tooltip,
   TooltipContent,

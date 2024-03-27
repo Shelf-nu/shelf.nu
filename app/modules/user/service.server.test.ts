@@ -14,9 +14,9 @@ import {
   USER_ID,
   USER_PASSWORD,
 } from "mocks/user";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
-import { randomUsernameFromEmail } from "~/utils";
+import { randomUsernameFromEmail } from "~/utils/user";
 import {
   createUserAccountForTesting,
   defaultUserCategories,
@@ -26,7 +26,7 @@ import {
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
 // mock db
-vitest.mock("~/database", () => ({
+vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
     user: {

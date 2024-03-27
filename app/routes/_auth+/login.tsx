@@ -16,22 +16,23 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
+import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
+import { signInWithEmail } from "~/modules/auth/service.server";
 
-import { signInWithEmail, ContinueWithEmailForm } from "~/modules/auth";
-import { getOrganizationByUserId } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
+import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 import {
   data,
   error,
   getActionMethod,
-  isFormProcessing,
   parseData,
   safeRedirect,
-  validEmail,
-} from "~/utils";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+} from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";

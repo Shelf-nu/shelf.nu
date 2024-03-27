@@ -1,16 +1,11 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "react-router";
 import sharp from "sharp";
-import { getUserByID, updateUser } from "~/modules/user";
+import { getUserByID, updateUser } from "~/modules/user/service.server";
+import { dateTimeInUnix } from "~/utils/date-time-in-unix";
+import { makeShelfError, ShelfError } from "~/utils/error";
 
-import {
-  ShelfError,
-  assertIsPost,
-  data,
-  dateTimeInUnix,
-  error,
-  makeShelfError,
-} from "~/utils";
+import { assertIsPost, data, error } from "~/utils/http.server";
 import {
   deleteProfilePicture,
   getPublicFileURL,

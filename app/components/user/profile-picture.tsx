@@ -1,5 +1,5 @@
-import { useUserData } from "~/hooks";
-import { tw } from "~/utils";
+import { useUserData } from "~/hooks/use-user-data";
+import { tw } from "~/utils/tw";
 
 /** Returns the current user's profile picture */
 export default function ProfilePicture({

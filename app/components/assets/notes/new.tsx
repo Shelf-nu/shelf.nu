@@ -6,8 +6,11 @@ import { atom, useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
-import { MarkdownEditor, clearMarkdownAtom } from "~/components/markdown";
-import { Button } from "~/components/shared";
+import {
+  MarkdownEditor,
+  clearMarkdownAtom,
+} from "~/components/markdown/markdown-editor";
+import { Button } from "~/components/shared/button";
 
 export const NewNoteSchema = z.object({
   content: z.string().min(3, "Content is required"),

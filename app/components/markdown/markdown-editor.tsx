@@ -3,7 +3,7 @@ import type { TextareaHTMLAttributes, ChangeEvent } from "react";
 import { Link, useFetcher } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
 import type { action } from "~/routes/api+/utils.parse-markdown";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { MarkdownViewer } from "./markdown-viewer";
 import Input from "../forms/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../shared/tabs";

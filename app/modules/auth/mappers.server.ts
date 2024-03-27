@@ -1,5 +1,5 @@
 import type { AuthSession } from "server/session";
-import type { SupabaseAuthSession } from "~/integrations/supabase";
+import type { SupabaseAuthSession } from "~/integrations/supabase/types";
 
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";

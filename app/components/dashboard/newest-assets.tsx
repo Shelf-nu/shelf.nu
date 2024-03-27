@@ -4,7 +4,7 @@ import type { loader } from "~/routes/_layout+/dashboard";
 import { EmptyState } from "./empty-state";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
-import { Badge } from "../shared";
+import { Badge } from "../shared/badge";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Td, Table, Tr } from "../table";
 

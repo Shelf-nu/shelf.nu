@@ -16,26 +16,25 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
-import { getOrganizationByUserId } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { createUser, findUserByEmail } from "~/modules/user";
+import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import { createUser, findUserByEmail } from "~/modules/user/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { setCookie } from "~/utils/cookies.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { isErrorResponse } from "~/utils/http";
 import {
   data,
   error,
   getActionMethod,
-  isFormProcessing,
-  makeShelfError,
-  notAllowedMethod,
   parseData,
-  randomUsernameFromEmail,
   safeRedirect,
-  tw,
-  validEmail,
-} from "~/utils";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
-import { isErrorResponse } from "~/utils/http";
+} from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
 import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
+import { tw } from "~/utils/tw";
+import { randomUsernameFromEmail } from "~/utils/user";
 
 export function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);

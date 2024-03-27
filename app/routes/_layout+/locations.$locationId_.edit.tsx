@@ -15,13 +15,19 @@ import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { LocationForm, NewLocationFormSchema } from "~/components/location";
-import { getLocation, updateLocation } from "~/modules/location";
-import { data, error, getParams, parseData } from "~/utils";
+import {
+  LocationForm,
+  NewLocationFormSchema,
+} from "~/components/location/form";
+import { getLocation, updateLocation } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { MAX_SIZE } from "./locations.new";
 

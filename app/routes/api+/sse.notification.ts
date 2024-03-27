@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { eventStream } from "remix-utils/sse/server";
-import { ShelfError } from "~/utils";
 import { emitter } from "~/utils/emitter/emitter.server";
+import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
 export function loader({ context, request }: LoaderFunctionArgs) {

@@ -7,34 +7,27 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
-import { ChevronRight } from "~/components/icons";
+import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters } from "~/components/list";
-import { List } from "~/components/list/list";
-import { ActionsDropdown, MapPlaceholder } from "~/components/location";
+import { List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
+import { ActionsDropdown } from "~/components/location/actions-dropdown";
 import { ShelfMap } from "~/components/location/map";
-import { Badge, Button } from "~/components/shared";
+import { MapPlaceholder } from "~/components/location/map-placeholder";
+import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
-import { deleteLocation, getLocation } from "~/modules/location";
-import assetCss from "~/styles/asset.css";
-import {
-  data,
-  error,
-  geolocate,
-  getCurrentSearchParams,
-  getParams,
-  getParamsValues,
-  tw,
-} from "~/utils";
+import { deleteLocation, getLocation } from "~/modules/location/service.server";
+import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -43,8 +36,20 @@ import {
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { geolocate } from "~/utils/geolocate.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

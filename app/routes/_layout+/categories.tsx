@@ -11,20 +11,16 @@ import { DeleteCategory } from "~/components/category/delete-category";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
-import { deleteCategory, getCategories } from "~/modules/category";
 import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParamsValues,
-  makeShelfError,
-  parseData,
-} from "~/utils";
+  deleteCategory,
+  getCategories,
+} from "~/modules/category/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -32,7 +28,18 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { makeShelfError } from "~/utils/error";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  parseData,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

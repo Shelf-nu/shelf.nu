@@ -1,4 +1,4 @@
-import { HorizontalDotsIcon } from "~/components/icons";
+import { HorizontalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,

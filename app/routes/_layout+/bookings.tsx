@@ -8,23 +8,18 @@ import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
 
-import { ChevronRight } from "~/components/icons";
+import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import { Badge, Button } from "~/components/shared";
+import { Filters } from "~/components/list/filters";
+import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
-import { getBookings } from "~/modules/booking";
+import { getBookings } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParamsValues,
-  makeShelfError,
-} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import {
@@ -32,7 +27,13 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { makeShelfError } from "~/utils/error";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

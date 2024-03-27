@@ -1,4 +1,4 @@
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 
 export const CategorySelectNoCategories = () => (
   <div>

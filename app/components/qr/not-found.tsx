@@ -1,5 +1,5 @@
-import { SadFaceIcon } from "~/components/icons";
-import { Button } from "~/components/shared";
+import { SadFaceIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
 export const QrNotFound = () => (
   <>
     <div className="flex flex-1 justify-center py-8">

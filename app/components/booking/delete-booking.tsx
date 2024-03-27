@@ -12,8 +12,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import { isFormProcessing, tw } from "~/utils";
-import { TrashIcon } from "../icons";
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
+import { TrashIcon } from "../icons/library";
 
 export const DeleteBooking = ({
   booking,

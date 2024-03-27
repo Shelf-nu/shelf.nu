@@ -1,5 +1,5 @@
 import { useSubmit } from "@remix-run/react";
-import { ChevronRight } from "~/components/icons";
+import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,9 +10,9 @@ import {
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { DeleteBooking } from "./delete-booking";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 
 interface Props {
   booking: BookingWithCustodians;

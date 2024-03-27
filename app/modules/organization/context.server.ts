@@ -1,10 +1,10 @@
 import { createCookie } from "@remix-run/node";
-import { NODE_ENV, SESSION_SECRET } from "~/utils";
 import {
   destroyCookie,
   parseCookie,
   serializeCookie,
 } from "~/utils/cookies.server";
+import { NODE_ENV, SESSION_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 

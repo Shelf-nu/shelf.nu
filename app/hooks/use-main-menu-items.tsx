@@ -7,7 +7,7 @@ import {
   ScanQRIcon,
   SettingsIcon,
   TagsIcon,
-} from "~/components/icons";
+} from "~/components/icons/library";
 // eslint-disable-next-line import/no-cycle
 import { useUserIsSelfService } from "./user-user-is-self-service";
 

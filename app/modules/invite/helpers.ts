@@ -1,4 +1,4 @@
-import { SERVER_URL } from "~/utils";
+import { SERVER_URL } from "~/utils/env";
 import type { InviteWithInviterAndOrg } from "./types";
 
 export function generateRandomCode(length: number): string {

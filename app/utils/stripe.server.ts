@@ -2,10 +2,10 @@ import type { User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
-import { db } from "~/database";
-import type { ErrorLabel } from ".";
-import { ShelfError } from ".";
+import { db } from "~/database/db.server";
 import { STRIPE_SECRET_KEY } from "./env";
+import type { ErrorLabel } from "./error";
+import { ShelfError } from "./error";
 
 const label: ErrorLabel = "Stripe";
 

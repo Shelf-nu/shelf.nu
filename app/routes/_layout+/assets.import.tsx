@@ -17,14 +17,17 @@ import {
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
-import { createAssetsFromContentImport } from "~/modules/asset";
-import { assertUserCanImportAssets } from "~/modules/tier";
-import { data, error, parseData } from "~/utils";
+import { createAssetsFromContentImport } from "~/modules/asset/service.server";
+import { assertUserCanImportAssets } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {

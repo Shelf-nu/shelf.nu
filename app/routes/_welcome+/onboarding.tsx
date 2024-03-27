@@ -15,24 +15,19 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { onboardingEmailText } from "~/emails/onboarding-email";
 import { getAuthUserById } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getUserByID, updateUser } from "~/modules/user";
-import {
-  SMTP_FROM,
-  assertIsPost,
-  data,
-  error,
-  isFormProcessing,
-  makeShelfError,
-  parseData,
-} from "~/utils";
+import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { SMTP_FROM } from "~/utils/env";
+import { makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
+import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import { sendEmail } from "~/utils/mail.server";
 import { createStripeCustomer } from "~/utils/stripe.server";
 

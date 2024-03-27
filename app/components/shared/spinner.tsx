@@ -1,4 +1,4 @@
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 export function Spinner({ className }: { className?: string }) {
   return (

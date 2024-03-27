@@ -3,13 +3,17 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { z } from "zod";
 import { Spinner } from "~/components/shared/spinner";
-import { signInWithEmail } from "~/modules/auth";
-import { checkUserAndInviteMatch, updateInviteStatus } from "~/modules/invite";
+import { signInWithEmail } from "~/modules/auth/service.server";
 import { generateRandomCode } from "~/modules/invite/helpers";
+import {
+  checkUserAndInviteMatch,
+  updateInviteStatus,
+} from "~/modules/invite/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { INVITE_TOKEN_SECRET, error, parseData, safeRedirect } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
+import { INVITE_TOKEN_SECRET } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { error, parseData, safeRedirect } from "~/utils/http.server";
 import jwt from "~/utils/jsonwebtoken.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

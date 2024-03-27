@@ -1,4 +1,4 @@
-import { ToolIcon } from "../icons";
+import { ToolIcon } from "../icons/library";
 import { Button } from "../shared/button";
 
 export default function MaintenanceMode() {

@@ -1,7 +1,7 @@
 import { OrganizationRoles, OrganizationType } from "@prisma/client";
 import type { Organization, User } from "@prisma/client";
 
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { defaultUserCategories } from "../category/default-categories";

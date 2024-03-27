@@ -11,17 +11,21 @@ import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import Input from "~/components/forms/input";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import { db } from "~/database";
-import { duplicateAsset } from "~/modules/asset";
-import styles from "~/styles/layout/custom-modal.css";
-import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
+import { db } from "~/database/db.server";
+import { duplicateAsset } from "~/modules/asset/service.server";
+import styles from "~/styles/layout/custom-modal.css?url";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
