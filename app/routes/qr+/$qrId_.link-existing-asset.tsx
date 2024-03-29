@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { AssetStatus, type Asset } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  LinksFunction,
+} from "@remix-run/node";
 import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -10,6 +14,7 @@ import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
 import { ChevronRight, LinkIcon } from "~/components/icons/library";
+import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared";
@@ -29,6 +34,7 @@ import {
   updateAssetQrCode,
 } from "~/modules/asset";
 import { getQr } from "~/modules/qr";
+import css from "~/styles/link-existing-asset.css";
 import { isFormProcessing } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
@@ -112,8 +118,8 @@ export const loader = async ({
     return json(
       data({
         header: {
-          title: "Link QR with asset",
-          subHeading: "Choose an item to link this QR with",
+          title: "Link with existingasset",
+          subHeading: "Choose an asset to link with this QR tag.",
         },
         showModal: true,
         qrId,
@@ -184,6 +190,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
 
+export const links: LinksFunction = () => [{ rel: "stylesheet", href: css }];
+
 export default function QrLinkExisting() {
   const { header } = useLoaderData<typeof loader>();
   const { qrId } = useParams();
@@ -200,17 +208,10 @@ export default function QrLinkExisting() {
   }
 
   return (
-    <div className="mt-4 flex max-h-full flex-1 flex-col">
-      <header className="mb-3 text-left">
-        <h2>{header.title}</h2>
-        <p>{header.subHeading}</p>
-      </header>
+    <div className="flex max-h-full flex-1 flex-col">
+      <Header {...header} hideBreadcrumbs={true} classNames="text-left" />
 
-      <Filters
-        slots={{
-          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-        }}
-      >
+      <Filters className="py-3">
         <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
           {hasFiltersToClear ? (
             <div className="hidden gap-6 md:flex">
@@ -257,7 +258,7 @@ export default function QrLinkExisting() {
 
       {/* Body of the modal*/}
 
-      <div className="flex-1 overflow-y-auto pb-4">
+      <div className="-mx-4 flex-1 overflow-y-auto px-4 pb-4">
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
@@ -310,12 +311,6 @@ const RowComponent = ({ item }: { item: Asset }) => (
             <p className="word-break whitespace-break-spaces text-left font-medium">
               {item.title}
             </p>
-            <div>
-              <AssetStatusBadge
-                status={item.status}
-                availableToBook={item.availableToBook}
-              />
-            </div>
           </div>
         </div>
       </div>

@@ -64,7 +64,7 @@ export default function QrSuccessfullLink() {
   return asset ? (
     <>
       <div className="flex max-h-full flex-1 flex-col items-center justify-center ">
-        <span className="mb-2.5 flex size-12 items-center justify-center rounded-full bg-primary-50 p-2 text-primary-600">
+        <span className="mb-2.5 flex size-12 items-center justify-center rounded-full bg-success-50 p-2 text-success-600">
           <LinkIcon />
         </span>
         <h3>Succesfully linked Item</h3>
