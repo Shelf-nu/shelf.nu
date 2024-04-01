@@ -60,6 +60,7 @@ app.use("*", logger());
  * Add session middleware
  */
 app.use(
+  //@ts-expect-error fixed soon
   session({
     autoCommit: true,
     createSessionStorage() {
@@ -128,6 +129,7 @@ app.use(
  * Add remix middleware to Hono server
  */
 app.use(
+  //@ts-expect-error fixed soon
   remix({
     // @ts-ignore
     build,
