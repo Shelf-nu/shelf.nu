@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AssetStatus, type Asset } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -9,8 +9,6 @@ import type {
 import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
-import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
 import { ChevronRight, LinkIcon } from "~/components/icons/library";

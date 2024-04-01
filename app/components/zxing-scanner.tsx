@@ -19,7 +19,7 @@ export const ZXingScanner = ({
 
   // Function to decode the QR code
   const decodeQRCodes = (result: string) => {
-    console.log("QR code detected", result);
+    // console.log("QR code detected", result);
     if (result != null) {
       const regex = /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
       /** We make sure the value of the QR code matches the structure of Shelf qr codes */
@@ -49,7 +49,7 @@ export const ZXingScanner = ({
     constraints: { video: true, audio: false },
     timeBetweenDecodingAttempts: 100,
     onDecodeResult(result) {
-      console.log(result.getText());
+      // console.log(result.getText());
       decodeQRCodes(result.getText());
     },
     onError(cause) {
