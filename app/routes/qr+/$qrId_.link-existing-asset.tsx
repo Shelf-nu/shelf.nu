@@ -7,6 +7,7 @@ import type {
   LinksFunction,
 } from "@remix-run/node";
 import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
+import { useHydrated } from "remix-utils/use-hydrated";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -16,6 +17,7 @@ import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared";
+import { Image } from "~/components/shared/image";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -27,6 +29,7 @@ import {
 } from "~/components/shared/modal";
 import { Td } from "~/components/table";
 import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getPaginatedAndFilterableAssets,
   updateAssetQrCode,
@@ -89,6 +92,8 @@ export const loader = async ({
       cookie,
       totalCategories,
       totalTags,
+      locations,
+      totalLocations,
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
@@ -116,7 +121,7 @@ export const loader = async ({
     return json(
       data({
         header: {
-          title: "Link with existingasset",
+          title: "Link with existing asset",
           subHeading: "Choose an asset to link with this QR tag.",
         },
         showModal: true,
@@ -124,6 +129,8 @@ export const loader = async ({
         items: assets,
         categories,
         tags,
+        locations,
+        totalLocations,
         search,
         page,
         totalItems: totalAssets,
@@ -205,11 +212,15 @@ export default function QrLinkExisting() {
     setSelectedAssetId(assetId);
   }
 
+  let isHydrated = useHydrated();
+  const { vh } = useViewportHeight();
+  const maxHeight = isHydrated ? vh - 12 + "px" : "100%"; // We need to handle SSR and we are also substracting 12px to properly handle spacing on the bottom
+
   return (
-    <div className="flex max-h-full flex-1 flex-col">
+    <div className="flex flex-1 flex-col" style={{ maxHeight }}>
       <Header {...header} hideBreadcrumbs={true} classNames="text-left" />
 
-      <Filters className="py-3">
+      <Filters className="-mx-4 border-b px-4 py-3">
         <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
           {hasFiltersToClear ? (
             <div className="hidden gap-6 md:flex">
@@ -250,6 +261,31 @@ export default function QrLinkExisting() {
               initialDataKey="tags"
               countKey="totalTags"
             />
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Locations{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "location", key: "name" }}
+              label="Filter by Location"
+              initialDataKey="locations"
+              countKey="totalLocations"
+              renderItem={({ metadata }) => (
+                <div className="flex items-center gap-2">
+                  <Image
+                    imageId={metadata.imageId}
+                    alt="img"
+                    className={tw(
+                      "size-6 rounded-[2px] object-cover",
+                      metadata.description ? "rounded-b-none border-b-0" : ""
+                    )}
+                  />
+                  <div>{metadata.name}</div>
+                </div>
+              )}
+            />
           </div>
         </div>
       </Filters>
@@ -267,6 +303,7 @@ export default function QrLinkExisting() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
+          className="border-t-0"
         />
       </div>
       <ConfirmLinkingAssetModal
@@ -280,7 +317,7 @@ export default function QrLinkExisting() {
       />
 
       {/* Footer of the modal */}
-      <footer className="flex justify-between border-t pt-3">
+      <footer className="-mx-4 flex justify-between border-t px-4 pt-3">
         <Button variant="secondary" to={`/qr/${qrId}/link`} width="full">
           Close
         </Button>
@@ -356,8 +393,8 @@ export const ConfirmLinkingAssetModal = ({
           </AlertDialogTitle>
           <AlertDialogDescription className="text-left">
             Are you sure that you want to do this? The current QR code that is
-            linked to this Item will be unlinked. You can always re-link it with
-            the old QR code.
+            linked to this asset will be unlinked. You can always re-link it
+            with the old QR code.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
