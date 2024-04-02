@@ -83,6 +83,7 @@ const ConditionalActionsDropdown = () => {
               __html: `@media (max-width: 640px) {
                 [data-radix-popper-content-wrapper] {
                   transform: none !important;
+                  will-change: auto !important;
               }
           }`,
             }} // is a hack to fix the dropdown menu not being in the right place on mobile
