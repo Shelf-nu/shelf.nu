@@ -424,25 +424,19 @@ export async function updateProfilePicture({
 
     const profilePicture = fileData.get("profile-picture") as string;
 
-    /** if profile picture is an empty string, the upload failed so we return an error */
-    if (!profilePicture || profilePicture === "") {
-      throw new ShelfError({
-        cause: null,
-        message: "There is no profile picture to upload",
-        additionalData: { userId },
-        label,
-      });
-    }
-
-    if (previousProfilePictureUrl) {
-      /** Delete the old picture  */
+    /**
+     * Delete the old image, if a new one was uploaded
+     */
+    if (profilePicture && previousProfilePictureUrl) {
       await deleteProfilePicture({ url: previousProfilePictureUrl });
     }
 
     /** Update user with new picture */
     return await updateUser({
       id: userId,
-      profilePicture: getPublicFileURL({ filename: profilePicture }),
+      profilePicture: profilePicture
+        ? getPublicFileURL({ filename: profilePicture })
+        : undefined,
     });
   } catch (cause) {
     throw new ShelfError({
