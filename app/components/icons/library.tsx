@@ -753,6 +753,26 @@ export function UnlinkIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function LinkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={22}
+      height={22}
+      fill="none"
+      {...props}
+    >
+      <path
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M9 12a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M13 10a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+      />
+    </svg>
+  );
+}
+
 export function MapIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -1181,8 +1201,8 @@ export const Profile = (props: SVGProps<SVGSVGElement>) => (
       d="M13.3332 14C13.3332 13.0696 13.3332 12.6044 13.2183 12.2259C12.9598 11.3736 12.2929 10.7067 11.4406 10.4482C11.0621 10.3333 10.5969 10.3333 9.6665 10.3333H6.33317C5.4028 10.3333 4.93761 10.3333 4.55908 10.4482C3.70681 10.7067 3.03986 11.3736 2.78133 12.2259C2.6665 12.6044 2.6665 13.0696 2.6665 14M10.9998 5C10.9998 6.65685 9.65669 8 7.99984 8C6.34298 8 4.99984 6.65685 4.99984 5C4.99984 3.34315 6.34298 2 7.99984 2C9.65669 2 10.9998 3.34315 10.9998 5Z"
       stroke="currentColor"
       strokeWidth="1.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     />
   </svg>
 );

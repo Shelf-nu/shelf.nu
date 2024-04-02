@@ -11,6 +11,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Spinner } from "~/components/shared/spinner";
 import { ZXingScanner } from "~/components/zxing-scanner";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import scannerCss from "~/styles/scanner.css";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
@@ -48,11 +49,18 @@ export const meta: MetaFunction<typeof loader> = () => [
 
 const QRScanner = () => {
   const { videoMediaDevices } = useQrScanner();
+  const { vh, isMd } = useViewportHeight();
+  const height = isMd ? vh - 132 : vh - 167;
 
   return (
     <>
       <Header title="QR code scanner" />
-      <div className=" -mx-4 flex h-[calc(100vh-167px)] flex-col md:h-[calc(100vh-132px)]">
+      <div
+        className={` -mx-4 flex flex-col`}
+        style={{
+          height: `${height}px`,
+        }}
+      >
         {videoMediaDevices && videoMediaDevices.length > 0 ? (
           <ZXingScanner videoMediaDevices={videoMediaDevices} />
         ) : (

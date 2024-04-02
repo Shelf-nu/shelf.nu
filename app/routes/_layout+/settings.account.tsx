@@ -156,7 +156,7 @@ export default function UserPage() {
       >
         <FormRow
           rowLabel={"Full name"}
-          className="border-t-[1px]"
+          className="border-t-DEFAULT"
           required={zodFieldIsRequired(UpdateFormSchema.shape.firstName)}
         >
           <div className="flex gap-6">

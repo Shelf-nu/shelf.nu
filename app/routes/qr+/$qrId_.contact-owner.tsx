@@ -149,11 +149,11 @@ export default function ContactOwner() {
         </Form>
         <div
           className={tw(
-            "rounded-xl border border-solid border-success-300 bg-success-25 p-4 text-center leading-[1]",
+            "rounded-xl border border-solid border-success-300 bg-success-25 p-4 text-center leading-none",
             isReported ? "block" : "hidden"
           )}
         >
-          <p className="inline-flex items-center gap-2 font-semibold leading-[1] text-success-700">
+          <p className="inline-flex items-center gap-2 font-semibold leading-none text-success-700">
             <SuccessIcon />
             Your message has been sent
           </p>
