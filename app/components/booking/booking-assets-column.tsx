@@ -68,7 +68,7 @@ export function BookingAssetsColumn() {
                 !canManageAssetsAsSelfService
               }
               buttonContent={{
-                title: "Manage Assets",
+                title: "Manage assets",
                 message: isCompleted
                   ? "Booking is completed. You cannot change the assets anymore"
                   : isSelfService
@@ -99,12 +99,12 @@ export function BookingAssetsColumn() {
               title: "Start by defining a booking period",
               text: "Assets added to your booking will show up here. You must select a Start and End date and Save your booking in order to be able to add assets.",
               newButtonRoute: manageAssetsUrl,
-              newButtonContent: "Manage Assets",
+              newButtonContent: "Manage assets",
               buttonProps: {
                 disabled: !booking.from || !booking.to,
               },
             }}
-            className="md:rounded-t-[0px]"
+            className="md:rounded-t-none"
           />
         </div>
       </div>

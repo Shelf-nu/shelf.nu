@@ -21,7 +21,7 @@ export default function FormRow({
   return (
     <div
       className={tw(
-        `flex gap-8 border-b-[1px] border-y-gray-200 py-6`,
+        `flex gap-8 border-b-DEFAULT border-y-gray-200 py-6`,
         className
       )}
     >

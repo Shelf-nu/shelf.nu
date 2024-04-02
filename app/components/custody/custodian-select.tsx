@@ -61,7 +61,7 @@ export default function CustodianSelect(
         <SelectTrigger
           className={tw(
             disabled ? "cursor-not-allowed" : "",
-            "custodian-selector text-left",
+            "custodian-selector min-h-[38px] text-left",
             className
           )}
         >

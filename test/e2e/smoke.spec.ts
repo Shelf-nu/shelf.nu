@@ -79,7 +79,7 @@ test("should allow you to add team member", async ({ page, account }) => {
   await page.click('[data-test-id="closeToast"]');
 });
 
-test("should allow you to give custody of an asset", async ({
+test("should allow you to assign custody of an asset", async ({
   page,
   account,
 }) => {
@@ -92,7 +92,7 @@ test("should allow you to give custody of an asset", async ({
   ).toBeVisible();
 
   await page.locator('[data-test-id="assetActionsButton"]').click();
-  await page.getByRole("link", { name: "Give custody" }).click();
+  await page.getByRole("link", { name: "Assign custody" }).click();
   await expect(page).toHaveURL(/.*assets\/[^]*\/give-custody/);
   await page.getByRole("combobox").click();
   await page

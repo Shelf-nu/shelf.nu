@@ -154,7 +154,7 @@ export default function CategoriesPage() {
           icon="plus"
           data-test-id="createNewCategory"
         >
-          New Category
+          New category
         </Button>
       </Header>
       <ListContentWrapper>

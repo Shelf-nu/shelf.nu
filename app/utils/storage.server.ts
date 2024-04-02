@@ -200,7 +200,6 @@ export async function deleteAssetImage({
 }) {
   try {
     const path = extractImageNameFromSupabaseUrl({ url, bucketName });
-
     if (!path) {
       throw new ShelfError({
         cause: null,

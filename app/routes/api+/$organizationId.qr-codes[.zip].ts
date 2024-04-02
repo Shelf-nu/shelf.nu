@@ -51,7 +51,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       const code = QRCode(0, ErrorCorrection["L"]);
       code.addData(`${process.env.SERVER_URL}/qr/${c.id}`);
       code.make();
-      const svg = code.createSvgTag({ cellSize: 3, margin: 0, scalable: true });
+      const svg = code.createSvgTag({ cellSize: 3, margin: 4, scalable: true });
 
       const dateString = `${c.createdAt.getFullYear().toString()}${(
         c.createdAt.getMonth() + 1

@@ -173,9 +173,9 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
               </>
             ) : null}
           </AlertDialogHeader>
-          {fetcher.data?.error ? (
+          {data?.error ? (
             <div>
-              <b className="text-red-500">{fetcher.data.error.message}</b>
+              <b className="text-red-500">{data.error.message}</b>
               <p>
                 Please fix your CSV file and try again. If the issue persists,
                 don't hesitate to get in touch with us.

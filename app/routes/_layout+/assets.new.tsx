@@ -31,7 +31,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { slugify } from "~/utils/slugify";
 
-const title = "New Asset";
+const title = "New asset";
 const header = {
   title,
 };

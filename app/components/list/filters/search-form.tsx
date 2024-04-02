@@ -22,9 +22,7 @@ export const SearchForm = () => {
   const submitButtonRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const label = searchFieldLabel
-    ? searchFieldLabel
-    : `Search by ${singular} name`;
+  const label = searchFieldLabel ? searchFieldLabel : `Search by ${singular}`;
 
   function clearSearch() {
     setSearchParams((prev) => {

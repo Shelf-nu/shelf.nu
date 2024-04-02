@@ -125,7 +125,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <UserIcon /> Give Custody
+                    <UserIcon /> Assign custody
                   </span>
                 </Button>
               )}
@@ -145,7 +145,7 @@ const ConditionalActionsDropdown = () => {
                 onClick={() => setOpen(false)}
               >
                 <span className="flex items-center gap-2">
-                  <LocationMarkerIcon /> Update Location
+                  <LocationMarkerIcon /> Update location
                 </span>
               </Button>
             </DropdownMenuItem>

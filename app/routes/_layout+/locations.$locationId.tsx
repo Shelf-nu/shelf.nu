@@ -244,7 +244,7 @@ export default function LocationPage() {
               icon="plus"
               width="full"
             >
-              Manage Assets
+              Manage assets
             </Button>
             <div className="w-full">
               <ActionsDropdown location={location} fullWidth />
@@ -260,7 +260,7 @@ export default function LocationPage() {
                     variant="primary"
                     icon="plus"
                   >
-                    Manage Assets
+                    Manage assets
                   </Button>
                 </div>
               </div>

@@ -82,7 +82,7 @@ function Row({
                 alt={`${custodian.name}'s profile`}
               />
               <div>
-                <span className="mt-[1px]">{custodian.name}</span>
+                <span className="mt-px">{custodian.name}</span>
                 <span className="block text-gray-600">{count} Assets</span>
               </div>
             </div>

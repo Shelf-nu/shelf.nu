@@ -325,12 +325,21 @@ export async function verifyOtpAndSignin(email: string, otp: string) {
 
     return mapAuthSession(session);
   } catch (cause) {
+    let message =
+      "Something went wrong. Please try again later or contact support.";
+    let shouldBeCaptured = true;
+
+    if (isAuthApiError(cause) && cause.message !== "") {
+      message = cause.message;
+      shouldBeCaptured = false;
+    }
+
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong. Please try again later or contact support.",
-      additionalData: { email },
+      message,
       label,
+      shouldBeCaptured,
+      additionalData: { email },
     });
   }
 }

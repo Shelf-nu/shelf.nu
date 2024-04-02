@@ -207,8 +207,8 @@ export function BookingForm({
         <div className="-mx-4 mb-4 md:mx-0">
           <div
             className={tw(
-              "mb-8 w-full xl:mb-0 ",
-              !isModal ? "xl:w-[328px]" : ""
+              "mb-8 w-full lg:mb-0 ",
+              !isModal ? "lg:w-[328px]" : ""
             )}
           >
             <div className="flex w-full flex-col gap-3">

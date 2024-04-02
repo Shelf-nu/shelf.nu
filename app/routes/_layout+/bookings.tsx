@@ -149,7 +149,7 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   return defaultShouldRevalidate;
 };
 
-type RouteHandleWithName = {
+export type RouteHandleWithName = {
   name?: string;
   [key: string]: any;
 };
@@ -360,7 +360,7 @@ function UserBadge({ img, name }: { img?: string; name: string }) {
         className="mr-1 size-4 rounded-full"
         alt=""
       />
-      <span className="mt-[1px]">{name}</span>
+      <span className="mt-px">{name}</span>
     </span>
   );
 }

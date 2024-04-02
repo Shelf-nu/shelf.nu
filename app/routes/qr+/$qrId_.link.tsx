@@ -1,11 +1,14 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { UnlinkIcon } from "~/components/icons/library";
+import ContextualModal from "~/components/layout/contextual-modal";
 import { Button } from "~/components/shared/button";
-import { makeShelfError } from "~/utils/error";
+import { db } from "~/database/db.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
-
 import {
   PermissionAction,
   PermissionEntity,
@@ -18,22 +21,51 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.qr,
       action: PermissionAction.update,
     });
 
-    return json(data({ qrId }));
+    const qr = await db.qr.findUnique({
+      where: {
+        id: qrId,
+        organizationId,
+      },
+    });
+
+    if (!qr) {
+      throw new ShelfError({
+        message: "This QR code doesn't belong to your current organization.",
+        title: "Not allowed",
+        label: "QR",
+        status: 403,
+        cause: null,
+      });
+    }
+
+    return json(
+      data({
+        header: {
+          title: "Link QR with asset",
+        },
+        qrId,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
   }
 }
 
+export const meta: MetaFunction<typeof loader> = ({ data }) => [
+  { title: appendToMetaTitle(data?.header.title) },
+];
+
 export default function QrLink() {
   const { qrId } = useLoaderData<typeof loader>();
+
   return (
     <>
       <div className="flex flex-1 justify-center py-8">
@@ -48,13 +80,20 @@ export default function QrLink() {
               an asset. Would you like to link it?
             </p>
           </div>
-          <div className="flex flex-col justify-center">
+          <div className="flex flex-col justify-center gap-2">
             <Button
               variant="primary"
-              className="mb-4 max-w-full"
+              className=" max-w-full"
               to={`/assets/new?qrId=${qrId}`}
             >
               Create a new asset and link
+            </Button>
+            <Button
+              variant="secondary"
+              className=" max-w-full"
+              to={`/qr/${qrId}/link-existing-asset`}
+            >
+              Link to existing asset
             </Button>
             <Button variant="secondary" className="max-w-full" to={"/"}>
               Cancel
@@ -62,6 +101,7 @@ export default function QrLink() {
           </div>
         </div>
       </div>
+      <ContextualModal />
     </>
   );
 }

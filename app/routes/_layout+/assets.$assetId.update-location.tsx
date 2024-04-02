@@ -116,7 +116,7 @@ export default function Custody() {
             <LocationMarkerIcon />
           </div>
           <div className="mb-5">
-            <h4>Update Location</h4>
+            <h4>Update location</h4>
             <p>Adjust the location of this asset.</p>
           </div>
           <div className=" relative z-50 mb-8">

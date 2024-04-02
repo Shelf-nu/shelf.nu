@@ -15,7 +15,7 @@ export default function NewestAssets() {
       <div className="border border-b-0 border-gray-200">
         <div className="flex items-center justify-between">
           <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
-            Newest Assets
+            Newest assets
           </div>
           <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
             <InfoTooltip

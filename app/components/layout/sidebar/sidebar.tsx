@@ -72,7 +72,7 @@ export default function Sidebar() {
           optimisticMinimizedSidebar
             ? "collapsed-navigation md:w-[82px] md:overflow-hidden"
             : "md:left-0 md:w-[312px]",
-          isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "left-[-100%]"
+          isMobileNavOpen ? "left-0 w-[312px] overflow-hidden " : "-left-full"
         )}
       >
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto overflow-x-hidden">

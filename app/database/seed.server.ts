@@ -6,7 +6,13 @@ import { createClient } from "@supabase/supabase-js";
 import { createUser } from "~/modules/user/service.server";
 import { ShelfError } from "~/utils/error";
 
-import { SUPABASE_SERVICE_ROLE, SUPABASE_URL } from "../utils/env";
+import {
+  SUPABASE_SERVICE_ROLE,
+  SUPABASE_URL,
+  ADMIN_EMAIL,
+  ADMIN_PASSWORD,
+  ADMIN_USERNAME,
+} from "../utils/env";
 
 export const createUserRole = async () => {
   const existingRole = await prisma.role.findFirst({
@@ -90,9 +96,11 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, {
 
 const prisma = new PrismaClient();
 
-const email = "hello@supabase.com";
+const email = ADMIN_EMAIL || "hello@supabase.com";
 
-const getUserId = async (email = "hello@supabase.com"): Promise<string> => {
+const getUserId = async (
+  email = ADMIN_EMAIL || "hello@supabase.com"
+): Promise<string> => {
   const userList = await supabaseAdmin.auth.admin.listUsers();
 
   if (userList.error) {
@@ -109,7 +117,7 @@ const getUserId = async (email = "hello@supabase.com"): Promise<string> => {
 
   const newUser = await supabaseAdmin.auth.admin.createUser({
     email,
-    password: "supabase",
+    password: ADMIN_PASSWORD || "supabase",
     email_confirm: true,
   });
 
@@ -146,7 +154,7 @@ async function seed() {
     const user = await createUser({
       email,
       userId: id,
-      username: "supabase",
+      username: ADMIN_USERNAME || "supabase",
     });
 
     if (!user) {
@@ -161,7 +169,10 @@ async function seed() {
 
     console.log(`Database has been seeded. 🌱\n`);
     console.log(
-      `User added to your database 👇 \n🆔: ${user.id}\n📧: ${user.email}\n🔑: supabase`
+      `User added to your database 👇\n`,
+      `🆔: ${user.id}\n`,
+      `📧: ${user.email}\n`,
+      `🔑: ${ADMIN_PASSWORD || "supabase"}`
     );
   } catch (cause) {
     throw new ShelfError({
