@@ -33,7 +33,7 @@ export default function PerPageItemsSelect() {
           ) : null
         )}
         <Select name="per_page" defaultValue={perPage.toString()}>
-          <SelectTrigger className="px-3 py-[8.5px]">
+          <SelectTrigger className="h-[40px] px-3 py-[8.5px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="w-[250px]" position="popper" align="start">

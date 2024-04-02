@@ -27,7 +27,7 @@ import { makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 
-const title = "New Asset";
+const title = "New asset";
 const header = {
   title,
 };

@@ -1,13 +1,13 @@
 /** Breadcrumbs */
 .breadcrumbs {
-  @apply flex items-center font-semibold text-gray-600;
+  @apply flex items-center font-semibold text-gray-600 max-w-full truncate;
 }
 
 .breadcrumb {
   @apply flex h-[20px] items-center;
 }
 .breadcrumb:last-child {
-  @apply pointer-events-none text-primary;
+  @apply pointer-events-none text-primary truncate;
 }
 
 .breadcrumb a,
@@ -18,4 +18,8 @@
 .breadcrumb a:not(#homeCrumb),
 .breadcrumb .single-crumb {
   @apply mb-[-3px];
+}
+
+.breadcrumb .single-crumb {
+  @apply w-full truncate;
 }

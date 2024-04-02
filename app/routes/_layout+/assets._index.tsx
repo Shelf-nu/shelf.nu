@@ -263,7 +263,7 @@ export default function AssetIndexPage() {
               icon="asset"
               data-test-id="createNewAsset"
             >
-              New Asset
+              New asset
             </Button>
           </>
         ) : null}

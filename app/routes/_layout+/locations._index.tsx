@@ -98,7 +98,7 @@ export default function LocationsIndexPage() {
           icon="plus"
           data-test-id="createNewLocation"
         >
-          Add Location
+          New location
         </Button>
       </Header>
       <ListContentWrapper>

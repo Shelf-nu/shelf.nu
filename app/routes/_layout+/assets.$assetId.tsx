@@ -281,15 +281,6 @@ export default function AssetDetailsPage() {
         ) : null}
       </Header>
 
-      <AssetImage
-        asset={{
-          assetId: asset.id,
-          mainImage: asset.mainImage,
-          mainImageExpiration: asset.mainImageExpiration,
-          alt: asset.title,
-        }}
-        className="mx-auto my-8 h-[240px] w-full rounded object-cover sm:w-[343px] md:hidden"
-      />
       <ContextualModal />
       <div className="mt-8 block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
@@ -301,17 +292,17 @@ export default function AssetDetailsPage() {
               alt: asset.title,
             }}
             className={tw(
-              "mb-8 hidden h-auto w-[343px] rounded border object-cover md:block lg:w-full",
+              " h-auto w-full rounded border object-cover",
               asset.description ? "rounded-b-none border-b-0" : ""
             )}
           />
           {asset.description ? (
-            <Card className="mt-0 rounded-t-none">
+            <Card className="mb-3 mt-0 rounded-t-none border-t-0">
               <p className=" text-gray-600">{asset.description}</p>
             </Card>
           ) : null}
           {!isSelfService ? (
-            <Card>
+            <Card className="my-3">
               <fetcher.Form
                 ref={zo.ref}
                 method="post"
@@ -345,7 +336,7 @@ export default function AssetDetailsPage() {
 
           {/* We simply check if the asset is available and we can assume that if it't not, there is a custodian assigned */}
           {!isSelfService && !assetIsAvailable && asset?.custody?.createdAt ? (
-            <Card>
+            <Card className="my-3">
               <div className="flex items-center gap-3">
                 <img
                   src="/static/images/default_pfp.jpg"
@@ -366,7 +357,7 @@ export default function AssetDetailsPage() {
           ) : null}
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
-          <Card>
+          <Card className="my-3">
             <ul className="item-information">
               <li className="mb-4 flex justify-between">
                 <span className="text-[12px] font-medium text-gray-600">
@@ -450,7 +441,7 @@ export default function AssetDetailsPage() {
                 text="Custom fields"
                 className="mb-8 pt-3 lg:hidden"
               />
-              <Card>
+              <Card className="my-3">
                 <ul className="item-information">
                   {customFieldsValues.map((field, index) => {
                     const customFieldDisplayValue = getCustomFieldDisplayValue(

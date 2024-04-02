@@ -20,7 +20,7 @@ export function BookingPageContent({
   return (
     <div
       id="bookingFormWrapper"
-      className="md:mt-5 xl:flex xl:items-start xl:gap-4"
+      className="md:mt-5 lg:flex lg:items-start lg:gap-4"
     >
       <div>
         <BookingForm
