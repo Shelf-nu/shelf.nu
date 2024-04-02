@@ -104,7 +104,7 @@ function Carousel() {
             className="carousel-next-btn mt-5"
             width="full"
           >
-            {isOrgInvite ? "View assets" : "New Asset"}
+            {isOrgInvite ? "View assets" : "New asset"}
           </Button>
         ) : (
           <Button

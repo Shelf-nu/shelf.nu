@@ -91,8 +91,8 @@ export default function SidebarBottom({ user, isSidebarMinimized }: Props) {
               width="full"
               title="Questions/Feedback"
             >
-              <span className="flex items-center justify-start gap-3">
-                <i className="icon text-gray-500">
+              <span className="flex items-center justify-start gap-2">
+                <i className="icon text-gray-700">
                   <QuestionsIcon />
                 </i>
                 <span className="text whitespace-nowrap transition duration-200 ease-linear">
