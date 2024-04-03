@@ -2,10 +2,8 @@ import { OrganizationRoles } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { getBooking } from "~/modules/booking/service.server";
-import {
-  getClientHint,
-  getDateTimeFormatFromHints,
-} from "~/utils/client-hints";
+import { getClientHint } from "~/utils/client-hints";
+import { formatDatesForICal } from "~/utils/date-fns";
 import { SERVER_URL } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
@@ -47,24 +45,9 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       });
     }
     const hints = getClientHint(request);
-    const dateTimeFormat = getDateTimeFormatFromHints(hints, {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-    const fromDate = new Date(
-      dateTimeFormat.format(booking.from as Date)
-    ).toISOString();
-    const toDate = new Date(
-      dateTimeFormat.format(booking.to as Date)
-    ).toISOString();
-    // Remove the dashes, colons and decimal seconds from the ISO string
-    const formattedFromDate = fromDate.replace(/[-:]|\.\d{3}Z/g, "");
-    const formattedToDate = toDate.replace(/[-:]|\.\d{3}Z/g, "");
+
+    const formattedFromDate = formatDatesForICal(booking.from as Date, hints);
+    const formattedToDate = formatDatesForICal(booking.to as Date, hints);
 
     const ics = `
 BEGIN:VCALENDAR
