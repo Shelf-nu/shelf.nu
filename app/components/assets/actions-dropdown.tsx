@@ -57,6 +57,7 @@ const ConditionalActionsDropdown = () => {
         <DropdownMenuTrigger
           className="asset-actions hidden sm:flex"
           onClick={() => setOpen(!open)}
+          asChild
         >
           <Button variant="secondary" data-test-id="assetActionsButton">
             <span className="flex items-center gap-2">

@@ -25,7 +25,8 @@ export const TagsAutocomplete = ({ existingTags }: { existingTags: Tag[] }) => {
   const [selected, setSelected] = useState<Tag[]>([]);
 
   useEffect(() => {
-    setSelected(() => [...existingTags]);
+    if (existingTags && existingTags.length > 0)
+      setSelected(() => [...existingTags]);
   }, [existingTags]);
 
   const onAdd = useCallback(
