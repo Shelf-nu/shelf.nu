@@ -3,18 +3,19 @@ import type { SVGProps } from "react";
 export function LogoutIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
-      width={20}
-      height={20}
-      fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 16 16"
+      width={16}
+      height={16}
       {...props}
     >
       <path
-        d="M13.333 14.167 17.5 10m0 0-4.167-4.167M17.5 10h-10m0-7.5h-1c-1.4 0-2.1 0-2.635.272a2.5 2.5 0 0 0-1.093 1.093C2.5 4.4 2.5 5.1 2.5 6.5v7c0 1.4 0 2.1.272 2.635a2.5 2.5 0 0 0 1.093 1.092C4.4 17.5 5.1 17.5 6.5 17.5h1"
         stroke="currentColor"
-        strokeWidth={1.667}
         strokeLinecap="round"
         strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M10.667 11.333 14 8m0 0-3.333-3.333M14 8H6m0-6h-.8c-1.12 0-1.68 0-2.108.218a2 2 0 0 0-.874.874C2 3.52 2 4.08 2 5.2v5.6c0 1.12 0 1.68.218 2.108a2 2 0 0 0 .874.874C3.52 14 4.08 14 5.2 14H6"
       />
     </svg>
   );
@@ -753,6 +754,26 @@ export function UnlinkIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function LinkIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={22}
+      height={22}
+      fill="none"
+      {...props}
+    >
+      <path
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M9 12a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M13 10a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+      />
+    </svg>
+  );
+}
+
 export function MapIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -777,17 +798,18 @@ export function QuestionsIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width={20}
-      height={21}
       fill="none"
+      viewBox="0 0 16 16"
+      width={16}
+      height={16}
       {...props}
     >
       <path
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth={2}
-        d="M5 6.5h5M5 10h8m-5.316 6H14.2c1.68 0 2.52 0 3.162-.327a3 3 0 0 0 1.311-1.311C19 13.72 19 12.88 19 11.2V5.8c0-1.68 0-2.52-.327-3.162a3 3 0 0 0-1.311-1.311C16.72 1 15.88 1 14.2 1H5.8c-1.68 0-2.52 0-3.162.327a3 3 0 0 0-1.311 1.311C1 3.28 1 4.12 1 5.8v12.535c0 .533 0 .8.11.937a.5.5 0 0 0 .39.188c.176 0 .384-.167.8-.5l2.385-1.908c.488-.39.731-.585 1.002-.724.241-.122.497-.212.762-.267C6.748 16 7.06 16 7.684 16Z"
+        strokeWidth={1.5}
+        d="M4.667 5.667H8M4.667 8H10m-3.544 4H10.8c1.12 0 1.68 0 2.108-.218a2 2 0 0 0 .874-.874C14 10.48 14 9.92 14 8.8V5.2c0-1.12 0-1.68-.218-2.108a2 2 0 0 0-.874-.874C12.48 2 11.92 2 10.8 2H5.2c-1.12 0-1.68 0-2.108.218a2 2 0 0 0-.874.874C2 3.52 2 4.08 2 5.2v8.357c0 .355 0 .533.073.624.063.08.16.126.26.126.117 0 .256-.112.533-.334l1.59-1.272c.326-.26.488-.39.669-.482.16-.082.331-.142.508-.178C5.832 12 6.04 12 6.456 12Z"
       />
     </svg>
   );
@@ -1170,19 +1192,19 @@ export const DownloadIcon = (props: SVGProps<SVGSVGElement>) => (
 
 export const Profile = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    width="16"
-    height="16"
-    viewBox="0 0 16 16"
-    fill="none"
     xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 16 16"
+    width={16}
+    height={16}
     {...props}
   >
     <path
-      d="M13.3332 14C13.3332 13.0696 13.3332 12.6044 13.2183 12.2259C12.9598 11.3736 12.2929 10.7067 11.4406 10.4482C11.0621 10.3333 10.5969 10.3333 9.6665 10.3333H6.33317C5.4028 10.3333 4.93761 10.3333 4.55908 10.4482C3.70681 10.7067 3.03986 11.3736 2.78133 12.2259C2.6665 12.6044 2.6665 13.0696 2.6665 14M10.9998 5C10.9998 6.65685 9.65669 8 7.99984 8C6.34298 8 4.99984 6.65685 4.99984 5C4.99984 3.34315 6.34298 2 7.99984 2C9.65669 2 10.9998 3.34315 10.9998 5Z"
       stroke="currentColor"
-      strokeWidth="1.5"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.5}
+      d="M13.333 14c0-.93 0-1.396-.114-1.774a2.666 2.666 0 0 0-1.778-1.778c-.379-.115-.844-.115-1.774-.115H6.333c-.93 0-1.395 0-1.774.115a2.666 2.666 0 0 0-1.777 1.778c-.115.378-.115.844-.115 1.774M11 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
     />
   </svg>
 );

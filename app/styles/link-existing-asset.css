@@ -1,0 +1,12 @@
+.logo {
+  display: none;
+}
+
+body > .container {
+  padding-top: 0;
+  padding-bottom: 16px;
+}
+
+body > .container > div {
+  @apply !justify-start;
+}

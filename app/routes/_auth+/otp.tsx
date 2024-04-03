@@ -173,14 +173,14 @@ export default function OtpPage() {
             />
 
             {data?.error.message ? (
-              <p className="text-center text-sm text-error-500">
+              <div className="!mt-1  text-sm text-error-500">
                 {data.error.message}
-              </p>
+              </div>
             ) : null}
             {message?.message && (
               <p
                 className={tw(
-                  "text-center text-sm",
+                  " text-sm",
                   message.type === "error"
                     ? "text-error-500"
                     : "text-success-500"

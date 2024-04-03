@@ -14,7 +14,7 @@ export default function LocationRatioChart() {
     <div className="w-full border border-gray-200 ">
       <div className="flex items-center justify-between">
         <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
-          Location Ratio
+          Location ratio
         </div>
         <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
           <InfoTooltip

@@ -263,7 +263,7 @@ export default function AssetIndexPage() {
               icon="asset"
               data-test-id="createNewAsset"
             >
-              New Asset
+              New asset
             </Button>
           </>
         ) : null}
@@ -453,7 +453,7 @@ const ListAssetContent = ({
                     alt=""
                   />
                 ) : null}
-                <span className="mt-[1px]">{custody.custodian.name}</span>
+                <span className="mt-px">{custody.custodian.name}</span>
               </>
             </GrayBadge>
           ) : null}
