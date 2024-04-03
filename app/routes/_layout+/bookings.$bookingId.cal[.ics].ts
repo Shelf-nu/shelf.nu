@@ -2,6 +2,11 @@ import { OrganizationRoles } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { getBooking } from "~/modules/booking/service.server";
+import {
+  getClientHint,
+  getDateTimeFormatFromHints,
+} from "~/utils/client-hints";
+import { SERVER_URL } from "~/utils/env";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions/types";
@@ -41,6 +46,25 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+    const hints = getClientHint(request);
+    const dateTimeFormat = getDateTimeFormatFromHints(hints, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    const fromDate = new Date(
+      dateTimeFormat.format(booking.from as Date)
+    ).toISOString();
+    const toDate = new Date(
+      dateTimeFormat.format(booking.to as Date)
+    ).toISOString();
+    // Remove the dashes, colons and decimal seconds from the ISO string
+    const formattedFromDate = fromDate.replace(/[-:]|\.\d{3}Z/g, "");
+    const formattedToDate = toDate.replace(/[-:]|\.\d{3}Z/g, "");
 
     const ics = `
 BEGIN:VCALENDAR
@@ -50,29 +74,24 @@ CALSCALE:GREGORIAN
 METHOD:PUBLISH
 BEGIN:VEVENT
 SUMMARY:${booking.name}
-UID:c7614cff-3549-4a00-9152-d25cc1fe077d
+UID:${booking.id}
 SEQUENCE:${Date.now()}
 STATUS:CONFIRMED
 TRANSP:TRANSPARENT
-RRULE:FREQ=YEARLY;INTERVAL=1;BYMONTH=2;BYMONTHDAY=12
-DTSTART:${booking.from}
-DTEND:${booking.to}
+DTSTART:${formattedFromDate}
+DTEND:${formattedToDate}
 DTSTAMP:${Date.now()}
-CATEGORIES:U.S. Presidents,Civil War People
-LOCATION:Hodgenville\, Kentucky
-GEO:37.5739497;-85.7399606
-DESCRIPTION:Born February 12\, 1809\nSixteenth President (1861-1865)\n\n\n
- \nhttp://AmericanHistoryCalendar.com
-URL:http://americanhistorycalendar.com/peoplecalendar/1,328-abraham-lincol
- n
+CATEGORIES:Shelf.nu booking
+LOCATION:shelf.nu
+DESCRIPTION:Shelf.nu booking (Asset / Equipment checkout) \n\n ${SERVER_URL}/bookings/${bookingId} 
+URL:${SERVER_URL}/bookings/${bookingId}/cal.ics
 END:VEVENT
 END:VCALENDAR`.trim();
 
     return new Response(ics, {
       headers: {
-        // @TODO add caching headers
         "Content-Type": "text/calendar",
-        "Content-Disposition": `attachment; filename="${booking.name}.ics"`,
+        "Content-Disposition": `attachment; filename="${booking.name} - shelf.nu.ics"`,
       },
     });
   } catch (cause) {
