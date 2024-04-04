@@ -34,11 +34,14 @@ export default function CustodianUserSelect(
   const { teamMembers } = useLoaderData<typeof loader>();
 
   // In the case of team member id passed, we set that to id and find the rest in the teamMembers array
-  let defaultValue = JSON.stringify({
-    id: teamMembers.find((member) => member.userId === defaultUserId)?.id,
-    name: teamMembers.find((member) => member.userId === defaultUserId)?.name,
-    userId: defaultUserId,
-  });
+  let defaultValue = defaultUserId
+    ? JSON.stringify({
+        id: teamMembers.find((member) => member.userId === defaultUserId)?.id,
+        name: teamMembers.find((member) => member.userId === defaultUserId)
+          ?.name,
+        userId: defaultUserId,
+      })
+    : undefined;
   return (
     <div className="relative w-full">
       <Select name="custodian" defaultValue={defaultValue} disabled={disabled}>
