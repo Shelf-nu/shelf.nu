@@ -5,7 +5,7 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
@@ -51,6 +51,7 @@ import {
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings";
@@ -578,22 +579,28 @@ export default function BookingEditPage() {
   );
 }
 
-const AddToCalendar = () => (
-  <TooltipProvider delayDuration={100}>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="link"
-          to={`cal.ics`}
-          download={true}
-          reloadDocument={true}
-        >
-          Add to calendar
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">
-        <p className="text-xs">Download this booking as a calendar event</p>
-      </TooltipContent>
-    </Tooltip>
-  </TooltipProvider>
-);
+const AddToCalendar = () => {
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
+
+  return (
+    <TooltipProvider delayDuration={100}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="link"
+            to={`cal.ics`}
+            download={true}
+            reloadDocument={true}
+            disabled={disabled}
+          >
+            Add to calendar
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p className="text-xs">Download this booking as a calendar event</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
