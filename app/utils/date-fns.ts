@@ -62,7 +62,10 @@ export function getBookingDefaultStartEndTimes() {
 
   let endDate;
   /** If its already after 6pm, set it to 6pm tomorrow */
-  if (now.getHours() >= 18) {
+  if (
+    now.getHours() >= 18 ||
+    (now.getHours() === 17 && now.getMinutes() > 49)
+  ) {
     now.setDate(now.getDate() + 1);
     endDate = dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)));
   } else {
