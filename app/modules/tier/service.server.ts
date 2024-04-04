@@ -128,6 +128,7 @@ export const assertUserCanCreateMoreCustomFields = async ({
       message: "Your user cannot create more custom fields",
       additionalData: { organizationId },
       label,
+      shouldBeCaptured: false,
     });
   }
 };
