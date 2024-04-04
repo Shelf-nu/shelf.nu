@@ -66,8 +66,8 @@ DTEND:${formattedToDate}
 DTSTAMP:${Date.now()}
 CATEGORIES:Shelf.nu booking
 LOCATION:shelf.nu
-DESCRIPTION:Shelf.nu booking (Asset / Equipment checkout) \n\n ${SERVER_URL}/bookings/${bookingId} 
-URL:${SERVER_URL}/bookings/${bookingId}/cal.ics
+DESCRIPTION:Shelf.nu booking (Asset / Equipment checkout)
+URL:${SERVER_URL}/bookings/${bookingId}
 END:VEVENT
 END:VCALENDAR`.trim();
 
