@@ -16,6 +16,12 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Badge, Button } from "~/components/shared";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { db } from "~/database";
 import { createNotes } from "~/modules/asset";
 import {
@@ -540,14 +546,7 @@ export default function BookingEditPage() {
                 {booking.status}
               </span>
             </Badge>
-            <Button
-              variant="link"
-              to={`cal.ics`}
-              download={true}
-              reloadDocument={true}
-            >
-              Add to calendar
-            </Button>
+            <AddToCalendar />
           </div>
         }
       />
@@ -578,3 +577,23 @@ export default function BookingEditPage() {
     </>
   );
 }
+
+const AddToCalendar = () => (
+  <TooltipProvider delayDuration={100}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="link"
+          to={`cal.ics`}
+          download={true}
+          reloadDocument={true}
+        >
+          Add to calendar
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p className="text-xs">Download this booking as a calendar event</p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
