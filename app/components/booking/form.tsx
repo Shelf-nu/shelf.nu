@@ -307,7 +307,9 @@ export function BookingForm({
                   assets during the duration of the booking period.
                 </p>
               </Card>
-              <AddToCalendar />
+              {!routeIsNewBooking && (
+                <AddToCalendar disabled={disabled || isDraft || isCancelled} />
+              )}
             </div>
           </div>
         </div>
@@ -321,29 +323,28 @@ export function BookingForm({
   );
 }
 
-const AddToCalendar = () => {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
-
-  return (
-    <TooltipProvider delayDuration={100}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            to={`cal.ics`}
-            download={true}
-            reloadDocument={true}
-            disabled={disabled}
-            variant="secondary"
-            icon="calendar"
-          >
-            Add to calendar
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <p className="text-xs">Download this booking as a calendar event</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-};
+const AddToCalendar = ({ disabled }: { disabled: boolean }) => (
+  <TooltipProvider delayDuration={100}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          to={`cal.ics`}
+          download={true}
+          reloadDocument={true}
+          disabled={disabled}
+          variant="secondary"
+          icon="calendar"
+        >
+          Add to calendar
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p className="text-xs">
+          {disabled
+            ? "Not possible to add to calendar due to booking status"
+            : "Download this booking as a calendar event"}
+        </p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
