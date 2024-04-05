@@ -1,11 +1,12 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import type { MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
+import { Link, Outlet, useRouteLoaderData } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
-import { useMatchesData } from "~/hooks";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import { requireAuthSession } from "~/modules/auth";
+import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
+import { data } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
@@ -13,15 +14,15 @@ export const handle = {
   breadcrumb: () => <Link to="/settings">Settings</Link>,
 };
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+export function loader() {
   const title = "Settings";
   const subHeading = "Manage your preferences here.";
   const header = {
     title,
     subHeading,
   };
-  return json({ header });
+
+  return json(data({ header }));
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -48,7 +49,7 @@ export default function SettingsPage() {
     );
   }
 
-  const enablePremium = useMatchesData<{ enablePremium: boolean }>(
+  const enablePremium = useRouteLoaderData<typeof layoutLoader>(
     "routes/_layout+/_layout"
   )?.enablePremium;
 
@@ -66,3 +67,5 @@ export default function SettingsPage() {
     </>
   );
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

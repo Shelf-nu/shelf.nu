@@ -10,44 +10,56 @@ import type {
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
-import { parseFormAny } from "react-zorm";
 import invariant from "tiny-invariant";
+import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { LocationForm, NewLocationFormSchema } from "~/components/location";
-import { commitAuthSession } from "~/modules/auth";
 import { getLocation, updateLocation } from "~/modules/location";
-import { getRequiredParam } from "~/utils";
+import { data, error, getParams, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { MAX_SIZE } from "./locations.new";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  const { organizationId } = await requirePermision(
-    request,
-    PermissionEntity.location,
-    PermissionAction.update
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { locationId: id } = getParams(
+    params,
+    z.object({ locationId: z.string() }),
+    {
+      additionalData: { userId },
+    }
   );
-  const id = getRequiredParam(params, "locationId");
 
-  const { location } = await getLocation({ organizationId, id });
-  if (!location) {
-    throw new ShelfStackError({ message: "Location Not Found", status: 404 });
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    });
+
+    const { location } = await getLocation({ organizationId, id });
+
+    const header: HeaderData = {
+      title: `Edit | ${location.name}`,
+    };
+
+    return json(
+      data({
+        location,
+        header,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
   }
-
-  const header: HeaderData = {
-    title: `Edit | ${location.name}`,
-  };
-
-  return json({
-    location,
-    header,
-  });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -58,84 +70,62 @@ export const handle = {
   breadcrumb: () => <span>Edit</span>,
 };
 
-export async function action({ request, params }: ActionFunctionArgs) {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.location,
-    PermissionAction.update
-  );
-  const clonedRequest = request.clone();
-
-  const id = getRequiredParam(params, "locationId");
-  const formData = await request.formData();
-  const result = await NewLocationFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
-
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-        success: false,
-      },
-      {
-        status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
-    );
-  }
-
-  const { name, description, address } = result.data;
-
-  const formDataFile = await unstable_parseMultipartFormData(
-    clonedRequest,
-    unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
-  );
-
-  const file = formDataFile.get("image") as File | null;
-  invariant(file instanceof File, "file not the right type");
-
-  const rsp = await updateLocation({
-    id,
-    userId: authSession.userId,
-    name,
-    description,
-    address,
-    image: file || null,
-    organizationId,
-  });
-  // Handle unique constraint error for name
-  if (rsp.error) {
-    return json(
-      {
-        errors: {
-          name: rsp.error,
-        },
-      },
-      {
-        status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
-      }
-    );
-  }
-
-  sendNotification({
-    title: "Location updated",
-    message: "Your location  has been updated successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return json(
-    { success: true },
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { locationId: id } = getParams(
+    params,
+    z.object({ locationId: z.string() }),
     {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, { authSession }),
-      },
+      additionalData: { userId },
     }
   );
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    });
+    const clonedRequest = request.clone();
+
+    const payload = parseData(await request.formData(), NewLocationFormSchema, {
+      additionalData: { userId, organizationId, id },
+    });
+
+    const { name, description, address } = payload;
+
+    const formDataFile = await unstable_parseMultipartFormData(
+      clonedRequest,
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
+    );
+
+    const file = formDataFile.get("image") as File | null;
+    invariant(file instanceof File, "file not the right type");
+
+    await updateLocation({
+      id,
+      userId: authSession.userId,
+      name,
+      description,
+      address,
+      image: file || null,
+      organizationId,
+    });
+
+    sendNotification({
+      title: "Location updated",
+      message: "Your location  has been updated successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+
+    return json(data({ success: true }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    return json(error(reason), { status: reason.status });
+  }
 }
 
 export default function LocationEditPage() {

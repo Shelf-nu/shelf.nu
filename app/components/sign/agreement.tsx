@@ -18,7 +18,7 @@ export default function Agreement() {
 
   return (
     <>
-      <div className={`flex gap-x-2 border-b-[1px] border-b-gray-200 p-4`}>
+      <div className={`flex gap-x-2 border-b-DEFAULT border-b-gray-200 p-4`}>
         <div className="flex h-fit space-x-2">
           <Checkbox id="terms1" />
           <div className="grid gap-1.5 leading-none">
@@ -37,7 +37,7 @@ export default function Agreement() {
       </div>
       <div
         onClick={() => setCanvasClicked(true)}
-        className={`flex h-full min-h-[400px] w-[400px] grow items-center justify-center border-b-[1px] border-b-gray-200 p-4`}
+        className={`flex h-full min-h-[400px] w-[400px] grow items-center justify-center border-b-DEFAULT border-b-gray-200 p-4`}
       >
         {!canvasClicked && (
           <div className="flex text-gray-300">
@@ -62,7 +62,7 @@ export default function Agreement() {
         )}
       </div>
       <div
-        className={`flex items-center justify-between gap-x-2 border-b-[1px] border-b-gray-200 p-4`}
+        className={`flex items-center justify-between gap-x-2 border-b-DEFAULT border-b-gray-200 p-4`}
       >
         <Input
           // disabled={disabled}

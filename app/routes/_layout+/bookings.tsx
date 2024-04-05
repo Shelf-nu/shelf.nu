@@ -1,11 +1,12 @@
-import { OrganizationRoles } from "@prisma/client";
-import type { BookingStatus, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { StatusFilter } from "~/components/booking/status-filter";
+import { ErrorContent } from "~/components/errors";
 
 import { ChevronRight } from "~/components/icons";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -15,13 +16,14 @@ import { Filters, List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Badge, Button } from "~/components/shared";
 import { Td, Th } from "~/components/table";
-import { commitAuthSession } from "~/modules/auth";
 import { getBookings } from "~/modules/booking";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
-  generatePageMeta,
+  data,
+  error,
   getCurrentSearchParams,
   getParamsValues,
+  makeShelfError,
 } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
@@ -31,93 +33,98 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId, role } = await requirePermision(
-    request,
-    PermissionEntity.booking,
-    PermissionAction.read
-  );
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search, status } = getParamsValues(searchParams);
-  const cookie = await updateCookieWithPerPage(request, perPageParam);
-  const { perPage } = cookie;
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  const { prev, next } = generatePageMeta(request);
+  try {
+    const { organizationId, role } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.read,
+    });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const searchParams = getCurrentSearchParams(request);
+    const { page, perPageParam, search, status } =
+      getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
 
-  const { bookings, bookingCount } = await getBookings({
-    organizationId,
-    page,
-    perPage,
-    search,
-    userId: authSession?.userId,
-    ...(status && {
-      // If status is in the params, we filter based on it
-      statuses: [status],
-    }),
-    ...(isSelfService && {
-      // If the user is self service, we only show bookings that belong to that user)
-      custodianUserId: authSession?.userId,
-    }),
-  });
-
-  const totalPages = Math.ceil(bookingCount / perPage);
-
-  const header: HeaderData = {
-    title: "Bookings",
-  };
-  const modelName = {
-    singular: "booking",
-    plural: "bookings",
-  };
-
-  /** We format the dates on the server based on the users timezone and locale  */
-  const items = bookings.map((b) => {
-    if (b.from && b.to) {
-      const from = new Date(b.from);
-      const displayFrom = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(from);
-
-      const to = new Date(b.to);
-      const displayTo = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(to);
-
-      return {
-        ...b,
-        displayFrom: displayFrom.split(","),
-        displayTo: displayTo.split(","),
-      };
-    }
-    return b;
-  });
-
-  return json(
-    {
-      header,
-      items,
-      search,
+    const { bookings, bookingCount } = await getBookings({
+      organizationId,
       page,
-      totalItems: bookingCount,
-      totalPages,
       perPage,
-      prev,
-      next,
-      modelName,
-    },
-    {
-      headers: [
-        setCookie(await userPrefs.serialize(cookie)),
-        setCookie(await commitAuthSession(request, { authSession })),
-        setCookie(await setSelectedOrganizationIdCookie(organizationId)),
-      ],
-    }
-  );
+      search,
+      userId: authSession?.userId,
+      ...(status && {
+        // If status is in the params, we filter based on it
+        statuses: [status],
+      }),
+      ...(isSelfService && {
+        // If the user is self service, we only show bookings that belong to that user)
+        custodianUserId: authSession?.userId,
+      }),
+    });
+
+    const totalPages = Math.ceil(bookingCount / perPage);
+
+    const header: HeaderData = {
+      title: "Bookings",
+    };
+    const modelName = {
+      singular: "booking",
+      plural: "bookings",
+    };
+
+    /** We format the dates on the server based on the users timezone and locale  */
+    const items = bookings.map((b) => {
+      if (b.from && b.to) {
+        const from = new Date(b.from);
+        const displayFrom = getDateTimeFormat(request, {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(from);
+
+        const to = new Date(b.to);
+        const displayTo = getDateTimeFormat(request, {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(to);
+
+        return {
+          ...b,
+          displayFrom: displayFrom.split(","),
+          displayTo: displayTo.split(","),
+        };
+      }
+      return b;
+    });
+
+    return json(
+      data({
+        header,
+        items,
+        search,
+        page,
+        totalItems: bookingCount,
+        totalPages,
+        perPage,
+        modelName,
+      }),
+      {
+        headers: [
+          setCookie(await userPrefs.serialize(cookie)),
+          setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+        ],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -141,7 +148,7 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   return defaultShouldRevalidate;
 };
 
-type RouteHandleWithName = {
+export type RouteHandleWithName = {
   name?: string;
   [key: string]: any;
 };
@@ -154,7 +161,7 @@ export default function BookingsIndexPage() {
   /**
    * We have 2 cases when we should render index:
    * 1. When we are on the index route
-   * 2. When we are on the .new route
+   * 2. When we are on the .new route - the reason we do this is because we want to have the .new modal overlaying the index.
    */
   const shouldRenderIndex =
     currentRoute?.handle?.name === ("bookings.index" as string) ||
@@ -173,9 +180,11 @@ export default function BookingsIndexPage() {
         </Button>
       </Header>
       <ListContentWrapper>
-        <Filters>
-          <StatusFilter />
-        </Filters>
+        <Filters
+          slots={{
+            "left-of-search": <StatusFilter statusItems={BookingStatus} />,
+          }}
+        />
         <List
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(id)}
@@ -315,7 +324,8 @@ const ListAssetContent = ({
         {item?.custodianUser ? (
           <UserBadge
             img={
-              item?.custodianUser?.profilePicture || "/images/default_pfp.jpg"
+              item?.custodianUser?.profilePicture ||
+              "/static/images/default_pfp.jpg"
             }
             name={`${item?.custodianUser?.firstName || ""} ${
               item?.custodianUser?.lastName || ""
@@ -329,7 +339,9 @@ const ListAssetContent = ({
       {/* Created by */}
       <Td className="hidden md:table-cell">
         <UserBadge
-          img={item?.creator?.profilePicture || "/images/default_pfp.jpg"}
+          img={
+            item?.creator?.profilePicture || "/static/images/default_pfp.jpg"
+          }
           name={`${item?.creator?.firstName || ""} ${
             item?.creator?.lastName || ""
           }`}
@@ -343,11 +355,11 @@ function UserBadge({ img, name }: { img?: string; name: string }) {
   return (
     <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
       <img
-        src={img || "/images/default_pfp.jpg"}
+        src={img || "/static/images/default_pfp.jpg"}
         className="mr-1 size-4 rounded-full"
         alt=""
       />
-      <span className="mt-[1px]">{name}</span>
+      <span className="mt-px">{name}</span>
     </span>
   );
 }
@@ -361,3 +373,5 @@ export type BookingWithCustodians = Prisma.BookingGetPayload<{
     custodianTeamMember: true;
   };
 }>;
+
+export const ErrorBoundary = () => <ErrorContent />;

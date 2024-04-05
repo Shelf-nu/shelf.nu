@@ -1,13 +1,9 @@
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import FormRow from "~/components/forms/form-row";
@@ -17,22 +13,22 @@ import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
 
 import { useUserData } from "~/hooks";
-import {
-  commitAuthSession,
-  destroyAuthSession,
-  requireAuthSession,
-  sendResetPasswordLink,
-} from "~/modules/auth";
+import { sendResetPasswordLink } from "~/modules/auth";
 import { updateProfilePicture, updateUser } from "~/modules/user";
-import type {
-  UpdateUserPayload,
-  UpdateUserResponse,
-} from "~/modules/user/types";
+import type { UpdateUserPayload } from "~/modules/user/types";
 
-import { assertIsPost, isFormProcessing } from "~/utils";
+import {
+  data,
+  error,
+  isFormProcessing,
+  makeShelfError,
+  parseData,
+} from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { delay } from "~/utils/delay";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { getValidationErrors } from "~/utils/http";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateFormSchema = z.object({
@@ -47,91 +43,81 @@ export const UpdateFormSchema = z.object({
   lastName: z.string().optional(),
 });
 
-export async function action({ request }: ActionFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  assertIsPost(request);
+const Actions = z.discriminatedUnion("intent", [
+  z.object({
+    intent: z.literal("resetPassword"),
+    email: z.string(),
+  }),
+  UpdateFormSchema.extend({
+    intent: z.literal("updateUser"),
+  }),
+]);
 
-  const clonedRequest = request.clone();
-  const formData = await clonedRequest.formData();
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  /** Handle Password Reset */
-  if (formData.get("intent") === "resetPassword") {
-    const email = formData.get("email") as string;
-
-    const { error } = await sendResetPasswordLink(email);
-
-    if (error) {
-      return json(
-        {
-          message: "Unable to send password reset link",
-          email: null,
-        },
-        { status: 500 }
-      );
-    }
-
-    /** Logout user after 3 seconds */
-    await delay(2000);
-    return destroyAuthSession(clonedRequest);
-  }
-
-  /** Handle the use update */
-  if (formData.get("intent") === "updateUser") {
-    const result = await UpdateFormSchema.safeParseAsync(
-      parseFormAny(formData)
-    );
-
-    if (!result.success) {
-      return json(
-        {
-          errors: result.error,
-        },
-        { status: 400 }
-      );
-    }
-
-    /** Create the payload if the client side validation works */
-    const updateUserPayload: UpdateUserPayload = {
-      ...result?.data,
-      id: authSession.userId,
-    };
-
-    await updateProfilePicture({
-      request,
-      userId: authSession.userId,
-    });
-
-    /** Update the user */
-    const updatedUser = await updateUser(updateUserPayload);
-
-    if (updatedUser.errors) {
-      return json({ errors: updatedUser.errors }, { status: 400 });
-    }
-
-    sendNotification({
-      title: "User updated",
-      message: "Your settings have been updated successfully",
-      icon: { name: "success", variant: "success" },
-      senderId: authSession.userId,
-    });
-
-    return json(
-      { success: true },
+  try {
+    const { intent, ...payload } = parseData(
+      await request.clone().formData(),
+      Actions,
       {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
+        additionalData: { userId },
       }
     );
+
+    switch (intent) {
+      case "resetPassword": {
+        const { email } = payload;
+
+        await sendResetPasswordLink(email);
+
+        /** Logout user after 3 seconds */
+        await delay(2000);
+
+        context.destroySession();
+
+        return redirect("/login");
+      }
+      case "updateUser": {
+        /** Create the payload if the client side validation works */
+        const updateUserPayload: UpdateUserPayload = {
+          ...payload,
+          id: userId,
+        };
+
+        await updateProfilePicture({
+          request,
+          userId,
+        });
+
+        /** Update the user */
+        await updateUser(updateUserPayload);
+
+        sendNotification({
+          title: "User updated",
+          message: "Your settings have been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+      default: {
+        checkExhaustiveSwitch(intent);
+        return json(data(null));
+      }
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
 }
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
-
+export function loader() {
   const title = "Account Details";
 
-  return json({ title });
+  return json(data({ title }));
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -146,11 +132,11 @@ export default function UserPage() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  const data = useActionData<UpdateUserResponse>();
-  const errors = data?.errors as UpdateUserResponse["errors"];
+  const data = useActionData<typeof action>();
   const user = useUserData();
-  const usernameError = errors?.username || zo.errors.username()?.message;
-
+  const usernameError =
+    getValidationErrors<typeof UpdateFormSchema>(data?.error)?.username
+      ?.message || zo.errors.username()?.message;
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   return (
@@ -170,7 +156,7 @@ export default function UserPage() {
       >
         <FormRow
           rowLabel={"Full name"}
-          className="border-t-[1px]"
+          className="border-t-DEFAULT"
           required={zodFieldIsRequired(UpdateFormSchema.shape.firstName)}
         >
           <div className="flex gap-6">

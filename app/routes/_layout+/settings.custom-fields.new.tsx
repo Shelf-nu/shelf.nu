@@ -1,7 +1,6 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useAtomValue } from "jotai";
-import { parseFormAny } from "react-zorm";
 
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
@@ -10,111 +9,104 @@ import {
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 
-import { commitAuthSession } from "~/modules/auth";
 import { createCustomField } from "~/modules/custom-field";
 import { assertUserCanCreateMoreCustomFields } from "~/modules/tier";
+import { data, error, makeShelfError, parseData } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 const title = "New Custom Field";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { organizationId, organizations } = await requirePermision(
-    request,
-    PermissionEntity.customField,
-    PermissionAction.create
-  );
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  await assertUserCanCreateMoreCustomFields({ organizations, organizationId });
+  try {
+    const { organizationId, organizations } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.customField,
+      action: PermissionAction.create,
+    });
 
-  const header = {
-    title,
-  };
+    await assertUserCanCreateMoreCustomFields({
+      organizations,
+      organizationId,
+    });
 
-  return json({
-    header,
-  });
+    const header = {
+      title,
+    };
+
+    return json(
+      data({
+        header,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: data ? appendToMetaTitle(data?.header?.title) : "" },
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export const handle = {
   breadcrumb: () => <span>{title}</span>,
 };
 
-export async function action({ request }: LoaderFunctionArgs) {
-  const { authSession, organizationId, organizations } = await requirePermision(
-    request,
-    PermissionEntity.customField,
-    PermissionAction.create
-  );
-  await assertUserCanCreateMoreCustomFields({
-    organizations,
-    organizationId,
-  });
+export async function action({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  const formData = await request.formData();
-  const result = await NewCustomFieldFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+  try {
+    const { organizationId, organizations } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.customField,
+      action: PermissionAction.create,
+    });
 
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-      },
-      {
-        status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
+    await assertUserCanCreateMoreCustomFields({
+      organizations,
+      organizationId,
+    });
+
+    const payload = parseData(
+      await request.formData(),
+      NewCustomFieldFormSchema
     );
+
+    const { name, helpText, required, type, active, options } = payload;
+
+    await createCustomField({
+      name,
+      helpText,
+      required,
+      type,
+      active,
+      organizationId,
+      userId: authSession.userId,
+      options,
+    });
+
+    sendNotification({
+      title: "Custom Field created",
+      message: "Your Custom Field has been created successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: userId,
+    });
+
+    return redirect(`/settings/custom-fields`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-
-  const { name, helpText, required, type, active, options } = result.data;
-
-  const rsp = await createCustomField({
-    name,
-    helpText,
-    required,
-    type,
-    active,
-    organizationId,
-    userId: authSession.userId,
-    options,
-  });
-
-  if (rsp.error) {
-    return json(
-      {
-        errors: { name: rsp.error },
-      },
-      {
-        status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
-      }
-    );
-  }
-
-  sendNotification({
-    title: "Custom Field created",
-    message: "Your Custom Field has been created successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return redirect(`/settings/custom-fields`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
 }
 
 export default function NewCustomFieldPage() {

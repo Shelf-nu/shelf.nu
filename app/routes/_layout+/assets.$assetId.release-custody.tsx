@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { z } from "zod";
 import { UserXIcon } from "~/components/icons";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database";
@@ -9,100 +10,170 @@ import { releaseCustody } from "~/modules/custody";
 import { assetCustodyRevokedEmailText } from "~/modules/invite/helpers";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
-import { isFormProcessing } from "~/utils";
+import {
+  data,
+  error,
+  getParams,
+  isFormProcessing,
+  parseData,
+  validEmail,
+} from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
-  const custody = await db.custody.findUnique({
-    where: { assetId: params.assetId as string },
-    select: {
-      custodian: {
+/** @TODO this needs review */
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
+
+    const custody = await db.custody
+      .findUniqueOrThrow({
+        where: { assetId },
         select: {
-          id: true,
-          name: true,
-          user: {
+          custodian: {
             select: {
-              email: true,
+              id: true,
+              name: true,
+              user: {
+                select: {
+                  email: true,
+                },
+              },
             },
           },
         },
-      },
-    },
-  });
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching custody. Please try again or contact support.",
+          additionalData: { userId, assetId },
+          label: "Assets",
+        });
+      });
 
-  if (!custody) return redirect(`/assets/${params.assetId}`);
+    if (!custody) {
+      return redirect(`/assets/${assetId}`);
+    }
 
-  return json({
-    showModal: true,
-    custody,
-    asset: await db.asset.findUnique({
-      where: { id: params.assetId as string },
-      select: {
-        title: true,
-      },
-    }),
-  });
-};
+    const asset = await db.asset
+      .findUniqueOrThrow({
+        where: { id: params.assetId as string },
+        select: {
+          title: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "We couldn't find the asset you were looking for.",
+          additionalData: { userId, assetId },
+          label: "Assets",
+        });
+      });
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const {
-    authSession: { userId },
-  } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
-  const assetId = params.assetId as string;
-  const user = await getUserByID(userId);
-
-  if (!user)
-    throw new ShelfStackError({
-      message:
-        "User not found. Please refresh and if the issue persists contact support.",
-    });
-
-  const asset = await releaseCustody({ assetId });
-  if (!asset.custody) {
-    const formData = await request.formData();
-    const custodianName = formData.get("custodianName") as string;
-    const custodianEmail = formData.get("custodianEmail") as string;
-
-    /** Once the asset is updated, we create the note */
-    await createNote({
-      content: `**${user.firstName?.trim()} ${
-        user.lastName
-      }** has released **${custodianName?.trim()}'s** custody over **${asset.title?.trim()}**`,
-      type: "UPDATE",
-      userId: asset.userId,
-      assetId: asset.id,
-    });
-    sendNotification({
-      title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
-      message: "This asset is available again.",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
-    });
-    sendEmail({
-      to: custodianEmail,
-      subject: `Your custody over ${asset.title} has been revoked`,
-      text: assetCustodyRevokedEmailText({
-        assetName: asset.title,
-        assignerName: user.firstName + " " + user.lastName,
-        assetId: asset.id,
-      }),
-    });
+    return json(
+      data({
+        showModal: true,
+        custody,
+        asset,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    throw json(error(reason), { status: reason.status });
   }
+}
 
-  return redirect(`/assets/${assetId}`);
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
+
+    const user = await getUserByID(userId);
+
+    const asset = await releaseCustody({ assetId });
+
+    if (!asset.custody) {
+      const formData = await request.formData();
+      const { custodianName, custodianEmail } = parseData(
+        formData,
+        z.object({
+          custodianName: z.string(),
+          custodianEmail: z
+            .string()
+            .transform((email) => email.toLowerCase())
+            .refine(validEmail, () => ({
+              message: "Custodian email is invalid",
+            })),
+        }),
+        {
+          additionalData: { userId, assetId },
+        }
+      );
+
+      //** Once the asset is updated, we create the note */
+      await createNote({
+        content: `**${user.firstName?.trim()} ${
+          user.lastName
+        }** has released **${custodianName?.trim()}'s** custody over **${asset.title?.trim()}**`,
+        type: "UPDATE",
+        userId: asset.userId,
+        assetId: asset.id,
+      });
+      sendNotification({
+        title: `‘${asset.title}’ is no longer in custody of ‘${custodianName}’`,
+        message: "This asset is available again.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      void sendEmail({
+        to: custodianEmail,
+        subject: `Your custody over ${asset.title} has been revoked`,
+        text: assetCustodyRevokedEmailText({
+          assetName: asset.title,
+          assignerName: user.firstName + " " + user.lastName,
+          assetId: asset.id,
+        }),
+      });
+    }
+
+    return redirect(`/assets/${assetId}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    return json(error(reason), { status: reason.status });
+  }
 };
 
 export function links() {
@@ -124,7 +195,7 @@ export default function Custody() {
           <p>
             Are you sure you want to release{" "}
             <span className="font-medium">{custody?.custodian.name}’s</span>{" "}
-            custody over <span className="font-medium">{asset?.title}</span>?
+            custody over <span className="font-medium">{asset.title}</span>?
           </p>
         </div>
         <div className="">

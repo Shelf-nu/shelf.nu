@@ -1,8 +1,7 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 import type { NotificationIcon } from "~/atoms/notifications";
-import { requireAuthSession } from "~/modules/auth";
+import { data, error, makeShelfError, parseData } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export const ClientNotificationSchema = z.object({
@@ -11,25 +10,25 @@ export const ClientNotificationSchema = z.object({
   icon: z.custom<NotificationIcon>(),
 });
 
-export async function action({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
+export async function action({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  const formData = await request.formData();
-  const result = await ClientNotificationSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+  try {
+    const payload = parseData(await request.json(), ClientNotificationSchema);
 
-  if (!result.success) {
-    return json({ error: result.error.message }, { status: 400 });
+    const { title, message, icon } = payload;
+
+    sendNotification({
+      title,
+      message,
+      icon,
+      senderId: authSession.userId,
+    });
+
+    return json(data({ success: true }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-  const { title, message, icon } = result.data;
-
-  sendNotification({
-    title,
-    message,
-    icon,
-    senderId: authSession.userId,
-  });
-
-  return json({ success: true });
 }

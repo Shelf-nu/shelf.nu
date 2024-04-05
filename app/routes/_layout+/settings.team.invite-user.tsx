@@ -7,7 +7,7 @@ import {
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import z from "zod";
 import {
   Select,
@@ -24,14 +24,21 @@ import { Button } from "~/components/shared";
 import { Image } from "~/components/shared/image";
 import { db } from "~/database";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
-import { commitAuthSession } from "~/modules/auth";
 import { createInvite } from "~/modules/invite";
 import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier";
 import styles from "~/styles/layout/custom-modal.css";
-import { isFormProcessing, tw, validEmail } from "~/utils";
+import {
+  data,
+  error,
+  isFormProcessing,
+  parseData,
+  tw,
+  validEmail,
+} from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import type { UserFriendlyRoles } from "./settings.team";
 
 const InviteUserFormSchema = z.object({
@@ -45,76 +52,96 @@ const InviteUserFormSchema = z.object({
   role: z.nativeEnum(OrganizationRoles),
 });
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { organizationId } = await requirePermision(
-    request,
-    PermissionEntity.teamMember,
-    PermissionAction.create
-  );
-  await assertUserCanInviteUsersToWorkspace({ organizationId });
-  return json({
-    showModal: true,
-  });
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.teamMember,
+      action: PermissionAction.create,
+    });
+
+    await assertUserCanInviteUsersToWorkspace({ organizationId });
+
+    return json(
+      data({
+        showModal: true,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.teamMember,
-    PermissionAction.create
-  );
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
-  const formData = await request.formData();
-  const result = await InviteUserFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
 
-  if (!result.success) {
-    return json(
-      {
-        errors: { ...result.error, invite: null },
-      },
-      { status: 400 }
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.teamMember,
+      action: PermissionAction.create,
+    });
+
+    const { email, teamMemberId, role } = parseData(
+      await request.formData(),
+      InviteUserFormSchema
     );
-  }
 
-  const { email, teamMemberId, role } = result.data;
+    let teamMemberName = email.split("@")[0];
 
-  let teamMemberName = email.split("@")[0];
-  if (teamMemberId) {
-    const teamMember = await db.teamMember.findUnique({
-      where: { deletedAt: null, id: teamMemberId },
-    });
-    if (teamMember) {
-      teamMemberName = teamMember.name;
+    if (teamMemberId) {
+      const teamMember = await db.teamMember
+        .findUnique({
+          where: { deletedAt: null, id: teamMemberId },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Failed to get team member",
+            additionalData: { teamMemberId, userId },
+            label: "Team",
+          });
+        });
+
+      if (teamMember) {
+        teamMemberName = teamMember.name;
+      }
     }
-  }
 
-  const invite = await createInvite({
-    organizationId,
-    inviteeEmail: email,
-    inviterId: userId,
-    roles: [role],
-    teamMemberName,
-    teamMemberId,
-    userId,
-  });
+    const invite = await createInvite({
+      organizationId,
+      inviteeEmail: email,
+      inviterId: userId,
+      roles: [role],
+      teamMemberName,
+      teamMemberId,
+      userId,
+    });
 
-  if (invite) {
-    sendNotification({
-      title: "Successfully invited user",
-      message:
-        "They will receive an email in which they can complete their registration.",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
-    });
-    return redirect("/settings/team", {
-      headers: {
-        "Set-Cookie": await commitAuthSession(request, { authSession }),
-      },
-    });
+    if (invite) {
+      sendNotification({
+        title: "Successfully invited user",
+        message:
+          "They will receive an email in which they can complete their registration.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      return redirect("/settings/team");
+    }
+
+    return json(data(null));
+  } catch (cause) {
+    const reason = makeShelfError(cause, {});
+    return json(error(reason), { status: reason.status });
   }
-  return null;
 };
 
 export function links() {
@@ -176,7 +203,7 @@ export default function InviteUser() {
                         className={tw("size-6 rounded-[2px] object-cover")}
                       />
 
-                      <div className=" ml-[1px] text-sm text-gray-900">
+                      <div className=" ml-px text-sm text-gray-900">
                         {organization.name}
                       </div>
                     </div>
@@ -201,7 +228,7 @@ export default function InviteUser() {
                   {Object.entries(organizationRolesMap).map(([k, v]) => (
                     <SelectItem value={k} key={k} className="p-2">
                       <div className="flex items-center gap-2">
-                        <div className=" ml-[1px] block text-sm lowercase text-gray-900 first-letter:uppercase">
+                        <div className=" ml-px block text-sm lowercase text-gray-900 first-letter:uppercase">
                           {v}
                         </div>
                       </div>
@@ -240,11 +267,11 @@ export default function InviteUser() {
             </Button>
           </div>
         </Form>
-        {actionData?.errors?.invite && (
+        {actionData?.error ? (
           <div className="text-sm text-error-500">
-            {actionData.errors?.invite}
+            {actionData.error.message}
           </div>
-        )}
+        ) : null}
       </div>
     </>
   ) : null;

@@ -7,8 +7,7 @@ import {
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
-import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/workspace.new";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
@@ -16,91 +15,97 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
 import { createOrganization } from "~/modules/organization";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import {
+  getSelectedOrganisation,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import { assertUserCanCreateMoreOrganizations } from "~/modules/tier";
-import { assertIsPost } from "~/utils";
+import { assertIsPost, data, error, makeShelfError, parseData } from "~/utils";
+import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
-  assertUserCanCreateMoreOrganizations(userId);
 
-  const header: HeaderData = {
-    title: `New workspace`,
-  };
+  try {
+    const { organizationId } = await getSelectedOrganisation({
+      userId,
+      request,
+    });
 
-  return json({ header, currentOrganizationId: organizationId });
+    await assertUserCanCreateMoreOrganizations(userId);
+
+    const header: HeaderData = {
+      title: `New workspace`,
+    };
+
+    return json(data({ header, currentOrganizationId: organizationId }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const MAX_SIZE = 1024 * 1024 * 4; // 4MB
 
-export async function action({ request }: ActionFunctionArgs) {
-  const authSession = await requireAuthSession(request);
-  assertIsPost(request);
-  assertUserCanCreateMoreOrganizations(authSession.userId);
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  /** Here we need to clone the request as we need 2 different streams:
-   * 1. Access form data for creating asset
-   * 2. Access form data via upload handler to be able to upload the file
-   *
-   * This solution is based on : https://github.com/remix-run/remix/issues/3971#issuecomment-1222127635
-   */
-  const clonedRequest = request.clone();
+  try {
+    assertIsPost(request);
 
-  const formData = await clonedRequest.formData();
+    await assertUserCanCreateMoreOrganizations(userId);
 
-  const result = await NewWorkspaceFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+    /** Here we need to clone the request as we need 2 different streams:
+     * 1. Access form data for creating asset
+     * 2. Access form data via upload handler to be able to upload the file
+     *
+     * This solution is based on : https://github.com/remix-run/remix/issues/3971#issuecomment-1222127635
+     */
+    const clonedRequest = request.clone();
 
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-      },
-      {
-        status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
+    const formData = await clonedRequest.formData();
+
+    const payload = parseData(formData, NewWorkspaceFormSchema, {
+      additionalData: { userId },
+    });
+
+    const { name, currency } = payload;
+    /** This checks if tags are passed and build the  */
+
+    const formDataFile = await unstable_parseMultipartFormData(
+      request,
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
     );
+
+    const file = formDataFile.get("image") as File | null;
+
+    invariant(file instanceof File, "file not the right type");
+
+    const newOrg = await createOrganization({
+      name,
+      userId: authSession.userId,
+      image: file || null,
+      currency,
+    });
+
+    sendNotification({
+      title: "Workspace created",
+      message: "Your workspace has been created successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect(`/settings/workspace/`, {
+      headers: [setCookie(await setSelectedOrganizationIdCookie(newOrg.id))],
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-
-  const { name, currency } = result.data;
-  /** This checks if tags are passed and build the  */
-
-  const formDataFile = await unstable_parseMultipartFormData(
-    request,
-    unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
-  );
-
-  const file = formDataFile.get("image") as File | null;
-  invariant(file instanceof File, "file not the right type");
-
-  await createOrganization({
-    name,
-    userId: authSession.userId,
-    image: file || null,
-    currency,
-  });
-
-  sendNotification({
-    title: "Workspace created",
-    message: "Your workspace has been created successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return redirect(`/settings/workspace/`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
 }
 
 export const handle = {
@@ -108,7 +113,7 @@ export const handle = {
 };
 
 export default function NewWorkspace() {
-  const title = useAtomValue(titleAtom);
+  const title = useAtomValue(dynamicTitleAtom);
 
   return (
     <div>

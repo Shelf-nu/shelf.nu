@@ -4,48 +4,93 @@ import {
   type ActionFunctionArgs,
 } from "@remix-run/node";
 import { Form, Link, useLoaderData } from "@remix-run/react";
+import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
 import { Button } from "~/components/shared";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { generateOrphanedCodes } from "~/modules/qr";
-import { ShelfStackError } from "~/utils/error";
+import { getParams, data, error, parseData } from "~/utils";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  requireAdmin(request);
+export const loader = async ({ context, params }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = getParams(
+    params,
+    z.object({ organizationId: z.string() }),
+    { additionalData: { userId } }
+  );
 
-  const organization = await db.organization.findUnique({
-    where: { id: params.organizationId as string },
-    include: {
-      qrCodes: {
+  try {
+    await requireAdmin(userId);
+
+    const organization = await db.organization
+      .findFirstOrThrow({
+        where: { id: organizationId },
         include: {
-          asset: true,
+          qrCodes: {
+            include: {
+              asset: true,
+            },
+          },
+          owner: true,
         },
-      },
-      owner: true,
-    },
-  });
-  if (!organization) {
-    throw new ShelfStackError({ message: "Organization not found" });
-  }
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          title: "Organization not found",
+          message:
+            "The organization you are trying to access does not exist or you do not have permission to access it.",
+          additionalData: { userId, params },
+          label: "Admin dashboard",
+        });
+      });
 
-  return json({ organization });
+    return json(data({ organization }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, organizationId });
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  await requireAuthSession(request);
-  await requireAdmin(request);
-  const organizationId = params.organizationId as string;
-  const formData = await request.formData();
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = getParams(
+    params,
+    z.object({ organizationId: z.string() }),
+    { additionalData: { userId } }
+  );
 
-  await generateOrphanedCodes({
-    organizationId,
-    userId: formData.get("userId") as string,
-    amount: Number(formData.get("amount")),
-  });
-  return json({ message: "Generated Orphaned QR codes" });
+  try {
+    await requireAdmin(userId);
+
+    const { amount, userId: ownerId } = parseData(
+      await request.formData(),
+      z.object({
+        amount: z.coerce.number(),
+        userId: z.string(),
+      })
+    );
+
+    await generateOrphanedCodes({
+      organizationId,
+      userId: ownerId,
+      amount,
+    });
+
+    return json(data({ message: "Generated Orphaned QR codes" }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, organizationId });
+    return json(error(reason), { status: reason.status });
+  }
 };
 
 export default function OrgPage() {

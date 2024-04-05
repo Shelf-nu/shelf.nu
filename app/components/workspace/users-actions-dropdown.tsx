@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { InviteStatuses, User } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { useFetcher } from "@remix-run/react";
 import {
   RefreshIcon,
   RemoveUserIcon,
+  UserXIcon,
   VerticalDotsIcon,
 } from "~/components/icons";
 import {
@@ -20,15 +21,17 @@ export function TeamUsersActionsDropdown({
   userId,
   inviteStatus,
   name,
+  teamMemberId,
   email,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
   name?: string;
+  teamMemberId?: string;
   email: string;
 }) {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const fetcher = useFetcher();
+  const disabled = isFormProcessing(fetcher.state);
   const [open, setOpen] = useState(false);
 
   return (
@@ -48,7 +51,7 @@ export function TeamUsersActionsDropdown({
           className="order w-[180px] rounded-md bg-white p-[6px] text-right"
           asChild
         >
-          <Form
+          <fetcher.Form
             method="post"
             onSubmit={() => {
               setOpen(false);
@@ -59,10 +62,11 @@ export function TeamUsersActionsDropdown({
               <>
                 <input type="hidden" name="name" value={name} />
                 <input type="hidden" name="email" value={email} />
+                <input type="hidden" name="teamMemberId" value={teamMemberId} />
                 <Button
                   type="submit"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 focus:bg-slate-100 hover:bg-slate-100 hover:text-gray-700"
+                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
                   width="full"
                   name="intent"
                   value="resend"
@@ -70,6 +74,19 @@ export function TeamUsersActionsDropdown({
                 >
                   <span className="flex items-center gap-2">
                     <RefreshIcon /> Resend invite
+                  </span>
+                </Button>
+                <Button
+                  type="submit"
+                  variant="link"
+                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
+                  width="full"
+                  name="intent"
+                  value="cancelInvite"
+                  disabled={disabled}
+                >
+                  <span className="flex items-center gap-2">
+                    <UserXIcon /> Cancel invite
                   </span>
                 </Button>
               </>
@@ -82,10 +99,10 @@ export function TeamUsersActionsDropdown({
                 <Button
                   type="submit"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 focus:bg-slate-100 hover:bg-slate-100 hover:text-gray-700"
+                  className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
                   width="full"
                   name="intent"
-                  value="revoke"
+                  value="revokeAccess"
                   disabled={disabled}
                 >
                   <span className="flex items-center gap-2">
@@ -94,7 +111,7 @@ export function TeamUsersActionsDropdown({
                 </Button>
               </>
             ) : null}
-          </Form>
+          </fetcher.Form>
         </DropdownMenuContent>
       </DropdownMenu>
     </>

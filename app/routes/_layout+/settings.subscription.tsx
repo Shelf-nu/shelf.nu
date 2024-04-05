@@ -5,7 +5,7 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
-import type Stripe from "stripe";
+import { z } from "zod";
 import { InfoIcon } from "~/components/icons";
 import {
   Tabs,
@@ -20,11 +20,12 @@ import SuccessfulSubscriptionModal from "~/components/subscription/successful-su
 import { db } from "~/database";
 
 import { getUserByID } from "~/modules/user";
+import { ENABLE_PREMIUM_FEATURES, data, error, parseData } from "~/utils";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getDomainUrl,
@@ -37,102 +38,142 @@ import {
   getCustomerTrialSubscription,
 } from "~/utils/stripe.server";
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
-    request,
-    PermissionEntity.subscription,
-    PermissionAction.read
-  );
-
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
-  const user = await getUserByID(userId);
 
-  if (!user) throw new Error("User not found");
+  try {
+    if (!ENABLE_PREMIUM_FEATURES) {
+      return redirect("/settings/account");
+    }
 
-  /** Get the Stripe customer */
-  const customer = user.customerId
-    ? ((await getStripeCustomer(user.customerId)) as CustomerWithSubscriptions)
-    : null;
-
-  let subscription = getCustomerActiveSubscription({ customer });
-  /** Check if the customer has an active subscription */
-
-  if (!subscription) {
-    subscription = getCustomerTrialSubscription({ customer });
-  }
-
-  /* Get the prices and products from Stripe */
-  const prices = await getStripePricesAndProducts();
-
-  let activeProduct = null;
-  if (customer && subscription) {
-    /** Get the active subscription ID */
-
-    activeProduct = getActiveProduct({
-      prices,
-      priceId: subscription?.items.data[0].plan.id || null,
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.subscription,
+      action: PermissionAction.read,
     });
-  }
 
-  return json({
-    title: "Subscription",
-    subTitle: "Pick an account plan that fits your workflow.",
-    prices,
-    customer,
-    subscription,
-    activeProduct,
-    expiration: {
-      date: new Date(
-        (subscription?.current_period_end as number) * 1000
-      ).toLocaleDateString(),
-      time: new Date(
-        (subscription?.current_period_end as number) * 1000
-      ).toLocaleTimeString(),
-    },
-    isTrialSubscription: !!subscription?.trial_end,
-  });
+    const user = await getUserByID(userId);
+
+    /** Get the Stripe customer */
+    const customer = user.customerId
+      ? ((await getStripeCustomer(
+          user.customerId
+        )) as CustomerWithSubscriptions)
+      : null;
+
+    /** Check if the customer has an trial subscription */
+    let subscription = getCustomerTrialSubscription({ customer });
+
+    /** If no trial, check if they have an active one */
+    if (!subscription) {
+      subscription = getCustomerActiveSubscription({ customer });
+    }
+
+    /* Get the prices and products from Stripe */
+    const prices = await getStripePricesAndProducts();
+
+    let activeProduct = null;
+    if (customer && subscription) {
+      /** Get the active subscription ID */
+
+      activeProduct = getActiveProduct({
+        prices,
+        priceId: subscription?.items.data[0].plan.id || null,
+      });
+    }
+
+    return json(
+      data({
+        title: "Subscription",
+        subTitle: "Pick an account plan that fits your workflow.",
+        prices,
+        customer,
+        subscription,
+        activeProduct,
+        expiration: {
+          date: new Date(
+            (subscription?.current_period_end as number) * 1000
+          ).toLocaleDateString(),
+          time: new Date(
+            (subscription?.current_period_end as number) * 1000
+          ).toLocaleTimeString(),
+        },
+        isTrialSubscription: !!subscription?.trial_end,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { authSession } = await requirePermision(
-    request,
-    PermissionEntity.subscription,
-    PermissionAction.update
-  );
-
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
   const { userId, email } = authSession;
-  const formData = await request.formData();
-  const priceId = formData.get("priceId") as Stripe.Price["id"];
 
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { customerId: true, firstName: true, lastName: true },
-  });
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.subscription,
+      action: PermissionAction.update,
+    });
 
-  if (!user) throw new Error("User not found");
+    const { priceId } = parseData(
+      await request.formData(),
+      z.object({ priceId: z.string() })
+    );
 
-  /**
-   * We create the stripe customer on onboarding,
-   * however we keep this to double check in case something went wrong
-   */
-  const customerId = user.customerId
-    ? user.customerId
-    : await createStripeCustomer({
-        email,
-        name: `${user.firstName} ${user.lastName}`,
-        userId,
+    const user = await db.user
+      .findUniqueOrThrow({
+        where: { id: userId },
+        select: { customerId: true, firstName: true, lastName: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "No user found",
+          additionalData: { userId },
+          label: "Subscription",
+        });
       });
 
-  if (!customerId) throw new ShelfStackError({ message: "Customer not found" });
+    /**
+     * We create the stripe customer on onboarding,
+     * however we keep this to double check in case something went wrong
+     */
+    const customerId = user.customerId
+      ? user.customerId
+      : await createStripeCustomer({
+          email,
+          name: `${user.firstName} ${user.lastName}`,
+          userId,
+        });
 
-  const stripeRedirectUrl = await createStripeCheckoutSession({
-    userId,
-    priceId,
-    domainUrl: getDomainUrl(request),
-    customerId: customerId,
-  });
-  return redirect(stripeRedirectUrl);
-};
+    if (!customerId) {
+      throw new ShelfError({
+        cause: null,
+        message: "No customer ID found for user",
+        additionalData: { userId },
+        label: "Subscription",
+      });
+    }
+
+    const stripeRedirectUrl = await createStripeCheckoutSession({
+      userId,
+      priceId,
+      domainUrl: getDomainUrl(request),
+      customerId: customerId,
+    });
+
+    return redirect(stripeRedirectUrl);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
+}
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
@@ -149,7 +190,7 @@ export default function UserPage() {
   return (
     <>
       <div className=" flex flex-col">
-        <div className="mb-8 mt-3 flex items-center gap-3 rounded-lg border border-gray-300 p-4">
+        <div className="mb-8 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
           <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
             <InfoIcon />
           </div>

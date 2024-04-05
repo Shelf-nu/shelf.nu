@@ -15,13 +15,13 @@ export default function NewestAssets() {
       <div className="border border-b-0 border-gray-200">
         <div className="flex items-center justify-between">
           <div className="flex-1 p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
-            Newest Assets
+            Newest assets
           </div>
           <div className=" p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
             <InfoTooltip
               content={
                 <>
-                  <h6>Newest Assets</h6>
+                  <h6>Newest assets</h6>
                   <p>Below listed assets were created recently</p>
                 </>
               }

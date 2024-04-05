@@ -1,31 +1,24 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { Link, Outlet } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 
-import { commitAuthSession } from "~/modules/auth";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+export function loader() {
+  return null;
+}
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.read
-  );
+export function shouldRevalidate({
+  actionResult,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  /**
+   * If we are toggliong the sidebar, no need to revalidate this loader.
+   * Revalidation happens in _layout
+   */
+  if (actionResult?.isTogglingSidebar) {
+    return false;
+  }
 
-  return json(
-    {},
-    {
-      headers: [
-        [
-          "Set-Cookie",
-          await commitAuthSession(request, {
-            authSession,
-          }),
-        ],
-      ],
-    }
-  );
+  return defaultShouldRevalidate;
 }
 
 export const handle = {
@@ -36,4 +29,4 @@ export default function AssetsPage() {
   return <Outlet />;
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

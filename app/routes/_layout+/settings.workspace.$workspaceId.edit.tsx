@@ -12,8 +12,8 @@ import type {
 import { useLoaderData } from "@remix-run/react";
 import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
-import { parseFormAny } from "react-zorm";
-import { titleAtom } from "~/atoms/workspace.new";
+import { z } from "zod";
+import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
@@ -21,36 +21,82 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
-import { commitAuthSession } from "~/modules/auth";
-import { getOrganization, updateOrganization } from "~/modules/organization";
-import { assertIsPost, getRequiredParam } from "~/utils";
+import { db } from "~/database";
+import { updateOrganization } from "~/modules/organization";
+import {
+  ShelfError,
+  assertIsPost,
+  data,
+  error,
+  getParams,
+  makeShelfError,
+  parseData,
+} from "~/utils";
+
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { MAX_SIZE } from "./settings.workspace.new";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermision(
-    request,
-    PermissionEntity.workspace,
-    PermissionAction.update
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { workspaceId: id } = getParams(
+    params,
+    z.object({ workspaceId: z.string() }),
+    {
+      additionalData: { userId },
+    }
   );
-  const id = getRequiredParam(params, "workspaceId");
 
-  const organization = await getOrganization({ id });
-  if (!organization) {
-    throw new Response("Not Found", { status: 404 });
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.workspace,
+      action: PermissionAction.update,
+    });
+
+    /** We get the organization and make sure the current user is the owner as only owner should be able to edit it */
+    const organization = await db.organization
+      .findUniqueOrThrow({
+        where: {
+          id,
+          owner: {
+            is: {
+              id: authSession.userId,
+            },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Your are not the owner of this organization.",
+          additionalData: {
+            userId,
+            id,
+          },
+          label: "Organization",
+          status: 403,
+        });
+      });
+
+    const header: HeaderData = {
+      title: `Edit | ${organization.name}`,
+    };
+
+    return json(
+      data({
+        organization,
+        header,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
   }
-
-  const header: HeaderData = {
-    title: `Edit | ${organization.name}`,
-  };
-
-  return json({
-    organization,
-    header,
-  });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -61,69 +107,68 @@ export const handle = {
   breadcrumb: () => <span>Edit</span>,
 };
 
-export async function action({ request, params }: ActionFunctionArgs) {
-  assertIsPost(request);
-  const { authSession } = await requirePermision(
-    request,
-    PermissionEntity.workspace,
-    PermissionAction.update
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { workspaceId: id } = getParams(
+    params,
+    z.object({ workspaceId: z.string() }),
+    {
+      additionalData: { userId },
+    }
   );
 
-  const id = getRequiredParam(params, "workspaceId");
-  const clonedRequest = request.clone();
-  const formData = await clonedRequest.formData();
-  const result = await NewWorkspaceFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+  try {
+    assertIsPost(request);
 
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-        success: false,
-      },
-      {
-        status: 400,
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      }
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.workspace,
+      action: PermissionAction.update,
+    });
+
+    const clonedRequest = request.clone();
+
+    const formData = await clonedRequest.formData();
+    const payload = parseData(formData, NewWorkspaceFormSchema, {
+      additionalData: { userId, id },
+    });
+
+    const { name, currency } = payload;
+
+    const formDataFile = await unstable_parseMultipartFormData(
+      request,
+      unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
     );
+
+    const file = formDataFile.get("image") as File | null;
+    invariant(file instanceof File, "file not the right type");
+
+    await updateOrganization({
+      id,
+      name,
+      image: file || null,
+      userId: authSession.userId,
+      currency,
+    });
+
+    sendNotification({
+      title: "Workspace updated",
+      message: "Your workspace  has been updated successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect("/settings/workspace");
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    return json(error(reason), { status: reason.status });
   }
-
-  const { name, currency } = result.data;
-  const formDataFile = await unstable_parseMultipartFormData(
-    request,
-    unstable_createMemoryUploadHandler({ maxPartSize: MAX_SIZE })
-  );
-
-  const file = formDataFile.get("image") as File | null;
-  invariant(file instanceof File, "file not the right type");
-
-  await updateOrganization({
-    id,
-    name,
-    image: file || null,
-    userId: authSession.userId,
-    currency,
-  });
-
-  sendNotification({
-    title: "Workspace updated",
-    message: "Your workspace  has been updated successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return redirect("/settings/workspace", {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
 }
 
 export default function WorkspaceEditPage() {
-  const name = useAtomValue(titleAtom);
+  const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "Untitled workspace";
   const { organization } = useLoaderData<typeof loader>();
 

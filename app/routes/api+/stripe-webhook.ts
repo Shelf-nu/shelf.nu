@@ -4,7 +4,8 @@ import { json } from "@remix-run/node";
 import type Stripe from "stripe";
 import { db } from "~/database";
 import { trialEndsSoonText } from "~/emails/stripe/trial-ends-soon";
-import { ShelfStackError } from "~/utils/error";
+import { error } from "~/utils";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import {
   fetchStripeSubscription,
@@ -12,46 +13,74 @@ import {
   stripe,
 } from "~/utils/stripe.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const payload = await request.text();
-  const sig = request.headers.get("stripe-signature") as string;
-  let event;
+export async function action({ request }: ActionFunctionArgs) {
   try {
-    event = stripe.webhooks.constructEvent(
+    const payload = await request.text();
+    const sig = request.headers.get("stripe-signature") as string;
+
+    const event = stripe.webhooks.constructEvent(
       payload,
       sig,
       process.env.STRIPE_WEBHOOK_ENDPOINT_SECRET
     );
+
     // Handle the event
     // Don't forget to enable the events in the Stripe dashboard
     switch (event.type) {
       case "checkout.session.completed": {
         // Here we need to update the user's tier in the database based on the subscription they created
-
         /** Get the subscriptionId from the session object */
         const { subscription: subscriptionId } = event.data
           .object as Stripe.Checkout.Session;
 
         /** if it doesnt exist, throw an error */
-        if (!subscriptionId) throw new Error("No subscription ID found");
+        if (!subscriptionId) {
+          throw new ShelfError({
+            cause: null,
+            message: "No subscription ID found",
+            additionalData: { event },
+            label: "Stripe webhook",
+          });
+        }
 
         const subscription = await fetchStripeSubscription(
           subscriptionId as string
         );
+
         /** Get the product */
         const product = subscription.items.data[0].plan
           .product as Stripe.Product;
+
         /* get the string with the customer id */
         const customerId = subscription.customer as string;
+
         const tierId = product?.metadata?.shelf_tier;
-        if (!tierId) throw new Error("No tier ID found");
+
+        if (!tierId) {
+          throw new ShelfError({
+            cause: null,
+            message: "No tier ID found",
+            additionalData: { event, subscription },
+            label: "Stripe webhook",
+          });
+        }
+
         /** Update the user's tier in the database */
-        await db.user.update({
-          where: { customerId },
-          data: {
-            tierId: tierId as TierId,
-          },
-        });
+        await db.user
+          .update({
+            where: { customerId },
+            data: {
+              tierId: tierId as TierId,
+            },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to update user tier",
+              additionalData: { customerId, tierId, event },
+              label: "Stripe webhook",
+            });
+          });
 
         return new Response(null, { status: 200 });
       }
@@ -60,7 +89,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const { subscription, customerId, tierId } =
           await getDataFromStripeEvent(event);
 
-        if (!tierId) throw new Error("No tier ID found");
+        if (!tierId) {
+          throw new ShelfError({
+            cause: null,
+            message: "No tier ID found",
+            additionalData: { event, subscription },
+            label: "Stripe webhook",
+          });
+        }
 
         /** Check if its a trial subscription */
         const isTrialSubscription =
@@ -68,34 +104,59 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         if (isTrialSubscription) {
           /** WHen its a trial subscription, update the tier of the user */
-          await db.user.update({
-            where: { customerId },
-            data: {
-              tierId: tierId as TierId,
-            },
-          });
+          await db.user
+            .update({
+              where: { customerId },
+              data: {
+                tierId: tierId as TierId,
+              },
+            })
+            .catch((cause) => {
+              throw new ShelfError({
+                cause,
+                message: "Failed to update user tier",
+                additionalData: { customerId, tierId, event },
+                label: "Stripe webhook",
+              });
+            });
         }
 
         return new Response(null, { status: 200 });
       }
 
       case "customer.subscription.paused": {
-        /** THis typpically handles expiring of subsciption */
+        /** THis typically handles expiring of subscription */
         const { subscription, customerId, tierId } =
           await getDataFromStripeEvent(event);
 
-        if (!tierId) throw new Error("No tier ID found");
+        if (!tierId) {
+          throw new ShelfError({
+            cause: null,
+            message: "No tier ID found",
+            additionalData: { event, subscription },
+            label: "Stripe webhook",
+          });
+        }
 
         /** When its a trial subscription, update the tier of the user
          * In that case we just set it back to free
          */
         if (subscription.status === "paused") {
-          await db.user.update({
-            where: { customerId },
-            data: {
-              tierId: "free",
-            },
-          });
+          await db.user
+            .update({
+              where: { customerId },
+              data: {
+                tierId: "free",
+              },
+            })
+            .catch((cause) => {
+              throw new ShelfError({
+                cause,
+                message: "Failed to update user tier",
+                additionalData: { customerId, tierId, event },
+                label: "Stripe webhook",
+              });
+            });
         }
 
         return new Response(null, { status: 200 });
@@ -104,14 +165,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       case "customer.subscription.updated": {
         const { customerId, tierId } = await getDataFromStripeEvent(event);
 
-        if (!tierId) throw new Error("No tier ID found");
+        if (!tierId) {
+          throw new ShelfError({
+            cause: null,
+            message: "No tier ID found",
+            additionalData: { event },
+            label: "Stripe webhook",
+          });
+        }
+
         /** Update the user's tier in the database */
-        await db.user.update({
-          where: { customerId },
-          data: {
-            tierId: tierId as TierId,
-          },
-        });
+        await db.user
+          .update({
+            where: { customerId },
+            data: {
+              tierId: tierId as TierId,
+            },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to update user tier",
+              additionalData: { customerId, tierId, event },
+              label: "Stripe webhook",
+            });
+          });
+
         return new Response(null, { status: 200 });
       }
 
@@ -120,12 +199,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
 
-        await db.user.update({
-          where: { customerId },
-          data: {
-            tierId: TierId.free,
-          },
-        });
+        await db.user
+          .update({
+            where: { customerId },
+            data: {
+              tierId: TierId.free,
+            },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message: "Failed to delete user subscription",
+              additionalData: { customerId, event },
+              label: "Stripe webhook",
+            });
+          });
+
         return new Response(null, { status: 200 });
       }
 
@@ -134,16 +223,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const { customerId, tierId, subscription } =
           await getDataFromStripeEvent(event);
 
-        if (!tierId) throw new ShelfStackError({ message: "No tier ID found" });
+        if (!tierId) {
+          throw new ShelfError({
+            cause: null,
+            message: "No tier ID found",
+            additionalData: { event, subscription },
+            label: "Stripe webhook",
+          });
+        }
         /** Check if its a trial subscription */
         const isTrialSubscription =
           subscription.trial_end && subscription.trial_start;
 
         if (isTrialSubscription) {
-          const user = await db.user.findUnique({
-            where: { customerId },
-          });
-          if (!user) throw new ShelfStackError({ message: "No user found" });
+          const user = await db.user
+            .findUniqueOrThrow({
+              where: { customerId },
+            })
+            .catch((cause) => {
+              throw new ShelfError({
+                cause,
+                message: "No user found",
+                additionalData: { customerId },
+                label: "Stripe webhook",
+              });
+            });
 
           await sendEmail({
             to: user.email,
@@ -161,9 +265,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         return new Response(null, { status: 200 });
       }
+
+      default: {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "Unhandled event. Maybe you forgot to handle this event type? Check the Stripe dashboard.",
+          additionalData: { event },
+          label: "Stripe webhook",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
     }
-  } catch (err: any) {
-    throw json({ errors: [{ message: err.message }] }, 400);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
   }
-  return new Response(null, { status: 200 });
-};
+}

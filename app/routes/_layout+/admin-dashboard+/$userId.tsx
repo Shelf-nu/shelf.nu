@@ -2,12 +2,19 @@ import type { Asset, Qr, User } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
+import { z } from "zod";
 import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
 import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
 import { deleteUser } from "~/modules/user";
-import { isDelete } from "~/utils";
+import {
+  ShelfError,
+  getParams,
+  data,
+  error,
+  isDelete,
+  makeShelfError,
+} from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { requireAdmin } from "~/utils/roles.server";
 
@@ -21,58 +28,111 @@ export type UserWithQrCodes = User & {
   qrCodes: QrCodeWithAsset[];
 };
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  requireAdmin(request);
-  const userId = params.userId as string;
-  const user = (await db.user.findUnique({
-    where: { id: userId },
-    include: {
-      qrCodes: {
-        orderBy: { createdAt: "desc" },
+export const loader = async ({ context, params }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { userId: shelfUserId } = getParams(
+    params,
+    z.object({ userId: z.string() }),
+    { additionalData: { userId } }
+  );
+
+  try {
+    await requireAdmin(userId);
+
+    const user = await db.user
+      .findUnique({
+        where: { id: shelfUserId },
         include: {
-          asset: {
-            select: {
-              title: true,
+          qrCodes: {
+            orderBy: { createdAt: "desc" },
+            include: {
+              asset: {
+                select: {
+                  title: true,
+                },
+              },
             },
           },
         },
-      },
-    },
-  })) as UserWithQrCodes;
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load shelf user",
+          additionalData: { userId, shelfUserId },
+          label: "Admin dashboard",
+        });
+      });
 
-  const organizations = await db.organization.findMany({
-    where: {
-      owner: {
-        id: userId,
-      },
-    },
-  });
+    const userOrganizations = await db.userOrganization
+      .findMany({
+        where: {
+          userId: shelfUserId,
+        },
+        select: {
+          organization: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to load user organizations",
+          additionalData: { userId, shelfUserId },
+          label: "Admin dashboard",
+        });
+      });
 
-  return json({ user, organizations });
+    return json(
+      data({
+        user,
+        organizations: userOrganizations.map((uo) => uo.organization),
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, shelfUserId });
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
 export const handle = {
   breadcrumb: () => "User details",
 };
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  await requireAdmin(request);
-  /** ID of the target user we are generating codes for */
-  const userId = params.userId as string;
+export const action = async ({
+  context,
+  request,
+  params,
+}: ActionFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { userId: shelfUserId } = getParams(
+    params,
+    z.object({ userId: z.string() }),
+    { additionalData: { userId } }
+  );
 
-  if (isDelete(request)) {
-    await deleteUser(userId);
+  try {
+    await requireAdmin(userId);
 
-    sendNotification({
-      title: "User deleted",
-      message: "The user has been deleted successfully",
-      icon: { name: "trash", variant: "error" },
-      senderId: authSession.userId,
-    });
-    return redirect("/admin-dashboard");
+    if (isDelete(request)) {
+      await deleteUser(shelfUserId);
+
+      sendNotification({
+        title: "User deleted",
+        message: "The user has been deleted successfully",
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+
+      return redirect("/admin-dashboard");
+    }
+
+    return json(data(null));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, shelfUserId });
+    return json(error(reason), { status: reason.status });
   }
-  return null;
 };
 
 export default function Area51UserPage() {
@@ -111,6 +171,9 @@ export default function Area51UserPage() {
               <th className="border-b p-4 text-left text-gray-600 md:px-6">
                 Created at
               </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                Is Owner
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -126,6 +189,7 @@ export default function Area51UserPage() {
                 </Td>
                 <Td>{org.type}</Td>
                 <Td>{org.createdAt}</Td>
+                <Td>{org.userId === user.id ? "yes" : "no"}</Td>
               </Tr>
             ))}
           </tbody>

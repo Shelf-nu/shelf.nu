@@ -1,4 +1,5 @@
-import { ShelfStackError } from "./error";
+import { z } from "zod";
+import { ShelfError } from "./error";
 import { isBrowser } from "./is-browser";
 
 declare global {
@@ -35,11 +36,15 @@ declare global {
       SMTP_PWD: string;
       SMTP_HOST: string;
       SMTP_USER: string;
+      SMTP_FROM: string;
       MAINTENANCE_MODE: string;
       DATABASE_URL: string;
       DIRECT_URL: string;
       GEOCODE_API_KEY: string;
       SENTRY_DSN: string;
+      ADMIN_EMAIL: string;
+      ADMIN_PASSWORD: string;
+      ADMIN_USERNAME: string;
     }
   }
 }
@@ -59,10 +64,34 @@ function getEnv(
   const value = source[name as keyof typeof source];
 
   if (!value && isRequired) {
-    throw new ShelfStackError({ message: `${name} is not set` });
+    // FIXME: @TODO Solve error handling
+    throw new ShelfError({
+      message: `${name} is not set`,
+      cause: null,
+      label: "Environment",
+    });
   }
 
   return value;
+}
+
+export const EnvSchema = z.object({
+  SESSION_SECRET: z.string().min(1),
+  NODE_ENV: z.enum(["development", "production", "test"]),
+});
+
+type Env = z.infer<typeof EnvSchema>;
+
+const PublicEnvSchema = EnvSchema.pick({
+  NODE_ENV: true,
+});
+
+export const env = (
+  isBrowser ? PublicEnvSchema.parse(window.env) : EnvSchema.parse(process.env)
+) as Env;
+
+export function initEnv() {
+  return env;
 }
 
 /**
@@ -81,11 +110,24 @@ export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
 export const SMTP_PWD = getEnv("SMTP_PWD");
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_USER = getEnv("SMTP_USER");
+export const SMTP_FROM = getEnv("SMTP_FROM", {
+  isRequired: false,
+});
 export const DATABASE_URL = getEnv("DATABASE_URL");
 export const DIRECT_URL = getEnv("DIRECT_URL", {
   isRequired: false,
 });
 export const SENTRY_DSN = getEnv("SENTRY_DSN", {
+  isRequired: false,
+});
+
+export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
+  isRequired: false,
+});
+export const ADMIN_PASSWORD = getEnv("ADMIN_PASSWORD", {
+  isRequired: false,
+});
+export const ADMIN_USERNAME = getEnv("ADMIN_USERNAME", {
   isRequired: false,
 });
 
@@ -129,6 +171,12 @@ export const MAINTENANCE_MODE =
 
 export const ENABLE_PREMIUM_FEATURES =
   getEnv("ENABLE_PREMIUM_FEATURES", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const SEND_ONBOARDING_EMAIL =
+  getEnv("SEND_ONBOARDING_EMAIL", {
     isSecret: false,
     isRequired: false,
   }) === "true" || false;

@@ -14,13 +14,13 @@ export default function LocationRatioChart() {
     <div className="w-full border border-gray-200 ">
       <div className="flex items-center justify-between">
         <div className="flex-1 border-b p-4 text-left text-[14px] font-semibold  text-gray-900 md:px-6">
-          Location Ratio
+          Location ratio
         </div>
         <div className="border-b p-4 text-right text-[14px] font-semibold  text-gray-900 md:px-6">
           <InfoTooltip
             content={
               <>
-                <h6>Location Ratio</h6>
+                <h6>Location ratio</h6>
                 <p>
                   This chart shows how much of your assets are in a defined
                   location
@@ -48,7 +48,7 @@ export default function LocationRatioChart() {
                     color="orange"
                   >
                     <span className="block text-center text-xs font-medium text-gray-600">
-                      Location Known <br />
+                      Location known <br />
                       <span className="block text-[14px] font-semibold leading-6 text-gray-900">
                         {assetsWithLocation}/{totalAssets} assets
                       </span>
@@ -59,7 +59,7 @@ export default function LocationRatioChart() {
 
               <div>
                 <Text className="mb-2 !text-[14px] font-medium text-gray-600">
-                  Location Ratio
+                  Location ratio
                 </Text>
                 <Text className="mb-3 !text-[30px] font-semibold text-gray-900">
                   {`${((assetsWithLocation / totalAssets) * 100).toFixed(2)}%`}

@@ -1,4 +1,5 @@
 import { Outlet } from "react-router";
+import { ErrorContent } from "~/components/errors";
 
 export default function OnboardingLayout() {
   return (
@@ -10,7 +11,7 @@ export default function OnboardingLayout() {
           </div>
         </div>
         <img
-          src="/images/bg-overlay1.png"
+          src="/static/images/bg-overlay1.png"
           alt="bg-overlay"
           className="absolute right-0 top-0 -z-10 size-full object-cover"
         />
@@ -18,3 +19,5 @@ export default function OnboardingLayout() {
     </div>
   );
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

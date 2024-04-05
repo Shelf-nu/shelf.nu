@@ -5,6 +5,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
+import { z } from "zod";
 import {
   ImportBackup,
   ImportContent,
@@ -17,96 +18,96 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { createAssetsFromContentImport } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
 import { assertUserCanImportAssets } from "~/modules/tier";
+import { data, error, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { authSession, organizationId, organizations } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.import
-  );
+export const action = async ({ context, request }: ActionFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
 
-  const error = {
-    message: "",
-    details: {
-      code: null,
-    },
-  };
-
   try {
+    const { organizationId, organizations } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    });
+
     await assertUserCanImportAssets({ organizationId, organizations });
-    const intent = (await request.clone().formData()).get("intent") as
-      | "backup"
-      | "content";
+
+    const { intent } = parseData(
+      await request.clone().formData(),
+      z.object({
+        intent: z.enum(["backup", "content"]),
+      })
+    );
+
     const csvData = await csvDataFromRequest({ request });
+
     if (csvData.length < 2) {
-      throw new Error("CSV file is empty");
+      throw new ShelfError({
+        cause: null,
+        message: "CSV file is empty",
+        additionalData: { intent },
+        label: "Assets",
+      });
     }
 
     switch (intent) {
-      case "backup":
-        throw new ShelfStackError({
+      case "backup": {
+        throw new ShelfError({
+          cause: null,
           message: "This feature is not available for you",
+          label: "Assets",
         });
-      case "content":
+      }
+      case "content": {
         const contentData = extractCSVDataFromContentImport(csvData);
         await createAssetsFromContentImport({
           data: contentData,
           userId,
           organizationId,
         });
-        return json({ success: true, error }, { status: 200 });
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Invalid CSV file";
-
-    return json(
-      {
-        success: false,
-        error: {
-          message,
-          details: {
-            code: null,
-          },
-        },
-      },
-      {
-        status: 400,
-        headers: [
-          setCookie(
-            await commitAuthSession(request, {
-              authSession,
-              flashErrorMessage: null,
-            })
-          ),
-        ],
+        return json(data(null));
       }
-    );
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
 };
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { organizationId, organizations } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.import
-  );
-  await assertUserCanImportAssets({ organizationId, organizations });
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  return json({
-    header: {
-      title: "Import assets (beta)",
-    },
-  });
+  try {
+    const { organizationId, organizations } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    });
+
+    await assertUserCanImportAssets({ organizationId, organizations });
+
+    return json(
+      data({
+        header: {
+          title: "Import assets (beta)",
+        },
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [

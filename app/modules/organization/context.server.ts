@@ -1,15 +1,16 @@
-import { createCookie, redirect } from "@remix-run/node";
-import { NODE_ENV, SESSION_SECRET, getCurrentPath, isGet } from "~/utils";
+import { createCookie } from "@remix-run/node";
+import { NODE_ENV, SESSION_SECRET } from "~/utils";
 import {
   destroyCookie,
   parseCookie,
   serializeCookie,
-  setCookie,
 } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 
 import { getUserOrganizations } from "./service.server";
-import type { AuthSession } from "../auth/types";
+
+const label: ErrorLabel = "Organization";
 
 const selectedOrganizationIdCookie = createCookie("selected-organization-id", {
   httpOnly: true,
@@ -39,11 +40,23 @@ export function destroySelectedOrganizationIdCookie() {
   return destroyCookie(selectedOrganizationIdCookie);
 }
 
-export async function requireOrganisationId(
-  { userId }: AuthSession,
-  request: Request
-) {
-  const organizationId = await getSelectedOrganizationIdCookie(request);
+/**
+ * This function is used to get the selected organization for the user.
+ *
+ * It checks if the user is part of the current selected organization
+ *
+ * **It always defaults to the personal organization if the user is not part of the current selected organization.**
+ *
+ * @throws If the user is not part of any organization
+ */
+export async function getSelectedOrganisation({
+  userId,
+  request,
+}: {
+  userId: string;
+  request: Request;
+}) {
+  let organizationId = await getSelectedOrganizationIdCookie(request);
 
   /** There could be a case when you get removed from an organization while browsing it.
    * In this case what we do is we set the current organization to the first one in the list
@@ -54,58 +67,40 @@ export async function requireOrganisationId(
   const personalOrganization = organizations.find(
     (org) => org.type === "PERSONAL"
   );
+
+  if (!personalOrganization) {
+    throw new ShelfError({
+      cause: null,
+      title: "No personal organization found",
+      message:
+        "You do not have a personal organization. This should not happen. Please contact support.",
+      additionalData: { userId, organizationId, userOrganizationIds },
+      label,
+    });
+  }
+
+  // If the organizationId is not set or the user is not part of the organization, we set it to the personal organization
+  // This case should be extremely rare (be revoked from an organization while browsing it), so, I keep it simple
+  // 💡 This can be improved by implementing a system that sends an sse notification when a user is revoked and forcing the app to reload
+  if (!organizationId || !userOrganizationIds.includes(organizationId)) {
+    organizationId = personalOrganization.id;
+  }
+
   const currentOrganization = organizations.find(
     (org) => org.id === organizationId
   );
 
-  if (!personalOrganization) {
-    throw new ShelfStackError({
-      cause: null,
-      message:
-        "You do not have a personal organization. This should not happen. Please contact support.",
-      status: 500,
-    });
-  }
-
-  /**
-   * If for some reason there is no currentOrganization, we handle it by setting it to the personalOrganization
-   */
+  // (should not happen but just in case)
   if (!currentOrganization) {
-    if (isGet(request)) {
-      throw redirect(getCurrentPath(request), {
-        headers: [
-          setCookie(
-            await setSelectedOrganizationIdCookie(personalOrganization.id)
-          ),
-        ],
-      });
-    }
-
-    // Other methods should throw an error (mostly for actions)
-    throw new ShelfStackError({
+    throw new ShelfError({
       cause: null,
-      message: "You do not have access to this organization",
-      status: 401,
-    });
-  }
-
-  // If the user is not part of the organization or the organizationId is not set (should not happen but just in case)
-  if (!organizationId || !userOrganizationIds.includes(organizationId)) {
-    if (isGet(request)) {
-      throw redirect(getCurrentPath(request), {
-        headers: [
-          setCookie(
-            await setSelectedOrganizationIdCookie(personalOrganization.id)
-          ),
-        ],
-      });
-    }
-
-    // Other methods should throw an error (mostly for actions)
-    throw new ShelfStackError({
-      cause: null,
-      message: "You do not have access to this organization",
-      status: 401,
+      title: "No organization",
+      message:
+        "You do not have access to any organization. Please contact support.",
+      status: 403,
+      additionalData: { userId, organizationId, userOrganizationIds },
+      shouldBeCaptured: false,
+      label,
     });
   }
 

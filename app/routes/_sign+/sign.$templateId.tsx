@@ -238,8 +238,8 @@ export default function Sign() {
     <div className="flex h-full flex-col md:flex-row">
       <AgreementPopup templateName={template.name} />
       <div className="order-2 grow md:order-1">PDF GOES HERE</div>
-      <div className="order-1 flex max-h-[90vh] w-full flex-col overflow-y-auto overflow-x-clip border-l-[1px] border-l-gray-200 md:order-2 md:w-[400px]">
-        <div className="flex w-full items-center justify-between gap-x-2 border-b-[1px] border-b-gray-200 p-4">
+      <div className="order-1 flex max-h-[90vh] w-full flex-col overflow-y-auto overflow-x-clip border-l-DEFAULT border-l-gray-200 md:order-2 md:w-[400px]">
+        <div className="flex w-full items-center justify-between gap-x-2 border-b-DEFAULT border-b-gray-200 p-4">
           <div title="Home" className="block h-[32px]">
             <img
               src="/images/logo-full-color(x2).png"
@@ -255,7 +255,7 @@ export default function Sign() {
             Sign
           </Button>
         </div>
-        <div className="flex flex-col gap-y-2 border-b-[1px] border-b-gray-200 p-4">
+        <div className="flex flex-col gap-y-2 border-b-DEFAULT border-b-gray-200 p-4">
           <h1 className="text-lg font-semibold text-gray-800">
             {template.name}
           </h1>

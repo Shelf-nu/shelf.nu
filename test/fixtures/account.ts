@@ -38,9 +38,9 @@ export const test = base.extend<{}, { account: Account }>({
       await page.goto("/");
       await page.click("[data-test-id=signupButton]");
       await expect(page).toHaveURL(/.*join/);
-      await page.fill("#magic-link", email);
+      // await page.fill("#magic-link", email);
 
-      await page.click("[data-test-id=continueWithMagicLink]");
+      await page.click("[data-test-id=continueWithOTPButton]");
 
       await expect(page.getByText("Check your emails")).toBeVisible();
 

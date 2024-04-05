@@ -4,6 +4,7 @@ import {
   CategoriesIcon,
   GraphIcon,
   LocationMarkerIcon,
+  ScanQRIcon,
   SettingsIcon,
   TagsIcon,
 } from "~/components/icons";
@@ -45,8 +46,14 @@ export function useMainMenuItems() {
   ];
   const menuItemsBottom = [
     {
+      icon: <ScanQRIcon />,
+      to: "scanner",
+      label: "QR scanner",
+      end: true,
+    },
+    {
       icon: <SettingsIcon />,
-      to: "settings/account",
+      to: "settings",
       label: "Settings",
       end: true,
     },

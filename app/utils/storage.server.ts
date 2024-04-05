@@ -1,31 +1,43 @@
 import {
-  json,
   unstable_composeUploadHandlers,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
 import type { ResizeOptions } from "sharp";
 
 import { getSupabaseAdmin } from "~/integrations/supabase";
-import { requireAuthSession } from "~/modules/auth";
 import { cropImage, extractImageNameFromSupabaseUrl } from ".";
 import { SUPABASE_URL } from "./env";
-import { ShelfStackError } from "./error";
+import type { ErrorLabel } from "./error";
+import { ShelfError } from "./error";
 import { getFileArrayBuffer } from "./getFileArrayBuffer";
+import { Logger } from "./logger";
 
-export function getPublicFileURL({
+const label: ErrorLabel = "File storage";
+
+export async function getPublicFileURL({
   filename,
   bucketName = "profile-pictures",
 }: {
   filename: string;
   bucketName?: string;
 }) {
-  bucketExists(bucketName);
+  /** @TODO bucketExists should be updated to catch the error properly so it can be used within the try/catch when invoked */
+  await bucketExists(bucketName);
 
-  const { data } = getSupabaseAdmin()
-    .storage.from(bucketName)
-    .getPublicUrl(filename);
+  try {
+    const { data } = getSupabaseAdmin()
+      .storage.from(bucketName)
+      .getPublicUrl(filename);
 
-  return data.publicUrl;
+    return data.publicUrl;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to get public file URL",
+      additionalData: { filename, bucketName },
+      label,
+    });
+  }
 }
 
 export async function createSignedUrl({
@@ -42,17 +54,23 @@ export async function createSignedUrl({
     if (filename.startsWith("/")) {
       filename = filename.substring(1); // Remove the first character
     }
+
     const { data, error } = await getSupabaseAdmin()
       .storage.from(bucketName)
-      .createSignedUrl(filename, 86_400_000); //24h
+      .createSignedUrl(filename, 24 * 60 * 60); //24h
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
 
     return data.signedUrl;
-  } catch (error) {
-    return new ShelfStackError({
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
       message:
-        "Something went wrong with updating your image. Please refresh the page. If the issue persists contact support.",
+        "Something went wrong while creating a signed URL. Please try again. If the issue persists contact support.",
+      additionalData: { filename, bucketName },
+      label,
     });
   }
 }
@@ -60,8 +78,11 @@ export async function createSignedUrl({
 async function bucketExists(bucketName: string) {
   const { error } = await getSupabaseAdmin().storage.getBucket(bucketName);
 
+  /** @TODO maybe we have to catch the error above. As there could be different errors on theory */
   if (error) {
-    throw new ShelfStackError({
+    throw new ShelfError({
+      label: "Storage",
+      cause: null,
       message: `Storage bucket "${bucketName}" does not exist. If the issue persists, please contact administrator.`,
     });
   }
@@ -95,11 +116,14 @@ async function uploadFile(
     }
 
     return data.path;
-  } catch (error) {
-    /** We have to return null as thats what composeUploadHandlers expects
-     * also we have to use try/catch. If i dont use it i get an error
-     */
-    return null;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while uploading the file. Please try again or contact support.",
+      additionalData: { filename, contentType, bucketName },
+      label,
+    });
   }
 }
 
@@ -124,35 +148,43 @@ export async function parseFileFormData({
   resizeOptions?: ResizeOptions;
   updateExisting?: boolean;
 }) {
-  await requireAuthSession(request);
-  await bucketExists(bucketName);
+  try {
+    await bucketExists(bucketName);
 
-  const uploadHandler = unstable_composeUploadHandlers(
-    async ({ contentType, data, filename }) => {
-      if (!contentType) return undefined;
-      if (contentType?.includes("image") && contentType.includes("pdf"))
-        return undefined;
-      const fileExtension = contentType.includes("pdf")
-        ? "pdf"
-        : filename?.split(".").pop();
+    const uploadHandler = unstable_composeUploadHandlers(
+      async ({ contentType, data, filename }) => {
+        if (!contentType) return undefined;
+        if (contentType?.includes("image") && contentType.includes("pdf"))
+          return undefined;
+        const fileExtension = contentType.includes("pdf")
+          ? "pdf"
+          : filename?.split(".").pop();
 
-      const uploadedFilePath = await uploadFile(data, {
-        filename: `${newFileName}.${fileExtension}`,
-        contentType,
-        bucketName,
-        resizeOptions,
-        updateExisting,
-      });
-      return uploadedFilePath;
-    }
-  );
+        const uploadedFilePath = await uploadFile(data, {
+          filename: `${newFileName}.${fileExtension}`,
+          contentType,
+          bucketName,
+          resizeOptions,
+          updateExisting,
+        });
+        return uploadedFilePath;
+      }
+    );
 
-  const formData = await unstable_parseMultipartFormData(
-    request,
-    uploadHandler
-  );
+    const formData = await unstable_parseMultipartFormData(
+      request,
+      uploadHandler
+    );
 
-  return formData;
+    return formData;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while uploading the file. Please try again or contact support.",
+      label,
+    });
+  }
 }
 
 export async function deleteProfilePicture({
@@ -169,7 +201,12 @@ export async function deleteProfilePicture({
       ) ||
       url === ""
     ) {
-      throw new ShelfStackError({ message: "Wrong url" });
+      throw new ShelfError({
+        cause: null,
+        message: "Invalid file URL",
+        additionalData: { url },
+        label,
+      });
     }
 
     const { error } = await getSupabaseAdmin()
@@ -179,8 +216,15 @@ export async function deleteProfilePicture({
     if (error) {
       throw error;
     }
-  } catch (error) {
-    return json({ error });
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Fail to delete the profile picture",
+        additionalData: { url, bucketName },
+        label,
+      })
+    );
   }
 }
 
@@ -193,9 +237,13 @@ export async function deleteAssetImage({
 }) {
   try {
     const path = extractImageNameFromSupabaseUrl({ url, bucketName });
-
     if (!path) {
-      throw new ShelfStackError({ message: "Cannot find image" });
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot extract the image path from the URL",
+        additionalData: { url, bucketName },
+        label,
+      });
     }
 
     const { error } = await getSupabaseAdmin()
@@ -207,7 +255,14 @@ export async function deleteAssetImage({
     }
 
     return true;
-  } catch (error) {
-    return { error };
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Fail to delete the asset image",
+        additionalData: { url, bucketName },
+        label,
+      })
+    );
   }
 }

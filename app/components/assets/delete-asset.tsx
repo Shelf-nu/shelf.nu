@@ -56,7 +56,11 @@ export const DeleteAsset = ({
 
           <Form method="delete">
             {asset.mainImage && (
-              <input type="hidden" value={asset.mainImage} name="mainImage" />
+              <input
+                type="hidden"
+                value={asset.mainImage}
+                name="mainImageUrl"
+              />
             )}
             <input type="hidden" value="delete" name="intent" />
             <Button

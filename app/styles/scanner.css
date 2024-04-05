@@ -1,0 +1,6 @@
+body {
+  @apply overflow-hidden;
+}
+body .inner-container {
+  @apply flex-1;
+}

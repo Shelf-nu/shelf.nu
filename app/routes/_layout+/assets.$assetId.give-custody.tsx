@@ -11,6 +11,7 @@ import {
   useNavigation,
 } from "@remix-run/react";
 import { useAtom } from "jotai";
+import { z } from "zod";
 import { assignCustodyUser } from "~/atoms/assign-custody-user";
 
 import CustodianSelect from "~/components/custody/custodian-select";
@@ -28,275 +29,363 @@ import {
 } from "~/modules/invite/helpers";
 import { getUserByID } from "~/modules/user";
 import styles from "~/styles/layout/custom-modal.css";
-import { isFormProcessing } from "~/utils";
+import {
+  data,
+  error,
+  getParams,
+  isFormProcessing,
+  makeShelfError,
+  parseData,
+  ShelfError,
+} from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
 import { sendEmail } from "~/utils/mail.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
+import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { organizationId } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
 
-  const assetId = params.assetId as string;
-  const asset = await db.asset.findUnique({
-    where: { id: assetId },
-    select: {
-      custody: {
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
+
+    const asset = await db.asset
+      .findUnique({
+        where: { id: assetId },
         select: {
-          id: true,
-        },
-      },
-      bookings: {
-        where: {
-          status: {
-            in: [BookingStatus.RESERVED],
+          custody: {
+            select: {
+              id: true,
+            },
+          },
+          bookings: {
+            where: {
+              status: {
+                in: [BookingStatus.RESERVED],
+              },
+            },
+            select: {
+              id: true,
+            },
           },
         },
-        select: {
-          id: true,
-        },
-      },
-    },
-  });
-  /** If the asset already has a custody, this page should not be visible */
-  if (asset && asset.custody) {
-    return redirect(`/assets/${assetId}`);
-  }
-
-  /** We get all the team members that are part of the user's personal organization */
-  const teamMembers = await db.teamMember.findMany({
-    where: {
-      deletedAt: null,
-      organizationId,
-    },
-    include: {
-      user: true,
-    },
-    orderBy: {
-      userId: "asc",
-    },
-  });
-
-  // We need to fetch all the templates that belong to the user's current organization
-  // and the template type is CUSTODY
-  const templates = await db.template.findMany({
-    where: {
-      organizationId,
-      type: TemplateType.CUSTODY,
-    },
-  });
-
-  return json({
-    showModal: true,
-    teamMembers,
-    templates,
-    asset,
-  });
-};
-
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const {
-    authSession: { userId },
-  } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
-  const formData = await request.formData();
-  const assetId = params.assetId as string;
-  const custodian = formData.get("custodian");
-  const user = await getUserByID(userId);
-  const addTemplateEnabled = formData.get("addTemplateEnabled");
-  const template = formData.get("template");
-
-  if (!user)
-    throw new ShelfStackError({
-      message:
-        "User not found. Please refresh and if the issue persists contact support.",
-    });
-
-  if (!custodian)
-    return json(
-      { error: "Please select a custodian", type: "CUSTODIAN" },
-      { status: 400 }
-    );
-
-  if (addTemplateEnabled && !template)
-    return json(
-      { error: "Please select a template", type: "TEMPLATE" },
-      { status: 400 }
-    );
-
-  let templateId = null,
-    templateObj = null;
-
-  if (addTemplateEnabled) {
-    templateId = JSON.parse(template as string).id;
-
-    templateObj = await db.template.findUnique({
-      where: { id: templateId as string },
-    });
-
-    if (!templateObj)
-      throw new ShelfStackError({
-        message:
-          "Template not found. Please refresh and if the issue persists contact support.",
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching asset. Please try again or contact support.",
+          additionalData: { userId, assetId, organizationId },
+          label: "Assets",
+        });
       });
+
+    /** If the asset already has a custody, this page should not be visible */
+    if (asset && asset.custody) {
+      return redirect(`/assets/${assetId}`);
+    }
+
+    /** We get all the team members that are part of the user's personal organization */
+    const teamMembers = await db.teamMember
+      .findMany({
+        where: {
+          deletedAt: null,
+          organizationId,
+        },
+        include: {
+          user: true,
+        },
+        orderBy: {
+          userId: "asc",
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching team members. Please try again or contact support.",
+          additionalData: { userId, assetId, organizationId },
+          label: "Assets",
+        });
+      });
+
+    // We need to fetch all the templates that belong to the user's current organization
+    // and the template type is CUSTODY
+    /** @TODO here you haev to throw if no template is found */
+    const templates = await db.template.findMany({
+      where: {
+        organizationId,
+        type: TemplateType.CUSTODY,
+      },
+    });
+
+    return json(
+      data({
+        showModal: true,
+        teamMembers,
+        asset,
+        templates,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    throw json(error(reason), { status: reason.status });
   }
+}
 
-  /** We send the data from the form as a json string, so we can easily have both the name and id
-   * ID is used to connect the asset to the custodian
-   * Name is used to create the note
-   */
-  const {
-    id: custodianId,
-    name: custodianName,
-    email: custodianEmail,
-    userId: custodianUserId,
-  } = JSON.parse(custodian as string);
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
 
-  let asset = null;
-
-  /**
-   * We consider 2 cases:
-   * 1. We assign a template for signature
-   * 2. We don't assign a template for signature
-   */
-  if (addTemplateEnabled) {
-    /**
-     * In this case, we do the following:
-     * 1. We check if the signature is required by the template
-     * 2. If yes, the the asset status is "AVAILABLE", else "IN_CUSTODY"
-     * 3. We create a new custody record for that specific asset and the template
-     * 4. We link it to the custodian
-     */
-    asset = await db.asset.update({
-      where: { id: assetId },
-      data: {
-        status: templateObj!.signatureRequired
-          ? AssetStatus.AVAILABLE
-          : AssetStatus.IN_CUSTODY,
-        custody: {
-          create: {
-            custodian: { connect: { id: custodianId as string } },
-            template: { connect: { id: templateId as string } },
-          },
-        },
-      },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
-    });
-  } else {
-    /**
-     * In this case, we do the following:
-     * 1. We update the asset status
-     * 2. We create a new custody record for that specific asset
-     * 3. We link it to the custodian
-     */
-    asset = await db.asset.update({
-      where: { id: assetId },
-      data: {
-        status: AssetStatus.IN_CUSTODY,
-        custody: {
-          create: {
-            custodian: { connect: { id: custodianId as string } },
-          },
-        },
-      },
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-          },
-        },
-      },
-    });
-  }
-
-  // If the template was specified, and signature was required
-  if (addTemplateEnabled && templateObj!.signatureRequired) {
-    /** We create the note */
-    await createNote({
-      content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateObj!.name?.trim()}** template before receiving custody.`,
-      type: "UPDATE",
-      userId: userId,
-      assetId: asset.id,
+  try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
     });
 
-    sendNotification({
-      title: `‘${asset.title}’ would go in custody of ${custodianName}`,
-      message:
-        "This asset will stay available until the custodian signs the PDF template. After that, the asset will be unavailable until custody is manually released.",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
-    });
-
-    sendEmail({
-      to: custodianEmail,
-      subject: `You have been assigned custody over ${asset.title}.`,
-      text: assetCustodyAssignedWithTemplateEmailText({
-        assetName: asset.title,
-        assignerName: user.firstName + " " + user.lastName,
-        assetId: asset.id,
-        templateId: templateObj!.id,
-        assigneeId: custodianUserId,
+    const { custodian, addTemplateEnabled, template } = parseData(
+      await request.formData(),
+      z.object({
+        custodian: stringToJSONSchema.pipe(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            email: z.string(),
+            userId: z.string(),
+          })
+        ),
+        /** @TODO not sure how this data is sent. please double check and review this 
+         *  This was the original code but now we handle it dirrefently. Needs to be reviewed and handled using parseData and the new approach
+         * //   if (addTemplateEnabled && !template)
+          //     return json(
+          //       { error: "Please select a template", type: "TEMPLATE" },
+          //       { status: 400 }
+          //     );
+        */
+        addTemplateEnabled: z.boolean(),
+        /** @TODO not sure what data we are sending here. I just added the ID but please add teh other fields that are suppsoed to be there */
+        template: stringToJSONSchema.pipe(
+          z.object({
+            id: z.string(),
+          })
+        ),
       }),
-    });
-  } else {
-    // If the template was not specified
-    await createNote({
-      content: `**${user.firstName} ${user.lastName}** has given **${custodianName}** custody over **${asset.title}**`,
-      type: "UPDATE",
-      userId: userId,
-      assetId: asset.id,
-    });
+      {
+        additionalData: { userId, assetId },
+        message: "Please select a custodian",
+      }
+    );
 
-    sendNotification({
-      title: `‘${asset.title}’ is now in custody of ${custodianName}`,
-      message:
-        "Remember, this asset will be unavailable until custody is manually released.",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
-    });
+    const user = await getUserByID(userId);
 
-    sendEmail({
-      to: custodianEmail,
-      subject: `You have been assigned custody over ${asset.title}`,
-      text: assetCustodyAssignedEmailText({
-        assetName: asset.title,
-        assignerName: user.firstName + " " + user.lastName,
+    /** We send the data from the form as a json string, so we can easily have both the name and id
+     * ID is used to connect the asset to the custodian
+     * Name is used to create the note
+     */
+    const {
+      id: custodianId,
+      name: custodianName,
+      email: custodianEmail,
+      userId: custodianUserId,
+    } = custodian;
+
+    let templateId = null,
+      templateObj = null;
+
+    if (addTemplateEnabled) {
+      templateId = template.id;
+
+      templateObj = await db.template
+        .findUnique({
+          where: { id: templateId as string },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while fetching template. Please try again or contact support.",
+            additionalData: { userId, assetId, custodianId },
+            label: "Assets",
+          });
+        });
+
+      if (!templateObj)
+        throw new ShelfError({
+          message:
+            "Template not found. Please refresh and if the issue persists contact support.",
+          label: "Assets",
+          cause: null,
+        });
+    }
+    let asset = null;
+
+    if (addTemplateEnabled) {
+      /**
+       * In this case, we do the following:
+       * 1. We check if the signature is required by the template
+       * 2. If yes, the the asset status is "AVAILABLE", else "IN_CUSTODY"
+       * 3. We create a new custody record for that specific asset and the template
+       * 4. We link it to the custodian
+       */
+      asset = await db.asset
+        .update({
+          where: { id: assetId },
+          data: {
+            status: templateObj!.signatureRequired
+              ? AssetStatus.AVAILABLE
+              : AssetStatus.IN_CUSTODY,
+            custody: {
+              create: {
+                custodian: { connect: { id: custodianId as string } },
+                template: { connect: { id: templateId as string } },
+              },
+            },
+          },
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while updating asset. Please try again or contact support.",
+            additionalData: { userId, assetId, custodianId, templateId },
+            label: "Assets",
+          });
+        });
+    } else {
+      /** In order to do it with a single query
+       * 1. We update the asset status
+       * 2. We create a new custody record for that specific asset
+       * 3. We link it to the custodian
+       */
+      asset = await db.asset
+        .update({
+          where: { id: assetId },
+          data: {
+            status: AssetStatus.IN_CUSTODY,
+            custody: {
+              create: {
+                custodian: { connect: { id: custodianId } },
+              },
+            },
+          },
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while updating asset. Please try again or contact support.",
+            additionalData: { userId, assetId, custodianId, templateId },
+            label: "Assets",
+          });
+        });
+    }
+
+    // If the template was specified, and signature was required
+    if (addTemplateEnabled && templateObj!.signatureRequired) {
+      /** We create the note */
+      await createNote({
+        content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateObj!.name?.trim()}** template before receiving custody.`,
+        type: "UPDATE",
+        userId: userId,
         assetId: asset.id,
-      }),
-    });
-  }
+      });
 
-  return redirect(`/assets/${assetId}`);
-};
+      sendNotification({
+        title: `‘${asset.title}’ would go in custody of ${custodianName}`,
+        message:
+          "This asset will stay available until the custodian signs the PDF template. After that, the asset will be unavailable until custody is manually released.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      /** @TODO I have set this to void but we have to consider if we want to catch this */
+      void sendEmail({
+        to: custodianEmail,
+        subject: `You have been assigned custody over ${asset.title}.`,
+        text: assetCustodyAssignedWithTemplateEmailText({
+          assetName: asset.title,
+          assignerName: user.firstName + " " + user.lastName,
+          assetId: asset.id,
+          templateId: templateObj!.id,
+          assigneeId: custodianUserId,
+        }),
+      });
+    } else {
+      // If the template was not specified
+      await createNote({
+        content: `**${user.firstName} ${user.lastName}** has given **${custodianName}** custody over **${asset.title}**`,
+        type: "UPDATE",
+        userId: userId,
+        assetId: asset.id,
+      });
+
+      sendNotification({
+        title: `‘${asset.title}’ is now in custody of ${custodianName}`,
+        message:
+          "Remember, this asset will be unavailable until custody is manually released.",
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+
+      /** @TODO I have set this to void but we have to consider if we want to catch this */
+      void sendEmail({
+        to: custodianEmail,
+        subject: `You have been assigned custody over ${asset.title}`,
+        text: assetCustodyAssignedEmailText({
+          assetName: asset.title,
+          assignerName: user.firstName + " " + user.lastName,
+          assetId: asset.id,
+        }),
+      });
+    }
+
+    return redirect(`/assets/${assetId}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    return json(error(reason), { status: reason.status });
+  }
+}
 
 export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
 export default function Custody() {
-  const actionData = useActionData<{
-    error: string;
-    type: "CUSTODIAN" | "TEMPLATE";
-  } | null>();
   const { asset } = useLoaderData<typeof loader>();
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
+  const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const [assignCustody] = useAtom(assignCustodyUser);
@@ -310,17 +399,19 @@ export default function Custody() {
             <UserIcon />
           </div>
           <div className="mb-5">
-            <h4>Give Custody</h4>
+            <h4>Assign custody</h4>
             <p>
-              This asset is currently available. You&apos;re about to give
-              custody to one of your team members.
+              This asset is currently available. You’re about to assign custody
+              to one of your team members.
             </p>
           </div>
           <div className=" relative z-50 mb-5">
             <CustodianSelect />
-            {actionData?.type && actionData?.type === "CUSTODIAN" && (
-              <div className="text-sm text-error-500">{actionData.error}</div>
-            )}
+            {actionData?.error ? (
+              <div className="-mt-8 mb-8 text-sm text-error-500">
+                {actionData.error.message}
+              </div>
+            ) : null}
           </div>
           {assignCustody == null || assignCustody?.userId === null ? (
             <CustomTooltip
@@ -377,9 +468,10 @@ export default function Custody() {
           {addTemplateEnabled && (
             <div className="mt-5">
               <TemplateSelect />
-              {actionData?.type && actionData?.type === "TEMPLATE" && (
+              {/* @TODO this still needs to be updated with the new approach. This check wont work as this type is not passed to action data */}
+              {/* {actionData?.type && actionData?.type === "TEMPLATE" && (
                 <div className="text-sm text-error-500">{actionData.error}</div>
-              )}
+              )} */}
             </div>
           )}
 

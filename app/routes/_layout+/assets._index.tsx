@@ -1,51 +1,47 @@
-import {
-  type Category,
-  type Asset,
-  type Tag,
-  type Custody,
-  OrganizationRoles,
-} from "@prisma/client";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
+import type { Category, Asset, Tag, Custody } from "@prisma/client";
+import { OrganizationRoles, AssetStatus } from "@prisma/client";
+import type {
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
+import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { Link, useLoaderData, useNavigate } from "@remix-run/react";
-import { useAtom, useAtomValue } from "jotai";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
-import { ChevronRight, SignIcon } from "~/components/icons";
+import { StatusFilter } from "~/components/booking/status-filter";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
+import { ChevronRight, SignIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Filters, List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import {
-  clearCategoryFiltersAtom,
-  clearTagFiltersAtom,
-  selectedCategoriesAtom,
-  selectedTagsAtom,
-} from "~/components/list/filters/atoms";
-import { CategoryFilters } from "~/components/list/filters/category";
-import { TagFilters } from "~/components/list/filters/tag";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
+import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database";
+import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
 import { getOrganizationTierLimit } from "~/modules/tier";
+import assetCss from "~/styles/assets.css";
+import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { userPrefs } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
+import { setCookie, userPrefs } from "~/utils/cookies.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
 import { isPersonalOrg } from "~/utils/organization";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription";
 
 export interface IndexResponse {
@@ -69,159 +65,175 @@ export interface IndexResponse {
   /** Search string */
   search: string | null;
 
-  /** Next page url - used for pagination */
-  next: string;
-
-  /** Prev page url - used for pagination */
-  prev: string;
-
   /** Used so all the default actions can be generate such as empty state, creating and so on */
   modelName: {
     singular: string;
     plural: string;
   };
 }
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: assetCss },
+];
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  const {
-    authSession,
-    organizationId,
-    organizations,
-    currentOrganization,
-    role,
-  } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.read
-  );
-
+export async function loader({ context, request }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
 
-  // @TODO we shouldnt have to do this. We can combine it with the requirePermission
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      userOrganizations: {
-        where: {
+  try {
+    const [{ organizationId, organizations, currentOrganization, role }, user] =
+      await Promise.all([
+        requirePermission({
           userId,
-        },
-        select: {
-          organization: {
+          request,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.read,
+        }),
+        db.user
+          .findUniqueOrThrow({
+            where: {
+              id: userId,
+            },
             select: {
-              id: true,
-              name: true,
-              type: true,
-              owner: {
+              firstName: true,
+              tier: {
+                include: { tierLimit: true },
+              },
+              userOrganizations: {
+                where: {
+                  userId,
+                },
                 select: {
-                  tier: {
-                    include: { tierLimit: true },
+                  organization: {
+                    select: {
+                      id: true,
+                      name: true,
+                      type: true,
+                      owner: {
+                        select: {
+                          tier: {
+                            include: { tierLimit: true },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
             },
-          },
-        },
-      },
-    },
-  });
-
-  const tierLimit = await getOrganizationTierLimit({
-    organizationId,
-    organizations,
-  });
-
-  let {
-    search,
-    totalAssets,
-    perPage,
-    page,
-    prev,
-    next,
-    categories,
-    tags,
-    assets,
-    totalPages,
-    cookie,
-  } = await getPaginatedAndFilterableAssets({
-    request,
-    organizationId,
-  });
-
-  if (totalPages !== 0 && page > totalPages) {
-    return redirect("/assets");
-  }
-
-  if (!assets) {
-    throw new ShelfStackError({
-      title: "Hey!",
-      message: `No assets found`,
-      status: 404,
-    });
-  }
-
-  if (role === OrganizationRoles.SELF_SERVICE) {
-    /**
-     * For self service users we dont return the assets that are not available to book
-     */
-    assets = assets.filter((a) => a.availableToBook);
-  }
-
-  assets = await updateAssetsWithBookingCustodians(assets);
-
-  const header: HeaderData = {
-    title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
-        : `Your inventory`
-      : currentOrganization?.name
-      ? `${currentOrganization?.name}'s inventory`
-      : "Your inventory",
-  };
-
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
-
-  return json(
-    {
-      header,
-      items: assets,
-      categories,
-      tags,
-      search,
-      page,
-      totalItems: totalAssets,
-      perPage,
-      totalPages,
-      next,
-      prev,
-      modelName,
-      canImportAssets: canImportAssets(tierLimit),
-      searchFieldLabel: "Search assets",
-      searchFieldTooltip: {
-        title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-      },
-    },
-    {
-      headers: [
-        ["Set-Cookie", await userPrefs.serialize(cookie)],
-        [
-          "Set-Cookie",
-          await commitAuthSession(request, {
-            authSession,
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message:
+                "We can't find your user data. Please try again or contact support.",
+              additionalData: { userId },
+              label: "Assets",
+            });
           }),
-        ],
-      ],
+      ]);
+
+    let [
+      tierLimit,
+      {
+        search,
+        totalAssets,
+        perPage,
+        page,
+        categories,
+        tags,
+        assets,
+        totalPages,
+        cookie,
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
+      },
+    ] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId,
+        organizations,
+      }),
+      getPaginatedAndFilterableAssets({
+        request,
+        organizationId,
+      }),
+    ]);
+
+    if (totalPages !== 0 && page > totalPages) {
+      return redirect("/assets");
     }
-  );
+
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      /**
+       * For self service users we dont return the assets that are not available to book
+       */
+      assets = assets.filter((a) => a.availableToBook);
+    }
+
+    assets = await updateAssetsWithBookingCustodians(assets);
+
+    const header: HeaderData = {
+      title: isPersonalOrg(currentOrganization)
+        ? user?.firstName
+          ? `${user.firstName}'s inventory`
+          : `Your inventory`
+        : currentOrganization?.name
+        ? `${currentOrganization?.name}'s inventory`
+        : "Your inventory",
+    };
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    return json(
+      data({
+        header,
+        items: assets,
+        categories,
+        tags,
+        search,
+        page,
+        totalItems: totalAssets,
+        perPage,
+        totalPages,
+        modelName,
+        canImportAssets: canImportAssets(tierLimit),
+        searchFieldLabel: "Search assets",
+        searchFieldTooltip: {
+          title: "Search your asset database",
+          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        },
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
+
+export function shouldRevalidate({
+  actionResult,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  /**
+   * If we are toggliong the sidebar, no need to revalidate this loader.
+   * Revalidation happens in _layout
+   */
+  if (actionResult?.isTogglingSidebar) {
+    return false;
+  }
+
+  return defaultShouldRevalidate;
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -230,21 +242,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const navigate = useNavigate();
+  const hasFiltersToClear = useSearchParamHasValue(
+    "category",
+    "tag",
+    "location"
+  );
+  const clearFilters = useClearValueFromParams("category", "tag", "location");
   const { canImportAssets } = useLoaderData<typeof loader>();
-  const selectedCategories = useAtomValue(selectedCategoriesAtom);
-  const [, clearCategoryFilters] = useAtom(clearCategoryFiltersAtom);
-
-  const selectedTags = useAtomValue(selectedTagsAtom);
-  const [, clearTagFilters] = useAtom(clearTagFiltersAtom);
-
-  const hasFiltersToClear =
-    selectedCategories.items.length > 0 || selectedTags.items.length > 0;
-
-  const handleClearFilters = () => {
-    clearCategoryFilters();
-    clearTagFilters();
-  };
-
   const isSelfService = useUserIsSelfService();
 
   return (
@@ -260,29 +264,83 @@ export default function AssetIndexPage() {
               icon="asset"
               data-test-id="createNewAsset"
             >
-              New Asset
+              New asset
             </Button>
           </>
         ) : null}
       </Header>
       <ListContentWrapper>
-        <Filters>
-          <div className="flex items-center justify-around gap-6 md:justify-end">
+        <Filters
+          slots={{
+            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          }}
+        >
+          <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
             {hasFiltersToClear ? (
               <div className="hidden gap-6 md:flex">
                 <Button
                   as="button"
-                  onClick={handleClearFilters}
+                  onClick={clearFilters}
                   variant="link"
                   className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+                  type="button"
                 >
                   Clear all filters
                 </Button>
                 <div className="text-gray-500"> | </div>
               </div>
             ) : null}
-            <CategoryFilters />
-            <TagFilters />
+
+            <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Categories{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "category", key: "name" }}
+                label="Filter by category"
+                initialDataKey="categories"
+                countKey="totalCategories"
+              />
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "tag", key: "name" }}
+                label="Filter by tags"
+                initialDataKey="tags"
+                countKey="totalTags"
+              />
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Locations{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{ name: "location", key: "name" }}
+                label="Filter by Location"
+                initialDataKey="locations"
+                countKey="totalLocations"
+                renderItem={({ metadata }) => (
+                  <div className="flex items-center gap-2">
+                    <Image
+                      imageId={metadata.imageId}
+                      alt="img"
+                      className={tw(
+                        "size-6 rounded-[2px] object-cover",
+                        metadata.description ? "rounded-b-none border-b-0" : ""
+                      )}
+                    />
+                    <div>{metadata.name}</div>
+                  </div>
+                )}
+              />
+            </div>
           </div>
         </Filters>
         <List
@@ -420,13 +478,13 @@ const ListAssetContent = ({
                   <img
                     src={
                       custody.custodian?.user?.profilePicture ||
-                      "/images/default_pfp.jpg"
+                      "/static/images/default_pfp.jpg"
                     }
                     className="mr-1 size-4 rounded-full"
                     alt=""
                   />
                 ) : null}
-                <span className="mt-[1px]">{custody.custodian.name}</span>
+                <span className="mt-px">{custody.custodian.name}</span>
               </>
             </GrayBadge>
           ) : null}
@@ -448,7 +506,7 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   return tags && tags?.length > 0 ? (
     <div className="">
       {visibleTags?.map((tag) => (
-        <TagBadge key={tag.name} className="mr-2">
+        <TagBadge key={tag.id} className="mr-2">
           {tag.name}
         </TagBadge>
       ))}

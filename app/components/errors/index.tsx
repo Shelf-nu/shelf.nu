@@ -1,83 +1,39 @@
-import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
-import { NODE_ENV } from "~/utils/env";
-import type { ShelfStackError } from "~/utils/error";
-import { isShelfStackError } from "~/utils/error";
-import { ErrorContent } from "./content";
+import { useLocation, useRouteError } from "@remix-run/react";
 
-export interface ErrorContentProps {
-  title?: string;
-  message?: string | JSX.Element;
-  showReload?: boolean;
-}
+import { isRouteError } from "~/utils/http";
+import { Button } from "../shared";
 
-export const ErrorBoundryComponent = ({
-  title,
-  message,
-}: ErrorContentProps) => {
-  const error: Error = useRouteError() as Error;
-  if (isShelfStackError(error)) {
-    title = title || (error as ShelfStackError).title;
-    message = message || error.message;
+export const ErrorContent = () => {
+  const loc = useLocation();
+  const response = useRouteError();
+
+  let title = "Oops, something went wrong";
+  let message =
+    "There was an unexpected error. Please refresh to try again. If the issues persists, please contact support.";
+  let traceId;
+
+  if (isRouteError(response)) {
+    message = response.data.error.message;
+    title = response.data.error.title || "Oops, something went wrong";
+    traceId = response.data.error.traceId;
   }
-  /** 404 ERROR */
-  if (isRouteErrorResponse(error)) {
-    switch (error.status) {
-      case 404:
-        return (
-          <ErrorContent
-            title={title ? title : "Sorry, this page doesnt exist"}
-            message={
-              message
-                ? message
-                : "It may have been (re)moved or the URL you’ve entered is incorrect."
-            }
-            showReload={false}
-          />
-        );
-      case 403:
-        return (
-          <ErrorContent
-            title={title ? title : "Unauthorized."}
-            message={"You don't have access to this page"}
-            showReload={false}
-          />
-        );
-      default:
-        /** 500 error */
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown error";
-        return (
-          <ErrorContent
-            title={title ? title : "Oops, something went wrong"}
-            message={
-              NODE_ENV === "development" ? (
-                <pre>{errorMessage}</pre>
-              ) : message ? (
-                message
-              ) : (
-                "Please try again and if the issue persists, contact support"
-              )
-            }
-          />
-        );
-    }
-  } else if (error instanceof Error) {
-    return (
-      <ErrorContent
-        title={title ? title : "Oops, something went wrong"}
-        message={
-          NODE_ENV === "development"
-            ? error.message
-            : "Please try again and if the issue persists, contact support"
-        }
-      />
-    );
-  } else {
-    return (
-      <ErrorContent
-        title={"Unknown error"}
-        message={"Please try again and if the issue persists, contact support"}
-      />
-    );
-  }
+
+  return (
+    <div className="flex size-full items-center justify-center">
+      <div className="flex flex-col items-center text-center">
+        <img src="/static/images/error-icon.svg" alt="" className="mb-5" />
+        <h2 className="mb-2">{title}</h2>
+        <p className="max-w-[550px]">{message}</p>
+        {traceId && <p className="text-gray-400">(Trace id: {traceId})</p>}
+        <div className=" mt-8 flex gap-3">
+          <Button to="/" variant="secondary" icon="home">
+            Back to home
+          </Button>
+          <Button to={loc.pathname} reloadDocument>
+            Reload page
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 };

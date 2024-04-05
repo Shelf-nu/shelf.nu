@@ -1,139 +1,193 @@
-import { useState } from "react";
-import {
-  type Asset,
-  type Booking,
-  type Category,
-  type Custody,
-} from "@prisma/client";
+import { useEffect, useMemo, useState } from "react";
+import type { Asset, Booking, Category, Custody } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import {
+  Form,
   useLoaderData,
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
+import { useAtom, useAtomValue } from "jotai";
+import { z } from "zod";
+import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css";
+import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import Input from "~/components/forms/input";
+import Header from "~/components/layout/header";
 import { List } from "~/components/list";
-import { AddAssetForm } from "~/components/location/add-asset-form";
 import { Button } from "~/components/shared";
 
 import { Td } from "~/components/table";
-import { getPaginatedAndFilterableAssets } from "~/modules/asset";
+import { createNotes, getPaginatedAndFilterableAssets } from "~/modules/asset";
 import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
-import { getRequiredParam, isFormProcessing } from "~/utils";
+import { getUserByID } from "~/modules/user";
+import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { getClientHint } from "~/utils/client-hints";
-import { ShelfStackError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { organizationId } = await requirePermision(
-    request,
-    PermissionEntity.booking,
-    PermissionAction.update
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { bookingId: id } = getParams(
+    params,
+    z.object({ bookingId: z.string() }),
+    {
+      additionalData: { userId },
+    }
   );
 
-  const id = getRequiredParam(params, "bookingId");
-
-  const {
-    search,
-    totalAssets,
-    perPage,
-    page,
-    prev,
-    next,
-    categories,
-    tags,
-    assets,
-    totalPages,
-  } = await getPaginatedAndFilterableAssets({
-    request,
-    organizationId,
-    excludeCategoriesQuery: true,
-    excludeTagsQuery: true,
-    excludeSearchFromView: true,
-  });
-
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
-
-  const booking = await getBooking({ id });
-  if (!booking) {
-    throw new ShelfStackError({ message: "Booking not found" });
-  }
-
-  return json({
-    showModal: true,
-    booking,
-    items: assets,
-    categories,
-    tags,
-    search,
-    page,
-    totalItems: totalAssets,
-    perPage,
-    totalPages,
-    next,
-    prev,
-    modelName,
-  });
-};
-
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  await requirePermision(
-    request,
-    PermissionEntity.booking,
-    PermissionAction.update
-  );
-
-  const bookingId = getRequiredParam(params, "bookingId");
-  const formData = await request.formData();
-  const assetId = formData.get("assetId") as string;
-  const isChecked = formData.get("isChecked") === "yes";
-  if (isChecked) {
-    await upsertBooking(
-      {
-        id: bookingId,
-        assetIds: [assetId],
-      },
-      getClientHint(request)
-    );
-  } else {
-    await removeAssets({
-      id: bookingId,
-      assetIds: [assetId],
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
     });
-  }
 
-  return json({ ok: true });
-};
+    const {
+      search,
+      totalAssets,
+      perPage,
+      page,
+      categories,
+      tags,
+      assets,
+      totalPages,
+    } = await getPaginatedAndFilterableAssets({
+      request,
+      organizationId,
+      excludeCategoriesQuery: true,
+      excludeTagsQuery: true,
+      excludeSearchFromView: true,
+    });
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    const booking = await getBooking({ id, organizationId });
+
+    return json(
+      data({
+        header: {
+          title: `Manage assets for ‘${booking?.name}’`,
+          subHeading: "Fill up the booking with the assets of your choice",
+        },
+        showModal: true,
+        noScroll: true,
+        booking,
+        items: assets,
+        categories,
+        tags,
+        search,
+        page,
+        totalItems: totalAssets,
+        perPage,
+        totalPages,
+        modelName,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
+  }
+}
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { bookingId } = getParams(params, z.object({ bookingId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
+
+    // assetIds: z.array(z.string()).optional().default([]),
+    // removedAssetIds: z.array(z.string()).optional().default([]),
+
+    const { assetIds, removedAssetIds } = parseData(
+      await request.formData(),
+      z.object({
+        assetIds: z.array(z.string()).optional().default([]),
+        removedAssetIds: z.array(z.string()).optional().default([]),
+      }),
+      {
+        additionalData: { userId, bookingId },
+      }
+    );
+
+    const user = await getUserByID(authSession.userId);
+
+    /** We only update the booking if there are assets to add */
+    if (assetIds.length > 0) {
+      /** We update the booking with the new assets */
+      const b = await upsertBooking(
+        {
+          id: bookingId,
+          assetIds,
+        },
+        getClientHint(request)
+      );
+
+      /** We create notes for the assets that were added */
+      await createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** added asset to booking **[${
+          b.name
+        }](/bookings/${b.id})**.`,
+        type: "UPDATE",
+        userId: authSession.userId,
+        assetIds,
+      });
+    }
+
+    /** If some assets were removed, we also need to handle those */
+    if (removedAssetIds.length > 0) {
+      await removeAssets({
+        booking: { id: bookingId, assetIds: removedAssetIds },
+        firstName: user?.firstName || "",
+        lastName: user?.lastName || "",
+        userId: authSession.userId,
+      });
+    }
+
+    return redirect(`/bookings/${bookingId}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, bookingId });
+    return json(error(reason), { status: reason.status });
+  }
+}
 
 export default function AddAssetsToNewBooking() {
-  const { booking, search } = useLoaderData<typeof loader>();
+  const { booking, search, header } = useLoaderData<typeof loader>();
   const [_searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const [searchValue, setSearchValue] = useState(search || "");
-
   function handleSearch(value: string) {
     setSearchParams((prev) => {
       prev.set("s", value);
       return prev;
     });
   }
-
   function clearSearch() {
     setSearchParams((prev) => {
       prev.delete("s");
@@ -141,15 +195,40 @@ export default function AddAssetsToNewBooking() {
     });
   }
 
-  return (
-    <div>
-      <header className="mb-5">
-        <h2>Add assets to ‘{booking?.name}’ booking</h2>
-        <p>Fill up the booking with the assets of your choice</p>
-      </header>
+  const bookingAssetsIds = useMemo(
+    () => booking?.assets.map((a) => a.id) || [],
+    [booking.assets]
+  );
 
-      <div className="flex justify-between">
-        <div className="flex w-1/2">
+  const [selectedAssets, setSelectedAssets] = useAtom(
+    bookingsSelectedAssetsAtom
+  );
+  const removedAssetIds = useMemo(
+    () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
+    [bookingAssetsIds, selectedAssets]
+  );
+
+  /**
+   * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per booking
+   * So we do a manual effect to set the selected assets to the booking assets ids
+   * I would still rather use the useHydrateAtoms, but it's not working as expected.
+   * @TODO Going to ask here: https://github.com/pmndrs/jotai/discussions/669
+   */
+  useEffect(() => {
+    setSelectedAssets(bookingAssetsIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking.id]);
+
+  return (
+    <div className="flex max-h-full flex-col ">
+      <Header
+        {...header}
+        hideBreadcrumbs={true}
+        classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
+      />
+
+      <div className="-mx-6 justify-between border-b px-6 pb-4 md:flex">
+        <div className="flex md:w-1/2">
           <div className="relative flex-1">
             <Input
               type="text"
@@ -160,7 +239,7 @@ export default function AddAssetsToNewBooking() {
               defaultValue={search || ""}
               hideLabel={true}
               hasAttachedButton
-              className=" h-full flex-1"
+              className=" h-full flex-1 [&>span]:hidden"
               inputClassName="pr-9"
               onKeyUp={(e) => {
                 setSearchValue(e.currentTarget.value);
@@ -195,24 +274,73 @@ export default function AddAssetsToNewBooking() {
           />
         </div>
 
-        <div className="w-[200px]">
+        <div className="mt-3 md:mt-0 md:w-[200px]">
           <AvailabilitySelect />
         </div>
       </div>
 
-      <List
-        ItemComponent={RowComponent}
-        className="mb-8 mt-4"
-        customEmptyStateContent={{
-          title: "You haven't added any assets yet.",
-          text: "What are you waiting for? Create your first asset now!",
-          newButtonRoute: "/assets/new",
-          newButtonContent: "New asset",
-        }}
-      />
-      <Button variant="secondary" width="full" to={".."}>
-        Close
-      </Button>
+      {/* Body of the modal*/}
+      <div className="-mx-6 flex-1 overflow-y-auto px-5 md:px-0">
+        <List
+          ItemComponent={RowComponent}
+          /** Clicking on the row will add the current asset to the atom of selected assets */
+          navigate={(assetId) => {
+            setSelectedAssets((selectedAssets) =>
+              selectedAssets.includes(assetId)
+                ? selectedAssets.filter((id) => id !== assetId)
+                : [...selectedAssets, assetId]
+            );
+          }}
+          customEmptyStateContent={{
+            title: "You haven't added any assets yet.",
+            text: "What are you waiting for? Create your first asset now!",
+            newButtonRoute: "/assets/new",
+            newButtonContent: "New asset",
+          }}
+          className="-mx-5 border-0"
+        />
+      </div>
+
+      {/* Footer of the modal */}
+      <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
+        <div className="flex items-center">
+          {selectedAssets.length} assets selected
+        </div>
+        <div className="flex gap-3">
+          <Button variant="secondary" to={".."}>
+            Close
+          </Button>
+          <Form method="post">
+            {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
+            {/* These are the asset ids, coming from the server */}
+            {removedAssetIds.map((assetId, i) => (
+              <input
+                key={assetId}
+                type="hidden"
+                name={`removedAssetIds[${i}]`}
+                value={assetId}
+              />
+            ))}
+            {/* These are the ids selected by the user and stored in the atom */}
+            {selectedAssets.map((assetId, i) => (
+              <input
+                key={assetId}
+                type="hidden"
+                name={`assetIds[${i}]`}
+                value={assetId}
+              />
+            ))}
+            <Button
+              type="submit"
+              name="intent"
+              value="addAssets"
+              disabled={isSearching}
+            >
+              Confirm
+            </Button>
+          </Form>
+        </div>
+      </footer>
     </div>
   );
 }
@@ -224,16 +352,14 @@ export type AssetWithBooking = Asset & {
 };
 
 const RowComponent = ({ item }: { item: AssetWithBooking }) => {
-  const { booking } = useLoaderData<typeof loader>();
-  const isChecked =
-    booking?.assets.some((asset) => asset.id === item.id) ?? false;
-
+  const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
+  const checked = selectedAssets.some((id) => id === item.id);
   return (
     <>
       <Td className="w-full p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-12 items-center justify-center">
+            <div className="flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -245,7 +371,9 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
               />
             </div>
             <div className="flex flex-col">
-              <div className="font-medium">{item.title}</div>
+              <p className="word-break whitespace-break-spaces font-medium">
+                {item.title}
+              </p>
             </div>
           </div>
         </div>
@@ -259,7 +387,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
       </Td>
 
       <Td>
-        <AddAssetForm assetId={item.id} isChecked={isChecked} />
+        <FakeCheckbox checked={checked} />
       </Td>
     </>
   );

@@ -23,7 +23,7 @@ import {
   SelectValue,
   SelectItem,
 } from "../forms";
-import { Calendar } from "../forms/calender-input";
+import { Calendar } from "../forms/calendar-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { Switch } from "../forms/switch";
@@ -151,8 +151,8 @@ export default function AssetCustomFields({
               align="start"
             >
               <div className=" max-h-[320px] overflow-auto">
-                {field.options.map((value) => (
-                  <SelectItem value={value} key={value}>
+                {field.options.map((value, index) => (
+                  <SelectItem value={value} key={value + index}>
                     <span className="mr-4 text-[14px] text-gray-700">
                       {value.toLowerCase()}
                     </span>
@@ -178,14 +178,14 @@ export default function AssetCustomFields({
         </Link>
       </div>
       {customFields.length > 0 ? (
-        customFields.map((field) => {
+        customFields.map((field, index) => {
           const value = customFieldsValues?.find(
             (cfv) => cfv.customFieldId === field.id
           )?.value;
           const displayVal = value ? getCustomFieldDisplayValue(value) : "";
           return (
             <FormRow
-              key={field.id}
+              key={field.id + index}
               rowLabel={field.name}
               subHeading={field.helpText ? <p>{field.helpText}</p> : undefined}
               className="border-b-0"
@@ -215,7 +215,7 @@ export default function AssetCustomFields({
         })
       ) : (
         <div>
-          <div className=" mx-auto max-w-[640px] rounded-xl border border-gray-300 bg-white px-5 py-10 text-center">
+          <div className=" mx-auto max-w-screen-sm rounded-xl border border-gray-300 bg-white px-5 py-10 text-center">
             <div>
               <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-gray-50 bg-gray-100 p-2 text-gray-600">
                 <SearchIcon />

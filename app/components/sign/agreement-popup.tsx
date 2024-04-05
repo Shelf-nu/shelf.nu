@@ -29,7 +29,7 @@ export default function AgreementPopup({
           className="dialog-backdrop !bg-[#364054]/70"
           onClick={handleBackdropClose}
         >
-          <div className="flex h-fit max-h-[90vh] w-[90vw] flex-col overflow-y-auto rounded-md border-b-[1px] border-b-gray-500 bg-white">
+          <div className="flex h-fit max-h-[90vh] w-[90vw] flex-col overflow-y-auto rounded-md border-b-DEFAULT border-b-gray-500 bg-white">
             <div className="flex items-center justify-between p-4">
               <div>
                 <div className="text-lg font-semibold text-gray-800">

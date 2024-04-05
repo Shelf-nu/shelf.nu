@@ -2,12 +2,11 @@ import { OrganizationRoles, OrganizationType } from "@prisma/client";
 import type { Organization, User } from "@prisma/client";
 
 import { db } from "~/database";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { defaultUserCategories } from "../category/default-categories";
 
-export const getOrganization = async ({ id }: { id: Organization["id"] }) =>
-  db.organization.findUnique({
-    where: { id },
-  });
+const label: ErrorLabel = "Organization";
 
 export const getOrganizationByUserId = async ({
   userId,
@@ -15,50 +14,36 @@ export const getOrganizationByUserId = async ({
 }: {
   userId: User["id"];
   orgType: OrganizationType;
-}) =>
-  await db.organization.findFirstOrThrow({
-    where: {
-      owner: {
-        is: {
-          id: userId,
+}) => {
+  try {
+    return await db.organization.findFirstOrThrow({
+      where: {
+        owner: {
+          is: {
+            id: userId,
+          },
         },
+        type: orgType,
       },
-      type: orgType,
-    },
-    select: {
-      id: true,
-      name: true,
-      type: true,
-      currency: true,
-    },
-  });
-
-export type UserOrganization = Awaited<
-  ReturnType<typeof getOrganizationByUserId>
->;
-
-export const getUserOrganizationsWithDetailedData = async ({
-  userId,
-}: {
-  userId: User["id"];
-}) =>
-  await db.organization.findMany({
-    where: {
-      owner: {
-        is: {
-          id: userId,
-        },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        currency: true,
       },
-    },
-    include: {
-      _count: {
-        select: {
-          assets: true,
-          members: true,
-        },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "No organization found for this user.",
+      additionalData: {
+        userId,
+        orgType,
       },
-    },
-  });
+      label,
+    });
+  }
+};
 
 export async function createOrganization({
   name,
@@ -69,51 +54,63 @@ export async function createOrganization({
   userId: User["id"];
   image: File | null;
 }) {
-  const data = {
-    name,
-    currency,
-    type: OrganizationType.TEAM,
-    categories: {
-      create: defaultUserCategories.map((c) => ({ ...c, userId })),
-    },
-    userOrganizations: {
-      create: {
-        userId,
-        roles: [OrganizationRoles.OWNER],
+  try {
+    const data = {
+      name,
+      currency,
+      type: OrganizationType.TEAM,
+      categories: {
+        create: defaultUserCategories.map((c) => ({ ...c, userId })),
       },
-    },
-    owner: {
-      connect: {
-        id: userId,
+      userOrganizations: {
+        create: {
+          userId,
+          roles: [OrganizationRoles.OWNER],
+        },
       },
-    },
-  };
+      owner: {
+        connect: {
+          id: userId,
+        },
+      },
+    };
 
-  const org = await db.organization.create({ data });
-  if (image?.size && image?.size > 0) {
-    await db.image.create({
-      data: {
-        blob: Buffer.from(await image.arrayBuffer()),
-        contentType: image.type,
-        ownerOrg: {
-          connect: {
-            id: org.id,
+    const org = await db.organization.create({ data });
+
+    if (image?.size && image?.size > 0) {
+      await db.image.create({
+        data: {
+          blob: Buffer.from(await image.arrayBuffer()),
+          contentType: image.type,
+          ownerOrg: {
+            connect: {
+              id: org.id,
+            },
+          },
+          organization: {
+            connect: {
+              id: org.id,
+            },
+          },
+          user: {
+            connect: {
+              id: userId,
+            },
           },
         },
-        organization: {
-          connect: {
-            id: org.id,
-          },
-        },
-        user: {
-          connect: {
-            id: userId,
-          },
-        },
-      },
+      });
+    }
+
+    return org;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating the organization. Please try again or contact support.",
+      additionalData: { name, userId },
+      label,
     });
   }
-  return org;
 }
 export async function updateOrganization({
   id,
@@ -125,61 +122,113 @@ export async function updateOrganization({
   userId: User["id"];
   image: File | null;
 }) {
-  const data = {
-    name,
-    currency,
-  };
-
-  if (image?.size && image?.size > 0) {
-    const imageData = {
-      blob: Buffer.from(await image.arrayBuffer()),
-      contentType: image.type,
-      ownerOrg: {
-        connect: {
-          id: id,
-        },
-      },
-      user: {
-        connect: {
-          id: userId,
-        },
-      },
+  try {
+    const data = {
+      name,
+      currency,
     };
 
-    Object.assign(data, {
-      image: {
-        upsert: {
-          create: imageData,
-          update: imageData,
+    if (image?.size && image?.size > 0) {
+      const imageData = {
+        blob: Buffer.from(await image.arrayBuffer()),
+        contentType: image.type,
+        ownerOrg: {
+          connect: {
+            id: id,
+          },
+        },
+        user: {
+          connect: {
+            id: userId,
+          },
+        },
+      };
+
+      Object.assign(data, {
+        image: {
+          upsert: {
+            create: imageData,
+            update: imageData,
+          },
+        },
+      });
+    }
+
+    return await db.organization.update({
+      where: { id },
+      data: data,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while updating the organization. Please try again or contact support.",
+      additionalData: { id, userId, name },
+      label,
+    });
+  }
+}
+
+export async function getUserOrganizations({ userId }: { userId: string }) {
+  try {
+    return await db.userOrganization.findMany({
+      where: { userId },
+      select: {
+        roles: true,
+        organization: {
+          select: {
+            id: true,
+            type: true,
+            name: true,
+            imageId: true,
+            userId: true,
+            updatedAt: true,
+            currency: true,
+          },
         },
       },
     });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching user organizations. Please try again or contact support.",
+      additionalData: { userId },
+      label,
+    });
   }
-
-  return await db.organization.update({
-    where: { id },
-    data: data,
-  });
 }
 
-export const getUserOrganizations = async ({ userId }: { userId: string }) => {
-  const userOrganizations = await db.userOrganization.findMany({
-    where: { userId },
-    select: {
-      roles: true,
-      organization: {
-        select: {
-          id: true,
-          type: true,
-          name: true,
-          imageId: true,
-          userId: true,
-          updatedAt: true,
-          currency: true,
+export async function getOrganizationAdminsEmails({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  try {
+    const admins = await db.userOrganization.findMany({
+      where: {
+        organizationId,
+        roles: {
+          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
         },
       },
-    },
-  });
+      select: {
+        user: {
+          select: {
+            email: true,
+          },
+        },
+      },
+    });
 
-  return userOrganizations;
-};
+    return admins.map((a) => a.user.email);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching organization admins emails. Please try again or contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}

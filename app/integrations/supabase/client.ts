@@ -5,7 +5,7 @@ import {
   SUPABASE_URL,
   SUPABASE_ANON_PUBLIC,
 } from "~/utils/env";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
 import { isBrowser } from "~/utils/is-browser";
 
 // ⚠️ cloudflare needs you define fetch option : https://github.com/supabase/supabase-js#custom-fetch-implementation
@@ -41,9 +41,11 @@ const supabaseClient = getSupabaseClient(SUPABASE_ANON_PUBLIC);
  */
 function getSupabaseAdmin() {
   if (isBrowser)
-    throw new ShelfStackError({
+    throw new ShelfError({
+      cause: null,
       message:
         "getSupabaseAdmin is not available in browser and should NOT be used in insecure environments",
+      label: "Dev error",
     });
 
   return getSupabaseClient(SUPABASE_SERVICE_ROLE);

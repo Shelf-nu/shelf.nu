@@ -6,20 +6,20 @@ import {
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { commitAuthSession } from "~/modules/auth";
 import { getTag, updateTag } from "~/modules/tag";
-import { getRequiredParam, isFormProcessing } from "~/utils";
+import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
+
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateTagFormSchema = z.object({
@@ -29,79 +29,75 @@ export const UpdateTagFormSchema = z.object({
 
 const title = "Edit Tag";
 
-export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermision(
-    request,
-    PermissionEntity.tag,
-    PermissionAction.update
-  );
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { tagId: id } = getParams(params, z.object({ tagId: z.string() }), {
+    additionalData: { userId },
+  });
 
-  const id = getRequiredParam(params, "tagId");
-  const tag = await getTag({ id });
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.tag,
+      action: PermissionAction.update,
+    });
 
-  const header = {
-    title,
-  };
+    const tag = await getTag({ id, organizationId });
 
-  return json({ header, tag });
+    const header = {
+      title,
+    };
+
+    return json(data({ header, tag }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-export async function action({ request, params }: LoaderFunctionArgs) {
-  const { authSession } = await requirePermision(
-    request,
-    PermissionEntity.tag,
-    PermissionAction.update
-  );
-  const formData = await request.formData();
-  const result = await UpdateTagFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+export async function action({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { tagId: id } = getParams(params, z.object({ tagId: z.string() }), {
+    additionalData: { userId },
+  });
 
-  const id = getRequiredParam(params, "tagId");
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.tag,
+      action: PermissionAction.update,
+    });
 
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-      },
-      {
-        status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
-      }
-    );
+    const payload = parseData(await request.formData(), UpdateTagFormSchema, {
+      additionalData: { userId, id, organizationId },
+    });
+
+    await updateTag({
+      ...payload,
+      id,
+      organizationId,
+    });
+
+    sendNotification({
+      title: "Tag Updated",
+      message: "Your tag has been updated successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect(`/tags`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-
-  const rsp = await updateTag({
-    ...result.data,
-    id,
-  });
-
-  if (rsp?.error) {
-    return json(
-      {
-        errors: rsp.error,
-      },
-      {
-        status: 400,
-        headers: [setCookie(await commitAuthSession(request, { authSession }))],
-      }
-    );
-  }
-
-  sendNotification({
-    title: "Tag Updated",
-    message: "Your tag has been updated successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return redirect(`/tags`, {
-    headers: [setCookie(await commitAuthSession(request, { authSession }))],
-  });
 }
 
 export default function EditTag() {
@@ -156,9 +152,9 @@ export default function EditTag() {
           </div>
         </div>
 
-        {actionData?.errors ? (
+        {actionData?.error ? (
           <div className="mt-3 text-sm text-error-500">
-            {actionData?.errors?.message}
+            {actionData?.error?.message}
           </div>
         ) : null}
       </Form>

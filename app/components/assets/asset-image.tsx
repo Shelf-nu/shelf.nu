@@ -21,10 +21,13 @@ export const AssetImage = ({
 }) => {
   const fetcher = useFetcher<typeof action>();
   const { assetId, mainImage, mainImageExpiration, alt } = asset;
+  const updatedAssetMainImage = fetcher.data?.error
+    ? null
+    : fetcher.data?.asset.mainImage;
   const url =
     mainImage ||
-    fetcher?.data?.asset?.mainImage ||
-    "/images/asset-placeholder.jpg";
+    updatedAssetMainImage ||
+    "/static/images/asset-placeholder.jpg";
 
   useEffect(() => {
     if (mainImage && mainImageExpiration) {

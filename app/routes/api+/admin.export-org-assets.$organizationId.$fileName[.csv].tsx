@@ -1,25 +1,34 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { requireAuthSession } from "~/modules/auth";
-import { getRequiredParam } from "~/utils";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { z } from "zod";
+import { error, getParams, makeShelfError } from "~/utils";
 import { exportAssetsToCsv } from "~/utils/csv.server";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await requireAuthSession(request);
-  await requireAdmin(request);
-  const organizationId = getRequiredParam(params, "organizationId");
-  // const { organizations } = await requireOrganisationId(authSession, request);
+export async function loader({ context, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = getParams(
+    params,
+    z.object({ organizationId: z.string() }),
+    {
+      additionalData: { userId },
+    }
+  );
 
-  /** We dont need to do this anymore, because this is only for admin */
-  // await assertUserCanExportAssets({ organizationId, organizations });
+  try {
+    await requireAdmin(authSession.userId);
 
-  /** Join the rows with a new line */
-  const csvString = await exportAssetsToCsv({ organizationId });
+    /** Join the rows with a new line */
+    const csvString = await exportAssetsToCsv({ organizationId });
 
-  return new Response(csvString, {
-    status: 200,
-    headers: {
-      "content-type": "text/csv",
-    },
-  });
-};
+    return new Response(csvString, {
+      status: 200,
+      headers: {
+        "content-type": "text/csv",
+      },
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
+}

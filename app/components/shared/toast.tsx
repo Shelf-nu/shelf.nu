@@ -37,7 +37,7 @@ export const Toaster = () => {
     <Toast.Provider swipeDirection="right" duration={3000}>
       <Toast.Root
         className={tw(
-          "flex gap-4 rounded-lg border border-gray-100 bg-white p-3 shadow-xl",
+          "flex gap-4 rounded border border-gray-100 bg-white p-3 shadow-xl",
           "data-[swipe=cancel]:translate-x-0 data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[state=closed]:animate-hide data-[state=open]:animate-slideIn data-[swipe=end]:animate-swipeOut data-[swipe=cancel]:transition-[transform_200ms_ease-out]"
         )}
         open={open}

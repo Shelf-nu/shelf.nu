@@ -18,3 +18,4 @@ export * from "./gif-to-png";
 export * from "./slugify";
 export * from "./geolocate.server";
 export * from "./misc";
+export * from "./error";

@@ -41,7 +41,7 @@ function Carousel() {
             <div>
               <figure className="mb-6">
                 <img
-                  src="/images/shelf-visual1.jpg"
+                  src="/static/images/shelf-visual1.jpg"
                   alt="img"
                   className=" object-cover"
                 />
@@ -59,7 +59,7 @@ function Carousel() {
             <div>
               <figure className="mb-6">
                 <img
-                  src="/images/shelf-visual2.jpg"
+                  src="/static/images/shelf-visual2.jpg"
                   alt="img"
                   className=" object-cover"
                 />
@@ -78,7 +78,7 @@ function Carousel() {
             <div>
               <figure className="mb-6">
                 <img
-                  src="/images/shelf-visual3.jpg"
+                  src="/static/images/shelf-visual3.jpg"
                   alt="img"
                   className=" object-cover"
                 />
@@ -104,7 +104,7 @@ function Carousel() {
             className="carousel-next-btn mt-5"
             width="full"
           >
-            {isOrgInvite ? "View assets" : "New Asset"}
+            {isOrgInvite ? "View assets" : "New asset"}
           </Button>
         ) : (
           <Button

@@ -1,73 +1,105 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useNavigation } from "@remix-run/react";
+import { z } from "zod";
 import { LocationMarkerIcon } from "~/components/icons";
 import { LocationSelect } from "~/components/location";
 import { Button } from "~/components/shared/button";
-import { getAllRelatedEntries, getAsset, updateAsset } from "~/modules/asset";
-import { commitAuthSession } from "~/modules/auth";
+import {
+  getAllEntriesForCreateAndEdit,
+  getAsset,
+  updateAsset,
+} from "~/modules/asset";
 import styles from "~/styles/layout/custom-modal.css";
-import { assertIsPost, getRequiredParam, isFormProcessing } from "~/utils";
+import {
+  assertIsPost,
+  getParams,
+  error,
+  isFormProcessing,
+  makeShelfError,
+  parseData,
+} from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { authSession, organizationId } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
   const { userId } = authSession;
-
-  const { locations } = await getAllRelatedEntries({
-    userId,
-    organizationId,
+  const { assetId: id } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
   });
 
-  const id = getRequiredParam(params, "assetId");
-  const asset = await getAsset({ userId, id });
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
 
-  return json({
-    asset,
-    locations,
-    showModal: true,
-  });
-};
+    const { locations } = await getAllEntriesForCreateAndEdit({
+      organizationId,
+      request,
+    });
 
-export async function action({ request, params }: ActionFunctionArgs) {
-  assertIsPost(request);
-  const { authSession } = await requirePermision(
-    request,
-    PermissionEntity.asset,
-    PermissionAction.update
-  );
+    const asset = await getAsset({ userId, id });
 
-  const id = getRequiredParam(params, "assetId");
+    return json({
+      asset,
+      locations,
+      showModal: true,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, params, id });
+    throw json(error(reason), { status: reason.status });
+  }
+}
 
-  const formData = await request.formData();
-  const newLocationId = formData.get("newLocationId") as string;
-  const currentLocationId = formData.get("currentLocationId") as string;
-
-  await updateAsset({
-    id,
-    newLocationId,
-    currentLocationId,
-    userId: authSession.userId,
-  });
-
-  sendNotification({
-    title: "Location updated",
-    message: "Your asset's location has been updated successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId: id } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
   });
 
-  return redirect(`/assets/${id}`, {
-    headers: {
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
+  try {
+    assertIsPost(request);
+
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
+
+    const { newLocationId, currentLocationId } = parseData(
+      await request.formData(),
+      z.object({
+        newLocationId: z.string().optional(),
+        currentLocationId: z.string().optional(),
+      })
+    );
+
+    await updateAsset({
+      id,
+      newLocationId,
+      currentLocationId,
+      userId: authSession.userId,
+    });
+
+    sendNotification({
+      title: "Location updated",
+      message: "Your asset's location has been updated successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect(`/assets/${id}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 }
 
 export function links() {
@@ -86,7 +118,7 @@ export default function Custody() {
             <LocationMarkerIcon />
           </div>
           <div className="mb-5">
-            <h4>Update Location</h4>
+            <h4>Update location</h4>
             <p>Adjust the location of this asset.</p>
           </div>
           <div className=" relative z-50 mb-8">
