@@ -5,7 +5,7 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
 } from "@remix-run/node";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { DateTime } from "luxon";
 import { z } from "zod";
@@ -15,13 +15,8 @@ import { NewBookingFormSchema } from "~/components/booking/form";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Badge, Button } from "~/components/shared";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "~/components/shared/tooltip";
+import { Badge } from "~/components/shared";
+
 import { db } from "~/database";
 import { createNotes } from "~/modules/asset";
 import {
@@ -51,7 +46,6 @@ import {
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import { PermissionAction, PermissionEntity } from "~/utils/permissions";
 import { requirePermission } from "~/utils/roles.server";
 import { bookingStatusColorMap } from "./bookings";
@@ -547,7 +541,6 @@ export default function BookingEditPage() {
                 {booking.status}
               </span>
             </Badge>
-            <AddToCalendar />
           </div>
         }
       />
@@ -578,29 +571,3 @@ export default function BookingEditPage() {
     </>
   );
 }
-
-const AddToCalendar = () => {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
-
-  return (
-    <TooltipProvider delayDuration={100}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="link"
-            to={`cal.ics`}
-            download={true}
-            reloadDocument={true}
-            disabled={disabled}
-          >
-            Add to calendar
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
-          <p className="text-xs">Download this booking as a calendar event</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-};
