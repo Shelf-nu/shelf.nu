@@ -8,6 +8,12 @@ import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
@@ -22,6 +28,7 @@ import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-posit
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { ControlledActionButton } from "../shared/controlled-action-button";
+
 /**
  * Important note is that the fields are only valudated when they are not disabled
  */
@@ -301,6 +308,9 @@ export function BookingForm({
                   assets during the duration of the booking period.
                 </p>
               </Card>
+              {!routeIsNewBooking && (
+                <AddToCalendar disabled={disabled || isDraft || isCancelled} />
+              )}
             </div>
           </div>
         </div>
@@ -313,3 +323,29 @@ export function BookingForm({
     </div>
   );
 }
+
+const AddToCalendar = ({ disabled }: { disabled: boolean }) => (
+  <TooltipProvider delayDuration={100}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          to={`cal.ics`}
+          download={true}
+          reloadDocument={true}
+          disabled={disabled}
+          variant="secondary"
+          icon="calendar"
+        >
+          Add to calendar
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p className="text-xs">
+          {disabled
+            ? "Not possible to add to calendar due to booking status"
+            : "Download this booking as a calendar event"}
+        </p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);

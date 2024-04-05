@@ -87,6 +87,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId: organizationId,
     });
 
+    /** For self service users, we only allow them to read their own bookings */
+    if (isSelfService && booking.custodianUserId !== authSession.userId) {
+      throw new ShelfError({
+        cause: null,
+        message: "You are not authorized to view this booking",
+        status: 403,
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+
     const [teamMembers, org, assets] = await Promise.all([
       /**
        * We need to fetch the team members to be able to display them in the custodian dropdown.
@@ -171,16 +182,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     /** We replace the assets ids in the booking object with the assets fetched in the separate request.
      * This is useful for more consistent data in the front-end */
     booking.assets = assets;
-
-    /** For self service users, we only allow them to read their own bookings */
-    if (isSelfService && booking.custodianUserId !== authSession.userId) {
-      throw new ShelfError({
-        cause: null,
-        message: "You are not authorized to view this booking",
-        status: 403,
-        label: "Booking",
-      });
-    }
 
     const { page, perPageParam } = getParamsValues(searchParams);
     const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -536,11 +537,13 @@ export default function BookingEditPage() {
       <Header
         title={hasName ? name : booking.name}
         subHeading={
-          <Badge color={bookingStatusColorMap[booking.status]}>
-            <span className="block lowercase first-letter:uppercase">
-              {booking.status}
-            </span>
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge color={bookingStatusColorMap[booking.status]}>
+              <span className="block lowercase first-letter:uppercase">
+                {booking.status}
+              </span>
+            </Badge>
+          </div>
         }
       />
 

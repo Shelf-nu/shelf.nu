@@ -1,3 +1,4 @@
+import { CalendarIcon } from "@radix-ui/react-icons";
 import { Spinner } from "./spinner";
 
 import {
@@ -57,7 +58,8 @@ export type Icon =
   | "help"
   | "profile"
   | "send"
-  | "user";
+  | "user"
+  | "calendar";
 
 type IconsMap = {
   [key in Icon]: JSX.Element;
@@ -91,6 +93,7 @@ export const iconsMap: IconsMap = {
   logout: <LogoutIcon />,
   send: <SendIcon />,
   user: <UserIcon />,
+  calendar: <CalendarIcon className="size-5" />,
 };
 
 export default iconsMap;

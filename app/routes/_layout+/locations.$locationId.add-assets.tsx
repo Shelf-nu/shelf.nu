@@ -8,9 +8,11 @@ import { z } from "zod";
 import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
+import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+
 import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
 import {
@@ -94,6 +96,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
+        header: {
+          title: `Move assets to ‘${location?.name}’ location`,
+          subHeading:
+            "Search your database for assets that you would like to move to this location.",
+        },
         showModal: true,
         noScroll: true,
         items: assets,
@@ -275,7 +282,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToLocation() {
-  const { location } = useLoaderData<typeof loader>();
+  const { location, header } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
 
@@ -304,18 +311,16 @@ export default function AddAssetsToLocation() {
 
   return (
     <div className="flex max-h-full flex-col">
-      <header className="mb-5">
-        <h2>Move assets to ‘{location?.name}’ location</h2>
-        <p>
-          Search your database for assets that you would like to move to this
-          location.
-        </p>
-      </header>
+      <Header
+        {...header}
+        hideBreadcrumbs={true}
+        classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
+      />
 
-      <div>
-        <Filters className="mb-2" />
+      <div className="-mx-6 border-b px-6 md:pb-3">
+        <Filters className="md:border-0 md:p-0" />
       </div>
-      <div className="mt-4 flex-1 overflow-y-auto pb-4">
+      <div className="-mx-6 flex-1 overflow-y-auto px-5 md:px-0">
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
@@ -332,11 +337,14 @@ export default function AddAssetsToLocation() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
+          className="-mx-5 border-0"
         />
       </div>
       {/* Footer of the modal */}
-      <footer className="flex justify-between border-t pt-3">
-        <div>{selectedAssets.length} assets selected</div>
+      <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
+        <div className="flex items-center">
+          {selectedAssets.length} assets selected
+        </div>
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
             Close

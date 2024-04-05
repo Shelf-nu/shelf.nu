@@ -21,6 +21,7 @@ import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import Input from "~/components/forms/input";
+import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 
@@ -92,6 +93,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
+        header: {
+          title: `Manage assets for ‘${booking?.name}’`,
+          subHeading: "Fill up the booking with the assets of your choice",
+        },
         showModal: true,
         noScroll: true,
         booking,
@@ -183,7 +188,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToNewBooking() {
-  const { booking, search } = useLoaderData<typeof loader>();
+  const { booking, search, header } = useLoaderData<typeof loader>();
   const [_searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -226,14 +231,15 @@ export default function AddAssetsToNewBooking() {
   }, [booking.id]);
 
   return (
-    <div className="flex max-h-full flex-col">
-      <header className="mb-3">
-        <h2>Add assets to ‘{booking?.name}’ booking</h2>
-        <p>Fill up the booking with the assets of your choice</p>
-      </header>
+    <div className="flex max-h-full flex-col ">
+      <Header
+        {...header}
+        hideBreadcrumbs={true}
+        classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
+      />
 
-      <div className="flex justify-between">
-        <div className="flex w-1/2">
+      <div className="-mx-6 justify-between border-b px-6 pb-4 md:flex">
+        <div className="flex md:w-1/2">
           <div className="relative flex-1">
             <Input
               type="text"
@@ -244,7 +250,7 @@ export default function AddAssetsToNewBooking() {
               defaultValue={search || ""}
               hideLabel={true}
               hasAttachedButton
-              className=" h-full flex-1"
+              className=" h-full flex-1 [&>span]:hidden"
               inputClassName="pr-9"
               onKeyUp={(e) => {
                 setSearchValue(e.currentTarget.value);
@@ -279,13 +285,13 @@ export default function AddAssetsToNewBooking() {
           />
         </div>
 
-        <div className="w-[200px]">
+        <div className="mt-3 md:mt-0 md:w-[200px]">
           <AvailabilitySelect />
         </div>
       </div>
 
       {/* Body of the modal*/}
-      <div className="mt-4 flex-1 overflow-y-auto pb-4">
+      <div className="-mx-6 flex-1 overflow-y-auto px-5 md:px-0">
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
@@ -302,12 +308,15 @@ export default function AddAssetsToNewBooking() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
+          className="-mx-5 border-0"
         />
       </div>
 
       {/* Footer of the modal */}
-      <footer className="flex justify-between border-t pt-3">
-        <div>{selectedAssets.length} assets selected</div>
+      <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
+        <div className="flex items-center">
+          {selectedAssets.length} assets selected
+        </div>
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>
             Close

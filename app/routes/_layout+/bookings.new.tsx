@@ -15,7 +15,7 @@ import { upsertBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
+import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -198,7 +198,7 @@ export const handle = {
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
-  const now = new Date();
+  const { startDate, endDate } = getBookingDefaultStartEndTimes();
   return (
     <div>
       <header className="mb-5">
@@ -213,8 +213,8 @@ export default function NewBooking() {
         <BookingForm
           id={booking.id}
           name={booking.name}
-          startDate={dateForDateTimeInputValue(new Date(now.setHours(8, 0, 0)))}
-          endDate={dateForDateTimeInputValue(new Date(now.setHours(18, 0, 0)))}
+          startDate={startDate}
+          endDate={endDate}
           custodianUserId={
             booking.custodianUserId ||
             teamMembers.find(
