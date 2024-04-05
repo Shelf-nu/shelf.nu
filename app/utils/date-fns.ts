@@ -79,7 +79,6 @@ export function formatDatesForICal(date: Date, hints: ClientHint) {
   return formatLocalDate(date, dateTimeFormat);
 }
 
-
 export function getBookingDefaultStartEndTimes() {
   const now = new Date();
 
