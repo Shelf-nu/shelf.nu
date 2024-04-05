@@ -48,6 +48,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 
     const formattedFromDate = formatDatesForICal(booking.from as Date, hints);
     const formattedToDate = formatDatesForICal(booking.to as Date, hints);
+    const formattedDTSTAMP = formatDatesForICal(new Date(Date.now()), hints);
 
     const ics = `
 BEGIN:VCALENDAR
@@ -63,7 +64,7 @@ STATUS:CONFIRMED
 TRANSP:TRANSPARENT
 DTSTART:${formattedFromDate}
 DTEND:${formattedToDate}
-DTSTAMP:${Date.now()}
+DTSTAMP:${formattedDTSTAMP}
 CATEGORIES:Shelf.nu booking
 LOCATION:shelf.nu
 DESCRIPTION:Shelf.nu booking (Asset / Equipment checkout)
