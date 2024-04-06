@@ -7,7 +7,7 @@ import { data, error, makeShelfError, parseData } from "~/utils";
 
 const ModelFiltersSchema = z.object({
   /** Models that are allowed to filter */
-  model: z.enum(["asset", "tag", "category", "location"]),
+  model: z.enum(["asset", "tag", "category", "location", "teamMember"]),
 
   /** key of field for which we have to filter values */
   queryKey: z.string(),
