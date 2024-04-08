@@ -10,7 +10,10 @@ export const CustomerPortalForm = ({
   const customerPortalFetcher = useFetcher();
   const isProcessing = isFormProcessing(customerPortalFetcher.state);
   return (
-    <customerPortalFetcher.Form method="post" action="customer-portal">
+    <customerPortalFetcher.Form
+      method="post"
+      action="/settings/subscription/customer-portal"
+    >
       <Button disabled={isProcessing}>
         {isProcessing ? "Redirecting to Customer Portal..." : buttonText}
       </Button>

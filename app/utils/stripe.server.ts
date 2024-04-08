@@ -1,4 +1,4 @@
-import type { User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
@@ -276,7 +276,8 @@ export function getActiveProduct({
   return null;
 }
 
-export function getCustomerActiveSubscription({
+/** Gets the customer's paid subscription */
+export function getCustomerPaidSubscription({
   customer,
 }: {
   customer: CustomerWithSubscriptions | null;
@@ -285,6 +286,8 @@ export function getCustomerActiveSubscription({
     customer?.subscriptions?.data.find((sub) => sub.status === "active") || null
   );
 }
+
+/** Gets the trial subscription from customers subscription */
 export function getCustomerTrialSubscription({
   customer,
 }: {
@@ -294,6 +297,21 @@ export function getCustomerTrialSubscription({
     customer?.subscriptions?.data.find((sub) => sub.status === "trialing") ||
     null
   );
+}
+
+export function getCustomerActiveSubscription({
+  customer,
+}: {
+  customer: CustomerWithSubscriptions | null;
+}) {
+  /** Get the trial subscription */
+  const trialSubscription = getCustomerTrialSubscription({ customer });
+
+  /** Get a normal subscription */
+  const paidSubscription = getCustomerPaidSubscription({ customer });
+
+  /** WE prioritize active subscrption over trial */
+  return paidSubscription || trialSubscription;
 }
 
 export async function fetchStripeSubscription(id: string) {
@@ -336,3 +354,19 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
     });
   }
 }
+
+export const disabledTeamOrg = ({
+  currentOrganization,
+  tierId,
+}: {
+  currentOrganization: Pick<Organization, "type">;
+  tierId: string;
+}) =>
+  /**
+   * We need to check a few things before disabling team orgs
+   *
+   * 1. The current organization is a team
+   * 2. The current tier has to be tier_2. Anything else is not allowed
+   */
+
+  currentOrganization.type === "TEAM" && tierId !== "tier_2";

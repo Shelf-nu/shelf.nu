@@ -46,7 +46,7 @@ export interface Price {
   } | null;
 }
 
-const plansIconsMap: { [key: string]: JSX.Element } = {
+export const plansIconsMap: { [key: string]: JSX.Element } = {
   free: <SingleLayerIcon />,
   tier_1: <DoubleLayerIcon />,
   tier_2: <MultiLayerIcon />,
