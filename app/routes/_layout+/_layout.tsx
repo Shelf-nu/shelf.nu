@@ -117,9 +117,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
         canUseBookings: canUseBookings(currentOrganization),
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
-        disabledTeamOrg: disabledTeamOrg({
+        disabledTeamOrg: await disabledTeamOrg({
           currentOrganization,
-          tierId: user.tierId,
+          organizations,
         }),
       }),
       {

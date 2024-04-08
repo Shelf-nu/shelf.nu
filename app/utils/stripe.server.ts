@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database";
+import { getOrganizationTierLimit } from "~/modules/tier";
 import type { ErrorLabel } from ".";
 import { ShelfError } from ".";
 import { STRIPE_SECRET_KEY } from "./env";
@@ -355,13 +356,16 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
   }
 }
 
-export const disabledTeamOrg = ({
+export const disabledTeamOrg = async ({
   currentOrganization,
-  tierId,
+  organizations,
 }: {
-  currentOrganization: Pick<Organization, "type">;
-  tierId: string;
-}) =>
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
+  currentOrganization: Pick<Organization, "id" | "type">;
+}) => {
   /**
    * We need to check a few things before disabling team orgs
    *
@@ -369,4 +373,10 @@ export const disabledTeamOrg = ({
    * 2. The current tier has to be tier_2. Anything else is not allowed
    */
 
-  currentOrganization.type === "TEAM" && tierId !== "tier_2";
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId: currentOrganization.id,
+    organizations,
+  });
+
+  return currentOrganization.type === "TEAM" && tierLimit?.id !== "tier_2";
+};
