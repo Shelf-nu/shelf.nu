@@ -234,7 +234,7 @@ export default function DynamicSelect({
   );
 }
 
-const MobileStyles = ({ open }: { open: boolean }) =>
+export const MobileStyles = ({ open }: { open: boolean }) =>
   open && (
     <>
       <div
@@ -256,7 +256,12 @@ const MobileStyles = ({ open }: { open: boolean }) =>
                   top: 20px !important;
                   left: 50% !important;
                   transform: translate(-50%, 0) !important;
+                  width: calc(100% - 40px) !important;
               }
+              [data-radix-popper-content-wrapper] > div {
+                width: 100% !important;
+              }
+
           }`,
         }} // is a hack to fix the dropdown menu not being in the right place on mobile
         // can not target [data-radix-popper-content-wrapper] for this file only with css
