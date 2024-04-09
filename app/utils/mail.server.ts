@@ -2,7 +2,6 @@ import type { Attachment } from "nodemailer/lib/mailer";
 import { transporter } from "~/emails/transporter.server";
 import { SMTP_FROM } from "./env";
 import { ShelfError } from "./error";
-import logoImg from "../../public/static/images/shelf-symbol.png";
 
 export const sendEmail = async ({
   to,
@@ -40,7 +39,7 @@ export const sendEmail = async ({
       attachments: [
         {
           filename: "shelf-symbol.png",
-          path: `${process.env.SERVER_URL}${logoImg}`,
+          path: `${process.env.SERVER_URL}/static/images/shelf-symbol.png`,
           cid: "shelf-logo",
         },
         ...(attachments || []),
