@@ -1,4 +1,4 @@
-import type { ModelFilterItem } from "~/hooks";
+import type { ModelFilterItem } from "~/hooks/use-model-filters";
 
 export function itemsWithExtractedValue(
   items: ModelFilterItem[],
