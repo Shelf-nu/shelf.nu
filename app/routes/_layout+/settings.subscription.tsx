@@ -67,24 +67,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         )) as CustomerWithSubscriptions)
       : null;
 
-    /** Check if the customer has an trial subscription */
-    let subscription = getCustomerTrialSubscription({ customer });
+    /** Get the trial subscription */
+    const trialSubscription = getCustomerTrialSubscription({ customer });
 
-    /** If no trial, check if they have an active one */
-    if (!subscription) {
-      subscription = getCustomerActiveSubscription({ customer });
-    }
+    /** Get a normal subscription */
+    const subscription = getCustomerActiveSubscription({ customer });
+
+    const activeSubscription = subscription || trialSubscription;
 
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
 
     let activeProduct = null;
-    if (customer && subscription) {
+    if (customer && activeSubscription) {
       /** Get the active subscription ID */
 
       activeProduct = getActiveProduct({
         prices,
-        priceId: subscription?.items.data[0].plan.id || null,
+        priceId: activeSubscription?.items.data[0].plan.id || null,
       });
     }
 
@@ -94,17 +94,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         subTitle: "Pick an account plan that fits your workflow.",
         prices,
         customer,
-        subscription,
+        subscription: activeSubscription,
         activeProduct,
         expiration: {
           date: new Date(
-            (subscription?.current_period_end as number) * 1000
+            (activeSubscription?.current_period_end as number) * 1000
           ).toLocaleDateString(),
           time: new Date(
-            (subscription?.current_period_end as number) * 1000
+            (activeSubscription?.current_period_end as number) * 1000
           ).toLocaleTimeString(),
         },
-        isTrialSubscription: !!subscription?.trial_end,
+        isTrialSubscription: !!activeSubscription?.trial_end,
       })
     );
   } catch (cause) {

@@ -9,7 +9,7 @@ import {
   useNavigation,
 } from "@remix-run/react";
 import { z } from "zod";
-import CustodianSelect from "~/components/custody/custodian-select";
+import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
@@ -93,6 +93,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         orderBy: {
           userId: "asc",
         },
+        take: 12,
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -104,11 +105,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
+    const totalTeamMembers = await db.teamMember.count({
+      where: {
+        deletedAt: null,
+        organizationId,
+      },
+    });
+
     return json(
       data({
         showModal: true,
         teamMembers,
         asset,
+        totalTeamMembers,
       })
     );
   } catch (cause) {
@@ -240,7 +249,19 @@ export default function Custody() {
             </p>
           </div>
           <div className=" relative z-50 mb-8">
-            <CustodianSelect />
+            <DynamicSelect
+              disabled={disabled}
+              model={{ name: "teamMember", key: "name" }}
+              fieldName="custodian"
+              label="Team members"
+              initialDataKey="teamMembers"
+              countKey="totalTeamMembers"
+              placeholder="Select a team member"
+              closeOnSelect
+              valueExtractor={(item) =>
+                JSON.stringify({ id: item.id, name: item.name })
+              }
+            />
           </div>
           {actionData?.error ? (
             <div className="-mt-8 mb-8 text-sm text-error-500">
