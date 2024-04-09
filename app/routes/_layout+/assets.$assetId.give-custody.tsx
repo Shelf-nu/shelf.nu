@@ -111,10 +111,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return json(
       data({
         showModal: true,
-        teamMembers: teamMembers.map((member) => ({
-          ...member,
-          inputValue: JSON.stringify({ id: member.id, name: member.name }),
-        })),
+        teamMembers,
         asset,
         totalTeamMembers,
       })
@@ -257,6 +254,9 @@ export default function Custody() {
               countKey="totalTeamMembers"
               placeholder="Select a team member"
               closeOnSelect
+              valueExtractor={(item) =>
+                JSON.stringify({ id: item.id, name: item.name })
+              }
             />
           </div>
           {actionData?.error ? (

@@ -30,6 +30,7 @@ type Props = ModelFilterProps & {
   disabled?: boolean;
   placeholder?: string;
   closeOnSelect?: boolean;
+  valueExtractor?: (item: ModelFilterItem) => string;
 };
 
 export default function DynamicSelect({
@@ -48,6 +49,7 @@ export default function DynamicSelect({
   disabled,
   placeholder = `Select ${model.name}`,
   closeOnSelect = false,
+  valueExtractor,
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -73,6 +75,7 @@ export default function DynamicSelect({
     countKey,
     initialDataKey,
     selectionMode: "none",
+    valueExtractor,
   });
 
   return (
@@ -89,11 +92,7 @@ export default function DynamicSelect({
             ref={triggerRef}
             className="flex items-center justify-between rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
           >
-            {items.find((item) => {
-              const itemValue = item.inputValue || item.id;
-
-              return itemValue === selectedValue;
-            })?.name ?? placeholder}
+            {items.find((i) => i.id === selectedValue)?.name ?? placeholder}
             <ChevronDownIcon />
           </div>
         </PopoverTrigger>
@@ -159,39 +158,36 @@ export default function DynamicSelect({
             {searchQuery !== "" && items.length === 0 && (
               <EmptyState searchQuery={searchQuery} modelName={model.name} />
             )}
-            {items.map((item) => {
-              const itemValue = item.inputValue || item.id;
-              return (
-                <div
-                  key={item.id}
-                  className={tw(
-                    "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                    item.id === selectedValue && "bg-gray-100"
+            {items.map((item) => (
+              <div
+                key={item.id}
+                className={tw(
+                  "flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                  item.id === selectedValue && "bg-gray-100"
+                )}
+                onClick={() => {
+                  setSelectedValue(item.id);
+                  handleSelectItemChange(item.id);
+                  if (closeOnSelect) {
+                    setIsPopoverOpen(false);
+                  }
+                }}
+              >
+                <div>
+                  {typeof renderItem === "function" ? (
+                    renderItem({ ...item, metadata: item })
+                  ) : (
+                    <div className="flex items-center truncate text-sm font-medium">
+                      {item.name}
+                    </div>
                   )}
-                  onClick={() => {
-                    setSelectedValue(itemValue);
-                    handleSelectItemChange(itemValue);
-                    if (closeOnSelect) {
-                      setIsPopoverOpen(false);
-                    }
-                  }}
-                >
-                  <div>
-                    {typeof renderItem === "function" ? (
-                      renderItem({ ...item, metadata: item })
-                    ) : (
-                      <div className="flex items-center truncate text-sm font-medium">
-                        {item.name}
-                      </div>
-                    )}
-                  </div>
-
-                  <When truthy={itemValue === selectedValue}>
-                    <CheckIcon className="text-primary" />
-                  </When>
                 </div>
-              );
-            })}
+
+                <When truthy={item.id === selectedValue}>
+                  <CheckIcon className="text-primary" />
+                </When>
+              </div>
+            ))}
 
             {items.length < totalItems && searchQuery === "" && (
               <button
