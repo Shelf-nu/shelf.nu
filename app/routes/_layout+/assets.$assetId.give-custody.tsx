@@ -255,6 +255,8 @@ export default function Custody() {
               label="Team Member"
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
+              placeholder="Select Team Member"
+              closeOnSelect
             />
           </div>
           {actionData?.error ? (
