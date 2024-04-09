@@ -29,6 +29,8 @@ type Props = ModelFilterProps & {
   extraContent?: React.ReactNode;
   disabled?: boolean;
   placeholder?: string;
+  closeOnSelect?: boolean;
+  valueExtractor?: (item: ModelFilterItem) => string;
 };
 
 export default function DynamicSelect({
@@ -46,7 +48,10 @@ export default function DynamicSelect({
   extraContent,
   disabled,
   placeholder = `Select ${model.name}`,
+  closeOnSelect = false,
+  valueExtractor,
 }: Props) {
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -70,6 +75,7 @@ export default function DynamicSelect({
     countKey,
     initialDataKey,
     selectionMode: "none",
+    valueExtractor,
   });
 
   return (
@@ -80,7 +86,7 @@ export default function DynamicSelect({
         name={fieldName ?? model.name}
       />
 
-      <Popover>
+      <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger disabled={disabled} asChild>
           <div
             ref={triggerRef}
@@ -162,6 +168,9 @@ export default function DynamicSelect({
                 onClick={() => {
                   setSelectedValue(item.id);
                   handleSelectItemChange(item.id);
+                  if (closeOnSelect) {
+                    setIsPopoverOpen(false);
+                  }
                 }}
               >
                 <div>
@@ -182,6 +191,7 @@ export default function DynamicSelect({
 
             {items.length < totalItems && searchQuery === "" && (
               <button
+                type="button"
                 disabled={isSearching}
                 onClick={getAllEntries}
                 className=" flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-gray-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
