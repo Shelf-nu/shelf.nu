@@ -252,10 +252,10 @@ export default function Custody() {
               disabled={disabled}
               model={{ name: "teamMember", key: "name" }}
               fieldName="custodian"
-              label="Team Member"
+              label="Team members"
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
-              placeholder="Select Team Member"
+              placeholder="Select a team member"
               closeOnSelect
             />
           </div>
