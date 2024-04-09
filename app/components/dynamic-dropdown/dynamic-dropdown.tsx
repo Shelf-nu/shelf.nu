@@ -1,8 +1,11 @@
 import { cloneElement } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import { useNavigation } from "@remix-run/react";
-import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
-import { useModelFilters } from "~/hooks";
+import { useModelFilters } from "~/hooks/use-model-filters";
+import type {
+  ModelFilterItem,
+  ModelFilterProps,
+} from "~/hooks/use-model-filters";
 import { isFormProcessing, tw } from "~/utils";
 import { EmptyState } from "./empty-state";
 import Input from "../forms/input";
