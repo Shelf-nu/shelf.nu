@@ -195,6 +195,7 @@ export default function DynamicSelect({
 
             {items.length < totalItems && searchQuery === "" && (
               <button
+                type="button"
                 disabled={isSearching}
                 onClick={getAllEntries}
                 className=" flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-gray-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
