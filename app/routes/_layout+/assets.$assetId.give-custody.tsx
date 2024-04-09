@@ -113,7 +113,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         showModal: true,
         teamMembers: teamMembers.map((member) => ({
           ...member,
-          id: JSON.stringify({ id: member.id, name: member.name }),
+          inputValue: JSON.stringify({ id: member.id, name: member.name }),
         })),
         asset,
         totalTeamMembers,

@@ -64,6 +64,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         filters: queryData.map((item) => ({
+          inputValue:
+            model === "teamMember" // Handle special case for teamMember because we need the value as a json string
+              ? JSON.stringify({ id: item.id, name: item.name })
+              : item.id,
           id: item.id,
           name: item[queryKey],
           color: item?.color,

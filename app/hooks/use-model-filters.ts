@@ -10,6 +10,7 @@ export type ModelFilterItem = {
   name: string;
   color?: string;
   metadata: Record<string, any>;
+  inputValue?: string;
 };
 
 export type ModelFilterProps = {
