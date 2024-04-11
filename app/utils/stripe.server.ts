@@ -64,11 +64,13 @@ export async function createStripeCheckoutSession({
   userId,
   domainUrl,
   customerId,
+  intent,
 }: {
   priceId: Stripe.Price["id"];
   userId: User["id"];
   domainUrl: string;
   customerId: string;
+  intent: "trial" | "subscribe";
 }): Promise<string> {
   try {
     if (!stripe) {
@@ -106,6 +108,17 @@ export async function createStripeCheckoutSession({
       cancel_url: `${domainUrl}/settings/subscription?canceled=true`,
       client_reference_id: userId,
       customer: customerId,
+      ...(intent === "trial" && {
+        subscription_data: {
+          trial_settings: {
+            end_behavior: {
+              missing_payment_method: "pause",
+            },
+          },
+          trial_period_days: 14,
+        },
+        payment_method_collection: "if_required",
+      }), // Add trial period if intent is trial
     });
 
     if (!url) {

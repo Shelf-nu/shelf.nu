@@ -11,8 +11,9 @@ export const PriceCta = ({
   subscription: Object | null;
 }) => {
   if (price.id === "free") return null;
-  console.log(price);
-  const isTeamSubscription = price.id === "tier_2";
+
+  const isTeamSubscriptionColumn =
+    price.product.metadata.shelf_tier === "tier_2";
 
   if (subscription) {
     return (
@@ -26,10 +27,22 @@ export const PriceCta = ({
     <>
       <Form method="post">
         <input type="hidden" name="priceId" value={price.id} />
-        <Button type="submit">Upgrade to {price.product.name}</Button>
-      </Form>
+        <Button type="submit" name="intent" value="subscribe">
+          Upgrade to {price.product.name}
+        </Button>
 
-      {isTeamSubscription && <Button>Start 14 day free trial</Button>}
+        {isTeamSubscriptionColumn && !subscription && (
+          <Button
+            variant="secondary"
+            className="mt-2"
+            type="submit"
+            name="intent"
+            value="trial"
+          >
+            Start 14 day free trial
+          </Button>
+        )}
+      </Form>
     </>
   );
 };
