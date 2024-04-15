@@ -35,13 +35,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       entity: PermissionEntity.asset,
       action: PermissionAction.update,
     });
+    const asset = await getAsset({ organizationId, id });
 
     const { locations } = await getAllEntriesForCreateAndEdit({
       organizationId,
       request,
+      defaults: {
+        location: asset.locationId,
+      },
     });
-
-    const asset = await getAsset({ organizationId, id });
 
     return json({
       asset,
