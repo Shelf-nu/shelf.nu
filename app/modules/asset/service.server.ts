@@ -51,15 +51,13 @@ const label: ErrorLabel = "Assets";
 
 export async function getAsset({
   organizationId,
-  userId,
   id,
 }: Pick<Asset, "id"> & {
   organizationId?: Organization["id"];
-  userId?: User["id"];
 }) {
   try {
     return await db.asset.findFirstOrThrow({
-      where: { id, organizationId, userId },
+      where: { id, organizationId },
       include: {
         category: true,
         notes: {
@@ -113,7 +111,7 @@ export async function getAsset({
       title: "Asset not found",
       message:
         "The asset you are trying to access does not exist or you do not have permission to access it.",
-      additionalData: { id, organizationId, userId },
+      additionalData: { id, organizationId },
       label,
     });
   }

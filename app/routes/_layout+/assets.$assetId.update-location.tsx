@@ -41,7 +41,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const asset = await getAsset({ userId, id });
+    const asset = await getAsset({ organizationId, id });
 
     return json({
       asset,
