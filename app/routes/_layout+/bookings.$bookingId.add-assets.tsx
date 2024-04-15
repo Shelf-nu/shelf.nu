@@ -18,21 +18,32 @@ import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
-import styles from "~/components/booking/styles.css";
+import styles from "~/components/booking/styles.css?url";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import Input from "~/components/forms/input";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 
 import { Td } from "~/components/table";
-import { createNotes, getPaginatedAndFilterableAssets } from "~/modules/asset";
-import { getBooking, removeAssets, upsertBooking } from "~/modules/booking";
-import { getUserByID } from "~/modules/user";
-import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
+import {
+  createNotes,
+  getPaginatedAndFilterableAssets,
+} from "~/modules/asset/service.server";
+import {
+  getBooking,
+  removeAssets,
+  upsertBooking,
+} from "~/modules/booking/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];

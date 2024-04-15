@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "@remix-run/react";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import type { Icon } from "./icons-map";
 import iconsMap from "./icons-map";
 

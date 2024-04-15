@@ -8,17 +8,21 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
-import styles from "~/components/booking/styles.new.css";
-import { db } from "~/database";
+import styles from "~/components/booking/styles.new.css?url";
+import { db } from "~/database/db.server";
 
-import { upsertBooking } from "~/modules/booking";
+import { upsertBooking } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { data, error, makeShelfError, parseData } from "~/utils";
 import { getClientHint, getHints } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { makeShelfError } from "~/utils/error";
+import { data, error, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 /**

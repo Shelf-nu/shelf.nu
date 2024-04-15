@@ -2,6 +2,7 @@ import esbuild from "esbuild";
 
 esbuild
   .build({
+    alias: { "~": "./app" },
     // The final file name
     outfile: "build/server/index.js",
     // Our server entry point

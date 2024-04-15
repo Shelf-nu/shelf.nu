@@ -16,7 +16,7 @@ import { ChevronRight, LinkIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import {
   AlertDialog,
@@ -28,18 +28,21 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Td } from "~/components/table";
-import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
+import {
+  useClearValueFromParams,
+  useSearchParamHasValue,
+} from "~/hooks/use-search-param-utils";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getPaginatedAndFilterableAssets,
   updateAssetQrCode,
-} from "~/modules/asset";
-import { getQr } from "~/modules/qr";
-import css from "~/styles/link-existing-asset.css";
-import { isFormProcessing } from "~/utils";
+} from "~/modules/asset/service.server";
+import { getQr } from "~/modules/qr/service.server";
+import css from "~/styles/link-existing-asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 import {
   data,
   error,
@@ -48,9 +51,12 @@ import {
   parseData,
 } from "~/utils/http.server";
 
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw-classes";
+import { tw } from "~/utils/tw";
 
 export const loader = async ({
   context,

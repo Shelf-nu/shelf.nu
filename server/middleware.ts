@@ -2,7 +2,7 @@ import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
 
-import { refreshAccessToken } from "~/modules/auth";
+import { refreshAccessToken } from "~/modules/auth/service.server";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
 
@@ -98,7 +98,7 @@ export function refreshSession() {
  */
 export function cache(seconds: number) {
   return createMiddleware(async (c, next) => {
-    if (!c.req.path.match(/\.[a-zA-Z0-9]+$/)) {
+    if (!c.req.path.match(/\.[a-zA-Z0-9]+$/) || c.req.path.endsWith(".data")) {
       return next();
     }
 

@@ -1,7 +1,7 @@
 import type { Scan } from "@prisma/client";
-import { db } from "~/database";
-import type { ErrorLabel } from "~/utils";
-import { ShelfError } from "~/utils";
+import { db } from "~/database/db.server";
+import { ShelfError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
 
 const label: ErrorLabel = "Scan";
 

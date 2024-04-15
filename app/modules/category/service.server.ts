@@ -1,8 +1,9 @@
 import type { Category, Organization, Prisma, User } from "@prisma/client";
-import { db } from "~/database";
-import { getRandomColor } from "~/utils";
+import { db } from "~/database/db.server";
+
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { getRandomColor } from "~/utils/get-random-color";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Category";

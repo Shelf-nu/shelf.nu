@@ -6,20 +6,27 @@ import { changeDpiDataUrl } from "changedpi";
 import domtoimage from "dom-to-image";
 import { useReactToPrint } from "react-to-print";
 import { z } from "zod";
-import { XIcon } from "~/components/icons";
-import { Button } from "~/components/shared";
-import { createQr, generateCode, getQrByAssetId } from "~/modules/qr";
+import { XIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
+import {
+  createQr,
+  generateCode,
+  getQrByAssetId,
+} from "~/modules/qr/service.server";
 import type { loader as assetLoader } from "~/routes/_layout+/assets.$assetId";
+import { makeShelfError } from "~/utils/error";
 import {
   data,
   error,
   getCurrentSearchParams,
   getParams,
-  makeShelfError,
-  slugify,
-} from "~/utils";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+} from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { slugify } from "~/utils/slugify";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
