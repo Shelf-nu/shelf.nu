@@ -234,6 +234,7 @@ export const AssetForm = ({
             label="Categories"
             initialDataKey="categories"
             countKey="totalCategories"
+            closeOnSelect
             extraContent={
               <Button
                 to="/categories/new"
@@ -290,6 +291,7 @@ export const AssetForm = ({
             label="Locations"
             initialDataKey="locations"
             countKey="totalLocations"
+            closeOnSelect
             extraContent={
               <Button
                 to="/locations/new"
