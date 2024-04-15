@@ -1,36 +1,21 @@
-import { useMemo, useState } from "react";
-import { useLoaderData } from "@remix-run/react";
+import { useState } from "react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import type { loader } from "~/routes/_layout+/assets.$assetId.update-location";
+import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
-import { SearchInput } from "./search-input";
-import { useLocationSearch } from "./useLocationSearch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../forms/select";
+import DynamicSelect from "../dynamic-select/dynamic-select";
+
 import { XIcon } from "../icons/library";
 import { Image } from "../shared/image";
 
 export const LocationSelect = () => {
-  /** This takes care of the search bar inside the dropdown */
-  const {
-    locationSearch,
-    refinedLocations,
-    isSearchingLocations,
-    handleLocationSearch,
-    clearLocationSearch,
-  } = useLocationSearch();
+  const navigation = useNavigation();
 
-  const hasLocations = useMemo(
-    () => refinedLocations.length > 0,
-    [refinedLocations]
-  );
   const { asset } = useLoaderData<typeof loader>();
+
   const [locationId, setLocationId] = useState(asset.locationId || undefined);
+  const disabled = isFormProcessing(navigation.state);
 
   return (
     <div className="relative w-full">
@@ -40,84 +25,40 @@ export const LocationSelect = () => {
         value={asset.locationId || ""}
       />
       <div className="flex items-center gap-2">
-        {/* setting locationId as a key if it exists else a random string to clear select, solution based on https://github.com/radix-ui/primitives/issues/1569#issuecomment-1434801848*/}
-        <Select
-          name="newLocationId"
-          defaultValue={locationId}
-          value={locationId}
-          key={locationId ? locationId : "random-key"}
-          onValueChange={(value) => setLocationId(value)}
-        >
-          <SelectTrigger className="">
-            <SelectValue placeholder="Select location" />
-          </SelectTrigger>
-
-          <div>
-            <SelectContent
-              className=" max-h-[300px] w-[350px] overflow-auto"
-              position="popper"
-              align="end"
-              sideOffset={4}
-              ref={(ref) =>
-                ref?.addEventListener("touchend", (e) => e.preventDefault())
-              }
+        <DynamicSelect
+          disabled={disabled}
+          fieldName="newLocationId"
+          defaultValue={locationId || undefined}
+          model={{ name: "location", key: "name" }}
+          label="Locations"
+          initialDataKey="locations"
+          countKey="totalLocations"
+          closeOnSelect
+          extraContent={
+            <Button
+              to="/locations/new"
+              variant="link"
+              icon="plus"
+              className="w-full justify-start pt-4"
             >
-              {!hasLocations && !isSearchingLocations ? (
-                <div>
-                  You don't seem to have any locations yet.{" "}
-                  <Button to={"/locations/new"} variant="link" className="">
-                    Create your first location
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <div className="relative">
-                    <SearchInput
-                      filter={locationSearch}
-                      handleFilter={handleLocationSearch}
-                    />
-                    {isSearchingLocations && (
-                      <Button
-                        icon="x"
-                        variant="tertiary"
-                        disabled={isSearchingLocations}
-                        onClick={clearLocationSearch}
-                        className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
-                      />
-                    )}
-                  </div>
+              Create new location
+            </Button>
+          }
+          renderItem={({ name, metadata }) => (
+            <div className="flex items-center gap-2">
+              <Image
+                imageId={metadata.imageId}
+                alt="img"
+                className={tw(
+                  "size-6 rounded-[2px] object-cover",
+                  metadata.description ? "rounded-b-none border-b-0" : ""
+                )}
+              />
+              <div>{name}</div>
+            </div>
+          )}
+        />
 
-                  <div className="border-b border-b-gray-300 py-2 ">
-                    {refinedLocations.map((c) => (
-                      <SelectItem value={c.id} key={c.id} className="p-2">
-                        <div className="flex items-center gap-2">
-                          <Image
-                            imageId={c.imageId}
-                            alt="img"
-                            className={tw(
-                              "size-6 rounded-[2px] object-cover",
-                              c.description ? "rounded-b-none border-b-0" : ""
-                            )}
-                          />
-                          <div>{c.name}</div>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </div>
-
-                  <Button
-                    to={"/locations/new"}
-                    variant="link"
-                    icon="plus"
-                    className="w-full justify-start pt-4"
-                  >
-                    Create new location
-                  </Button>
-                </>
-              )}
-            </SelectContent>
-          </div>
-        </Select>
         <Button
           variant="secondary"
           type="button"
