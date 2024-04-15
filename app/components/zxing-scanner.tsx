@@ -2,8 +2,8 @@ import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
 import { useZxing } from "react-zxing";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { loader } from "~/routes/_layout+/scanner";
-import { isFormProcessing } from "~/utils";
 import { ShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 import { Spinner } from "./shared/spinner";
 
 export const ZXingScanner = ({

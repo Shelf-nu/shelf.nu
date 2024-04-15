@@ -18,10 +18,9 @@ import MostScannedCategories from "~/components/dashboard/most-scanned-categorie
 import NewestAssets from "~/components/dashboard/newest-assets";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
-import styles from "~/styles/layout/skeleton-loading.css";
-import { data, error } from "~/utils";
+import styles from "~/styles/layout/skeleton-loading.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getLocale } from "~/utils/client-hints";
 import { userPrefs } from "~/utils/cookies.server";
@@ -35,8 +34,12 @@ import {
   totalAssetsAtEndOfEachMonth,
 } from "~/utils/dashboard.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

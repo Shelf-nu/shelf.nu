@@ -6,7 +6,7 @@ import {
   BookingStatus,
   AssetStatus,
 } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { calcTimeDifference } from "~/utils/date-fns";
 import type { ErrorLabel } from "~/utils/error";
@@ -23,8 +23,8 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { ClientHint, SchedulerData } from "./types";
-import { createNotes } from "../asset";
-import { getOrganizationAdminsEmails } from "../organization";
+import { createNotes } from "../asset/service.server";
+import { getOrganizationAdminsEmails } from "../organization/service.server";
 
 const label: ErrorLabel = "Booking";
 

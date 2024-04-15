@@ -1,9 +1,13 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { Link, Outlet, json } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
-import { data, error, makeShelfError } from "~/utils";
+import { makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

@@ -6,20 +6,21 @@ import { useLoaderData } from "@remix-run/react";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
-import { Badge } from "~/components/shared";
+import { Badge } from "~/components/shared/badge";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { Image } from "~/components/shared/image";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Table, Td, Th } from "~/components/table";
 import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actions-dropdown";
-import { db } from "~/database";
-import { useUserData } from "~/hooks";
+import { db } from "~/database/db.server";
+import { useUserData } from "~/hooks/use-user-data";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
-import { data, error, tw } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import { canCreateMoreOrganizations } from "~/utils/subscription";
+import { tw } from "~/utils/tw";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();

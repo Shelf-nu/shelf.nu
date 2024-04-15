@@ -1,7 +1,7 @@
 import React from "react";
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
 import { renderers } from "@markdoc/markdoc";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 
 interface Props {
   content: RenderableTreeNodes;

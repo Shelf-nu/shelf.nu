@@ -16,18 +16,13 @@ import { z } from "zod";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { ContinueWithEmailForm } from "~/modules/auth";
+import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
-import { findUserByEmail } from "~/modules/user";
-import {
-  data,
-  error,
-  getActionMethod,
-  isFormProcessing,
-  parseData,
-} from "~/utils";
+import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Create an account";
