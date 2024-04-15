@@ -1,9 +1,10 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 
-import { sendOTP, SendOtpSchema } from "~/modules/auth";
-import { makeShelfError, error, notAllowedMethod } from "~/utils";
-import { getActionMethod, parseData } from "~/utils/http.server";
+import { SendOtpSchema } from "~/modules/auth/components/continue-with-email-form";
+import { sendOTP } from "~/modules/auth/service.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { error, getActionMethod, parseData } from "~/utils/http.server";
 
 export async function action({ request }: ActionFunctionArgs) {
   try {

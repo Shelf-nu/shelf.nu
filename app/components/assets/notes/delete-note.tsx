@@ -1,5 +1,5 @@
 import { useFetcher, useParams } from "@remix-run/react";
-import { TrashIcon } from "~/components/icons";
+import { TrashIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 
 import {

@@ -1,9 +1,10 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
-import { data, error, makeShelfError, parseData } from "~/utils";
+import { makeShelfError } from "~/utils/error";
+import { data, error, parseData } from "~/utils/http.server";
 
 const ModelFiltersSchema = z.object({
   /** Models that are allowed to filter */

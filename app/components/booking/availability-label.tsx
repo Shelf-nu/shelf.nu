@@ -2,7 +2,8 @@ import type { Booking } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import { Link, useLoaderData } from "@remix-run/react";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
-import { SERVER_URL, tw } from "~/utils";
+import { SERVER_URL } from "~/utils/env";
+import { tw } from "~/utils/tw";
 import {
   Tooltip,
   TooltipContent,

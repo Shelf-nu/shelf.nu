@@ -1,8 +1,9 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { NotificationIcon } from "~/atoms/notifications";
-import { data, error, makeShelfError, parseData } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
+import { data, error, parseData } from "~/utils/http.server";
 
 export const ClientNotificationSchema = z.object({
   title: z.string().min(4, { message: "Title is required" }),

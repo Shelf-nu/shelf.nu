@@ -9,18 +9,24 @@ import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import Header from "~/components/layout/header";
-import { List, Filters } from "~/components/list";
-import { Button } from "~/components/shared";
+import { List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
+import { Button } from "~/components/shared/button";
+
 import { Td } from "~/components/table";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import {
   createBulkLocationChangeNotes,
   getPaginatedAndFilterableAssets,
-} from "~/modules/asset";
+} from "~/modules/asset/service.server";
 
-import { data, error, getParams, isFormProcessing, parseData } from "~/utils";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

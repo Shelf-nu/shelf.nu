@@ -7,7 +7,7 @@ import {
   clearNotificationAtom,
   showNotificationAtom,
 } from "~/atoms/notifications";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { iconsMap } from "./icons-map";
 
 export const Toaster = () => {

@@ -3,13 +3,13 @@ import { redirect, json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
-import { getUserOrganizations } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getQr } from "~/modules/qr";
-import { createScan, updateScan } from "~/modules/scan";
-import { assertIsPost, data, error, getParams } from "~/utils";
+import { getUserOrganizations } from "~/modules/organization/service.server";
+import { getQr } from "~/modules/qr/service.server";
+import { createScan, updateScan } from "~/modules/scan/service.server";
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { assertIsPost, data, error, getParams } from "~/utils/http.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.isAuthenticated

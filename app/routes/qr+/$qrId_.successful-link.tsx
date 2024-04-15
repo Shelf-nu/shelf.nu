@@ -6,7 +6,7 @@ import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import { LinkIcon } from "~/components/icons/library";
 
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 
 import { db } from "~/database/db.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
