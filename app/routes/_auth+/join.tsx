@@ -99,7 +99,6 @@ export async function action({ request }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
-    console.log("this runs");
     const reason = makeShelfError(cause);
     return json(error(reason), { status: reason.status });
   }
