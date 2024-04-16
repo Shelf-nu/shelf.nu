@@ -5,26 +5,25 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import resolveConfig from "tailwindcss/resolveConfig";
-import { Button } from "~/components/shared";
+import { Button } from "~/components/shared/button";
 import Agreement from "~/components/sign/agreement";
 import AgreementPopup, {
   AGREEMENT_POPUP_VISIBLE,
 } from "~/components/sign/agreement-popup";
-import { db } from "~/database";
-import { createNote, getAsset } from "~/modules/asset";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import { ENABLE_PREMIUM_FEATURES, assertIsPost } from "~/utils";
+import { db } from "~/database/db.server";
+import { createNote, getAsset } from "~/modules/asset/service.server";
 import {
   initializePerPageCookieOnLayout,
   setCookie,
   userPrefs,
 } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
+import { ShelfError } from "~/utils/error";
 import tailwindConfig from "../../../tailwind.config";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  // @ts-expect-error @TODO - update to use new method
   const authSession = await requireAuthSession(request);
   // @TODO - we need to look into doing a select as we dont want to expose all data always
   const user = authSession
@@ -66,10 +65,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const assetId = new URL(request.url).searchParams.get("assetId");
   // const templateId = params.templateId;
   const userId = user?.id;
+  // @ts-expect-error @TODO - update to use new method
+
   const { organizationId } = await requireOrganisationId(authSession, request);
 
   if (!assetId || !assigneeId) {
-    throw new ShelfStackError({
+    // @ts-expect-error @TODO - update to use new method
+    throw new ShelfError({
       message: "Malformed URL",
       status: 400,
       title: "Malformed URL",
@@ -77,7 +79,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   if (userId !== assigneeId) {
-    throw new ShelfStackError({
+    // @ts-expect-error @TODO - update to use new method
+    throw new ShelfError({
       message: "Unauthorized",
       status: 401,
       title: "Unauthorized",
@@ -89,20 +92,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     organizationId,
   });
 
-  if (!asset) {
-    throw new ShelfStackError({
-      message: "Asset not found",
-      status: 404,
-      title: "Asset not found",
-    });
-  }
-
   // @TODO needs fixing -
   // @ts-ignore
   const custody = asset.custody as Custody;
 
   if (!custody) {
-    throw new ShelfStackError({
+    // @ts-expect-error @TODO - update to use new method
+    throw new ShelfError({
       message: "Custody not found",
       status: 404,
       title: "Custody not found",
@@ -113,7 +109,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const template = custody.template as Template;
 
   if (!template) {
-    throw new ShelfStackError({
+    // @ts-expect-error @TODO - update to use new method
+    throw new ShelfError({
       message: "Template not found",
       status: 404,
       title: "Template not found",
@@ -132,7 +129,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     {
       headers: [
         setCookie(await userPrefs.serialize(cookie)),
+
         setCookie(
+          // @ts-expect-error @TODO - update to use new method
           await commitAuthSession(request, {
             authSession,
           })
@@ -143,7 +142,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export async function action({ request }: ActionFunctionArgs) {
+  // @ts-expect-error @TODO - update to use new method
   assertIsPost(request);
+
+  // @ts-expect-error @TODO - update to use new method
   const authSession = await requireAuthSession(request);
   const userId = authSession.userId;
 
@@ -157,11 +159,13 @@ export async function action({ request }: ActionFunctionArgs) {
     },
   });
 
-  if (!user) throw new ShelfStackError({ message: "User not found" });
+  // @ts-expect-error @TODO - update to use new method
+  if (!user) throw new ShelfError({ message: "User not found" });
 
   const assetId = new URL(request.url).searchParams.get("assetId");
   if (!assetId) {
-    throw new ShelfStackError({
+    // @ts-expect-error @TODO - update to use new method
+    throw new ShelfError({
       message: "Malformed URL",
       status: 400,
       title: "Malformed URL",
@@ -173,7 +177,8 @@ export async function action({ request }: ActionFunctionArgs) {
   const signatureImage = formData.get("signatureImage") as string;
 
   if (!signatureText && !signatureImage) {
-    throw new ShelfStackError({
+    // @ts-expect-error @TODO - update to use new method
+    throw new ShelfError({
       message: "Signature required",
       status: 400,
       title: "Signature required",
@@ -220,6 +225,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   return redirect(`/assets/${assetId}`, {
     headers: {
+      // @ts-expect-error @TODO - update to use new method
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
   });

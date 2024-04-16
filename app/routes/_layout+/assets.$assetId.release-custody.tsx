@@ -2,27 +2,26 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
-import { UserXIcon } from "~/components/icons";
+import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database";
-import { createNote } from "~/modules/asset";
-import { releaseCustody } from "~/modules/custody";
+
+import { db } from "~/database/db.server";
+import { createNote } from "~/modules/asset/service.server";
+import { releaseCustody } from "~/modules/custody/service.server";
 import { assetCustodyRevokedEmailText } from "~/modules/invite/helpers";
-import { getUserByID } from "~/modules/user";
-import styles from "~/styles/layout/custom-modal.css";
-import {
-  data,
-  error,
-  getParams,
-  isFormProcessing,
-  parseData,
-  validEmail,
-} from "~/utils";
+import { getUserByID } from "~/modules/user/service.server";
+import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import { sendEmail } from "~/utils/mail.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { validEmail } from "~/utils/misc";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 /** @TODO this needs review */

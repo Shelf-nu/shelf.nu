@@ -1,13 +1,13 @@
 import type { Template } from "@prisma/client";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
-import { VerticalDotsIcon } from "~/components/icons";
+import { VerticalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils/form";
 import type { loader } from "../../routes/_layout+/settings.template.index";
 import { Button } from "../shared/button";
 import {

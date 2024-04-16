@@ -1,6 +1,6 @@
 import type { LinksFunction } from "@remix-run/node";
 import { Outlet } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 import { useCrisp } from "~/components/marketing/crisp";
 import styles from "~/styles/layout/index.css";
 
@@ -100,6 +100,4 @@ export default function App() {
   );
 }
 
-export const ErrorBoundary = () => (
-  <ErrorBoundryComponent title="Sorry, page you are looking for doesn't exist" />
-);
+export const ErrorBoundary = () => <ErrorContent />;

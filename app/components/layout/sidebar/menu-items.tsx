@@ -7,7 +7,7 @@ import { SwitchIcon } from "~/components/icons/library";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { useMainMenuItems } from "~/hooks/use-main-menu-items";
 import type { loader } from "~/routes/_layout+/_layout";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
 

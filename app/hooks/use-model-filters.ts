@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import type { AllowedModelNames, loader } from "~/routes/api+/model-filters";
+import { itemsWithExtractedValue } from "~/utils/model-filters";
 import useFetcherWithReset from "./use-fetcher-with-reset";
 
 export type ModelFilterItem = {
@@ -26,6 +27,15 @@ export type ModelFilterProps = {
   };
   /** If none is passed then values will not be added in query params */
   selectionMode?: "append" | "set" | "none";
+
+  /**
+   *
+   * A function to extract value/id of item on basis of item data
+   *
+   * @example
+   * (item) => JSON.stringify({ id: item.id, name: item.name })
+   */
+  valueExtractor?: (item: ModelFilterItem) => string;
 };
 
 const GET_ALL_KEY = "getAll";
@@ -36,6 +46,7 @@ export function useModelFilters({
   countKey,
   initialDataKey,
   selectionMode = "append",
+  valueExtractor,
 }: ModelFilterProps) {
   const initialData = useLoaderData<any>();
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -50,11 +61,11 @@ export function useModelFilters({
 
   const items = useMemo(() => {
     if (searchQuery && fetcher.data && !fetcher.data.error) {
-      return fetcher.data.filters;
+      return itemsWithExtractedValue(fetcher.data.filters, valueExtractor);
     }
 
-    return (initialData[initialDataKey] ?? []) as Array<ModelFilterItem>;
-  }, [fetcher.data, initialData, initialDataKey, searchQuery]);
+    return itemsWithExtractedValue(initialData[initialDataKey], valueExtractor);
+  }, [fetcher.data, initialData, initialDataKey, searchQuery, valueExtractor]);
 
   const handleSelectItemChange = useCallback(
     (value: string) => {

@@ -8,8 +8,8 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { validateFileAtom } from "~/atoms/file";
-import { Badge, Button } from "~/components/shared";
-import { formatBytes, isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils/form";
+import { formatBytes } from "~/utils/format-bytes";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import {
@@ -20,6 +20,8 @@ import {
   SelectValue,
 } from "../forms/select";
 import { Switch } from "../forms/switch";
+import { Badge } from "../shared/badge";
+import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import iconsMap from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";

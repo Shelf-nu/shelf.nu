@@ -2,72 +2,107 @@ import { CopyIcon } from "@radix-ui/react-icons";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
+import { z } from "zod";
 import Input from "~/components/forms/input";
-import { SendRotatedIcon, ShareAssetIcon } from "~/components/icons";
-import { Button } from "~/components/shared";
-import { db } from "~/database";
-import { requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+import { SendRotatedIcon, ShareAssetIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
+import { db } from "~/database/db.server";
 import styles from "~/styles/layout/custom-modal.css";
-import { isFormProcessing } from "~/utils";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getParams } from "~/utils/http.server";
 import { sendEmail } from "~/utils/mail.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
-
-  const assetId = params.assetId as string;
-  const asset = await db.asset.findUnique({
-    where: { id: assetId, organizationId },
-    select: {
-      title: true,
-      custody: {
-        include: {
-          template: true,
-          custodian: {
-            select: {
-              name: true,
-              user: {
+export const loader = async ({
+  request,
+  params,
+  context,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
+  try {
+    // @TODO this needs to be updated as the action and entity are not correct
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
+    const asset = await db.asset
+      .findUniqueOrThrow({
+        where: { id: assetId, organizationId },
+        select: {
+          title: true,
+          custody: {
+            include: {
+              template: true,
+              custodian: {
                 select: {
-                  email: true,
+                  name: true,
+                  user: {
+                    select: {
+                      email: true,
+                    },
+                  },
                 },
               },
             },
           },
         },
-      },
-    },
-  });
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "Something went wrong while fetching the asset. Please try again or contact support.",
+          additionalData: { userId, assetId, organizationId },
+          // @TODO need to create a new label for templates and use it on all the exceptions
+          label: "Assets",
+        });
+      });
 
-  if (!asset) {
-    return redirect("/assets");
+    const template = asset.custody?.template;
+    const custodianName = asset.custody?.custodian?.name;
+
+    if (!template)
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Template not found. Please refresh and if the issue persists contact support.",
+        label: "Assets",
+      });
+
+    if (!custodianName)
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Custodian not found. Please refresh and if the issue persists contact support.",
+        label: "Assets",
+      });
+
+    return json(
+      data({
+        showModal: true,
+        template,
+        custodianName,
+        assetId,
+        assetName: asset.title,
+        custodianEmail: asset.custody?.custodian?.user?.email,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, assetId });
+    throw json(error(reason), { status: reason.status });
   }
-
-  const template = asset.custody?.template;
-  const custodianName = asset.custody?.custodian?.name;
-
-  if (!template)
-    throw new ShelfStackError({
-      message:
-        "Template not found. Please refresh and if the issue persists contact support.",
-    });
-
-  if (!custodianName)
-    throw new ShelfStackError({
-      message:
-        "Custodian not found. Please refresh and if the issue persists contact support.",
-    });
-
-  return json({
-    showModal: true,
-    template,
-    custodianName,
-    assetId,
-    assetName: asset.title,
-    custodianEmail: asset.custody?.custodian?.user?.email,
-  });
 };
 
 export function links() {
@@ -75,6 +110,9 @@ export function links() {
 }
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
+  // @TODO - this needs to be updated to follow the new way of handling actions
+
+  // @ts-expect-error
   const authSession = await requireAuthSession(request);
   const formData = await request.formData();
   const assetId = params.assetId as string;

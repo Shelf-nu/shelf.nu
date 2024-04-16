@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { SendIcon, VerticalDotsIcon } from "~/components/icons";
+import { SendIcon, VerticalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,

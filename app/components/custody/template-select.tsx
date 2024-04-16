@@ -6,8 +6,8 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
-} from "../forms";
-import { Button } from "../shared";
+} from "../forms/select";
+import { Button } from "../shared/button";
 
 export default function TemplateSelect() {
   const { templates } = useLoaderData<typeof loader>();

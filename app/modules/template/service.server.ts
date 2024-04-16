@@ -4,9 +4,9 @@ import {
   type Template,
   type User,
 } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
-import { createNote } from "../asset";
+import { createNote } from "../asset/service.server";
 
 export async function createTemplate({
   name,
@@ -160,7 +160,7 @@ export async function updateTemplatePDF({
   });
 }
 
-export async function makeInactive({
+export function makeInactive({
   id,
   organizationId,
 }: Pick<Template, "id"> & { organizationId: Organization["id"] }) {
@@ -173,7 +173,7 @@ export async function makeInactive({
   });
 }
 
-export async function makeActive({
+export function makeActive({
   id,
   organizationId,
 }: Pick<Template, "id"> & { organizationId: Organization["id"] }) {
@@ -207,7 +207,7 @@ export async function makeDefault({
   });
 }
 
-export async function getTemplateById({ id }: Pick<Template, "id">) {
+export function getTemplateById({ id }: Pick<Template, "id">) {
   return db.template.findFirst({
     where: { id },
   });

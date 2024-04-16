@@ -3,7 +3,7 @@ import type { Role } from "@prisma/client";
 import { PrismaClient, Roles } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 
-import { createUser } from "~/modules/user";
+import { createUser } from "~/modules/user/service.server";
 import { ShelfError } from "~/utils/error";
 
 import {

@@ -1,9 +1,9 @@
 /* eslint-disable no-console */
 import { BookingStatus } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
-import { ShelfError } from "~/utils";
 import { getTimeRemainingMessage } from "~/utils/date-fns";
+import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";

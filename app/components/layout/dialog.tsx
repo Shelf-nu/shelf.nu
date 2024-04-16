@@ -1,8 +1,8 @@
 import { useCallback, type ReactNode } from "react";
 import { useMatches, useNavigate } from "@remix-run/react";
-import { tw } from "~/utils";
-import { XIcon } from "../icons";
-import { Button } from "../shared";
+import { tw } from "~/utils/tw";
+import { XIcon } from "../icons/library";
+import { Button } from "../shared/button";
 
 export const Dialog = ({
   children,
@@ -30,7 +30,7 @@ export const Dialog = ({
         <div
           className={tw(
             " relative z-10 size-full  bg-white p-6 shadow-lg md:max-h-[85vh] md:rounded",
-            noScroll ? "md:h-[85vh]" : "overflow-y-auto"
+            noScroll ? "md:h-[85vh]" : "md:overflow-y-auto"
           )}
         >
           <Button

@@ -5,30 +5,28 @@ import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import sharp from "sharp";
 import type { AuthSession } from "server/session";
-import type { ExtendedPrismaClient } from "~/database";
-import { db } from "~/database";
+import type { ExtendedPrismaClient } from "~/database/db.server";
+import { db } from "~/database/db.server";
 
 import {
   deleteAuthAccount,
   createEmailAuthAccount,
   signInWithEmail,
   updateAccountPassword,
-} from "~/modules/auth";
+} from "~/modules/auth/service.server";
 
-import {
-  dateTimeInUnix,
-  getCurrentSearchParams,
-  getParamsValues,
-  randomUsernameFromEmail,
-} from "~/utils";
+import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import type { ValidationError } from "~/utils/http";
+import { getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   deleteProfilePicture,
   getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
+import { randomUsernameFromEmail } from "~/utils/user";
 import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
 
@@ -435,7 +433,7 @@ export async function updateProfilePicture({
     return await updateUser({
       id: userId,
       profilePicture: profilePicture
-        ? getPublicFileURL({ filename: profilePicture })
+        ? await getPublicFileURL({ filename: profilePicture })
         : undefined,
     });
   } catch (cause) {

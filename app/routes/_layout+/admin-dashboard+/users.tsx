@@ -4,11 +4,13 @@ import { redirect, json } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
 import { Pagination } from "~/components/list/pagination";
 import { Td } from "~/components/table";
-import { getPaginatedAndFilterableUsers } from "~/modules/user";
-import { data, error, makeShelfError } from "~/utils";
+import { getPaginatedAndFilterableUsers } from "~/modules/user/service.server";
+import { makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

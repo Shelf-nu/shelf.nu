@@ -1,7 +1,7 @@
 import { Form } from "@remix-run/react";
 import { CustomerPortalForm } from "./customer-portal-form";
 import type { Price } from "./prices";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 
 export const PriceCta = ({
   price,

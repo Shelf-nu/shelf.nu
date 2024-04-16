@@ -1,6 +1,8 @@
 import type { ChangeEvent } from "react";
 import { atom } from "jotai";
-import { formatBytes, verifyAccept } from "~/utils";
+
+import { formatBytes } from "~/utils/format-bytes";
+import { verifyAccept } from "~/utils/verify-file-accept";
 
 export const fileErrorAtom = atom<string | undefined>(undefined);
 fileErrorAtom.onMount = (setAtom) => {

@@ -10,19 +10,16 @@ import {
   NewTemplateFormSchema,
   TemplateForm,
 } from "~/components/templates/form";
-import { requireAuthSession, commitAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+
 import { createTemplate, updateTemplatePDF } from "~/modules/template";
-import { assertUserCanCreateMoreTemplates } from "~/modules/tier";
-
-import { assertIsPost } from "~/utils";
-
+import { assertUserCanCreateMoreTemplates } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 const title = "New Template";
 
 export async function loader({ request }: LoaderFunctionArgs) {
+  // @ts-expect-error @TODO update to use new method
   const { userId } = await requireAuthSession(request);
 
   await assertUserCanCreateMoreTemplates({ userId });
@@ -45,8 +42,13 @@ export const handle = {
 };
 
 export async function action({ request }: LoaderFunctionArgs) {
+  // @ts-expect-error @TODO update to use new method
   const authSession = await requireAuthSession(request);
+
+  // @ts-expect-error @TODO update to use new method
   const { organizationId } = await requireOrganisationId(authSession, request);
+
+  // @ts-expect-error @TODO update to use new method
   assertIsPost(request);
   await assertUserCanCreateMoreTemplates({ userId: authSession.userId });
 
@@ -64,6 +66,7 @@ export async function action({ request }: LoaderFunctionArgs) {
       {
         status: 400,
         headers: {
+          // @ts-expect-error @TODO update to use new method
           "Set-Cookie": await commitAuthSession(request, { authSession }),
         },
       }
@@ -84,12 +87,14 @@ export async function action({ request }: LoaderFunctionArgs) {
       {
         status: 400,
         headers: {
+          // @ts-expect-error @TODO update to use new method
           "Set-Cookie": await commitAuthSession(request, { authSession }),
         },
       }
     );
   }
 
+  // @TODO update to use new method - throw errors inside the function
   const { id } = await createTemplate({
     name,
     type,
@@ -99,6 +104,7 @@ export async function action({ request }: LoaderFunctionArgs) {
     organizationId,
   });
 
+  // @TODO update to use new method - throw errors inside the function
   await updateTemplatePDF({
     pdfName: pdf.name,
     pdfSize: pdf.size,
@@ -116,6 +122,7 @@ export async function action({ request }: LoaderFunctionArgs) {
 
   return redirect(`/settings/template`, {
     headers: {
+      // @ts-expect-error @TODO update to use new method
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
   });

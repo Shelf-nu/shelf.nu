@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useSearchParams } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
 import Agreement from "./agreement";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 
 export const AGREEMENT_POPUP_VISIBLE = "show-agreement-popup";
 

@@ -1,8 +1,8 @@
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
-import { useUserData } from "~/hooks";
+import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
-import { isFormProcessing } from "~/utils";
+import { isFormProcessing } from "~/utils/form";
 import { NewNote } from "./new";
 import type { NoteWithDate } from "./note";
 import { Note } from "./note";

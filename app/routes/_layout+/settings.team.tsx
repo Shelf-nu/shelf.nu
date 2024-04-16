@@ -15,17 +15,20 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
 import { TeamMembersTable } from "~/components/workspace/team-members-table";
 import { UsersTable } from "~/components/workspace/users-table";
-import { db } from "~/database";
-import { createInvite } from "~/modules/invite";
+import { db } from "~/database/db.server";
 import { revokeAccessEmailText } from "~/modules/invite/helpers";
-import { revokeAccessToOrganization } from "~/modules/user";
-import { data, error, parseData } from "~/utils";
+import { createInvite } from "~/modules/invite/service.server";
+import { revokeAccessToOrganization } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error, parseData } from "~/utils/http.server";
 import { sendEmail } from "~/utils/mail.server";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";

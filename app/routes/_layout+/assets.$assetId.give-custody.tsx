@@ -14,33 +14,31 @@ import { useAtom } from "jotai";
 import { z } from "zod";
 import { assignCustodyUser } from "~/atoms/assign-custody-user";
 
-import CustodianSelect from "~/components/custody/custodian-select";
 import TemplateSelect from "~/components/custody/template-select";
+import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { Switch } from "~/components/forms/switch";
-import { UserIcon } from "~/components/icons";
+import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { CustomTooltip } from "~/components/shared/custom-tooltip";
 import { WarningBox } from "~/components/shared/warning-box";
-import { db } from "~/database";
-import { createNote } from "~/modules/asset";
+
+import { db } from "~/database/db.server";
+import { createNote } from "~/modules/asset/service.server";
 import {
   assetCustodyAssignedEmailText,
   assetCustodyAssignedWithTemplateEmailText,
 } from "~/modules/invite/helpers";
-import { getUserByID } from "~/modules/user";
-import styles from "~/styles/layout/custom-modal.css";
-import {
-  data,
-  error,
-  getParams,
-  isFormProcessing,
-  makeShelfError,
-  parseData,
-  ShelfError,
-} from "~/utils";
+import { getUserByID } from "~/modules/user/service.server";
+import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import { sendEmail } from "~/utils/mail.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
@@ -109,6 +107,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         orderBy: {
           userId: "asc",
         },
+        take: 12,
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -130,12 +129,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
+    const totalTeamMembers = await db.teamMember.count({
+      where: {
+        deletedAt: null,
+        organizationId,
+      },
+    });
+
     return json(
       data({
         showModal: true,
         teamMembers,
         asset,
         templates,
+        totalTeamMembers,
       })
     );
   } catch (cause) {
@@ -405,13 +412,21 @@ export default function Custody() {
               to one of your team members.
             </p>
           </div>
-          <div className=" relative z-50 mb-5">
-            <CustodianSelect />
-            {actionData?.error ? (
-              <div className="-mt-8 mb-8 text-sm text-error-500">
-                {actionData.error.message}
-              </div>
-            ) : null}
+
+          <div className=" relative z-50 mb-6">
+            <DynamicSelect
+              disabled={disabled}
+              model={{ name: "teamMember", key: "name" }}
+              fieldName="custodian"
+              label="Team members"
+              initialDataKey="teamMembers"
+              countKey="totalTeamMembers"
+              placeholder="Select a team member"
+              closeOnSelect
+              valueExtractor={(item) =>
+                JSON.stringify({ id: item.id, name: item.name })
+              }
+            />
           </div>
           {assignCustody == null || assignCustody?.userId === null ? (
             <CustomTooltip

@@ -13,17 +13,18 @@ import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
-import { isFormProcessing, tw } from "~/utils";
-
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
+
 import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
-import { Button } from "../shared";
+import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { Image } from "../shared/image";
@@ -233,6 +234,7 @@ export const AssetForm = ({
             label="Categories"
             initialDataKey="categories"
             countKey="totalCategories"
+            closeOnSelect
             extraContent={
               <Button
                 to="/categories/new"
@@ -289,6 +291,7 @@ export const AssetForm = ({
             label="Locations"
             initialDataKey="locations"
             countKey="totalLocations"
+            closeOnSelect
             extraContent={
               <Button
                 to="/locations/new"

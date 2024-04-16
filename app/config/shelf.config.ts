@@ -1,4 +1,4 @@
-import { ENABLE_PREMIUM_FEATURES, SEND_ONBOARDING_EMAIL } from "~/utils";
+import { ENABLE_PREMIUM_FEATURES, SEND_ONBOARDING_EMAIL } from "~/utils/env";
 import { Config } from "./types";
 
 export const config: Config = {

@@ -14,19 +14,21 @@ import {
   NewTemplateFormSchema,
   TemplateForm,
 } from "~/components/templates/form";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
+
 import {
   getTemplateById,
   updateTemplate,
   updateTemplatePDF,
 } from "~/modules/template";
-import { assertIsPost, getRequiredParam } from "~/utils";
+
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
+  // @ts-expect-error @TODO update to use new method
   await requireAuthSession(request);
+
+  // @ts-expect-error @TODO update to use new method
   const id = getRequiredParam(params, "templateId");
 
   const template = await getTemplateById({ id });
@@ -53,10 +55,14 @@ export const handle = {
 };
 
 export async function action({ request, params }: ActionFunctionArgs) {
+  // @ts-expect-error @TODO update to use new method
   assertIsPost(request);
+  // @ts-expect-error @TODO update to use new method
   const authSession = await requireAuthSession(request);
+  // @ts-expect-error @TODO update to use new method
   const { organizationId } = await requireOrganisationId(authSession, request);
 
+  // @ts-expect-error @TODO update to use new method
   const id = getRequiredParam(params, "templateId");
   const clonedData = request.clone();
   const formData = await request.formData();
@@ -73,6 +79,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       {
         status: 400,
         headers: {
+          // @ts-expect-error @TODO update to use new method
           "Set-Cookie": await commitAuthSession(request, { authSession }),
         },
       }
@@ -106,6 +113,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   return redirect("/settings/template", {
     headers: {
+      // @ts-expect-error @TODO update to use new method
       "Set-Cookie": await commitAuthSession(request, { authSession }),
     },
   });

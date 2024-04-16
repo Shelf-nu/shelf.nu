@@ -12,7 +12,7 @@ import { Spinner } from "~/components/shared/spinner";
 import { ZXingScanner } from "~/components/zxing-scanner";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import scannerCss from "~/styles/scanner.css";
+import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";

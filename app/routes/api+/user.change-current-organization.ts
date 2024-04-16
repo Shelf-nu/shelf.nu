@@ -1,9 +1,9 @@
 import { type ActionFunctionArgs, redirect, json } from "@remix-run/node";
 import { z } from "zod";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { error, parseData } from "~/utils";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError } from "~/utils/error";
+import { error, parseData } from "~/utils/http.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();

@@ -2,14 +2,17 @@ import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import { UnlinkIcon } from "~/components/icons";
+import { UnlinkIcon } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
-import { Button } from "~/components/shared";
-import { db } from "~/database";
-import { data, error, getParams, makeShelfError, ShelfError } from "~/utils";
-
+import { Button } from "~/components/shared/button";
+import { db } from "~/database/db.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { data, error, getParams } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

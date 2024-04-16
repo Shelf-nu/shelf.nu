@@ -12,8 +12,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import { isFormProcessing } from "~/utils";
-import { TrashIcon } from "../icons";
+import { isFormProcessing } from "~/utils/form";
+import { TrashIcon } from "../icons/library";
 
 export const DeleteTag = ({ tag }: { tag: Pick<Tag, "name" | "id"> }) => {
   const fetcher = useFetcher();
