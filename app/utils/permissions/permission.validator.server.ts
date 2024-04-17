@@ -26,6 +26,7 @@ export enum PermissionEntity {
   dashboard = "dashboard",
   generalSettings = "generalSettings",
   subscription = "subscription",
+  template = "template",
 }
 
 export interface PermissionCheckProps {
@@ -58,6 +59,11 @@ const Role2PermissionMap: {
     [PermissionEntity.dashboard]: [],
     [PermissionEntity.generalSettings]: [],
     [PermissionEntity.subscription]: [],
+    [PermissionEntity.template]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+    ],
   },
 };
 

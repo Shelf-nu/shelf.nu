@@ -134,6 +134,7 @@ export const assertUserCanCreateMoreCustomFields = async ({
   }
 };
 
+// @TODO - this needs to be updated. Errors are not being thrown correctly the function
 export const assertUserCanCreateMoreTemplates = async ({
   userId,
 }: {

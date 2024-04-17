@@ -1,11 +1,13 @@
 import type { LinksFunction } from "@remix-run/node";
 import { Outlet } from "@remix-run/react";
-import { ErrorContent } from "~/components/errors";
 import { useCrisp } from "~/components/marketing/crisp";
+
+// @TODO - this needs to be updated into the correct way of importing css using vite
 import styles from "~/styles/layout/index.css";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
+// @TODO - this needs to be cleaned up. Not sure what we want to do here
 // export const loader = async ({ request }: LoaderFunctionArgs) => {
 //   const authSession = await requireAuthSession(request);
 //   // @TODO - we need to look into doing a select as we dont want to expose all data always
@@ -99,5 +101,3 @@ export default function App() {
     </div>
   );
 }
-
-export const ErrorBoundary = () => <ErrorContent />;

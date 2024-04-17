@@ -392,7 +392,6 @@ export function links() {
 export default function Custody() {
   const { asset } = useLoaderData<typeof loader>();
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
-  const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const [assignCustody] = useAtom(assignCustodyUser);

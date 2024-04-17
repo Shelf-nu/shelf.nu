@@ -19,156 +19,165 @@ import { db } from "~/database/db.server";
 import { makeActive, makeDefault, makeInactive } from "~/modules/template";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreTemplates } from "~/utils/subscription";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // @TODO update to use new method
-  // @ts-expect-error
-  const authSession = await requireAuthSession(request);
-
-  // @ts-expect-error
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
 
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      templates: {
-        where: { organizationId },
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          createdAt: true,
-          updatedAt: true,
-          type: true,
-          isActive: true,
-          isDefault: true,
-          pdfSize: true,
-          pdfUrl: true,
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.template,
+      action: PermissionAction.read,
+    });
+
+    const user = await db.user
+      .findUniqueOrThrow({
+        where: {
+          id: userId,
         },
-      },
-    },
-  });
+        select: {
+          firstName: true,
+          tier: {
+            include: { tierLimit: true },
+          },
+          templates: {
+            where: { organizationId },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "An error occured while fetching the user",
+          additionalData: { userId },
+          label: "Template",
+        });
+      });
 
-  // @ts-expect-error @TODO needs updating
-  if (!user) throw new ShelfError({ message: "User not found" });
+      // @TODO - you dont need to do that. The error should be handled in the catch block above. Dont forget to use findUniqueOrThrow
+    if (!user) {
+      throw new ShelfError({
+        cause: " User not found",
+        message: "User not found",
+        label: "Template",
+      });
+    }
 
-  const modelName = {
-    singular: "Template",
-    plural: "Templates",
-  };
+    const modelName = {
+      singular: "Template",
+      plural: "Templates",
+    };
 
-  const templates = user.templates;
+    const templates = user.templates;
 
-  const defaultTemplates: { [key: string]: TTemplate } = {};
-  templates.forEach((template) => {
-    if (template.isDefault) defaultTemplates[template.type] = template;
-  });
+    const defaultTemplates: { [key: string]: Template } = {};
+    templates.forEach((template) => {
+      if (template.isDefault) defaultTemplates[template.type] = template;
+    });
 
-  return json({
-    userId,
-    tier: user.tier,
-    modelName,
-    canCreateMoreTemplates: canCreateMoreTemplates({
-      tierLimit: user.tier.tierLimit,
-      totalTemplates: templates.length,
-    }),
-    items: templates,
-    totalItems: templates.length,
-    title: "Templates",
-    defaultTemplates,
-  });
+    // @TODO - data is not being returned properly. See docs
+    return json({
+      userId,
+      tier: user.tier,
+      modelName,
+      canCreateMoreTemplates: canCreateMoreTemplates({
+        tierLimit: user.tier.tierLimit,
+        totalTemplates: templates.length,
+      }),
+      items: templates,
+      totalItems: templates.length,
+      title: "Templates",
+      defaultTemplates,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
-export async function action({ request }: ActionFunctionArgs) {
-  // @TODO update to use new method
-  // @ts-expect-error
+export async function action({ context, request }: ActionFunctionArgs) {
+  // @TODO - this is outdated. Use getActionMethod and handle in try/catch
+  // assertIsPost(request);
+  const authSession = context.getSession();
+  let organizationId = null;
 
-  assertIsPost(request);
-  // @ts-expect-error
+  try {
+    const { organizationId: orgId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.template,
+      action: PermissionAction.update,
+    });
+    organizationId = orgId;
 
-  const authSession = await requireAuthSession(request);
-  // @ts-expect-error
+    const formData = await request.clone().formData();
+    // @TODO - not the correct way to parse form data. We have the new parseData function
+    const intent = formData.get("intent") as "toggleActive" | "makeDefault";
 
-  const { organizationId } = await requireOrganisationId(authSession, request);
+    switch (intent) {
+      case "toggleActive": {
+        const isActive = formData.get("isActive") === "true";
+        const templateId = formData.get("templateId") as string;
 
-  const formData = await request.clone().formData();
-  const intent = formData.get("intent") as "toggleActive" | "makeDefault";
+        if (isActive) {
+          await makeInactive({
+            id: templateId,
+            organizationId,
+          });
+        } else {
+          await makeActive({
+            id: templateId,
+            organizationId,
+          });
+        }
 
-  switch (intent) {
-    case "toggleActive": {
-      const isActive = formData.get("isActive") === "true";
-      const templateId = formData.get("templateId") as string;
-
-      if (isActive) {
-        await makeInactive({
-          id: templateId,
-          organizationId,
+        sendNotification({
+          title: "Template updated",
+          message: "Your template has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
         });
-      } else {
-        await makeActive({
-          id: templateId,
-          organizationId,
-        });
+
+        return redirect(`/settings/template`);
       }
+      case "makeDefault": {
+        // @TODO - not the correct way to parse form data. We have the new parseData function
+        const templateId = formData.get("templateId") as string;
+        const templateType = formData.get("templateType") as Template["type"];
 
-      sendNotification({
-        title: "Template updated",
-        message: "Your template has been updated successfully",
-        icon: { name: "success", variant: "success" },
-        senderId: authSession.userId,
-      });
+        await makeDefault({
+          id: templateId,
+          type: templateType,
+          organizationId,
+        });
 
-      return redirect(`/settings/template`, {
-        headers: {
-          // @TODO not needed
-          // @ts-expect-error
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      });
+        sendNotification({
+          title: "Template updated",
+          message: "Your template has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return redirect(`/settings/template`);
+      }
     }
-    case "makeDefault": {
-      const templateId = formData.get("templateId") as string;
-      const templateType = formData.get("templateType") as Template["type"];
-
-      await makeDefault({
-        id: templateId,
-        type: templateType,
-        organizationId,
-      });
-
-      sendNotification({
-        title: "Template updated",
-        message: "Your template has been updated successfully",
-        icon: { name: "success", variant: "success" },
-        senderId: authSession.userId,
-      });
-
-      return redirect(`/settings/template`, {
-        headers: {
-          // @TODO not needed
-          // @ts-expect-error
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      });
-    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId: authSession.userId });
+    throw json(error(reason), { status: reason.status });
   }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
-
-export const ErrorBoundary = () => <ErrorContent />;
 
 export default function TemplatePage() {
   const { items, canCreateMoreTemplates, tier, totalItems } =

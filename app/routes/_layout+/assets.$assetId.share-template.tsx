@@ -109,11 +109,15 @@ export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  // @TODO - this needs to be updated to follow the new way of handling actions
+export const action = async ({
+  request,
+  context,
+  params,
+}: ActionFunctionArgs) => {
+  // @TODO - try/catch missing
+  const authSession = context.getSession();
 
-  // @ts-expect-error
-  const authSession = await requireAuthSession(request);
+  // @TODO - this is not the correct way to get form data and values from params. You should use the `getParams` function and `parseData` function
   const formData = await request.formData();
   const assetId = params.assetId as string;
   const assetName = formData.get("assetName") as string;
@@ -144,6 +148,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function ShareTemplate() {
+  // @QUESTION This isn't working for some reason - not returning data correctly in loader
   const { template, custodianName, assetId, assetName, custodianEmail } =
     useLoaderData<typeof loader>();
   const transition = useNavigation();

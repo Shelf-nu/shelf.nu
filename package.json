@@ -60,6 +60,8 @@
     "@remix-run/node": "2.8.1",
     "@remix-run/react": "2.8.1",
     "@remix-run/serve": "2.8.1",
+    "@react-pdf-viewer/core": "^3.12.0",
+    "@remix-run/css-bundle": "2.5.1",
     "@sentry/remix": "^7.101.0",
     "@stripe/react-stripe-js": "^2.5.0",
     "@stripe/stripe-js": "^3.0.2",

@@ -1,12 +1,13 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
-import { ErrorContent } from "~/components/errors";
+import { Link, Outlet, redirect } from "@remix-run/react";
 
-// import { requireAuthSession } from "~/modules/auth";
+export function loader({ context }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  // @ts-expect-error @TODO - update to use new method
-  await requireAuthSession(request);
+  if (!userId) {
+    return redirect("/login");
+  }
 
   return null;
 }
@@ -18,5 +19,3 @@ export const handle = {
 export default function TemplatesIndex() {
   return <Outlet />;
 }
-
-export const ErrorBoundary = () => <ErrorContent />;
