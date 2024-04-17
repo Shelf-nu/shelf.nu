@@ -1,11 +1,13 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { Link, Outlet, redirect } from "@remix-run/react";
 
-import { requireAuthSession } from "~/modules/auth";
+export async function loader({ context }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  await requireAuthSession(request);
+  if (!userId) {
+    return redirect("/login");
+  }
 
   return null;
 }
@@ -17,5 +19,3 @@ export const handle = {
 export default function TemplatesIndex() {
   return <Outlet />;
 }
-
-export const ErrorBoundary = () => <ErrorBoundryComponent />;

@@ -7,7 +7,6 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
 import { EmptyState } from "~/components/list/empty-state";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
@@ -16,146 +15,162 @@ import { ControlledActionButton } from "~/components/shared/controlled-action-bu
 import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
 import { db } from "~/database";
-import { commitAuthSession, requireAuthSession } from "~/modules/auth";
-import { requireOrganisationId } from "~/modules/organization/context.server";
 import { makeActive, makeDefault, makeInactive } from "~/modules/template";
-import { assertIsPost } from "~/utils";
+import { ShelfError, assertIsPost, error, makeShelfError } from "~/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
+import { PermissionAction, PermissionEntity } from "~/utils/permissions";
+import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreTemplates } from "~/utils/subscription";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
   const { userId } = authSession;
 
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      templates: {
-        where: { organizationId },
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          createdAt: true,
-          updatedAt: true,
-          type: true,
-          isActive: true,
-          isDefault: true,
-          pdfSize: true,
-          pdfUrl: true,
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.template,
+      action: PermissionAction.read,
+    });
+
+    const user = await db.user
+      .findUnique({
+        where: {
+          id: userId,
         },
-      },
-    },
-  });
+        select: {
+          firstName: true,
+          tier: {
+            include: { tierLimit: true },
+          },
+          templates: {
+            where: { organizationId },
+            orderBy: { createdAt: "desc" },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "An error occured while fetching the user",
+          additionalData: { userId },
+          label: "Template",
+        });
+      });
 
-  if (!user) throw new ShelfStackError({ message: "User not found" });
+    if (!user) {
+      throw new ShelfError({
+        cause: " User not found",
+        message: "User not found",
+        label: "Template",
+      });
+    }
 
-  const modelName = {
-    singular: "Template",
-    plural: "Templates",
-  };
+    const modelName = {
+      singular: "Template",
+      plural: "Templates",
+    };
 
-  const templates = user.templates;
+    const templates = user.templates;
 
-  const defaultTemplates: { [key: string]: TTemplate } = {};
-  templates.forEach((template) => {
-    if (template.isDefault) defaultTemplates[template.type] = template;
-  });
+    const defaultTemplates: { [key: string]: Template } = {};
+    templates.forEach((template) => {
+      if (template.isDefault) defaultTemplates[template.type] = template;
+    });
 
-  return json({
-    userId,
-    tier: user.tier,
-    modelName,
-    canCreateMoreTemplates: canCreateMoreTemplates({
-      tierLimit: user.tier.tierLimit,
-      totalTemplates: templates.length,
-    }),
-    items: templates,
-    totalItems: templates.length,
-    title: "Templates",
-    defaultTemplates,
-  });
+    return json({
+      userId,
+      tier: user.tier,
+      modelName,
+      canCreateMoreTemplates: canCreateMoreTemplates({
+        tierLimit: user.tier.tierLimit,
+        totalTemplates: templates.length,
+      }),
+      items: templates,
+      totalItems: templates.length,
+      title: "Templates",
+      defaultTemplates,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
-export async function action({ request }: ActionFunctionArgs) {
+export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
-  const authSession = await requireAuthSession(request);
-  const { organizationId } = await requireOrganisationId(authSession, request);
+  const authSession = context.getSession();
+  let organizationId = null;
 
-  const formData = await request.clone().formData();
-  const intent = formData.get("intent") as "toggleActive" | "makeDefault";
+  try {
+    const { organizationId: orgId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.template,
+      action: PermissionAction.update,
+    });
+    organizationId = orgId;
 
-  switch (intent) {
-    case "toggleActive": {
-      const isActive = formData.get("isActive") === "true";
-      const templateId = formData.get("templateId") as string;
+    const formData = await request.clone().formData();
+    const intent = formData.get("intent") as "toggleActive" | "makeDefault";
 
-      if (isActive) {
-        await makeInactive({
-          id: templateId,
-          organizationId,
+    switch (intent) {
+      case "toggleActive": {
+        const isActive = formData.get("isActive") === "true";
+        const templateId = formData.get("templateId") as string;
+
+        if (isActive) {
+          await makeInactive({
+            id: templateId,
+            organizationId,
+          });
+        } else {
+          await makeActive({
+            id: templateId,
+            organizationId,
+          });
+        }
+
+        sendNotification({
+          title: "Template updated",
+          message: "Your template has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
         });
-      } else {
-        await makeActive({
-          id: templateId,
-          organizationId,
-        });
+
+        return redirect(`/settings/template`);
       }
+      case "makeDefault": {
+        const templateId = formData.get("templateId") as string;
+        const templateType = formData.get("templateType") as Template["type"];
 
-      sendNotification({
-        title: "Template updated",
-        message: "Your template has been updated successfully",
-        icon: { name: "success", variant: "success" },
-        senderId: authSession.userId,
-      });
+        await makeDefault({
+          id: templateId,
+          type: templateType,
+          organizationId,
+        });
 
-      return redirect(`/settings/template`, {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      });
+        sendNotification({
+          title: "Template updated",
+          message: "Your template has been updated successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return redirect(`/settings/template`);
+      }
     }
-    case "makeDefault": {
-      const templateId = formData.get("templateId") as string;
-      const templateType = formData.get("templateType") as Template["type"];
-
-      await makeDefault({
-        id: templateId,
-        type: templateType,
-        organizationId,
-      });
-
-      sendNotification({
-        title: "Template updated",
-        message: "Your template has been updated successfully",
-        icon: { name: "success", variant: "success" },
-        senderId: authSession.userId,
-      });
-
-      return redirect(`/settings/template`, {
-        headers: {
-          "Set-Cookie": await commitAuthSession(request, { authSession }),
-        },
-      });
-    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId: authSession.userId });
+    throw json(error(reason), { status: reason.status });
   }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.title) : "" },
 ];
-
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
 
 export default function TemplatePage() {
   const { items, canCreateMoreTemplates, tier, totalItems } =

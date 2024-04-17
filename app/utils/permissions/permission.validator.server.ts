@@ -26,6 +26,11 @@ const Role2PermissionMap: {
     [PermissionEntity.dashboard]: [],
     [PermissionEntity.generalSettings]: [],
     [PermissionEntity.subscription]: [],
+    [PermissionEntity.template]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+    ],
   },
 };
 
