@@ -2,8 +2,8 @@ import type { Organization, User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
-import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { db } from "~/database/db.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { STRIPE_SECRET_KEY } from "./env";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
@@ -65,12 +65,14 @@ export async function createStripeCheckoutSession({
   domainUrl,
   customerId,
   intent,
+  shelfTier,
 }: {
   priceId: Stripe.Price["id"];
   userId: User["id"];
   domainUrl: string;
   customerId: string;
   intent: "trial" | "subscribe";
+  shelfTier: "tier_1" | "tier_2";
 }): Promise<string> {
   try {
     if (!stripe) {
@@ -104,7 +106,9 @@ export async function createStripeCheckoutSession({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: lineItems,
-      success_url: `${domainUrl}/settings/subscription?success=true`,
+      success_url: `${domainUrl}/settings/subscription?success=true${
+        shelfTier === "tier_2" ? "&team=true" : ""
+      }`,
       cancel_url: `${domainUrl}/settings/subscription?canceled=true`,
       client_reference_id: userId,
       customer: customerId,

@@ -7,6 +7,7 @@ import { Button } from "../shared/button";
 export default function SuccessfulSubscriptionModal() {
   const [params, setParams] = useSearchParams();
   const success = params.get("success") || false;
+  const isTeam = params.get("team") || false;
   const handleBackdropClose = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.target !== e.currentTarget) return;
@@ -41,9 +42,19 @@ export default function SuccessfulSubscriptionModal() {
                   Thank you, all {activeProduct?.name} features are unlocked.
                 </p>
               </div>
-              <Button width="full" to="/assets" variant="primary">
-                Get started
-              </Button>
+              {isTeam ? (
+                <Button
+                  width="full"
+                  to="/settings/workspace/new"
+                  variant="primary"
+                >
+                  Create your <b>Team</b> workspace
+                </Button>
+              ) : (
+                <Button width="full" to="/assets" variant="primary">
+                  Get started
+                </Button>
+              )}
             </div>
           </dialog>
         </div>

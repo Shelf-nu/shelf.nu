@@ -119,9 +119,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { priceId, intent } = parseData(
+    const { priceId, intent, shelfTier } = parseData(
       await request.formData(),
-      z.object({ priceId: z.string(), intent: z.enum(["trial", "subscribe"]) })
+      z.object({
+        priceId: z.string(),
+        intent: z.enum(["trial", "subscribe"]),
+        shelfTier: z.enum(["tier_1", "tier_2"]),
+      })
     );
 
     const user = await db.user
@@ -165,6 +169,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       domainUrl: getDomainUrl(request),
       customerId: customerId,
       intent,
+      shelfTier,
     });
 
     return redirect(stripeRedirectUrl);

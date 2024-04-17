@@ -27,6 +27,11 @@ export const PriceCta = ({
     <>
       <Form method="post">
         <input type="hidden" name="priceId" value={price.id} />
+        <input
+          type="hidden"
+          name="shelfTier"
+          value={price.product.metadata.shelf_tier}
+        />
         <Button type="submit" name="intent" value="subscribe">
           Upgrade to {price.product.name}
         </Button>
