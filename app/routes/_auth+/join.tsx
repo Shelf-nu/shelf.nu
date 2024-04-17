@@ -23,6 +23,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Create an account";
@@ -39,8 +40,10 @@ const JoinFormSchema = z
   .object({
     email: z
       .string()
-      .email("invalid-email")
-      .transform((email) => email.toLowerCase()),
+      .transform((email) => email.toLowerCase())
+      .refine(validEmail, () => ({
+        message: "Please enter a valid email",
+      })),
     password: z
       .string()
       .min(8, "Your password is too short. Min 8 characters are required."),

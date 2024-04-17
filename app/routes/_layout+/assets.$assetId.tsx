@@ -295,7 +295,9 @@ export default function AssetDetailsPage() {
           />
           {asset.description ? (
             <Card className="mb-3 mt-0 rounded-t-none border-t-0">
-              <p className="whitespace-pre-wrap text-gray-600">{asset.description}</p>
+              <p className="whitespace-pre-wrap text-gray-600">
+                {asset.description}
+              </p>
             </Card>
           ) : null}
           {!isSelfService ? (
