@@ -1,4 +1,5 @@
-import { Form } from "@remix-run/react";
+import { Form, useLoaderData } from "@remix-run/react";
+import type { loader } from "~/routes/_layout+/settings.subscription";
 import { CustomerPortalForm } from "./customer-portal-form";
 import type { Price } from "./prices";
 import { Button } from "../shared/button";
@@ -10,6 +11,8 @@ export const PriceCta = ({
   price: Price;
   subscription: Object | null;
 }) => {
+  const { usedFreeTrial } = useLoaderData<typeof loader>();
+
   if (price.id === "free") return null;
 
   const isTeamSubscriptionColumn =
@@ -36,7 +39,7 @@ export const PriceCta = ({
           Upgrade to {price.product.name}
         </Button>
 
-        {isTeamSubscriptionColumn && !subscription && (
+        {isTeamSubscriptionColumn && !subscription && !usedFreeTrial && (
           <Button
             variant="secondary"
             className="mt-2"

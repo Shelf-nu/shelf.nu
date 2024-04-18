@@ -19,7 +19,7 @@ import { Prices } from "~/components/subscription/prices";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import { db } from "~/database/db.server";
 
-import { getUserByID } from "~/modules/user/service.server";
+import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -90,6 +90,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         customer,
         subscription: subscription,
         activeProduct,
+        usedFreeTrial: user.usedFreeTrial,
         expiration: {
           date: new Date(
             (subscription?.current_period_end as number) * 1000
@@ -171,6 +172,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       intent,
       shelfTier,
     });
+
+    /** Update the user flag to mark them for having a trial */
+    if (intent === "trial" && stripeRedirectUrl) {
+      await updateUser({ id: userId, usedFreeTrial: true });
+    }
 
     return redirect(stripeRedirectUrl);
   } catch (cause) {
