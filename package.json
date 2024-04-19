@@ -41,7 +41,7 @@
     "precommit": "npm run db:generate-type && npm run lint:fix && npm run format && npm run typecheck"
   },
   "dependencies": {
-    "@hono/node-server": "^1.8.2",
+    "@hono/node-server": "^1.10.1",
     "@markdoc/markdoc": "^0.4.0",
     "@paralleldrive/cuid2": "^2.2.2",
     "@prisma/client": "^5.9.1",
