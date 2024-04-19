@@ -170,7 +170,8 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       case "customer.subscription.updated": {
-        const { customerId, tierId } = await getDataFromStripeEvent(event);
+        const { subscription, customerId, tierId } =
+          await getDataFromStripeEvent(event);
 
         if (!tierId) {
           throw new ShelfError({
@@ -190,7 +191,8 @@ export async function action({ request }: ActionFunctionArgs) {
           .update({
             where: { customerId },
             data: {
-              tierId: tierId as TierId,
+              tierId:
+                subscription.status === "paused" ? "free" : (tierId as TierId),
             },
           })
           .catch((cause) => {
