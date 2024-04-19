@@ -48,7 +48,7 @@ export default function SuccessfulSubscriptionModal() {
                   to="/settings/workspace/new"
                   variant="primary"
                 >
-                  Create your <b>Team</b> workspace
+                  Create your Team workspace
                 </Button>
               ) : (
                 <Button width="full" to="/assets" variant="primary">
