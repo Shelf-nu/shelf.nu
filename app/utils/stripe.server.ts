@@ -369,6 +369,7 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
       message: "Something went wrong while fetching data from Stripe event",
       additionalData: { event },
       label,
+      status: 500,
     });
   }
 }
