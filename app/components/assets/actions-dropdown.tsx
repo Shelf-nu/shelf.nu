@@ -4,6 +4,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import {
   ChevronRight,
   DuplicateIcon,
+  GpsMarkerIcon,
   LocationMarkerIcon,
   PenIcon,
   UserIcon,
@@ -96,7 +97,7 @@ const ConditionalActionsDropdown = () => {
         <DropdownMenuContent
           asChild
           align="end"
-          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]"
+          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
@@ -133,7 +134,7 @@ const ConditionalActionsDropdown = () => {
               )}
             </DropdownMenuItem>
             <DropdownMenuItem
-              className={tw("mb-2.5 border-b p-4 md:mb-0 md:p-0")}
+              className={tw("mb-2.5  p-4 md:mb-0 md:p-0")}
               disabled={assetIsCheckedOut}
             >
               <Button
@@ -148,6 +149,26 @@ const ConditionalActionsDropdown = () => {
               >
                 <span className="flex items-center gap-2">
                   <LocationMarkerIcon /> Update location
+                </span>
+              </Button>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              className={tw("mb-2.5 border-b p-4 md:mb-0 md:p-0")}
+            >
+              <Button
+                role="link"
+                variant="link"
+                className={tw(
+                  "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                )}
+                width="full"
+                onClick={() => {
+                  setOpen(false);
+                }}
+              >
+                <span className="flex items-center gap-2">
+                  <GpsMarkerIcon /> Update GPS coordinates
                 </span>
               </Button>
             </DropdownMenuItem>

@@ -25,7 +25,10 @@ export function parseScanData({
           ? `${scan.latitude}, ${scan.longitude}`
           : "Unknown location";
 
-      const dateTime = getDateTimeFormat(request).format(scan.createdAt);
+      const dateTime = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(scan.createdAt);
       const ua = parser(scan.userAgent || "");
 
       return {

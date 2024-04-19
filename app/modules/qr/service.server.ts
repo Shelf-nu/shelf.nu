@@ -26,7 +26,7 @@ export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
 
 export async function getQr(id: Qr["id"]) {
   try {
-    return await db.qr.findFirst({
+    return await db.qr.findUniqueOrThrow({
       where: { id },
     });
   } catch (cause) {

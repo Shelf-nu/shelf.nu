@@ -9,7 +9,13 @@ import { getQr } from "~/modules/qr/service.server";
 import { createScan, updateScan } from "~/modules/scan/service.server";
 import { setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, getParams } from "~/utils/http.server";
+import {
+  assertIsPost,
+  data,
+  error,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.isAuthenticated
@@ -129,16 +135,23 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const formData = await request.formData();
-    const latitude = formData.get("latitude") as string;
-    const longitude = formData.get("longitude") as string;
-    const scanId = formData.get("scanId") as string;
+    const { latitude, longitude, scanId } = parseData(
+      await request.formData(),
+      z.object({
+        latitude: z.string(),
+        longitude: z.string(),
+        scanId: z.string(),
+      })
+    );
 
-    await updateScan({
-      id: scanId,
-      latitude,
-      longitude,
-    });
+    /** This handles the automatic update when we have scanId formData */
+    if (scanId) {
+      await updateScan({
+        id: scanId,
+        latitude,
+        longitude,
+      });
+    }
 
     return json(data({ ok: true }));
   } catch (cause) {
