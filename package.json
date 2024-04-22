@@ -19,9 +19,7 @@
     "staging:dev": "dotenv -e .env.staging -- run-p dev:*",
     "format": "prettier --write .",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
-    "setup": "run-s setup:db setup:seed",
-    "setup:db": "prisma generate && prisma migrate deploy",
-    "setup:seed": "prisma db seed",
+    "setup": "prisma generate && prisma migrate deploy",
     "reset:db": "prisma migrate reset",
     "reset:db:staging": "dotenv -e .env.staging -- prisma migrate reset",
     "start": "NODE_ENV=production node ./build/server/index.js",
@@ -164,7 +162,6 @@
     "node": ">=20"
   },
   "prisma": {
-    "schema": "app/database/schema.prisma",
-    "seed": "tsx app/database/seed.server.ts"
+    "schema": "app/database/schema.prisma"
   }
 }
