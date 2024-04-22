@@ -183,27 +183,33 @@ export async function action({ request }: ActionFunctionArgs) {
           });
         }
 
+        console.log("subscription", subscription);
+
         /** Update the user's tier in the database
          *
          * We only update the tier if the subscription is not paused
+         * We only do it if the subscription is active because this event gets triggered when cancelling or pausing for example
          */
-        await db.user
-          .update({
-            where: { customerId },
-            data: {
-              tierId:
-                subscription.status === "paused" ? "free" : (tierId as TierId),
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to update user tier",
-              additionalData: { customerId, tierId, event },
-              label: "Stripe webhook",
-              status: 500,
+        if (subscription.status === "active") {
+          console.log("SUBSCRIPTION IS ACTIVE");
+          await db.user
+            .update({
+              where: { customerId },
+              data: {
+                tierId: tierId as TierId,
+              },
+            })
+            .catch((cause) => {
+              throw new ShelfError({
+                cause,
+                message: "Failed to update user tier",
+                additionalData: { customerId, tierId, event },
+                label: "Stripe webhook",
+                status: 500,
+              });
             });
-          });
+        }
+
         return new Response(null, { status: 200 });
       }
 
