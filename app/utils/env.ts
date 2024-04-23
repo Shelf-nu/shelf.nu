@@ -64,7 +64,6 @@ function getEnv(
   const value = source[name as keyof typeof source];
 
   if (!value && isRequired) {
-    // FIXME: @TODO Solve error handling
     throw new ShelfError({
       message: `${name} is not set`,
       cause: null,
