@@ -36,6 +36,7 @@ export function parseScanData({
         coordinates,
         dateTime,
         ua,
+        manuallyGenerated: scan.manuallyGenerated,
       };
     }
 
