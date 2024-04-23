@@ -40,6 +40,7 @@ export async function action({ request }: ActionFunctionArgs) {
             message: "No subscription ID found",
             additionalData: { event },
             label: "Stripe webhook",
+            status: 500,
           });
         }
 
@@ -62,6 +63,7 @@ export async function action({ request }: ActionFunctionArgs) {
             message: "No tier ID found",
             additionalData: { event, subscription },
             label: "Stripe webhook",
+            status: 500,
           });
         }
 
@@ -79,6 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
               message: "Failed to update user tier",
               additionalData: { customerId, tierId, event },
               label: "Stripe webhook",
+              status: 500,
             });
           });
 
@@ -95,6 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
             message: "No tier ID found",
             additionalData: { event, subscription },
             label: "Stripe webhook",
+            status: 500,
           });
         }
 
@@ -117,6 +121,7 @@ export async function action({ request }: ActionFunctionArgs) {
                 message: "Failed to update user tier",
                 additionalData: { customerId, tierId, event },
                 label: "Stripe webhook",
+                status: 500,
               });
             });
         }
@@ -135,6 +140,7 @@ export async function action({ request }: ActionFunctionArgs) {
             message: "No tier ID found",
             additionalData: { event, subscription },
             label: "Stripe webhook",
+            status: 500,
           });
         }
 
@@ -155,6 +161,7 @@ export async function action({ request }: ActionFunctionArgs) {
                 message: "Failed to update user tier",
                 additionalData: { customerId, tierId, event },
                 label: "Stripe webhook",
+                status: 500,
               });
             });
         }
@@ -163,7 +170,8 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       case "customer.subscription.updated": {
-        const { customerId, tierId } = await getDataFromStripeEvent(event);
+        const { subscription, customerId, tierId } =
+          await getDataFromStripeEvent(event);
 
         if (!tierId) {
           throw new ShelfError({
@@ -171,25 +179,36 @@ export async function action({ request }: ActionFunctionArgs) {
             message: "No tier ID found",
             additionalData: { event },
             label: "Stripe webhook",
+            status: 500,
           });
         }
 
-        /** Update the user's tier in the database */
-        await db.user
-          .update({
-            where: { customerId },
-            data: {
-              tierId: tierId as TierId,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to update user tier",
-              additionalData: { customerId, tierId, event },
-              label: "Stripe webhook",
+        console.log("subscription", subscription);
+
+        /** Update the user's tier in the database
+         *
+         * We only update the tier if the subscription is not paused
+         * We only do it if the subscription is active because this event gets triggered when cancelling or pausing for example
+         */
+        if (subscription.status === "active") {
+          console.log("SUBSCRIPTION IS ACTIVE");
+          await db.user
+            .update({
+              where: { customerId },
+              data: {
+                tierId: tierId as TierId,
+              },
+            })
+            .catch((cause) => {
+              throw new ShelfError({
+                cause,
+                message: "Failed to update user tier",
+                additionalData: { customerId, tierId, event },
+                label: "Stripe webhook",
+                status: 500,
+              });
             });
-          });
+        }
 
         return new Response(null, { status: 200 });
       }
@@ -212,6 +231,7 @@ export async function action({ request }: ActionFunctionArgs) {
               message: "Failed to delete user subscription",
               additionalData: { customerId, event },
               label: "Stripe webhook",
+              status: 500,
             });
           });
 
@@ -229,6 +249,7 @@ export async function action({ request }: ActionFunctionArgs) {
             message: "No tier ID found",
             additionalData: { event, subscription },
             label: "Stripe webhook",
+            status: 500,
           });
         }
         /** Check if its a trial subscription */
@@ -246,6 +267,7 @@ export async function action({ request }: ActionFunctionArgs) {
                 message: "No user found",
                 additionalData: { customerId },
                 label: "Stripe webhook",
+                status: 500,
               });
             });
 
@@ -273,7 +295,7 @@ export async function action({ request }: ActionFunctionArgs) {
             "Unhandled event. Maybe you forgot to handle this event type? Check the Stripe dashboard.",
           additionalData: { event },
           label: "Stripe webhook",
-          status: 400,
+          status: 500,
           shouldBeCaptured: false,
         });
       }

@@ -19,7 +19,7 @@ import { Prices } from "~/components/subscription/prices";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import { db } from "~/database/db.server";
 
-import { getUserByID } from "~/modules/user/service.server";
+import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -39,7 +39,6 @@ import {
   getStripeCustomer,
   getActiveProduct,
   getCustomerActiveSubscription,
-  getCustomerTrialSubscription,
 } from "~/utils/stripe.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -67,24 +66,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         )) as CustomerWithSubscriptions)
       : null;
 
-    /** Get the trial subscription */
-    const trialSubscription = getCustomerTrialSubscription({ customer });
-
     /** Get a normal subscription */
     const subscription = getCustomerActiveSubscription({ customer });
-
-    const activeSubscription = subscription || trialSubscription;
 
     /* Get the prices and products from Stripe */
     const prices = await getStripePricesAndProducts();
 
     let activeProduct = null;
-    if (customer && activeSubscription) {
+    if (customer && subscription) {
       /** Get the active subscription ID */
 
       activeProduct = getActiveProduct({
         prices,
-        priceId: activeSubscription?.items.data[0].plan.id || null,
+        priceId: subscription?.items.data[0].plan.id || null,
       });
     }
 
@@ -94,17 +88,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         subTitle: "Pick an account plan that fits your workflow.",
         prices,
         customer,
-        subscription: activeSubscription,
+        subscription: subscription,
         activeProduct,
+        usedFreeTrial: user.usedFreeTrial,
         expiration: {
           date: new Date(
-            (activeSubscription?.current_period_end as number) * 1000
+            (subscription?.current_period_end as number) * 1000
           ).toLocaleDateString(),
           time: new Date(
-            (activeSubscription?.current_period_end as number) * 1000
+            (subscription?.current_period_end as number) * 1000
           ).toLocaleTimeString(),
         },
-        isTrialSubscription: !!activeSubscription?.trial_end,
+        isTrialSubscription: !!subscription?.trial_end,
       })
     );
   } catch (cause) {
@@ -125,9 +120,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { priceId } = parseData(
+    const { priceId, intent, shelfTier } = parseData(
       await request.formData(),
-      z.object({ priceId: z.string() })
+      z.object({
+        priceId: z.string(),
+        intent: z.enum(["trial", "subscribe"]),
+        shelfTier: z.enum(["tier_1", "tier_2"]),
+      })
     );
 
     const user = await db.user
@@ -170,7 +169,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       priceId,
       domainUrl: getDomainUrl(request),
       customerId: customerId,
+      intent,
+      shelfTier,
     });
+
+    /** Update the user flag to mark them for having a trial */
+    if (intent === "trial" && stripeRedirectUrl) {
+      await updateUser({ id: userId, usedFreeTrial: true });
+    }
 
     return redirect(stripeRedirectUrl);
   } catch (cause) {

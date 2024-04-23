@@ -1,8 +1,9 @@
-import type { User } from "@prisma/client";
+import type { Organization, User } from "@prisma/client";
 import Stripe from "stripe";
 import type { PriceWithProduct } from "~/components/subscription/prices";
 import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { STRIPE_SECRET_KEY } from "./env";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
@@ -63,11 +64,15 @@ export async function createStripeCheckoutSession({
   userId,
   domainUrl,
   customerId,
+  intent,
+  shelfTier,
 }: {
   priceId: Stripe.Price["id"];
   userId: User["id"];
   domainUrl: string;
   customerId: string;
+  intent: "trial" | "subscribe";
+  shelfTier: "tier_1" | "tier_2";
 }): Promise<string> {
   try {
     if (!stripe) {
@@ -101,10 +106,23 @@ export async function createStripeCheckoutSession({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: lineItems,
-      success_url: `${domainUrl}/settings/subscription?success=true`,
+      success_url: `${domainUrl}/settings/subscription?success=true${
+        shelfTier === "tier_2" ? "&team=true" : ""
+      }`,
       cancel_url: `${domainUrl}/settings/subscription?canceled=true`,
       client_reference_id: userId,
       customer: customerId,
+      ...(intent === "trial" && {
+        subscription_data: {
+          trial_settings: {
+            end_behavior: {
+              missing_payment_method: "pause",
+            },
+          },
+          trial_period_days: 14,
+        },
+        payment_method_collection: "if_required",
+      }), // Add trial period if intent is trial
     });
 
     if (!url) {
@@ -276,7 +294,8 @@ export function getActiveProduct({
   return null;
 }
 
-export function getCustomerActiveSubscription({
+/** Gets the customer's paid subscription */
+export function getCustomerPaidSubscription({
   customer,
 }: {
   customer: CustomerWithSubscriptions | null;
@@ -285,6 +304,8 @@ export function getCustomerActiveSubscription({
     customer?.subscriptions?.data.find((sub) => sub.status === "active") || null
   );
 }
+
+/** Gets the trial subscription from customers subscription */
 export function getCustomerTrialSubscription({
   customer,
 }: {
@@ -294,6 +315,21 @@ export function getCustomerTrialSubscription({
     customer?.subscriptions?.data.find((sub) => sub.status === "trialing") ||
     null
   );
+}
+
+export function getCustomerActiveSubscription({
+  customer,
+}: {
+  customer: CustomerWithSubscriptions | null;
+}) {
+  /** Get the trial subscription */
+  const trialSubscription = getCustomerTrialSubscription({ customer });
+
+  /** Get a normal subscription */
+  const paidSubscription = getCustomerPaidSubscription({ customer });
+
+  /** WE prioritize active subscrption over trial */
+  return paidSubscription || trialSubscription;
 }
 
 export async function fetchStripeSubscription(id: string) {
@@ -333,6 +369,32 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
       message: "Something went wrong while fetching data from Stripe event",
       additionalData: { event },
       label,
+      status: 500,
     });
   }
 }
+
+export const disabledTeamOrg = async ({
+  currentOrganization,
+  organizations,
+}: {
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
+  currentOrganization: Pick<Organization, "id" | "type">;
+}) => {
+  /**
+   * We need to check a few things before disabling team orgs
+   *
+   * 1. The current organization is a team
+   * 2. The current tier has to be tier_2. Anything else is not allowed
+   */
+
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId: currentOrganization.id,
+    organizations,
+  });
+
+  return currentOrganization.type === "TEAM" && tierLimit?.id !== "tier_2";
+};

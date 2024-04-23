@@ -94,7 +94,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const userOrganizationIds = userOrganizations.map((org) => org.id);
     const personalOrganization = userOrganizations.find(
       (org) => org.type === "PERSONAL"
-    ) as Organization;
+    ) as Pick<Organization, "id">;
 
     if (!userOrganizationIds.includes(qr.organizationId)) {
       return redirect(`contact-owner?scanId=${scan.id}`);
