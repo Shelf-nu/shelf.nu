@@ -184,6 +184,12 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
             userId: true,
             updatedAt: true,
             currency: true,
+            owner: {
+              select: {
+                id: true,
+                email: true,
+              },
+            },
           },
         },
       },
