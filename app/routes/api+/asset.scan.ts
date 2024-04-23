@@ -19,7 +19,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    // @TODO require permission
     const { organizationId } = await requirePermission({
       userId,
       request,
