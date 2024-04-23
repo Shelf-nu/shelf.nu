@@ -4,7 +4,6 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import {
   ChevronRight,
   DuplicateIcon,
-  GpsMarkerIcon,
   LocationMarkerIcon,
   PenIcon,
   UserIcon,
@@ -19,6 +18,7 @@ import {
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
+import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import { Button } from "../shared/button";
 
 const ConditionalActionsDropdown = () => {
@@ -156,21 +156,10 @@ const ConditionalActionsDropdown = () => {
             <DropdownMenuItem
               className={tw("mb-2.5 border-b p-4 md:mb-0 md:p-0")}
             >
-              <Button
-                role="link"
-                variant="link"
-                className={tw(
-                  "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                )}
-                width="full"
-                onClick={() => {
-                  setOpen(false);
-                }}
-              >
-                <span className="flex items-center gap-2">
-                  <GpsMarkerIcon /> Update GPS coordinates
-                </span>
-              </Button>
+              <UpdateGpsCoordinatesForm
+                // Closes the dropdown when the button is clicked
+                callback={() => setOpen(false)}
+              />
             </DropdownMenuItem>
             <DropdownMenuItem className="px-4 py-1 md:p-0">
               <Button

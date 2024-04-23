@@ -10,6 +10,8 @@ export async function createScan(params: {
   userId?: Scan["userId"];
   qrId: string;
   deleted?: boolean;
+  latitude?: Scan["latitude"];
+  longitude?: Scan["longitude"];
   manuallyGenerated?: boolean;
 }) {
   const {
@@ -17,6 +19,8 @@ export async function createScan(params: {
     userId,
     qrId,
     deleted = false,
+    latitude = null,
+    longitude = null,
     manuallyGenerated = false,
   } = params;
 
@@ -24,7 +28,9 @@ export async function createScan(params: {
     const data = {
       userAgent,
       rawQrId: qrId,
-      // manuallyGenerated,
+      latitude,
+      longitude,
+      manuallyGenerated,
     };
 
     /** If user id is passed, connect to that user */
@@ -74,13 +80,7 @@ export async function updateScan(params: {
   longitude?: Scan["longitude"];
   manuallyGenerated?: boolean;
 }) {
-  const {
-    id,
-    userId,
-    latitude = null,
-    longitude = null,
-    manuallyGenerated = false,
-  } = params;
+  const { id, userId, latitude = null, longitude = null } = params;
 
   try {
     /** Delete the category id from the payload so we can use connect syntax from prisma */
