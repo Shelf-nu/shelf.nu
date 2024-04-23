@@ -17,6 +17,10 @@ const BasicModelFilters = z.object({
   selectedValues: z.string().optional(),
 });
 
+/**
+ * The schema used for each different model.
+ * To allow filtersing and searching on different models update the schema for the relevant model
+ */
 export const ModelFiltersSchema = z.discriminatedUnion("name", [
   BasicModelFilters.extend({
     name: z.literal("asset"),

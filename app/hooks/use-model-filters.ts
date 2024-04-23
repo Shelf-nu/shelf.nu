@@ -2,11 +2,7 @@ import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
-import {
-  ModelFiltersSchema,
-  type loader,
-  type ModelFilters,
-} from "~/routes/api+/model-filters";
+import { type loader, type ModelFilters } from "~/routes/api+/model-filters";
 import { itemsWithExtractedValue } from "~/utils/model-filters";
 import useFetcherWithReset from "./use-fetcher-with-reset";
 
