@@ -306,7 +306,7 @@ export default function AssetIndexPage() {
                     <ChevronRight className="hidden rotate-90 md:inline" />
                   </div>
                 }
-                model={{ name: "category", key: "name" }}
+                model={{ name: "category", queryKey: "name" }}
                 label="Filter by category"
                 initialDataKey="categories"
                 countKey="totalCategories"
@@ -317,7 +317,7 @@ export default function AssetIndexPage() {
                     Tags <ChevronRight className="hidden rotate-90 md:inline" />
                   </div>
                 }
-                model={{ name: "tag", key: "name" }}
+                model={{ name: "tag", queryKey: "name" }}
                 label="Filter by tags"
                 initialDataKey="tags"
                 countKey="totalTags"
@@ -329,7 +329,7 @@ export default function AssetIndexPage() {
                     <ChevronRight className="hidden rotate-90 md:inline" />
                   </div>
                 }
-                model={{ name: "location", key: "name" }}
+                model={{ name: "location", queryKey: "name" }}
                 label="Filter by Location"
                 initialDataKey="locations"
                 countKey="totalLocations"
