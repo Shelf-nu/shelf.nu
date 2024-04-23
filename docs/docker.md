@@ -37,10 +37,6 @@ This will make sure you have a DATABASE that you are ready to connect to.
      ghcr.io/shelf-nu/shelf.nu:latest
    ```
    > [!NOTE] > `DATABASE_URL` and `DIRECT_URL` are mandatory when using Supabase Cloud. Learn more in [Get Started > Development](./get-started.md#development) section.
-3. Run the following command to seed the database (create initial user), **only once after the first deployment**:
-   ```sh
-   docker exec -it shelf npm run setup:seed
-   ```
 
 ## Development
 
