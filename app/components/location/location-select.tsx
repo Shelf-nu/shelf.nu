@@ -29,7 +29,7 @@ export const LocationSelect = () => {
           disabled={disabled}
           fieldName="newLocationId"
           defaultValue={locationId || undefined}
-          model={{ name: "location", key: "name" }}
+          model={{ name: "location", queryKey: "name" }}
           label="Locations"
           initialDataKey="locations"
           countKey="totalLocations"
