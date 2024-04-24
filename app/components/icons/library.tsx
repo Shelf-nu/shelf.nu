@@ -877,6 +877,24 @@ export const LocationMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const GpsMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={20}
+    height={20}
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M16.667 10A6.667 6.667 0 0 1 10 16.667M16.667 10A6.667 6.667 0 0 0 10 3.333M16.667 10h1.666M10 16.667A6.667 6.667 0 0 1 3.333 10M10 16.667v1.666M3.333 10A6.667 6.667 0 0 1 10 3.333M3.333 10H1.667M10 3.333V1.667M12.5 10a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z"
+    />
+  </svg>
+);
+
 export const UserIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     width="18"

@@ -5,9 +5,7 @@ export type FetcherWithComponentsReset<T> = FetcherWithComponents<T> & {
   reset: () => void;
 };
 
-export default function useFetcherWithReset<
-  T,
->(): FetcherWithComponentsReset<T> {
+export default function useFetcherWithReset<T>() {
   const fetcher = useFetcher();
   const [data, setData] = useState(fetcher.data);
 
@@ -18,7 +16,12 @@ export default function useFetcherWithReset<
   }, [fetcher.data, fetcher.state]);
 
   return {
-    ...fetcher,
+    state: fetcher.state,
+    formMethod: fetcher.formMethod,
+    formData: fetcher.formData,
+    Form: fetcher.Form,
+    submit: fetcher.submit,
+    load: fetcher.load,
     data: data as T,
     reset: () => setData(undefined),
   };
