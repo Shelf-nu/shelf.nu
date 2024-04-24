@@ -18,6 +18,7 @@ import {
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
+import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import { Button } from "../shared/button";
 
 const ConditionalActionsDropdown = () => {
@@ -96,11 +97,11 @@ const ConditionalActionsDropdown = () => {
         <DropdownMenuContent
           asChild
           align="end"
-          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]"
+          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
-              className="border-b p-4 md:mb-0 md:p-0"
+              className="border-b px-4 py-1 md:p-0"
               disabled={assetIsCheckedOut && !assetCanBeReleased}
             >
               {assetCanBeReleased ? (
@@ -133,7 +134,7 @@ const ConditionalActionsDropdown = () => {
               )}
             </DropdownMenuItem>
             <DropdownMenuItem
-              className={tw("mb-2.5 border-b p-4 md:mb-0 md:p-0")}
+              className={tw("px-4 py-1 md:p-0")}
               disabled={assetIsCheckedOut}
             >
               <Button
@@ -150,6 +151,15 @@ const ConditionalActionsDropdown = () => {
                   <LocationMarkerIcon /> Update location
                 </span>
               </Button>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              className={tw("mb-2.5 border-b px-4 py-1 md:p-0")}
+            >
+              <UpdateGpsCoordinatesForm
+                // Closes the dropdown when the button is clicked
+                callback={() => setOpen(false)}
+              />
             </DropdownMenuItem>
             <DropdownMenuItem className="px-4 py-1 md:p-0">
               <Button
@@ -189,7 +199,7 @@ const ConditionalActionsDropdown = () => {
             >
               <DeleteAsset asset={asset} />
             </DropdownMenuItem>
-            <DropdownMenuItem className="mt-3 border-t p-4 md:hidden md:p-0">
+            <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
               <Button
                 role="button"
                 variant="secondary"
