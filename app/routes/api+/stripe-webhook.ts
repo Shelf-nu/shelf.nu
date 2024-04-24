@@ -183,15 +183,12 @@ export async function action({ request }: ActionFunctionArgs) {
           });
         }
 
-        console.log("subscription", subscription);
-
         /** Update the user's tier in the database
          *
          * We only update the tier if the subscription is not paused
          * We only do it if the subscription is active because this event gets triggered when cancelling or pausing for example
          */
         if (subscription.status === "active") {
-          console.log("SUBSCRIPTION IS ACTIVE");
           await db.user
             .update({
               where: { customerId },
