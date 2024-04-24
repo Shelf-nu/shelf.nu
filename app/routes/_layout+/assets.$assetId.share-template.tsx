@@ -148,7 +148,6 @@ export const action = async ({
 };
 
 export default function ShareTemplate() {
-  // @QUESTION This isn't working for some reason - not returning data correctly in loader
   const { template, custodianName, assetId, assetName, custodianEmail } =
     useLoaderData<typeof loader>();
   const transition = useNavigation();

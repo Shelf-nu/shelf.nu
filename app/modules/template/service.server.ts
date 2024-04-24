@@ -5,6 +5,7 @@ import {
   type User,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
+import { ShelfError } from "~/utils/error";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
 import { createNote } from "../asset/service.server";
 
@@ -207,10 +208,23 @@ export async function makeDefault({
   });
 }
 
-export function getTemplateById({ id }: Pick<Template, "id">) {
-  return db.template.findFirst({
-    where: { id },
-  });
+export async function getTemplateById(id: Template["id"]) {
+  try {
+    return await db.template.findUniqueOrThrow({
+      where: {
+        id,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Template not found",
+      message:
+        "The template you are trying to access does not exist or you do not have permission to access it.",
+      additionalData: { id },
+      label: "Template",
+    });
+  }
 }
 
 export async function getTemplates({

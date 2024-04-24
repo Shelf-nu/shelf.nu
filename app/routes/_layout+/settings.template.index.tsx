@@ -21,7 +21,10 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions/permission.validator.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreTemplates } from "~/utils/subscription";
 
@@ -62,7 +65,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
         });
       });
 
-      // @TODO - you dont need to do that. The error should be handled in the catch block above. Dont forget to use findUniqueOrThrow
+    // @TODO - you dont need to do that. The error should be handled in the catch block above. Dont forget to use findUniqueOrThrow
     if (!user) {
       throw new ShelfError({
         cause: " User not found",

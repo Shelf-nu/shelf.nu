@@ -7,6 +7,7 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { parseFormAny } from "react-zorm";
+import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -22,7 +23,7 @@ import {
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
+import { data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -33,8 +34,13 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  // @TODO - not the correct way to get params
-  const id = params.templateId;
+  const { templateId: id } = getParams(
+    params,
+    z.object({ templateId: z.string() }),
+    {
+      additionalData: { userId },
+    }
+  );
 
   try {
     await requirePermission({
@@ -57,31 +63,19 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       });
     }
 
-    const template = await getTemplateById({ id });
-
-    // @TODO - this is not correct. The error has to be caught inside getTemplateById
-    if (!template) {
-      throw new ShelfError({
-        cause: null,
-        message: "Template not found",
-        status: 404,
-        label: "Template",
-        additionalData: {
-          userId,
-          params,
-        },
-      });
-    }
+    const template = await getTemplateById(id);
 
     const header: HeaderData = {
       title: `Edit | ${template.name}`,
     };
 
     // @TODO - not correct way to return
-    return json({
-      template,
-      header,
-    });
+    return json(
+      data({
+        template,
+        header,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
