@@ -26,14 +26,16 @@ export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
 
 export async function getQr(id: Qr["id"]) {
   try {
-    return await db.qr.findFirst({
+    return await db.qr.findUniqueOrThrow({
       where: { id },
     });
   } catch (cause) {
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while fetching the QR. Please try again or contact support.",
+        "This QR code doesn't exist or it doesn't belong to your current organization.",
+      title: "QR code not found",
+      status: 404,
       additionalData: { id },
       label,
     });
