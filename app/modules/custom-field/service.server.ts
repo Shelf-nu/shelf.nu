@@ -17,6 +17,7 @@ export async function createCustomField({
   active,
   userId,
   options = [],
+  categories = [],
 }: CustomFieldDraftPayload) {
   try {
     return await db.customField.create({
@@ -36,6 +37,9 @@ export async function createCustomField({
           connect: {
             id: userId,
           },
+        },
+        categories: {
+          connect: categories.map((category) => ({ id: category })),
         },
       },
     });
