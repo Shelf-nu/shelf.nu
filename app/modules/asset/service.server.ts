@@ -1114,7 +1114,7 @@ export async function getAllEntriesForCreateAndEdit({
   organizationId: Organization["id"];
   request: LoaderFunctionArgs["request"];
   defaults?: {
-    category?: string | null;
+    category?: string | string[] | null;
     tag?: string | null;
     location?: string | null;
   };
@@ -1139,10 +1139,22 @@ export async function getAllEntriesForCreateAndEdit({
     ] = await Promise.all([
       /** Get the categories */
       db.category.findMany({
-        where: { organizationId, id: { not: categorySelected } },
+        where: {
+          organizationId,
+          id: Array.isArray(categorySelected)
+            ? { notIn: categorySelected }
+            : { not: categorySelected },
+        },
         take: getAllEntries.includes("category") ? undefined : 12,
       }),
-      db.category.findMany({ where: { organizationId, id: categorySelected } }),
+      db.category.findMany({
+        where: {
+          organizationId,
+          id: Array.isArray(categorySelected)
+            ? { in: categorySelected }
+            : categorySelected,
+        },
+      }),
       db.category.count({ where: { organizationId } }),
 
       /** Get the tags */

@@ -58,6 +58,7 @@ interface Props {
   active?: CustomField["active"];
   options?: CustomField["options"];
   isEdit?: boolean;
+  categories?: string[];
 }
 
 const FIELD_TYPE_DESCRIPTION: { [key in CustomFieldType]: string } = {
@@ -77,6 +78,7 @@ export const CustomFieldForm = ({
   type,
   active,
   isEdit = false,
+  categories = [],
 }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewCustomFieldFormSchema);
@@ -86,7 +88,7 @@ export const CustomFieldForm = ({
   const [selectedType, setSelectedType] = useState<CustomFieldType>(
     type || "TEXT"
   );
-  const [useCategories, setUseCategories] = useState(false);
+  const [useCategories, setUseCategories] = useState(categories.length > 0);
 
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
@@ -251,7 +253,10 @@ export const CustomFieldForm = ({
             </div>
 
             {useCategories && (
-              <CategoriesInput name={(i) => zo.fields.categories(i)()} />
+              <CategoriesInput
+                categories={categories}
+                name={(i) => zo.fields.categories(i)()}
+              />
             )}
           </FormRow>
         </div>

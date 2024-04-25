@@ -108,6 +108,7 @@ export async function getCustomField({
   try {
     return await db.customField.findFirstOrThrow({
       where: { id, organizationId },
+      include: { categories: { select: { id: true } } },
     });
   } catch (cause) {
     throw new ShelfError({
@@ -129,8 +130,9 @@ export async function updateCustomField(payload: {
   required?: CustomField["required"];
   active?: CustomField["active"];
   options?: CustomField["options"];
+  categories?: string[];
 }) {
-  const { id, name, helpText, required, active, options } = payload;
+  const { id, name, helpText, required, active, options, categories } = payload;
 
   try {
     //dont ever update type
@@ -142,7 +144,10 @@ export async function updateCustomField(payload: {
       required,
       active,
       options,
-    };
+      categories: {
+        set: categories?.map((category) => ({ id: category })),
+      },
+    } satisfies Prisma.CustomFieldUpdateInput;
 
     return await db.customField.update({
       where: { id },

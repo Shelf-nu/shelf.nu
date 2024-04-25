@@ -8,6 +8,7 @@ type CategoriesInputProps = {
   style?: React.CSSProperties;
   disabled?: boolean;
   name: (index: number) => string;
+  categories: string[];
 };
 
 export default function CategoriesInput({
@@ -15,8 +16,11 @@ export default function CategoriesInput({
   style,
   disabled,
   name,
+  categories: incomingCategories,
 }: CategoriesInputProps) {
-  const [categories, setCategories] = useState<string[]>([""]);
+  const [categories, setCategories] = useState<string[]>(
+    incomingCategories.length === 0 ? [""] : incomingCategories
+  );
 
   return (
     <div className={tw("w-full", className)} style={style}>
