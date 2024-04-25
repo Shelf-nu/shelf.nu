@@ -8,7 +8,7 @@ import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createScan, updateScan } from "~/modules/scan/service.server";
 import { setCookie } from "~/utils/cookies.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import {
   assertIsPost,
   data,
@@ -29,6 +29,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     /* Find the QR in the database */
     const qr = await getQr(id);
+    /** If the QR doesn't exist, getQR will throw a 404
+     *
+     * AFTER MVP: Here we have to consider a deleted User which will
+     * delete all the connected QRs.
+     * However, in real life there could be a physical QR code
+     * that is still there. Will we allow someone to claim it?
+     */
 
     /** Record the scan in the DB using the QR id
      * if the QR doesn't exist, we still record the scan
@@ -39,25 +46,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       qrId: id,
       deleted: !qr,
     });
-
-    /** If the QR doesn't exist, return a 404
-     *
-     * AFTER MVP: Here we have to consider a deleted User which will
-     * delete all the connected QRs.
-     * However, in real life there could be a physical QR code
-     * that is still there. Will we allow someone to claim it?
-     */
-    if (!qr) {
-      throw new ShelfError({
-        cause: null,
-        title: "QR is not found",
-        message:
-          "The QR you are trying to access does not exist or you do not have permission to access it.",
-        additionalData: { userId, id },
-        label: "QR",
-        status: 404,
-      });
-    }
 
     /**
      * Check if user is logged in.
