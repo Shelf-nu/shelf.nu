@@ -19,13 +19,16 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import Input from "~/components/forms/input";
+import { ChevronRight } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Button } from "~/components/shared/button";
 
 import { Td } from "~/components/table";
+
 import {
   createNotes,
   getPaginatedAndFilterableAssets,
@@ -76,11 +79,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       tags,
       assets,
       totalPages,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      excludeCategoriesQuery: true,
-      excludeTagsQuery: true,
       excludeSearchFromView: true,
     });
 
@@ -109,6 +114,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         perPage,
         totalPages,
         modelName,
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
       })
     );
   } catch (cause) {
@@ -193,6 +202,7 @@ export default function AddAssetsToNewBooking() {
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
   const [searchValue, setSearchValue] = useState(search || "");
+
   function handleSearch(value: string) {
     setSearchParams((prev) => {
       prev.set("s", value);
@@ -288,6 +298,55 @@ export default function AddAssetsToNewBooking() {
         <div className="mt-3 md:mt-0 md:w-[200px]">
           <AvailabilitySelect />
         </div>
+      </div>
+
+      <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
+        <DynamicDropdown
+          trigger={
+            <div className="flex cursor-pointer items-center gap-2">
+              Categories <ChevronRight className="hidden rotate-90 md:inline" />
+            </div>
+          }
+          model={{ name: "category", queryKey: "name" }}
+          label="Filter by category"
+          initialDataKey="categories"
+          countKey="totalCategories"
+        />
+        <DynamicDropdown
+          trigger={
+            <div className="flex cursor-pointer items-center gap-2">
+              Tags <ChevronRight className="hidden rotate-90 md:inline" />
+            </div>
+          }
+          model={{ name: "tag", queryKey: "name" }}
+          label="Filter by tags"
+          initialDataKey="tags"
+          countKey="totalTags"
+        />
+        <DynamicDropdown
+          trigger={
+            <div className="flex cursor-pointer items-center gap-2">
+              Locations <ChevronRight className="hidden rotate-90 md:inline" />
+            </div>
+          }
+          model={{ name: "location", queryKey: "name" }}
+          label="Filter by Location"
+          initialDataKey="locations"
+          countKey="totalLocations"
+          renderItem={({ metadata }) => (
+            <div className="flex items-center gap-2">
+              {/* <Image
+                  imageId={metadata.imageId}
+                  alt="img"
+                  className={tw(
+                    "size-6 rounded-[2px] object-cover",
+                    metadata.description ? "rounded-b-none border-b-0" : ""
+                  )}
+                /> */}
+              <div>{metadata.name}</div>
+            </div>
+          )}
+        />
       </div>
 
       {/* Body of the modal*/}
