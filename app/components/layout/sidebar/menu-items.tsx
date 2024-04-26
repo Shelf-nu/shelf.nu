@@ -10,6 +10,7 @@ import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils/tw";
 import { toggleMobileNavAtom } from "./atoms";
 import { ChatWithAnExpert } from "./chat-with-an-expert";
+import Icon from "~/components/icons/Icon";
 
 const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
@@ -170,7 +171,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   )}
                 >
                   <i className="icon pl-[2px] text-gray-500">
-                    <SwitchIcon />
+                    <Icon icon="switch"/>
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
                     Minimize

@@ -30,6 +30,9 @@ import {
   UserIcon,
   GpsMarkerIcon,
   DuplicateIcon,
+  GraphIcon,
+  ScanQRIcon,
+  SwitchIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -63,7 +66,10 @@ export type IconType =
   | "profile"
   | "send"
   | "user"
-  | "calendar";
+  | "calendar"
+  | "graph"
+  | "scanQR"
+  | "switch";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -100,6 +106,9 @@ export const iconsMap: IconsMap = {
   send: <SendIcon />,
   user: <UserIcon />,
   calendar: <CalendarIcon className="size-5" />,
+  graph: <GraphIcon/>,
+  scanQR: <ScanQRIcon/>,
+  switch: <SwitchIcon/>
 };
 
 export default iconsMap;
