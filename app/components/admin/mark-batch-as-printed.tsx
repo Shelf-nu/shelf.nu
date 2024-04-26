@@ -11,7 +11,7 @@ import {
 import { Button } from "../shared/button";
 
 export const MarkBatchAsPrinted = () => {
-  const { uniqueBatchValues } = useLoaderData<typeof loader>();
+  const { batches } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   return (
@@ -28,20 +28,20 @@ export const MarkBatchAsPrinted = () => {
             align="start"
           >
             <div className=" max-h-[320px] overflow-auto">
-              {uniqueBatchValues.map(
-                (value) =>
-                  value && (
-                    <SelectItem
-                      value={value}
-                      key={value}
-                      className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
-                    >
-                      <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
-                        {value}
-                      </span>
-                    </SelectItem>
-                  )
-              )}
+              {batches
+                .filter((b) => !b.printed)
+                .map((batch) => (
+                  <SelectItem
+                    value={batch.id}
+                    key={batch.id}
+                    defaultValue={batches[0].id}
+                    className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+                  >
+                    <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
+                      {batch.name}
+                    </span>
+                  </SelectItem>
+                ))}
             </div>
           </SelectContent>
         </Select>

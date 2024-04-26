@@ -1,4 +1,10 @@
-import type { Organization, Prisma, Qr, User } from "@prisma/client";
+import type {
+  Organization,
+  PrintBatch,
+  Prisma,
+  Qr,
+  User,
+} from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import QRCode from "qrcode-generator";
 import { db } from "~/database/db.server";
@@ -163,25 +169,38 @@ export async function generateUnclaimedCodesForPrint({
   batchName?: string;
 }) {
   try {
-    const batch = batchName || generateRandomCode(10);
+    batchName = batchName || generateRandomCode(10);
     /**
      * We create an array of empty objects to create the amount of codes requested
      */
+
+    const batch = await db.printBatch.create({
+      data: {
+        name: batchName,
+      },
+    });
+
     const data = Array.from({ length: amount }).map(() => ({
       // Generating codes also prints them so unclaimed codes are marked as printed
-      printed: false,
       // We generate a random code for the batch
-      batch,
+      batchId: batch.id,
     }));
 
     await db.qr.createMany({
-      data: data,
+      data,
       skipDuplicates: true,
     });
 
     return await db.qr.findMany({
       where: {
-        batch,
+        batch: {
+          name: {
+            equals: batchName,
+          },
+        },
+      },
+      include: {
+        batch: true,
       },
     });
   } catch (cause) {
@@ -278,7 +297,7 @@ async function getQrCodes({
 
   search?: string | null;
 
-  batch?: string | null;
+  batch?: PrintBatch["id"] | "No batch" | null;
 }) {
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
@@ -297,7 +316,7 @@ async function getQrCodes({
     }
 
     if (batch) {
-      where.batch =
+      where.batchId =
         batch === "No batch"
           ? {
               equals: null,
@@ -331,6 +350,7 @@ async function getQrCodes({
               lastName: true,
             },
           },
+          batch: true,
         },
         where,
         orderBy: { createdAt: "desc" },
@@ -354,14 +374,15 @@ async function getQrCodes({
 /** Generates codes that are not attached to assets but attached to a certain org and user */
 export async function markBatchAsPrinted({ batch }: { batch: string }) {
   try {
-    return await db.qr.updateMany({
+    const updatedBatch = await db.printBatch.update({
       where: {
-        batch,
+        id: batch,
       },
       data: {
         printed: true,
       },
     });
+    return updatedBatch;
   } catch (cause) {
     throw new ShelfError({
       cause,

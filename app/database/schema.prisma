@@ -204,16 +204,34 @@ model Qr {
   organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String?
 
-  // This should be set to true, when QR code is exported for print
-  printed Boolean @default(false)
+
+  
   // This batch is used to group QR codes together when they are created as unclaimed and printed
-  batch   String? 
+  batch   PrintBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  batchId String? 
 
   // DateTime
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   scans          Scan[]
 }
+
+model PrintBatch {
+  id String @id @default(cuid())
+
+  name String @unique
+
+  // This should be set to true, when QR code is exported for print
+  printed Boolean @default(false)
+
+  // Relationships
+  qrCodes Qr[]
+
+  // DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 
 // Stores a report for when a an asset is reported as found
 model ReportFound {

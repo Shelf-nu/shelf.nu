@@ -22,7 +22,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return new Response(zipBlob, {
       headers: {
         "content-type": "application/zip",
-        "Content-Disposition": `attachment; filename="QR codes batch - ${codes[0].batch}.zip"`,
+        "Content-Disposition": `attachment; filename="QR codes batch - ${batchName}.zip"`,
       },
     });
   } catch (cause) {

@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { PrintBatch, Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
@@ -45,29 +45,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
 
     /** We do this to get all the batches ever created so we can have the filter */
-    const qrsWithBatches = await db.qr.findMany({
-      where: {
-        batch: {
-          not: null,
-        },
-      },
-      select: {
-        batch: true,
-        createdAt: true,
-        printed: true,
-      },
-    });
-
-    // @TODO this needs to be updated to an object where the batch is the key and the values are:
-    // {
-    // createdAt: Date;
-    // printed: boolean;
-    // batch: string;
-    // }
-
-    const uniqueBatchValues = [
-      ...new Set(qrsWithBatches.map((qr) => qr.batch)),
-    ];
+    const batches = await db.printBatch.findMany();
 
     if (page > totalPages) {
       return redirect("/admin-dashboard");
@@ -92,7 +70,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         totalPages,
         modelName,
-        uniqueBatchValues,
+        batches,
       })
     );
   } catch (cause) {
@@ -129,7 +107,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function Area51() {
-  const { totalItems, uniqueBatchValues } = useLoaderData<typeof loader>();
+  const { totalItems, batches } = useLoaderData<typeof loader>();
   return (
     <div>
       <h1>Admin dashboard</h1>
@@ -141,7 +119,7 @@ export default function Area51() {
 
         <Filters
           slots={{
-            "left-of-search": <BatchFilter batchItems={uniqueBatchValues} />,
+            "left-of-search": <BatchFilter batches={batches} />,
             "right-of-search": <div>Total codes: {totalItems}</div>,
           }}
         />
@@ -154,7 +132,9 @@ export default function Area51() {
               <Th className="hidden md:table-cell">Asset</Th>
               <Th className="hidden md:table-cell">Organization ID</Th>
               <Th className="hidden md:table-cell">User ID</Th>
-              <Th className="hidden md:table-cell">Printed</Th>
+              <Th className="hidden md:table-cell">
+                <span title="Only available for batched codes">Printed</span>
+              </Th>
               <Th className="hidden md:table-cell">Batch</Th>
               <Th className="hidden md:table-cell">Created at</Th>
             </>
@@ -190,6 +170,7 @@ const ListUserContent = ({
           lastName: true;
         };
       };
+      batch: true;
     };
   }>;
 }) => (
@@ -243,12 +224,12 @@ const ListUserContent = ({
     </Td>
     <Td className=" p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-        {item.printed ? "Yes" : "No"}
+        {item?.batch ? (item.batch.printed ? "Yes" : "No") : "N/A"}
       </div>
     </Td>
     <Td className=" p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-        {item.batch || "N/A"}
+        {item?.batch ? item.batch.name : "N/A"}
       </div>
     </Td>
     <Td className=" p-0 md:p-0">
@@ -261,7 +242,11 @@ const ListUserContent = ({
 
 export const ErrorBoundary = () => <ErrorContent />;
 
-function BatchFilter({ batchItems }: { batchItems: (string | null)[] }) {
+function BatchFilter({
+  batches,
+}: {
+  batches: Pick<PrintBatch, "id" | "name" | "printed">[];
+}) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -296,16 +281,16 @@ function BatchFilter({ batchItems }: { batchItems: (string | null)[] }) {
           align="start"
         >
           <div className=" max-h-[320px] overflow-auto">
-            {["ALL", "No batch", ...batchItems].map(
-              (value) =>
-                value && (
+            {["ALL", "No batch", ...batches].map(
+              (b) =>
+                b && (
                   <SelectItem
-                    value={value}
-                    key={value}
+                    value={typeof b === "string" ? b : b.id}
+                    key={typeof b === "string" ? b : b.id}
                     className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
                   >
                     <span className="mr-4 block text-[14px] lowercase text-gray-700 first-letter:uppercase">
-                      {value}
+                      {typeof b === "string" ? b : b.name}
                     </span>
                   </SelectItem>
                 )
