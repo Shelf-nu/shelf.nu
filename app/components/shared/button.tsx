@@ -101,7 +101,6 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           ref={ref}
         >
           {icon && <WrapIcon enableWrap={true} icon={icon} />}{" "}
-          
           {children ? (
             <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>
               {children}

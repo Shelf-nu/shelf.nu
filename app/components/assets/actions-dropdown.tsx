@@ -3,10 +3,6 @@ import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import {
   ChevronRight,
-  DuplicateIcon,
-  LocationMarkerIcon,
-  PenIcon,
-  UserIcon,
   UserXIcon,
 } from "~/components/icons/library";
 import {
@@ -87,9 +83,8 @@ const ConditionalActionsDropdown = () => {
                 [data-radix-popper-content-wrapper] {
                   transform: none !important;
                   will-change: auto !important;
-              }import iconsMap from '../shared/icons-map';
-
-          }`,
+                }
+              }`,
             }} // is a hack to fix the dropdown menu not being in the right place on mobile
             // can not target [data-radix-popper-content-wrapper] for this file only with css
             // so we have to use dangerouslySetInnerHTML
