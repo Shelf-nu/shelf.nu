@@ -2,7 +2,7 @@ import React from "react";
 import { Link } from "@remix-run/react";
 import { tw } from "~/utils/tw";
 import type { IconType } from "./icons-map";
-import Icon from "../icons/Icon";
+import Icon from "../icons/icon";
 import type { ButtonVariant, ButtonWidth } from "../layout/header/types";
 
 export interface ButtonProps {

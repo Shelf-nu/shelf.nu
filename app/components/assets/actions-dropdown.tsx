@@ -12,7 +12,7 @@ import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
-import Icon from "../icons/Icon";
+import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 
 const ConditionalActionsDropdown = () => {

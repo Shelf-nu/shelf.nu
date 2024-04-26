@@ -1,5 +1,5 @@
 import React from "react";
-import IconHug from "./IconHug";
+import IconHug from "./iconHug";
 import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
