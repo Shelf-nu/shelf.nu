@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
-import {
-  ChevronRight,
-  UserXIcon,
-} from "~/components/icons/library";
+import { ChevronRight, UserXIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,

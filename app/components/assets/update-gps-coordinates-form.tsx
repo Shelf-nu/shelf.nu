@@ -4,8 +4,8 @@ import { useFetcher, useParams } from "@remix-run/react";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { action } from "~/routes/api+/asset.scan";
 import { tw } from "~/utils/tw";
-import { GpsMarkerIcon } from "../icons/library";
 import Icon from "../icons/Icon";
+import { GpsMarkerIcon } from "../icons/library";
 import { Button } from "../shared/button";
 
 interface Coordinates {
