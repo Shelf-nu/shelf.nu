@@ -3,6 +3,7 @@ import { NavLink, useLoaderData, useLocation } from "@remix-run/react";
 import { motion } from "framer-motion";
 import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
+import Icon from "~/components/icons/Icon";
 import { SwitchIcon } from "~/components/icons/library";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { useMainMenuItems } from "~/hooks/use-main-menu-items";
@@ -170,7 +171,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   )}
                 >
                   <i className="icon pl-[2px] text-gray-500">
-                    <SwitchIcon />
+                    <Icon icon="switch" />
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
                     Minimize

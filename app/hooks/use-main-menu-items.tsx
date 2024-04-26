@@ -1,3 +1,4 @@
+import Icon from "~/components/icons/Icon";
 import {
   AssetsIcon,
   CalendarIcon,
@@ -14,45 +15,45 @@ import { useUserIsSelfService } from "./user-user-is-self-service";
 export function useMainMenuItems() {
   let menuItemsTop = [
     {
-      icon: <GraphIcon />,
+      icon: <Icon icon="graph" />,
       to: "dashboard",
       label: "Dashboard",
     },
     {
-      icon: <AssetsIcon />,
+      icon: <Icon icon="asset" />,
       to: "assets",
       label: "Assets",
     },
     {
-      icon: <CategoriesIcon />,
+      icon: <Icon icon="category" />,
       to: "categories",
       label: "Categories",
     },
     {
-      icon: <TagsIcon />,
+      icon: <Icon icon="tag" />,
       to: "tags",
       label: "Tags",
     },
     {
-      icon: <LocationMarkerIcon />,
+      icon: <Icon icon="location" />,
       to: "locations",
       label: "Locations",
     },
     {
-      icon: <CalendarIcon />,
+      icon: <Icon icon="calendar" />,
       to: "bookings",
       label: "Bookings (beta)",
     },
   ];
   const menuItemsBottom = [
     {
-      icon: <ScanQRIcon />,
+      icon: <Icon icon="scanQR" />,
       to: "scanner",
       label: "QR scanner",
       end: true,
     },
     {
-      icon: <SettingsIcon />,
+      icon: <Icon icon="settings" />,
       to: "settings",
       label: "Settings",
       end: true,
