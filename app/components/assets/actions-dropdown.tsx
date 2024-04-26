@@ -19,8 +19,8 @@ import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
-import { Button } from "../shared/button";
 import WrapIcon from "../icons/WrapIcon";
+import { Button } from "../shared/button";
 
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
@@ -130,7 +130,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <WrapIcon enableWrap={true} icon="user"/> Assign custody
+                    <WrapIcon enableWrap={true} icon="user" /> Assign custody
                   </span>
                 </Button>
               )}
@@ -150,7 +150,7 @@ const ConditionalActionsDropdown = () => {
                 onClick={() => setOpen(false)}
               >
                 <span className="flex items-center gap-2">
-                  <WrapIcon enableWrap={true} icon="location"/> Update location
+                  <WrapIcon enableWrap={true} icon="location" /> Update location
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -188,7 +188,7 @@ const ConditionalActionsDropdown = () => {
                   className="flex items-center gap-2"
                   onClick={() => setOpen(false)}
                 >
-                  <WrapIcon enableWrap={true} icon="duplicate"/> Duplicate
+                  <WrapIcon enableWrap={true} icon="duplicate" /> Duplicate
                 </span>
               </Button>
             </DropdownMenuItem>
