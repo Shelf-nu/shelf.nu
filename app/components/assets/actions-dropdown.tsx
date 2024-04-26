@@ -15,7 +15,7 @@ import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
-import WrapIcon from "../icons/WrapIcon";
+import Icon from "../icons/Icon";
 import { Button } from "../shared/button";
 
 const ConditionalActionsDropdown = () => {
@@ -125,7 +125,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <WrapIcon enableWrap={true} icon="user" /> Assign custody
+                    <Icon enableWrap={true} icon="user" /> Assign custody
                   </span>
                 </Button>
               )}
@@ -145,7 +145,7 @@ const ConditionalActionsDropdown = () => {
                 onClick={() => setOpen(false)}
               >
                 <span className="flex items-center gap-2">
-                  <WrapIcon enableWrap={true} icon="location" /> Update location
+                  <Icon enableWrap={true} icon="location" /> Update location
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -167,7 +167,7 @@ const ConditionalActionsDropdown = () => {
                 width="full"
               >
                 <span className="flex items-center gap-2">
-                  <WrapIcon enableWrap={true} icon="pen" /> Edit
+                  <Icon enableWrap={true} icon="pen" /> Edit
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -183,7 +183,7 @@ const ConditionalActionsDropdown = () => {
                   className="flex items-center gap-2"
                   onClick={() => setOpen(false)}
                 >
-                  <WrapIcon enableWrap={true} icon="duplicate" /> Duplicate
+                  <Icon enableWrap={true} icon="duplicate" /> Duplicate
                 </span>
               </Button>
             </DropdownMenuItem>

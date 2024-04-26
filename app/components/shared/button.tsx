@@ -1,9 +1,9 @@
 import React from "react";
 import { Link } from "@remix-run/react";
 import { tw } from "~/utils/tw";
-import type { Icon } from "./icons-map";
+import type { IconType } from "./icons-map";
 import iconsMap from "./icons-map";
-import WrapIcon from "../icons/WrapIcon";
+import Icon from "../icons/Icon";
 import type { ButtonVariant, ButtonWidth } from "../layout/header/types";
 
 export interface ButtonProps {
@@ -12,7 +12,7 @@ export interface ButtonProps {
   variant?: ButtonVariant;
   width?: ButtonWidth;
   size?: "sm" | "md";
-  icon?: Icon;
+  icon?: IconType;
   disabled?: boolean;
   attachToInput?: boolean;
   onlyIconOnMobile?: boolean;
@@ -100,7 +100,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           title={title}
           ref={ref}
         >
-          {icon && <WrapIcon enableWrap={true} icon={icon} />}{" "}
+          {icon && <Icon enableWrap={true} icon={icon} />}{" "}
           {children ? (
             <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>
               {children}

@@ -33,7 +33,7 @@ import {
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
-export type Icon =
+export type IconType =
   | "plus"
   | "trash"
   | "archive"
@@ -66,7 +66,7 @@ export type Icon =
   | "calendar";
 
 type IconsMap = {
-  [key in Icon]: JSX.Element;
+  [key in IconType]: JSX.Element;
 };
 
 export const iconsMap: IconsMap = {

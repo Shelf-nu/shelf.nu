@@ -5,7 +5,7 @@ import { useClientNotification } from "~/hooks/use-client-notification";
 import type { action } from "~/routes/api+/asset.scan";
 import { tw } from "~/utils/tw";
 import { GpsMarkerIcon } from "../icons/library";
-import WrapIcon from "../icons/WrapIcon";
+import Icon from "../icons/Icon";
 import { Button } from "../shared/button";
 
 interface Coordinates {
@@ -98,7 +98,7 @@ export const UpdateGpsCoordinatesForm = ({
       onClick={handleSubmit}
     >
       <span className="flex items-center gap-2">
-        <WrapIcon enableWrap={true} icon="gps" /> Update GPS coordinates
+        <Icon enableWrap={true} icon="gps" /> Update GPS coordinates
       </span>
     </Button>
   );
