@@ -26,6 +26,7 @@ import { ChevronRight } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Button } from "~/components/shared/button";
+import { Image } from "~/components/shared/image";
 
 import { Td } from "~/components/table";
 
@@ -48,6 +49,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
@@ -303,7 +305,7 @@ export default function AddAssetsToNewBooking() {
       <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
         <DynamicDropdown
           trigger={
-            <div className="flex cursor-pointer items-center gap-2">
+            <div className="flex h-6 cursor-pointer items-center gap-2">
               Categories <ChevronRight className="hidden rotate-90 md:inline" />
             </div>
           }
@@ -314,7 +316,7 @@ export default function AddAssetsToNewBooking() {
         />
         <DynamicDropdown
           trigger={
-            <div className="flex cursor-pointer items-center gap-2">
+            <div className="flex h-6 cursor-pointer items-center gap-2">
               Tags <ChevronRight className="hidden rotate-90 md:inline" />
             </div>
           }
@@ -325,7 +327,7 @@ export default function AddAssetsToNewBooking() {
         />
         <DynamicDropdown
           trigger={
-            <div className="flex cursor-pointer items-center gap-2">
+            <div className="flex h-6 cursor-pointer items-center gap-2">
               Locations <ChevronRight className="hidden rotate-90 md:inline" />
             </div>
           }
@@ -335,14 +337,14 @@ export default function AddAssetsToNewBooking() {
           countKey="totalLocations"
           renderItem={({ metadata }) => (
             <div className="flex items-center gap-2">
-              {/* <Image
-                  imageId={metadata.imageId}
-                  alt="img"
-                  className={tw(
-                    "size-6 rounded-[2px] object-cover",
-                    metadata.description ? "rounded-b-none border-b-0" : ""
-                  )}
-                /> */}
+              <Image
+                imageId={metadata.imageId}
+                alt="img"
+                className={tw(
+                  "size-6 rounded-[2px] object-cover",
+                  metadata.description ? "rounded-b-none border-b-0" : ""
+                )}
+              />
               <div>{metadata.name}</div>
             </div>
           )}
