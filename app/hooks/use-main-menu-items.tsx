@@ -1,14 +1,4 @@
-import Icon from "~/components/icons/Icon";
-import {
-  AssetsIcon,
-  CalendarIcon,
-  CategoriesIcon,
-  GraphIcon,
-  LocationMarkerIcon,
-  ScanQRIcon,
-  SettingsIcon,
-  TagsIcon,
-} from "~/components/icons/library";
+import Icon from "~/components/icons/icon";
 // eslint-disable-next-line import/no-cycle
 import { useUserIsSelfService } from "./user-user-is-self-service";
 
