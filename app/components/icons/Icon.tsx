@@ -11,7 +11,14 @@ const Icon = React.forwardRef<HTMLElement, IconProps>(function Icon({
   icon,
   disableWrap,
 }: IconProps) {
-  return icon && (disableWrap?<div>{iconsMap[icon]}</div>:<IconHug size="sm">{iconsMap[icon]}</IconHug>)
+  return (
+    icon &&
+    (disableWrap ? (
+      <div>{iconsMap[icon]}</div>
+    ) : (
+      <IconHug size="sm">{iconsMap[icon]}</IconHug>
+    ))
+  );
 });
 
 export default Icon;
