@@ -5,13 +5,13 @@ import iconsMap from "../shared/icons-map";
 
 export interface IconProps {
   icon?: IconType;
-  enableWrap?: boolean;
+  disableWrap?: true;
 }
 const Icon = React.forwardRef<HTMLElement, IconProps>(function Icon({
   icon,
-  enableWrap,
+  disableWrap,
 }: IconProps) {
-  return icon && enableWrap && <IconHug size="sm">{iconsMap[icon]}</IconHug>;
+  return icon && !disableWrap && <IconHug size="sm">{iconsMap[icon]}</IconHug>;
 });
 
 export default Icon;

@@ -2,7 +2,6 @@ import React from "react";
 import { Link } from "@remix-run/react";
 import { tw } from "~/utils/tw";
 import type { IconType } from "./icons-map";
-import iconsMap from "./icons-map";
 import Icon from "../icons/Icon";
 import type { ButtonVariant, ButtonWidth } from "../layout/header/types";
 
@@ -100,7 +99,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           title={title}
           ref={ref}
         >
-          {icon && <Icon enableWrap={true} icon={icon} />}{" "}
+          {icon && <Icon icon={icon} />}{" "}
           {children ? (
             <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>
               {children}

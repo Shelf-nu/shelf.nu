@@ -98,7 +98,7 @@ export const UpdateGpsCoordinatesForm = ({
       onClick={handleSubmit}
     >
       <span className="flex items-center gap-2">
-        <Icon enableWrap={true} icon="gps" /> Update GPS coordinates
+        <Icon icon="gps" /> Update GPS coordinates
       </span>
     </Button>
   );

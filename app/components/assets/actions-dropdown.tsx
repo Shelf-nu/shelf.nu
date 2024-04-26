@@ -122,7 +122,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon enableWrap={true} icon="user" /> Assign custody
+                    <Icon icon="user" /> Assign custody
                   </span>
                 </Button>
               )}
@@ -142,7 +142,7 @@ const ConditionalActionsDropdown = () => {
                 onClick={() => setOpen(false)}
               >
                 <span className="flex items-center gap-2">
-                  <Icon enableWrap={true} icon="location" /> Update location
+                  <Icon icon="location" /> Update location
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -164,7 +164,7 @@ const ConditionalActionsDropdown = () => {
                 width="full"
               >
                 <span className="flex items-center gap-2">
-                  <Icon enableWrap={true} icon="pen" /> Edit
+                  <Icon icon="pen" /> Edit
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -180,7 +180,7 @@ const ConditionalActionsDropdown = () => {
                   className="flex items-center gap-2"
                   onClick={() => setOpen(false)}
                 >
-                  <Icon enableWrap={true} icon="duplicate" /> Duplicate
+                  <Icon icon="duplicate" /> Duplicate
                 </span>
               </Button>
             </DropdownMenuItem>
