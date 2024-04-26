@@ -1178,7 +1178,18 @@ export async function getAllEntriesForCreateAndEdit({
 
       /** Get the custom fields */
       db.customField.findMany({
-        where: { organizationId, active: { equals: true } },
+        where: {
+          organizationId,
+          active: { equals: true },
+          ...(categorySelected && typeof categorySelected === "string"
+            ? {
+                OR: [
+                  { categories: { none: {} } }, // Custom fields with no category
+                  { categories: { some: { id: categorySelected } } },
+                ],
+              }
+            : { categories: { none: {} } }),
+        },
       }),
     ]);
 

@@ -55,6 +55,7 @@ export default function DynamicSelect({
   placeholder = `Select ${model.name}`,
   closeOnSelect = false,
   valueExtractor,
+  selectionMode = "none",
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -79,7 +80,7 @@ export default function DynamicSelect({
     model,
     countKey,
     initialDataKey,
-    selectionMode: "none",
+    selectionMode,
     valueExtractor,
   });
 

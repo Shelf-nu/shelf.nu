@@ -1,8 +1,10 @@
 import type { CustomField, Organization, Prisma, User } from "@prisma/client";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -278,14 +280,24 @@ export async function createCustomFieldsIfNotExists({
 
 export async function getActiveCustomFields({
   organizationId,
+  category,
 }: {
   organizationId: string;
+  category?: string | null;
 }) {
   try {
     return await db.customField.findMany({
       where: {
         organizationId,
-        active: true,
+        active: { equals: true },
+        ...(typeof category === "string"
+          ? {
+              OR: [
+                { categories: { none: {} } }, // Custom fields with no category
+                { categories: { some: { id: category } } },
+              ],
+            }
+          : { categories: { none: {} } }),
       },
     });
   } catch (cause) {
