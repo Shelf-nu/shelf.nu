@@ -53,10 +53,10 @@ export const GenerateBatchQr = () => {
           value="createOrphans"
           disabled={disabled}
         >
-          Generate & Download unclaimed QR codes batch
+          Generate & Download batch
         </Button>
         <p className="mt-2 text-sm text-gray-500">
-          Generates and downloads a batch of 1000 unclaimed qr codes
+          Generates and downloads a batch of unclaimed qr codes. Min 1, Max 1000
         </p>
       </div>
     </div>
