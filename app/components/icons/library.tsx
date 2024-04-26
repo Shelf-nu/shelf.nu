@@ -1,5 +1,4 @@
 import type { SVGProps } from "react";
-import WrapIcon from "./WrapIcon";
 
 export function LogoutIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -133,7 +132,7 @@ export function TrashIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       width={20}
-      height={22}
+      height={20}
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       {...props}
@@ -601,12 +600,12 @@ export function BarCodeIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export const WrappedPenIcon = WrapIcon(PenIcon);
-
 export function PenIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
-      viewBox={`0 0 ${props.width} ${props.height}`}
+      width="19"
+      height="19"
+      viewBox="0 0 19 19"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       {...props}
@@ -854,7 +853,9 @@ export const TagsIcon = (props: SVGProps<SVGSVGElement>) => (
 
 export const LocationMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    viewBox={`0 0 ${props.width} ${props.height}`}
+    width="18"
+    height="22"
+    viewBox="0 0 18 22"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     {...props}
@@ -876,12 +877,11 @@ export const LocationMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export const WrappedLocationMarkerIcon = WrapIcon(LocationMarkerIcon);
-
 export const GpsMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    viewBox={`0 0 ${props.width} ${props.height}`}
     xmlns="http://www.w3.org/2000/svg"
+    width={20}
+    height={20}
     fill="none"
     {...props}
   >
@@ -895,11 +895,11 @@ export const GpsMarkerIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-export const WrappedGpsMarkerIcon = WrapIcon(GpsMarkerIcon);
-
 export const UserIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    viewBox={`0 0 ${props.width} ${props.height}`}
+    width="18"
+    height="20"
+    viewBox="0 0 18 20"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     {...props}
@@ -913,7 +913,6 @@ export const UserIcon = (props: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
-export const WrappedUserIcon = WrapIcon(UserIcon);
 
 export const UserXIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
@@ -1147,7 +1146,9 @@ export const HelpIcon = (props: SVGProps<SVGSVGElement>) => (
 
 export const DuplicateIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
-    viewBox={`0 0 ${props.width} ${props.height}`}
+    width="20"
+    height="20"
+    viewBox="0 0 20 20"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     {...props}
@@ -1168,8 +1169,6 @@ export const DuplicateIcon = (props: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
-
-export const WrappedDuplicateIcon = WrapIcon(DuplicateIcon);
 
 export const PrintIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg

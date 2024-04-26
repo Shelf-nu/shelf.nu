@@ -28,6 +28,8 @@ import {
   HelpIcon,
   Profile,
   UserIcon,
+  GpsMarkerIcon,
+  DuplicateIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -50,6 +52,8 @@ export type Icon =
   | "tag"
   | "category"
   | "location"
+  | "gps"
+  | "duplicate"
   | "asset"
   | "download"
   | "print"
@@ -84,6 +88,8 @@ export const iconsMap: IconsMap = {
   tag: <TagsIcon />,
   category: <CategoriesIcon />,
   location: <LocationMarkerIcon />,
+  gps: <GpsMarkerIcon/>,
+  duplicate: <DuplicateIcon/>,
   asset: <AssetsIcon />,
   download: <DownloadIcon />,
   print: <PrintIcon />,
