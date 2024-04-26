@@ -4,6 +4,7 @@ import { useFetcher, useParams } from "@remix-run/react";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { action } from "~/routes/api+/asset.scan";
 import { tw } from "~/utils/tw";
+import Icon from "../icons/Icon";
 import { GpsMarkerIcon } from "../icons/library";
 import { Button } from "../shared/button";
 
@@ -97,7 +98,7 @@ export const UpdateGpsCoordinatesForm = ({
       onClick={handleSubmit}
     >
       <span className="flex items-center gap-2">
-        <GpsMarkerIcon /> Update GPS coordinates
+        <Icon icon="gps" /> Update GPS coordinates
       </span>
     </Button>
   );

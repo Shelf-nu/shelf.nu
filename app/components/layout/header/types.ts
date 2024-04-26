@@ -8,7 +8,7 @@
  */
 
 import type { LinkProps } from "@remix-run/react";
-import type { Icon } from "~/components/shared/icons-map";
+import type { IconType } from "~/components/shared/icons-map";
 
 export interface HeaderData {
   /** Heading/title that will be rendered on top of the view */
@@ -28,7 +28,7 @@ export type Action = {
     "data-test-id"?: string;
 
     /** The possible options for icons to be rendered in the button */
-    icon: Icon;
+    icon: IconType;
 
     /** The button variant. Default is primary */
     variant?: ButtonVariant;
