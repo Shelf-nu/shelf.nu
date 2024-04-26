@@ -1,14 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
-import {
-  ChevronRight,
-  DuplicateIcon,
-  LocationMarkerIcon,
-  PenIcon,
-  UserIcon,
-  UserXIcon,
-} from "~/components/icons/library";
+import { ChevronRight, UserXIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +12,7 @@ import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
+import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 
 const ConditionalActionsDropdown = () => {
@@ -86,8 +80,8 @@ const ConditionalActionsDropdown = () => {
                 [data-radix-popper-content-wrapper] {
                   transform: none !important;
                   will-change: auto !important;
-              }
-          }`,
+                }
+              }`,
             }} // is a hack to fix the dropdown menu not being in the right place on mobile
             // can not target [data-radix-popper-content-wrapper] for this file only with css
             // so we have to use dangerouslySetInnerHTML
@@ -128,7 +122,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <UserIcon /> Assign custody
+                    <Icon icon="user" /> Assign custody
                   </span>
                 </Button>
               )}
@@ -148,7 +142,7 @@ const ConditionalActionsDropdown = () => {
                 onClick={() => setOpen(false)}
               >
                 <span className="flex items-center gap-2">
-                  <LocationMarkerIcon /> Update location
+                  <Icon icon="location" /> Update location
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -170,7 +164,7 @@ const ConditionalActionsDropdown = () => {
                 width="full"
               >
                 <span className="flex items-center gap-2">
-                  <PenIcon /> Edit
+                  <Icon icon="pen" /> Edit
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -186,7 +180,7 @@ const ConditionalActionsDropdown = () => {
                   className="flex items-center gap-2"
                   onClick={() => setOpen(false)}
                 >
-                  <DuplicateIcon /> Duplicate
+                  <Icon icon="duplicate" /> Duplicate
                 </span>
               </Button>
             </DropdownMenuItem>

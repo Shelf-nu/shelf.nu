@@ -2,7 +2,7 @@ import type { RefObject } from "react";
 import { forwardRef } from "react";
 
 import { tw } from "~/utils/tw";
-import type { Icon } from "../shared/icons-map";
+import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
 export interface InputProps
@@ -22,7 +22,7 @@ export interface InputProps
   hideLabel?: boolean;
 
   /** name of any icon available in icons map */
-  icon?: Icon;
+  icon?: IconType;
 
   /** Add on to the input. Cannot be used together with icon  */
   addOn?: string;
@@ -129,7 +129,7 @@ const Input = forwardRef(function Input(
       </span>
 
       <div className={`relative flex flex-wrap items-stretch`}>
-        {/* Icon */}
+        {/* IconType */}
         {icon && <div className={iconClasses}>{iconsMap[icon]}</div>}
         {/* Addon */}
         {addOn && <div className={addonClasses}>{addOn}</div>}

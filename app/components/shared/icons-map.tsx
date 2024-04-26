@@ -28,10 +28,15 @@ import {
   HelpIcon,
   Profile,
   UserIcon,
+  GpsMarkerIcon,
+  DuplicateIcon,
+  GraphIcon,
+  ScanQRIcon,
+  SwitchIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
-export type Icon =
+export type IconType =
   | "plus"
   | "trash"
   | "archive"
@@ -50,6 +55,8 @@ export type Icon =
   | "tag"
   | "category"
   | "location"
+  | "gps"
+  | "duplicate"
   | "asset"
   | "download"
   | "print"
@@ -59,10 +66,13 @@ export type Icon =
   | "profile"
   | "send"
   | "user"
-  | "calendar";
+  | "calendar"
+  | "graph"
+  | "scanQR"
+  | "switch";
 
 type IconsMap = {
-  [key in Icon]: JSX.Element;
+  [key in IconType]: JSX.Element;
 };
 
 export const iconsMap: IconsMap = {
@@ -84,6 +94,8 @@ export const iconsMap: IconsMap = {
   tag: <TagsIcon />,
   category: <CategoriesIcon />,
   location: <LocationMarkerIcon />,
+  gps: <GpsMarkerIcon />,
+  duplicate: <DuplicateIcon />,
   asset: <AssetsIcon />,
   download: <DownloadIcon />,
   print: <PrintIcon />,
@@ -94,6 +106,9 @@ export const iconsMap: IconsMap = {
   send: <SendIcon />,
   user: <UserIcon />,
   calendar: <CalendarIcon className="size-5" />,
+  graph: <GraphIcon />,
+  scanQR: <ScanQRIcon />,
+  switch: <SwitchIcon />,
 };
 
 export default iconsMap;
