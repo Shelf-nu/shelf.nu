@@ -36,6 +36,7 @@ model User {
   firstName      String?
   lastName       String?
   profilePicture String?
+  usedFreeTrial  Boolean @default(false)
   onboarded      Boolean @default(false)
   customerId     String? @unique // Stripe customer id
   tierId         TierId  @default(free)
@@ -247,6 +248,9 @@ model Scan {
 
   // We also store the qrId as a raw string for reference is fhte qr is deleted
   rawQrId String
+
+  // This will be true if the user manually created the scan by using "Update GPS coordinates"
+  manuallyGenerated Boolean @default(false)
 
   // DateTime
   createdAt DateTime @default(now())

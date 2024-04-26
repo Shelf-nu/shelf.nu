@@ -8,8 +8,14 @@ import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createScan, updateScan } from "~/modules/scan/service.server";
 import { setCookie } from "~/utils/cookies.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, getParams } from "~/utils/http.server";
+import { makeShelfError } from "~/utils/error";
+import {
+  assertIsPost,
+  data,
+  error,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.isAuthenticated
@@ -23,6 +29,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     /* Find the QR in the database */
     const qr = await getQr(id);
+    /** If the QR doesn't exist, getQR will throw a 404
+     *
+     * AFTER MVP: Here we have to consider a deleted User which will
+     * delete all the connected QRs.
+     * However, in real life there could be a physical QR code
+     * that is still there. Will we allow someone to claim it?
+     */
 
     /** Record the scan in the DB using the QR id
      * if the QR doesn't exist, we still record the scan
@@ -33,25 +46,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       qrId: id,
       deleted: !qr,
     });
-
-    /** If the QR doesn't exist, return a 404
-     *
-     * AFTER MVP: Here we have to consider a deleted User which will
-     * delete all the connected QRs.
-     * However, in real life there could be a physical QR code
-     * that is still there. Will we allow someone to claim it?
-     */
-    if (!qr) {
-      throw new ShelfError({
-        cause: null,
-        title: "QR is not found",
-        message:
-          "The QR you are trying to access does not exist or you do not have permission to access it.",
-        additionalData: { userId, id },
-        label: "QR",
-        status: 404,
-      });
-    }
 
     /**
      * Check if user is logged in.
@@ -88,7 +82,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const userOrganizationIds = userOrganizations.map((org) => org.id);
     const personalOrganization = userOrganizations.find(
       (org) => org.type === "PERSONAL"
-    ) as Organization;
+    ) as Pick<Organization, "id">;
 
     if (!userOrganizationIds.includes(qr.organizationId)) {
       return redirect(`contact-owner?scanId=${scan.id}`);
@@ -129,16 +123,23 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const formData = await request.formData();
-    const latitude = formData.get("latitude") as string;
-    const longitude = formData.get("longitude") as string;
-    const scanId = formData.get("scanId") as string;
+    const { latitude, longitude, scanId } = parseData(
+      await request.formData(),
+      z.object({
+        latitude: z.string(),
+        longitude: z.string(),
+        scanId: z.string(),
+      })
+    );
 
-    await updateScan({
-      id: scanId,
-      latitude,
-      longitude,
-    });
+    /** This handles the automatic update when we have scanId formData */
+    if (scanId) {
+      await updateScan({
+        id: scanId,
+        latitude,
+        longitude,
+      });
+    }
 
     return json(data({ ok: true }));
   } catch (cause) {

@@ -416,7 +416,11 @@ export default function Custody() {
           <div className=" relative z-50 mb-6">
             <DynamicSelect
               disabled={disabled}
-              model={{ name: "teamMember", key: "name" }}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+              }}
               fieldName="custodian"
               label="Team members"
               initialDataKey="teamMembers"

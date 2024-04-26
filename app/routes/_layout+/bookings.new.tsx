@@ -200,7 +200,7 @@ export default function NewBooking() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
   return (
-    <div>
+    <div className="booking-inner-wrapper">
       <header className="mb-5">
         <h2>Create new booking</h2>
         <p>

@@ -230,7 +230,7 @@ export const AssetForm = ({
           <DynamicSelect
             disabled={disabled}
             defaultValue={category ?? undefined}
-            model={{ name: "category", key: "name" }}
+            model={{ name: "category", queryKey: "name" }}
             label="Categories"
             initialDataKey="categories"
             countKey="totalCategories"
@@ -287,7 +287,7 @@ export const AssetForm = ({
             disabled={disabled}
             fieldName="newLocationId"
             defaultValue={location || undefined}
-            model={{ name: "location", key: "name" }}
+            model={{ name: "location", queryKey: "name" }}
             label="Locations"
             initialDataKey="locations"
             countKey="totalLocations"

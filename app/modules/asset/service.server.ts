@@ -356,6 +356,7 @@ async function getAssets(params: {
   perPage?: number;
   search?: string | null;
   categoriesIds?: Category["id"][] | null;
+  locationIds?: Location["id"][] | null;
   tagsIds?: Tag["id"][] | null;
   status?: Asset["status"] | null;
   hideUnavailable?: Asset["availableToBook"];
@@ -369,6 +370,7 @@ async function getAssets(params: {
     perPage = 8,
     search,
     categoriesIds,
+    locationIds,
     tagsIds,
     status,
     bookingFrom,
@@ -468,6 +470,12 @@ async function getAssets(params: {
             in: tagsIds,
           },
         },
+      };
+    }
+
+    if (locationIds && locationIds.length > 0) {
+      where.location = {
+        id: { in: locationIds },
       };
     }
 

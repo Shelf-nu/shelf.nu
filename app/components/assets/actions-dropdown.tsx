@@ -1,14 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
-import {
-  ChevronRight,
-  DuplicateIcon,
-  LocationMarkerIcon,
-  PenIcon,
-  UserIcon,
-  UserXIcon,
-} from "~/components/icons/library";
+import { ChevronRight, UserXIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +11,8 @@ import {
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw";
 import { DeleteAsset } from "./delete-asset";
+import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
+import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 
 const ConditionalActionsDropdown = () => {
@@ -86,8 +81,8 @@ const ConditionalActionsDropdown = () => {
                 [data-radix-popper-content-wrapper] {
                   transform: none !important;
                   will-change: auto !important;
-              }
-          }`,
+                }
+              }`,
             }} // is a hack to fix the dropdown menu not being in the right place on mobile
             // can not target [data-radix-popper-content-wrapper] for this file only with css
             // so we have to use dangerouslySetInnerHTML
@@ -97,11 +92,11 @@ const ConditionalActionsDropdown = () => {
         <DropdownMenuContent
           asChild
           align="end"
-          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]"
+          className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
-              className="border-b p-4 md:mb-0 md:p-0"
+              className="border-b px-4 py-1 md:p-0"
               disabled={assetIsCheckedOut && !assetCanBeReleased}
             >
               {assetCanBeReleased ? (
@@ -127,13 +122,13 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <UserIcon /> Assign custody
+                    <Icon icon="user" /> Assign custody
                   </span>
                 </Button>
               )}
             </DropdownMenuItem>
             <DropdownMenuItem
-              className={tw("mb-2.5 border-b p-4 md:mb-0 md:p-0")}
+              className={tw("px-4 py-1 md:p-0")}
               disabled={assetIsCheckedOut}
             >
               <Button
@@ -147,9 +142,18 @@ const ConditionalActionsDropdown = () => {
                 onClick={() => setOpen(false)}
               >
                 <span className="flex items-center gap-2">
-                  <LocationMarkerIcon /> Update location
+                  <Icon icon="location" /> Update location
                 </span>
               </Button>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              className={tw("mb-2.5 border-b px-4 py-1 md:p-0")}
+            >
+              <UpdateGpsCoordinatesForm
+                // Closes the dropdown when the button is clicked
+                callback={() => setOpen(false)}
+              />
             </DropdownMenuItem>
             <DropdownMenuItem className="px-4 py-1 md:p-0">
               <Button
@@ -160,7 +164,7 @@ const ConditionalActionsDropdown = () => {
                 width="full"
               >
                 <span className="flex items-center gap-2">
-                  <PenIcon /> Edit
+                  <Icon icon="pen" /> Edit
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -176,7 +180,7 @@ const ConditionalActionsDropdown = () => {
                   className="flex items-center gap-2"
                   onClick={() => setOpen(false)}
                 >
-                  <DuplicateIcon /> Duplicate
+                  <Icon icon="duplicate" /> Duplicate
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -189,7 +193,7 @@ const ConditionalActionsDropdown = () => {
             >
               <DeleteAsset asset={asset} />
             </DropdownMenuItem>
-            <DropdownMenuItem className="mt-3 border-t p-4 md:hidden md:p-0">
+            <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
               <Button
                 role="button"
                 variant="secondary"
