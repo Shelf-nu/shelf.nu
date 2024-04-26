@@ -3,11 +3,11 @@ import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import {
   ChevronRight,
-  DuplicateIcon,
-  LocationMarkerIcon,
-  PenIcon,
-  UserIcon,
   UserXIcon,
+  WrappedDuplicateIcon,
+  WrappedLocationMarkerIcon,
+  WrappedPenIcon,
+  WrappedUserIcon,
 } from "~/components/icons/library";
 import {
   DropdownMenu,
@@ -128,7 +128,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <UserIcon /> Assign custody
+                    <WrappedUserIcon size="sm" /> Assign custody
                   </span>
                 </Button>
               )}
@@ -148,7 +148,7 @@ const ConditionalActionsDropdown = () => {
                 onClick={() => setOpen(false)}
               >
                 <span className="flex items-center gap-2">
-                  <LocationMarkerIcon /> Update location
+                  <WrappedLocationMarkerIcon size="sm" /> Update location
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -170,7 +170,7 @@ const ConditionalActionsDropdown = () => {
                 width="full"
               >
                 <span className="flex items-center gap-2">
-                  <PenIcon /> Edit
+                  <WrappedPenIcon size="sm" /> Edit
                 </span>
               </Button>
             </DropdownMenuItem>
@@ -186,7 +186,7 @@ const ConditionalActionsDropdown = () => {
                   className="flex items-center gap-2"
                   onClick={() => setOpen(false)}
                 >
-                  <DuplicateIcon /> Duplicate
+                  <WrappedDuplicateIcon size="sm" /> Duplicate
                 </span>
               </Button>
             </DropdownMenuItem>
