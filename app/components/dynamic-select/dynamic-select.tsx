@@ -18,7 +18,7 @@ import { EmptyState } from "../dynamic-dropdown/empty-state";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons/library";
 import { Button } from "../shared/button";
-import type { Icon } from "../shared/icons-map";
+import type { IconType } from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -27,7 +27,7 @@ type Props = ModelFilterProps & {
   style?: React.CSSProperties;
   fieldName?: string;
   label?: React.ReactNode;
-  searchIcon?: Icon;
+  searchIcon?: IconType;
   showSearch?: boolean;
   defaultValue?: string;
   renderItem?: (item: ModelFilterItem) => React.ReactNode;
