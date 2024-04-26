@@ -2,6 +2,7 @@ import type { Organization, Prisma, Qr, User } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import QRCode from "qrcode-generator";
 import { db } from "~/database/db.server";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { gifToPng } from "~/utils/gif-to-png";
@@ -156,17 +157,19 @@ export async function generateOrphanedCodes({
 /** Generates codes that are not attached to assets, user or organization */
 export async function generateUnclaimedCodesForPrint({
   amount,
+  batchName,
 }: {
   amount: number;
+  batchName?: string;
 }) {
   try {
-    const batch = generateRandomCode(10);
+    const batch = batchName || generateRandomCode(10);
     /**
      * We create an array of empty objects to create the amount of codes requested
      */
     const data = Array.from({ length: amount }).map(() => ({
       // Generating codes also prints them so unclaimed codes are marked as printed
-      printed: true,
+      printed: false,
       // We generate a random code for the batch
       batch,
     }));
@@ -230,19 +233,22 @@ export const getPaginatedAndFilterableQrCodes = async ({
   request: LoaderFunctionArgs["request"];
 }) => {
   const searchParams = getCurrentSearchParams(request);
-  const { page, search } = getParamsValues(searchParams);
+  const { page, search, batch, perPageParam } = getParamsValues(searchParams);
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
 
   try {
     const { qrCodes, totalQrCodes } = await getQrCodes({
       page,
-      perPage: 25,
+      perPage,
       search,
+      batch,
     });
     const totalPages = Math.ceil(totalQrCodes / 25);
 
     return {
       page,
-      perPage: 25,
+      perPage,
       search,
       totalQrCodes,
       qrCodes,
@@ -262,6 +268,7 @@ async function getQrCodes({
   page = 1,
   perPage = 8,
   search,
+  batch,
 }: {
   /** Page number. Starts at 1 */
   page: number;
@@ -270,6 +277,8 @@ async function getQrCodes({
   perPage?: number;
 
   search?: string | null;
+
+  batch?: string | null;
 }) {
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
@@ -287,6 +296,15 @@ async function getQrCodes({
       };
     }
 
+    if (batch) {
+      where.batch =
+        batch === "No batch"
+          ? {
+              equals: null,
+            }
+          : batch;
+    }
+
     const [qrCodes, totalQrCodes] = await Promise.all([
       /** Get the users */
       db.qr.findMany({
@@ -297,6 +315,20 @@ async function getQrCodes({
             select: {
               id: true,
               title: true,
+            },
+          },
+          organization: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
             },
           },
         },
@@ -314,6 +346,27 @@ async function getQrCodes({
       cause,
       message: "Failed to get qr codes",
       additionalData: { page, perPage, search },
+      label,
+    });
+  }
+}
+
+/** Generates codes that are not attached to assets but attached to a certain org and user */
+export async function markBatchAsPrinted({ batch }: { batch: string }) {
+  try {
+    return await db.qr.updateMany({
+      where: {
+        batch,
+      },
+      data: {
+        printed: true,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to mark batch as printed",
+      additionalData: { batch },
       label,
     });
   }

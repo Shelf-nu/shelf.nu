@@ -13,8 +13,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     await requireAdmin(userId);
     const url = new URL(request.url);
     const amount = Number(url.searchParams.get("amount"));
+    const batchName = url.searchParams.get("batchName") as string;
 
-    const codes = await generateUnclaimedCodesForPrint({ amount });
+    const codes = await generateUnclaimedCodesForPrint({ amount, batchName });
 
     const zipBlob = await createQrCodesZip(codes);
 
