@@ -1,3 +1,4 @@
+import Icon from "~/components/icons/Icon";
 import {
   AssetsIcon,
   CalendarIcon,
@@ -10,50 +11,49 @@ import {
 } from "~/components/icons/library";
 // eslint-disable-next-line import/no-cycle
 import { useUserIsSelfService } from "./user-user-is-self-service";
-import Icon from "~/components/icons/Icon";
 
 export function useMainMenuItems() {
   let menuItemsTop = [
     {
-      icon: <Icon icon="graph"/>,
+      icon: <Icon icon="graph" />,
       to: "dashboard",
       label: "Dashboard",
     },
     {
-      icon: <Icon icon="asset"/>,
+      icon: <Icon icon="asset" />,
       to: "assets",
       label: "Assets",
     },
     {
-      icon: <Icon icon="category"/>,
+      icon: <Icon icon="category" />,
       to: "categories",
       label: "Categories",
     },
     {
-      icon: <Icon icon="tag"/>,
+      icon: <Icon icon="tag" />,
       to: "tags",
       label: "Tags",
     },
     {
-      icon: <Icon icon="location"/>,
+      icon: <Icon icon="location" />,
       to: "locations",
       label: "Locations",
     },
     {
-      icon: <Icon icon="calendar"/>,
+      icon: <Icon icon="calendar" />,
       to: "bookings",
       label: "Bookings (beta)",
     },
   ];
   const menuItemsBottom = [
     {
-      icon: <Icon icon="scanQR"/>,
+      icon: <Icon icon="scanQR" />,
       to: "scanner",
       label: "QR scanner",
       end: true,
     },
     {
-      icon: <Icon icon="settings"/>,
+      icon: <Icon icon="settings" />,
       to: "settings",
       label: "Settings",
       end: true,
