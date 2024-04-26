@@ -7,10 +7,10 @@ export interface IconProps {
   icon?: IconType;
   disableWrap?: true;
 }
-const Icon = React.forwardRef<HTMLElement, IconProps>(function Icon({
-  icon,
-  disableWrap,
-}: IconProps, _ref) {
+const Icon = React.forwardRef<HTMLElement, IconProps>(function Icon(
+  { icon, disableWrap }: IconProps,
+  _ref
+) {
   return (
     icon &&
     (disableWrap ? (
