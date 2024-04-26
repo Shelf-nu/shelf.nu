@@ -320,7 +320,7 @@ export default function AddAssetsToLocation() {
   }, [location.id]);
 
   return (
-    <div className="flex max-h-full flex-col">
+    <div className="flex h-full max-h-full flex-col">
       <Header
         {...header}
         hideBreadcrumbs={true}
@@ -378,7 +378,7 @@ export default function AddAssetsToLocation() {
           )}
         />
       </div>
-      <div className="-mx-6 flex-1 overflow-y-auto px-5 md:px-0">
+      <div className="-mx-6  flex-1 overflow-y-auto px-5 md:px-0">
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
@@ -395,7 +395,7 @@ export default function AddAssetsToLocation() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
-          className="-mx-5 border-0"
+          className="-mx-5 flex h-full flex-col justify-between border-0"
         />
       </div>
       {/* Footer of the modal */}

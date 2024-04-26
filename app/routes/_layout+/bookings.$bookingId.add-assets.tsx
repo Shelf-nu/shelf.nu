@@ -243,7 +243,7 @@ export default function AddAssetsToNewBooking() {
   }, [booking.id]);
 
   return (
-    <div className="flex max-h-full flex-col ">
+    <div className="flex h-full max-h-full flex-col ">
       <Header
         {...header}
         hideBreadcrumbs={true}
@@ -369,7 +369,7 @@ export default function AddAssetsToNewBooking() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
-          className="-mx-5 border-0"
+          className="-mx-5 flex h-full flex-col justify-between border-0"
         />
       </div>
 
