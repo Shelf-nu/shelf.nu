@@ -1143,7 +1143,6 @@ export async function getAllEntriesForCreateAndEdit({
       locationExcludedSelected,
       selectedLocation,
       totalLocations,
-      customFields,
     ] = await Promise.all([
       /** Get the categories */
       db.category.findMany({
@@ -1175,22 +1174,6 @@ export async function getAllEntriesForCreateAndEdit({
       }),
       db.location.findMany({ where: { organizationId, id: locationSelected } }),
       db.location.count({ where: { organizationId } }),
-
-      /** Get the custom fields */
-      db.customField.findMany({
-        where: {
-          organizationId,
-          active: { equals: true },
-          ...(categorySelected && typeof categorySelected === "string"
-            ? {
-                OR: [
-                  { categories: { none: {} } }, // Custom fields with no category
-                  { categories: { some: { id: categorySelected } } },
-                ],
-              }
-            : { categories: { none: {} } }),
-        },
-      }),
     ]);
 
     return {
@@ -1199,7 +1182,6 @@ export async function getAllEntriesForCreateAndEdit({
       tags,
       locations: [...selectedLocation, ...locationExcludedSelected],
       totalLocations,
-      customFields,
     };
   } catch (cause) {
     throw new ShelfError({
