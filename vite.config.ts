@@ -21,6 +21,9 @@ export default defineConfig({
         "./app/routes/**/*",
       ],
     },
+    hmr:{
+      overlay:false
+    }
   },
   // https://github.com/remix-run/remix/discussions/8917#discussioncomment-8640023
   optimizeDeps: {

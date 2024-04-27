@@ -243,3 +243,11 @@ dialog {
 .word-break {
   word-break: break-word;
 }
+.fc-toolbar{
+  border: 1px solid #d5d6da;
+  padding: 10px;
+  margin: 0 !important;
+  border-bottom: none;
+  border-top-left-radius: 5px;
+  border-top-right-radius: 5px;
+}

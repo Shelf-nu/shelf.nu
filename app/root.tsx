@@ -84,6 +84,7 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
 
         <Meta />
         {title ? <title>{title}</title> : null}
+        <style data-fullcalendar />
         <Links />
         <Clarity />
       </head>
