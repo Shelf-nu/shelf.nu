@@ -1,6 +1,6 @@
 import React from "react";
-import dayGridPlugin from '@fullcalendar/daygrid';
-import FullCalendar from '@fullcalendar/react'
+import dayGridPlugin from "@fullcalendar/daygrid";
+import FullCalendar from "@fullcalendar/react";
 import { json, redirect } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -17,28 +17,31 @@ export const loader = () => {
   return json({ header });
 };
 const Calendar = () => {
-  const {header} = useLoaderData<typeof loader>();
-  return <>
-    <header className={tw("-mx-4 bg-white")}>
-    <div className="border-b border-gray-200 p-4">
-          <Heading as="h2" className="break-all text-[20px] font-semibold text-orange-500">
+  const { header } = useLoaderData<typeof loader>();
+  return (
+    <>
+      <header className={tw("-mx-4 bg-white")}>
+        <div className="border-b border-gray-200 p-4">
+          <Heading
+            as="h2"
+            className="break-all text-[20px] font-semibold text-orange-500"
+          >
             {header?.title}
           </Heading>
         </div>
-    </header>
-    <div className="mt-5">
-      <FullCalendar
-        plugins={[dayGridPlugin]}
-        firstDay={1}
-        initialView='dayGridMonth'
-        editable={true}
-        selectable={true}
-    /></div>
-    
-  </>;
-}
-const calendar = () => {
-  return <Calendar/>
-}
+      </header>
+      <div className="mt-5">
+        <FullCalendar
+          plugins={[dayGridPlugin]}
+          firstDay={1}
+          initialView="dayGridMonth"
+          editable={true}
+          selectable={true}
+        />
+      </div>
+    </>
+  );
+};
+const calendar = () => <Calendar />;
 
 export default calendar;
