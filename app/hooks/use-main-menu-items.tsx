@@ -9,10 +9,10 @@ export function useMainMenuItems() {
       to: "dashboard",
       label: "Dashboard",
     },
-    { 
-      icon: <Icon icon="calendar"/>,
+    {
+      icon: <Icon icon="calendar" />,
       to: "calendar",
-      label:"Calendar"
+      label: "Calendar",
     },
     {
       icon: <Icon icon="asset" />,
