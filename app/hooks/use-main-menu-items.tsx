@@ -9,6 +9,11 @@ export function useMainMenuItems() {
       to: "dashboard",
       label: "Dashboard",
     },
+    { 
+      icon: <Icon icon="calendar"/>,
+      to: "calendar",
+      label:"Calendar"
+    },
     {
       icon: <Icon icon="asset" />,
       to: "assets",
