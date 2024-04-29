@@ -3,8 +3,7 @@ import FullCalendar from "@fullcalendar/react";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-// Import dummy bookings
-// Define the dummy data for bookings
+
 const dummyOrganizationId = "shelf";
 const dummyUserId = "shelfnu";
 
