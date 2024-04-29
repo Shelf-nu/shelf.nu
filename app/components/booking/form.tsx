@@ -109,6 +109,7 @@ export function BookingForm({
     isCompleted ||
     isOverdue ||
     isCancelled;
+
   const zo = useZorm(
     "NewQuestionWizardScreen",
     NewBookingFormSchema(inputFieldIsDisabled)
@@ -128,18 +129,26 @@ export function BookingForm({
               <ActionsDropdown booking={booking} />
             )}
 
-            {isDraft ? (
-              <Button
-                type="submit"
-                disabled={disabled}
-                variant="secondary"
-                name="intent"
-                value="save"
-                className="grow"
-                size="sm"
-              >
-                Save
-              </Button>
+            {/*  We show the button in all cases, unless the booking is in a final state */}
+            {!(isCompleted || isCancelled || isArchived) ? (
+              <>
+                <input
+                  type="hidden"
+                  name="nameChangeOnly"
+                  value={isDraft ? "no" : "yes"}
+                />
+                <Button
+                  type="submit"
+                  disabled={disabled}
+                  variant="secondary"
+                  name="intent"
+                  value="save"
+                  className="grow"
+                  size="sm"
+                >
+                  Save
+                </Button>
+              </>
             ) : null}
 
             {/* When booking is draft, we show the reserve button */}
@@ -230,7 +239,9 @@ export function BookingForm({
                     label="Name"
                     hideLabel
                     name={zo.fields.name()}
-                    disabled={inputFieldIsDisabled}
+                    disabled={
+                      disabled || isCompleted || isCancelled || isArchived
+                    }
                     error={zo.errors.name()?.message}
                     autoFocus
                     onChange={updateName}

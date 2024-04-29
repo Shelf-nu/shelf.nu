@@ -212,7 +212,6 @@ export default function NewBooking() {
       <div>
         <BookingForm
           id={booking.id}
-          name={booking.name}
           startDate={startDate}
           endDate={endDate}
           custodianUserId={

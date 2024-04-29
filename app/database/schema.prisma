@@ -538,6 +538,7 @@ model Announcement {
   updatedAt DateTime @updatedAt
 }
 
+
 enum BookingStatus {
   DRAFT
   RESERVED

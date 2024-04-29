@@ -20,10 +20,7 @@ export default function FormRow({
 }: Props) {
   return (
     <div
-      className={tw(
-        `flex gap-8 border-b-DEFAULT border-y-gray-200 py-6`,
-        className
-      )}
+      className={tw(`flex gap-8 border-b border-y-gray-200 py-6`, className)}
     >
       <div className="hidden lg:block lg:min-w-[280px] lg:basis-[280px]">
         <div
