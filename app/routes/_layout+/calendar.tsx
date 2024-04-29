@@ -1,9 +1,9 @@
+import { useState, useEffect } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import FullCalendar from "@fullcalendar/react";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-import { useState, useEffect } from "react";
 const dummyOrganizationId = "shelf";
 const dummyUserId = "shelfnu";
 
@@ -123,7 +123,7 @@ interface CalendarEvent {
 const Calendar = () => {
   const { bookings, header } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]); 
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   useEffect(() => {
     if (bookings && bookings.length > 0) {
       const events = bookings.map((booking) => ({
@@ -134,7 +134,7 @@ const Calendar = () => {
       setCalendarEvents(events); // Set the new events
     }
   }, [bookings]);
-  
+
   const handleMonthChange = (info: any) => {
     const newMonth = !(info.start.getDate() == 1)
       ? info.start.getMonth() + 1
