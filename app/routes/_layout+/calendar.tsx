@@ -1,11 +1,10 @@
 import dayGridPlugin from "@fullcalendar/daygrid";
 import FullCalendar from "@fullcalendar/react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { useNavigate } from "@remix-run/react";
-import { LoaderFunctionArgs } from "@remix-run/node";
- // Import dummy bookings
- // Define the dummy data for bookings
+import { useLoaderData, useNavigate } from "@remix-run/react";
+// Import dummy bookings
+// Define the dummy data for bookings
 const dummyOrganizationId = "shelf";
 const dummyUserId = "shelfnu";
 
@@ -88,26 +87,29 @@ const dummyBookingsResponse = {
   userId: dummyUserId,
 };
 
-
 // Loader Function to Return Bookings Data
 export const loader = ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const monthParam = url.searchParams.get("month");
   const yearParam = url.searchParams.get("year");
 
-  const currentMonth = monthParam ? parseInt(monthParam, 10)-1 : new Date().getMonth()+1;
-  
-  const currentYear = yearParam ? parseInt(yearParam, 10) : new Date().getFullYear();
+  const currentMonth = monthParam
+    ? parseInt(monthParam, 10) - 1
+    : new Date().getMonth() + 1;
+
+  const currentYear = yearParam
+    ? parseInt(yearParam, 10)
+    : new Date().getFullYear();
 
   // Filter the bookings for the selected month and year
   const filteredBookings = dummyBookings.filter(
-    (booking) => 
+    (booking) =>
       booking.from.getMonth() === currentMonth &&
       booking.from.getFullYear() === currentYear
   );
 
   const header = {
-    title: `Calendar for ${currentMonth+1}/${currentYear}`,
+    title: `Calendar for ${currentMonth + 1}/${currentYear}`,
   };
 
   return json({ bookings: filteredBookings, header });
@@ -116,37 +118,35 @@ export const loader = ({ request }: LoaderFunctionArgs) => {
 // Calendar Component
 const Calendar = () => {
   const { bookings, header } = useLoaderData<typeof loader>();
-  const navigate = useNavigate(); 
+  const navigate = useNavigate();
 
   const calendarEvents = bookings.map((booking) => ({
     title: booking.name,
     start: booking.from,
     end: booking.to,
   }));
-  
-  const handleMonthChange = (info:any) => {
+
+  const handleMonthChange = (info: any) => {
     console.log(info.start.getDate());
-    
-    console.log(info.start.getMonth()+1);
+
+    console.log(info.start.getMonth() + 1);
     let flag = false;
-    if(info.start.getDate()==1){
-      flag=true;
+    if (info.start.getDate() == 1) {
+      flag = true;
     }
-    const newMonth = !flag ? (info.start.getMonth() + 1):(info.start.getMonth()); 
+    const newMonth = !flag ? info.start.getMonth() + 1 : info.start.getMonth();
     const newYear = info.start.getFullYear();
-    navigate(`?month=${newMonth+1}&year=${newYear}`);
+    navigate(`?month=${newMonth + 1}&year=${newYear}`);
   };
 
   return (
     <>
-      
-
       <FullCalendar
         plugins={[dayGridPlugin]}
         firstDay={1}
         initialView="dayGridMonth"
         timeZone="local"
-        events={calendarEvents} 
+        events={calendarEvents}
         datesSet={handleMonthChange}
       />
     </>
