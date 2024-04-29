@@ -3,7 +3,7 @@ import FullCalendar from "@fullcalendar/react";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-
+import { useState, useEffect } from "react";
 const dummyOrganizationId = "shelf";
 const dummyUserId = "shelfnu";
 
@@ -114,17 +114,27 @@ export const loader = ({ request }: LoaderFunctionArgs) => {
   return json({ bookings: filteredBookings, header });
 };
 
+interface CalendarEvent {
+  title: string;
+  start: string;
+  end: string;
+}
 // Calendar Component
 const Calendar = () => {
   const { bookings, header } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
-
-  const calendarEvents = bookings.map((booking) => ({
-    title: booking.name,
-    start: booking.from,
-    end: booking.to,
-  }));
-
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]); 
+  useEffect(() => {
+    if (bookings && bookings.length > 0) {
+      const events = bookings.map((booking) => ({
+        title: booking.name,
+        start: booking.from,
+        end: booking.to,
+      }));
+      setCalendarEvents(events); // Set the new events
+    }
+  }, [bookings]);
+  
   const handleMonthChange = (info: any) => {
     const newMonth = !(info.start.getDate() == 1)
       ? info.start.getMonth() + 1
