@@ -33,8 +33,6 @@ export type ModelFilterProps = {
    * (item) => JSON.stringify({ id: item.id, name: item.name })
    */
   valueExtractor?: (item: ModelFilterItem) => string;
-
-  excludeItems?: string[];
 };
 
 const GET_ALL_KEY = "getAll";
@@ -46,7 +44,6 @@ export function useModelFilters({
   initialDataKey,
   selectionMode = "append",
   valueExtractor,
-  excludeItems,
 }: ModelFilterProps) {
   const initialData = useLoaderData<any>();
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -60,28 +57,11 @@ export function useModelFilters({
   const fetcher = useFetcherWithReset<SerializeFrom<typeof loader>>();
 
   const items = useMemo(() => {
-    let items: ModelFilterItem[];
-
     if (searchQuery && fetcher.data && !fetcher.data.error) {
-      items = itemsWithExtractedValue(fetcher.data.filters, valueExtractor);
-    } else {
-      items = itemsWithExtractedValue(
-        initialData[initialDataKey],
-        valueExtractor
-      );
+      return itemsWithExtractedValue(fetcher.data.filters, valueExtractor);
     }
-
-    return excludeItems
-      ? items.filter((item) => !excludeItems.includes(item.id))
-      : items;
-  }, [
-    excludeItems,
-    fetcher.data,
-    initialData,
-    initialDataKey,
-    searchQuery,
-    valueExtractor,
-  ]);
+    return itemsWithExtractedValue(initialData[initialDataKey], valueExtractor);
+  }, [fetcher.data, initialData, initialDataKey, searchQuery, valueExtractor]);
 
   const handleSelectItemChange = useCallback(
     (value: string) => {

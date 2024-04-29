@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -36,7 +36,8 @@ type Props = ModelFilterProps & {
   placeholder?: string;
   closeOnSelect?: boolean;
   valueExtractor?: (item: ModelFilterItem) => string;
-  onChange?: (value: string) => void;
+  excludeItems?: string[];
+  onChange?: ((value: string) => void) | null;
 };
 
 export default function DynamicSelect({
@@ -58,7 +59,7 @@ export default function DynamicSelect({
   valueExtractor,
   selectionMode = "none",
   excludeItems,
-  onChange,
+  onChange = null,
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -85,8 +86,13 @@ export default function DynamicSelect({
     initialDataKey,
     selectionMode,
     valueExtractor,
-    excludeItems,
   });
+
+  const itemsToRender = useMemo(
+    () =>
+      excludeItems ? items.filter((i) => !excludeItems.includes(i.id)) : items,
+    [excludeItems, items]
+  );
 
   return (
     <>
@@ -175,7 +181,7 @@ export default function DynamicSelect({
                     modelName={model.name}
                   />
                 )}
-                {items.map((item) => (
+                {itemsToRender.map((item) => (
                   <div
                     key={item.id}
                     className={tw(
@@ -185,7 +191,7 @@ export default function DynamicSelect({
                     onClick={() => {
                       setSelectedValue(item.id);
                       handleSelectItemChange(item.id);
-                      onChange?.(item.id);
+                      onChange && onChange(item.id);
                       if (closeOnSelect) {
                         setIsPopoverOpen(false);
                       }

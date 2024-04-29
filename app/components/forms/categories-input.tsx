@@ -37,6 +37,10 @@ export default function CategoriesInput({
             placeholder="Select Category"
             className="flex-1"
             excludeItems={categories}
+            onChange={(value) => {
+              categories[i] = value;
+              setCategories([...categories]);
+            }}
           />
 
           <Button
