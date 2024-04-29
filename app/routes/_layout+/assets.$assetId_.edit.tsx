@@ -128,8 +128,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const asset = await getAsset({ organizationId, id });
-
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
@@ -137,7 +135,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const customFields = await getActiveCustomFields({
       organizationId,
-      category: searchParams.get("category") ?? asset.categoryId,
+      category:
+        searchParams.get("category") ?? String(formData.get("category")),
     });
 
     const FormSchema = mergedSchema({
