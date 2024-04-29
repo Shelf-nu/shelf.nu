@@ -127,6 +127,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           ...asset,
           custody,
           notes,
+          /** We only need customField with same category of asset or without any category */
+          customFields: asset.categoryId
+            ? asset.customFields.filter(
+                (cf) =>
+                  !cf.customField.categories.length ||
+                  cf.customField.categories
+                    .map((c) => c.id)
+                    .includes(asset.categoryId!)
+              )
+            : asset.customFields,
         },
         lastScan,
         header,

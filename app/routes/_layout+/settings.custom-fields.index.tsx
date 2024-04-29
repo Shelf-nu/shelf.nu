@@ -1,4 +1,4 @@
-import type { Category, CustomField, Prisma } from "@prisma/client";
+import type { Category, Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
