@@ -32,10 +32,16 @@ import { ControlledActionButton } from "../shared/controlled-action-button";
 /**
  * Important note is that the fields are only valudated when they are not disabled
  */
-export const NewBookingFormSchema = (inputFieldIsDisabled = false) =>
+export const NewBookingFormSchema = (
+  inputFieldIsDisabled = false,
+  routeIsNewBooking = false
+) =>
   z
     .object({
-      id: inputFieldIsDisabled ? z.string().optional() : z.string().min(1),
+      id:
+        inputFieldIsDisabled || routeIsNewBooking
+          ? z.string().optional()
+          : z.string().min(1),
       name: inputFieldIsDisabled
         ? z.string().optional()
         : z.string().min(2, "Name is required"),
@@ -112,7 +118,7 @@ export function BookingForm({
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
-    NewBookingFormSchema(inputFieldIsDisabled)
+    NewBookingFormSchema(inputFieldIsDisabled, routeIsNewBooking)
   );
 
   const isSelfService = useUserIsSelfService();

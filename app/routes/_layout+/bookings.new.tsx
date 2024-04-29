@@ -136,7 +136,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
-    const payload = parseData(formData, NewBookingFormSchema(), {
+    const payload = parseData(formData, NewBookingFormSchema(false, true), {
       additionalData: { userId, organizationId },
     });
 
