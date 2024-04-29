@@ -126,9 +126,6 @@ const Calendar = () => {
   }));
 
   const handleMonthChange = (info: any) => {
-    console.log(info.start.getDate());
-
-    console.log(info.start.getMonth() + 1);
     let flag = false;
     if (info.start.getDate() == 1) {
       flag = true;
