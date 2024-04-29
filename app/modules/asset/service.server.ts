@@ -1149,18 +1149,14 @@ export async function getAllEntriesForCreateAndEdit({
       db.category.findMany({
         where: {
           organizationId,
-          id: Array.isArray(categorySelected)
-            ? { notIn: categorySelected }
-            : { not: categorySelected },
+          id: { notIn: [...categorySelected] },
         },
         take: getAllEntries.includes("category") ? undefined : 12,
       }),
       db.category.findMany({
         where: {
           organizationId,
-          id: Array.isArray(categorySelected)
-            ? { in: categorySelected }
-            : categorySelected,
+          id: { in: [...categorySelected] },
         },
       }),
       db.category.count({ where: { organizationId } }),

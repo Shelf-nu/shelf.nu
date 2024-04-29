@@ -36,11 +36,12 @@ export default function CategoriesInput({
             countKey="totalCategories"
             placeholder="Select Category"
             className="flex-1"
+            excludeItems={categories}
           />
 
           <Button
             icon="x"
-            className="py-3"
+            className="py-2"
             variant="outline"
             type="button"
             onClick={() => {

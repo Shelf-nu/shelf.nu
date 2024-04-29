@@ -36,6 +36,7 @@ type Props = ModelFilterProps & {
   placeholder?: string;
   closeOnSelect?: boolean;
   valueExtractor?: (item: ModelFilterItem) => string;
+  onChange?: (value: string) => void;
 };
 
 export default function DynamicSelect({
@@ -56,6 +57,8 @@ export default function DynamicSelect({
   closeOnSelect = false,
   valueExtractor,
   selectionMode = "none",
+  excludeItems,
+  onChange,
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -82,6 +85,7 @@ export default function DynamicSelect({
     initialDataKey,
     selectionMode,
     valueExtractor,
+    excludeItems,
   });
 
   return (
@@ -181,6 +185,7 @@ export default function DynamicSelect({
                     onClick={() => {
                       setSelectedValue(item.id);
                       handleSelectItemChange(item.id);
+                      onChange?.(item.id);
                       if (closeOnSelect) {
                         setIsPopoverOpen(false);
                       }
