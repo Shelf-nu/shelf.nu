@@ -126,11 +126,7 @@ const Calendar = () => {
   }));
 
   const handleMonthChange = (info: any) => {
-    let flag = false;
-    if (info.start.getDate() == 1) {
-      flag = true;
-    }
-    const newMonth = !flag ? info.start.getMonth() + 1 : info.start.getMonth();
+    const newMonth = !(info.start.getDate() == 1) ? info.start.getMonth() + 1 : info.start.getMonth();
     const newYear = info.start.getFullYear();
     navigate(`?month=${newMonth + 1}&year=${newYear}`);
   };
