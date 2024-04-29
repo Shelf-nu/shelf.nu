@@ -10,7 +10,7 @@ import { toggleMobileNavAtom } from "./atoms";
 import SidebarBottom from "./bottom";
 import MenuButton from "./menu-button";
 import MenuItems from "./menu-items";
-import { OrganizationSelect } from "./organization-select";
+import { OrganizationSelectForm } from "./organization-select-form";
 import Overlay from "./overlay";
 
 export default function Sidebar() {
@@ -94,7 +94,7 @@ export default function Sidebar() {
             </Link>
           </div>
           <div className="">
-            <OrganizationSelect key={currentOrganizationId} />
+            <OrganizationSelectForm key={currentOrganizationId} />
           </div>
           <div className={tw("flex-1", workspaceSwitching ? "opacity-50" : "")}>
             <MenuItems fetcher={sidebarFetcher} />

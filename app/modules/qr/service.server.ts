@@ -392,3 +392,47 @@ export async function markBatchAsPrinted({ batch }: { batch: string }) {
     });
   }
 }
+
+/** Claims a unclaimed code by linking it to an organization and user */
+export async function claimQrCode({
+  id,
+  organizationId,
+  userId,
+}: {
+  id: Qr["id"];
+  organizationId: Organization["id"];
+  userId: User["id"];
+}) {
+  try {
+    /** First, just in case we check whether its claimed */
+    const qr = await getQr(id);
+    if (qr.organizationId) {
+      throw new ShelfError({
+        message:
+          "This QR code already belongs to an organization so you cannot claim it.",
+        title: "QR code already claimed",
+        status: 403,
+        additionalData: { id, organizationId, userId },
+        label,
+        cause: null,
+      });
+    }
+
+    return await db.qr.update({
+      where: {
+        id,
+      },
+      data: {
+        organizationId,
+        userId,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to claim qr code",
+      additionalData: { id, organizationId, userId },
+      label,
+    });
+  }
+}
