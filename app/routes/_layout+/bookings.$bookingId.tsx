@@ -34,7 +34,6 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import {
@@ -198,7 +197,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return json(
       data({
         header,
-        booking: booking,
+        booking,
         modelName,
         items: assets,
         page,
@@ -564,7 +563,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
-  const { booking, teamMembers } = useLoaderData<typeof loader>();
+  const { booking } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -582,26 +581,7 @@ export default function BookingEditPage() {
       />
 
       <div>
-        <BookingPageContent
-          id={booking.id}
-          name={booking.name}
-          startDate={
-            booking.from
-              ? dateForDateTimeInputValue(new Date(booking.from))
-              : undefined
-          }
-          endDate={
-            booking.to
-              ? dateForDateTimeInputValue(new Date(booking.to))
-              : undefined
-          }
-          custodianUserId={
-            booking.custodianUserId ||
-            teamMembers.find(
-              (member) => member.user?.id === booking.custodianUserId
-            )?.id
-          }
-        />
+        <BookingPageContent />
         <ContextualModal />
       </div>
     </>

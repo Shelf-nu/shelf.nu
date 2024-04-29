@@ -42,21 +42,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
-
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
-    // const booking = await upsertBooking(
-    //   {
-    //     organizationId,
-    //     name: "Draft booking",
-    //     creatorId: authSession.userId,
-    //     // If the user is self service, we already set them as the custodian as that is the only possible option
-    //     ...(isSelfService && {
-    //       custodianUserId: authSession.userId,
-    //     }),
-    //   },
-    //   getClientHint(request)
-    // );
 
     const [teamMembers, org] = await Promise.all([
       /**
@@ -128,12 +114,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const formData = await request.formData();
     const payload = parseData(formData, NewBookingFormSchema(false, true), {
@@ -163,6 +150,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         name,
         from,
         to,
+        creatorId: authSession.userId,
+        ...(isSelfService && {
+          custodianUserId: authSession.userId,
+        }),
       },
       getClientHint(request)
     );
@@ -214,7 +205,6 @@ export default function NewBooking() {
           startDate={startDate}
           endDate={endDate}
           custodianUserId={isSelfService ? selfServiceId : undefined}
-          isModal={true}
         />
       </div>
     </div>

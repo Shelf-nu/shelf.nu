@@ -1,9 +1,4 @@
-import {
-  Form,
-  useLoaderData,
-  useLocation,
-  useNavigation,
-} from "@remix-run/react";
+import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -14,13 +9,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import { useBookingStatus } from "~/hooks/use-booking-status";
+import type { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { ActionsDropdown } from "./actions-dropdown";
-import type { BookingFormData } from "./page-content";
 import CustodianUserSelect from "../custody/custodian-user-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -34,12 +27,13 @@ import { ControlledActionButton } from "../shared/controlled-action-button";
  */
 export const NewBookingFormSchema = (
   inputFieldIsDisabled = false,
-  routeIsNewBooking = false
+  isNewBooking = false
 ) =>
   z
     .object({
+      // @TODO this is why its not working, because the id is required even on new bookings
       id:
-        inputFieldIsDisabled || routeIsNewBooking
+        inputFieldIsDisabled || isNewBooking
           ? z.string().optional()
           : z.string().min(1),
       name: inputFieldIsDisabled
@@ -76,49 +70,44 @@ export const NewBookingFormSchema = (
       }
     );
 
+type BookingFormData = {
+  id?: string;
+  name?: string;
+  startDate?: string;
+  endDate?: string;
+  custodianUserId?: string; // This holds the ID of the user attached to custodian
+  bookingStatus?: ReturnType<typeof useBookingStatus>;
+};
+
 export function BookingForm({
   id,
   name,
   startDate,
   endDate,
   custodianUserId,
-  isModal = false,
+  bookingStatus,
 }: BookingFormData) {
   const navigation = useNavigation();
 
-  const routeIsNewBooking = useLocation().pathname.includes("new");
+  /** If there is noId, that means we are creating a new booking */
+  const isNewBooking = !id;
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
-  const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
 
-  const {
-    hasAssets,
-    hasUnavailableAssets,
-    isDraft,
-    isReserved,
-    isOngoing,
-    isCompleted,
-    isArchived,
-    isOverdue,
-    isCancelled,
-    hasCheckedOutAssets,
-    hasAlreadyBookedAssets,
-    hasAssetsInCustody,
-  } = useBookingStatus(booking);
-
-  const disabled = isFormProcessing(navigation.state) || isArchived;
+  const disabled =
+    isFormProcessing(navigation.state) || bookingStatus?.isArchived;
 
   const inputFieldIsDisabled =
     disabled ||
-    isReserved ||
-    isOngoing ||
-    isCompleted ||
-    isOverdue ||
-    isCancelled;
+    bookingStatus?.isReserved ||
+    bookingStatus?.isOngoing ||
+    bookingStatus?.isCompleted ||
+    bookingStatus?.isOverdue ||
+    bookingStatus?.isCancelled;
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
-    NewBookingFormSchema(inputFieldIsDisabled, routeIsNewBooking)
+    NewBookingFormSchema(inputFieldIsDisabled, isNewBooking)
   );
 
   const isSelfService = useUserIsSelfService();
@@ -126,22 +115,25 @@ export function BookingForm({
   return (
     <div>
       <Form ref={zo.ref} method="post">
-        {/* Render the actions on top only when the form is not in a modal */}
-        {!isModal ? (
+        {/* Render the actions on top only when the form is in edit mode */}
+        {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
-            {/* We only render the actions when we are not on the .new route */}
-            {routeIsNewBooking || (isCompleted && isSelfService) ? null : ( // When the booking is Completed, there are no actions available for selfService so we don't render it
-              // @ts-ignore
-              <ActionsDropdown booking={booking} />
+            {/* When the booking is Completed, there are no actions available for selfService so we don't render it */}
+            {bookingStatus?.isCompleted && isSelfService ? null : (
+              <ActionsDropdown />
             )}
 
             {/*  We show the button in all cases, unless the booking is in a final state */}
-            {!(isCompleted || isCancelled || isArchived) ? (
+            {!(
+              bookingStatus?.isCompleted ||
+              bookingStatus?.isCancelled ||
+              bookingStatus?.isArchived
+            ) ? (
               <>
                 <input
                   type="hidden"
                   name="nameChangeOnly"
-                  value={isDraft ? "no" : "yes"}
+                  value={bookingStatus?.isDraft ? "no" : "yes"}
                 />
                 <Button
                   type="submit"
@@ -158,19 +150,19 @@ export function BookingForm({
             ) : null}
 
             {/* When booking is draft, we show the reserve button */}
-            {isDraft ? (
+            {bookingStatus?.isDraft ? (
               <ControlledActionButton
                 canUseFeature={
                   !disabled &&
-                  hasAssets &&
-                  !hasUnavailableAssets &&
-                  !hasAlreadyBookedAssets
+                  bookingStatus?.hasAssets &&
+                  !bookingStatus?.hasUnavailableAssets &&
+                  !bookingStatus?.hasAlreadyBookedAssets
                 }
                 buttonContent={{
                   title: "Reserve",
-                  message: hasUnavailableAssets
+                  message: bookingStatus?.hasUnavailableAssets
                     ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
-                    : hasAlreadyBookedAssets
+                    : bookingStatus?.hasAlreadyBookedAssets
                     ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
                     : "You need to add assets to your booking before you can reserve it",
                 }}
@@ -187,17 +179,17 @@ export function BookingForm({
             ) : null}
 
             {/* When booking is reserved, we show the check-out button */}
-            {isReserved && !isSelfService ? (
+            {bookingStatus?.isReserved && !isSelfService ? (
               <ControlledActionButton
                 canUseFeature={
                   !disabled &&
-                  !hasUnavailableAssets &&
-                  !hasCheckedOutAssets &&
-                  !hasAssetsInCustody
+                  !bookingStatus?.hasUnavailableAssets &&
+                  !bookingStatus?.hasCheckedOutAssets &&
+                  !bookingStatus?.hasAssetsInCustody
                 }
                 buttonContent={{
                   title: "Check-out",
-                  message: hasAssetsInCustody
+                  message: bookingStatus?.hasAssetsInCustody
                     ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
                     : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
                 }}
@@ -212,7 +204,8 @@ export function BookingForm({
               />
             ) : null}
 
-            {(isOngoing || isOverdue) && !isSelfService ? (
+            {(bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
+            !isSelfService ? (
               <Button
                 type="submit"
                 name="intent"
@@ -230,7 +223,7 @@ export function BookingForm({
           <div
             className={tw(
               "mb-8 w-full lg:mb-0 ",
-              !isModal ? "lg:w-[328px]" : ""
+              !isNewBooking ? "lg:w-[328px]" : ""
             )}
           >
             <div className="flex w-full flex-col gap-3">
@@ -246,7 +239,10 @@ export function BookingForm({
                     hideLabel
                     name={zo.fields.name()}
                     disabled={
-                      disabled || isCompleted || isCancelled || isArchived
+                      disabled ||
+                      bookingStatus?.isCompleted ||
+                      bookingStatus?.isCancelled ||
+                      bookingStatus?.isArchived
                     }
                     error={zo.errors.name()?.message}
                     autoFocus
@@ -325,13 +321,20 @@ export function BookingForm({
                   assets during the duration of the booking period.
                 </p>
               </Card>
-              {!routeIsNewBooking && (
-                <AddToCalendar disabled={disabled || isDraft || isCancelled} />
+              {!isNewBooking && (
+                <AddToCalendar
+                  disabled={
+                    disabled ||
+                    bookingStatus?.isDraft ||
+                    bookingStatus?.isCancelled ||
+                    false
+                  }
+                />
               )}
             </div>
           </div>
         </div>
-        {isModal ? (
+        {isNewBooking ? (
           <div className="text-right">
             <Button type="submit">Check Asset Availability</Button>
           </div>
