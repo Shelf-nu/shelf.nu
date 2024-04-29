@@ -82,6 +82,7 @@ export async function getFilteredAndPaginatedCustomFields(params: {
         take,
         where,
         orderBy: [{ active: "desc" }, { updatedAt: "desc" }],
+        include: { categories: true },
       }),
 
       /** Count them */

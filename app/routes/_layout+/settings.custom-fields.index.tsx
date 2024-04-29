@@ -1,4 +1,4 @@
-import type { CustomField } from "@prisma/client";
+import type { Category, CustomField, Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
@@ -30,6 +30,7 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription";
+import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -127,6 +128,7 @@ export default function CustomFieldsIndexPage() {
         ItemComponent={TeamMemberRow}
         headerChildren={
           <>
+            <Th>Categories</Th>
             <Th>Required</Th>
             <Th>Status</Th>
             <Th>Actions</Th>
@@ -136,7 +138,11 @@ export default function CustomFieldsIndexPage() {
     </>
   );
 }
-function TeamMemberRow({ item }: { item: CustomField }) {
+function TeamMemberRow({
+  item,
+}: {
+  item: Prisma.CustomFieldGetPayload<{ include: { categories: true } }>;
+}) {
   return (
     <>
       <Td className="w-full">
@@ -153,6 +159,9 @@ function TeamMemberRow({ item }: { item: CustomField }) {
             </div>
           </div>
         </Link>
+      </Td>
+      <Td>
+        <ListItemCategoryColumn categories={item.categories} />
       </Td>
       <Td>
         <span className="text-text-sm font-medium capitalize text-gray-600">
@@ -176,3 +185,50 @@ function TeamMemberRow({ item }: { item: CustomField }) {
     </>
   );
 }
+
+const ListItemCategoryColumn = ({ categories }: { categories: Category[] }) => {
+  const visibleCategories = categories?.slice(0, 2);
+  const remainingCategories = categories?.slice(2);
+
+  if (!categories || !categories.length) {
+    return "All";
+  }
+
+  return (
+    <div className="">
+      {visibleCategories?.map((category) => (
+        <CategoryBadge key={category.id} className="mr-2">
+          {category.name}
+        </CategoryBadge>
+      ))}
+      {remainingCategories && remainingCategories?.length > 0 ? (
+        <CategoryBadge
+          className="mr-2 w-6 text-center"
+          title={`${remainingCategories?.map((c) => c.name).join(", ")}`}
+        >
+          {`+${categories.length - 2}`}
+        </CategoryBadge>
+      ) : null}
+    </div>
+  );
+};
+
+export const CategoryBadge = ({
+  children,
+  className,
+  title,
+}: {
+  children: string | JSX.Element;
+  className?: string;
+  title?: string;
+}) => (
+  <span
+    className={tw(
+      "inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700",
+      className
+    )}
+    title={title}
+  >
+    {children}
+  </span>
+);
