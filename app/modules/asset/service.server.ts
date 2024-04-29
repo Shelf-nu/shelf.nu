@@ -781,6 +781,11 @@ export async function updateAsset({
         }
       );
 
+      /** We have to delete the customFieldValues which are no longer in use */
+      await db.assetCustomFieldValue.deleteMany({
+        where: { id: { notIn: customFieldsValuesFromForm.map((cf) => cf.id) } },
+      });
+
       Object.assign(data, {
         customFields: {
           upsert: customFieldsValuesFromForm?.map(({ id, value }) => ({
