@@ -60,7 +60,6 @@ export function useModelFilters({
     if (searchQuery && fetcher.data && !fetcher.data.error) {
       return itemsWithExtractedValue(fetcher.data.filters, valueExtractor);
     }
-
     return itemsWithExtractedValue(initialData[initialDataKey], valueExtractor);
   }, [fetcher.data, initialData, initialDataKey, searchQuery, valueExtractor]);
 
