@@ -60,7 +60,7 @@ export const Filters = ({
       <Form ref={formRef} className="w-full">
         {existingParamInputs}
         <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+          <div className="flex w-full flex-col gap-2 md:flex-row md:items-center">
             {slots?.["left-of-search"] || null}
             <SearchForm />
             {slots?.["right-of-search"] || null}
