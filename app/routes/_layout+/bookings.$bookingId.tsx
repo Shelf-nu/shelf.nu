@@ -34,7 +34,6 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import {
@@ -198,7 +197,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return json(
       data({
         header,
-        booking: booking,
+        booking,
         modelName,
         items: assets,
         page,
@@ -237,7 +236,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { intent } = parseData(
+    const { intent, nameChangeOnly } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum([
@@ -250,6 +249,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "archive",
           "cancel",
         ]),
+        nameChangeOnly: z
+          .string()
+          .optional()
+          .transform((val) => (val === "yes" ? true : false)),
       }),
       {
         additionalData: { userId },
@@ -283,32 +286,62 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     switch (intent) {
       case "save": {
         const formData = await request.formData();
-        const payload = parseData(formData, NewBookingFormSchema(), {
-          additionalData: { userId, id, organizationId, role },
-        });
 
-        const { name, custodian } = payload;
-        const hints = getHints(request);
-        const startDate = formData.get("startDate")!.toString();
-        const endDate = formData.get("endDate")!.toString();
-        const fmt = "yyyy-MM-dd'T'HH:mm";
-        const from = DateTime.fromFormat(startDate, fmt, {
-          zone: hints.timeZone,
-        }).toJSDate();
-        const to = DateTime.fromFormat(endDate, fmt, {
-          zone: hints.timeZone,
-        }).toJSDate();
-        const booking = await upsertBooking(
-          {
-            custodianUserId: custodian,
-            organizationId,
-            id,
-            name,
-            from,
-            to,
-          },
-          getClientHint(request)
-        );
+        let booking;
+        // We are only changing the name so we do things simpler
+        if (nameChangeOnly) {
+          const { name } = parseData(
+            formData,
+            z.object({
+              name: z.string(),
+            }),
+            {
+              additionalData: { userId, id, organizationId, role },
+            }
+          );
+
+          booking = await upsertBooking(
+            {
+              organizationId,
+              id,
+              name,
+            },
+            getClientHint(request)
+          );
+        } else {
+          /** WE are updating the whole booking */
+          const payload = parseData(
+            formData,
+            NewBookingFormSchema(), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
+            {
+              additionalData: { userId, id, organizationId, role },
+            }
+          );
+
+          const { name, custodian } = payload;
+
+          const hints = getHints(request);
+          const startDate = formData.get("startDate")!.toString();
+          const endDate = formData.get("endDate")!.toString();
+          const fmt = "yyyy-MM-dd'T'HH:mm";
+          const from = DateTime.fromFormat(startDate, fmt, {
+            zone: hints.timeZone,
+          }).toJSDate();
+          const to = DateTime.fromFormat(endDate, fmt, {
+            zone: hints.timeZone,
+          }).toJSDate();
+          booking = await upsertBooking(
+            {
+              custodianUserId: custodian,
+              organizationId,
+              id,
+              name,
+              from,
+              to,
+            },
+            getClientHint(request)
+          );
+        }
 
         sendNotification({
           title: "Booking saved",
@@ -530,7 +563,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
-  const { booking, teamMembers } = useLoaderData<typeof loader>();
+  const { booking } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -548,26 +581,7 @@ export default function BookingEditPage() {
       />
 
       <div>
-        <BookingPageContent
-          id={booking.id}
-          name={booking.name}
-          startDate={
-            booking.from
-              ? dateForDateTimeInputValue(new Date(booking.from))
-              : undefined
-          }
-          endDate={
-            booking.to
-              ? dateForDateTimeInputValue(new Date(booking.to))
-              : undefined
-          }
-          custodianUserId={
-            booking.custodianUserId ||
-            teamMembers.find(
-              (member) => member.user?.id === booking.custodianUserId
-            )?.id
-          }
-        />
+        <BookingPageContent />
         <ContextualModal />
       </div>
     </>

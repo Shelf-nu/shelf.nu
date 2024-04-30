@@ -114,8 +114,8 @@ export default function DynamicDropdown({
               <div className="filters-form relative border-y border-y-gray-200 p-3">
                 <Input
                   type="text"
-                  label={`Search ${label}`}
-                  placeholder={`Search ${label}`}
+                  label={label}
+                  placeholder={label}
                   hideLabel
                   className="text-gray-500"
                   icon={searchIcon}

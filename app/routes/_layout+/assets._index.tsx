@@ -307,7 +307,7 @@ export default function AssetIndexPage() {
                   </div>
                 }
                 model={{ name: "category", queryKey: "name" }}
-                label="Filter by category"
+                label="Search categories"
                 initialDataKey="categories"
                 countKey="totalCategories"
               />
@@ -318,7 +318,7 @@ export default function AssetIndexPage() {
                   </div>
                 }
                 model={{ name: "tag", queryKey: "name" }}
-                label="Filter by tags"
+                label="Search tags"
                 initialDataKey="tags"
                 countKey="totalTags"
               />
@@ -330,7 +330,7 @@ export default function AssetIndexPage() {
                   </div>
                 }
                 model={{ name: "location", queryKey: "name" }}
-                label="Filter by Location"
+                label="Search locations"
                 initialDataKey="locations"
                 countKey="totalLocations"
                 renderItem={({ metadata }) => (
