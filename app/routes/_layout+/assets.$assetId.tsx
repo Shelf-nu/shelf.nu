@@ -125,6 +125,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         asset: {
           ...asset,
+          createdAt: getDateTimeFormat(request, {
+            dateStyle: "short",
+            timeStyle: "short",
+          }).format(asset.createdAt),
           custody,
           notes,
           /** We only need customField with same category of asset or without any category */
@@ -374,6 +378,13 @@ export default function AssetDetailsPage() {
                 </span>
                 <div className="max-w-[250px]">{asset.id}</div>
               </li>
+              <li className="mb-4 flex justify-between">
+                <span className="text-[12px] font-medium text-gray-600">
+                  Created
+                </span>
+                <div className="max-w-[250px]">{asset.createdAt}</div>
+              </li>
+
               {asset?.category ? (
                 <li className="mb-4 flex justify-between">
                   <span className="text-[12px] font-medium text-gray-600">

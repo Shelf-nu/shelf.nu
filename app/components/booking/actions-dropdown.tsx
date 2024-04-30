@@ -1,4 +1,4 @@
-import { useSubmit } from "@remix-run/react";
+import { useLoaderData, useSubmit } from "@remix-run/react";
 import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
@@ -9,17 +9,17 @@ import {
 } from "~/components/shared/dropdown";
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
+import type { loader } from "~/routes/_layout+/bookings.$bookingId";
 import { tw } from "~/utils/tw";
 import { DeleteBooking } from "./delete-booking";
 import { Button } from "../shared/button";
 
 interface Props {
-  booking: BookingWithCustodians;
   fullWidth?: boolean;
 }
 
-export const ActionsDropdown = ({ booking, fullWidth }: Props) => {
+export const ActionsDropdown = ({ fullWidth }: Props) => {
+  const { booking } = useLoaderData<typeof loader>();
   const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
     useBookingStatus(booking);
 

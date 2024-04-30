@@ -31,31 +31,44 @@ export function AvailabilitySelect() {
 
   return (
     <Select
-      name="category"
+      name="hideUnavailable"
       defaultValue={defaultValue}
       onValueChange={handleSelectChange}
     >
-      <SelectTrigger className="">
-        <SelectValue placeholder="Select category" />
+      <SelectTrigger className="text-left text-base text-gray-500 md:mt-0 md:max-w-fit">
+        <SelectValue placeholder="Select availability" />
       </SelectTrigger>
 
-      <div>
-        <SelectContent
-          className=" w-[350px]"
-          position="popper"
-          align="end"
-          sideOffset={4}
-        >
-          <div className="border-b border-b-gray-300 py-2 ">
-            <SelectItem value={"show"} key={"show"}>
-              <span className="whitespace-nowrap">All assets</span>
-            </SelectItem>
-            <SelectItem value={"hide"} key={"hide"}>
-              <span className="whitespace-nowrap">Hide unavailable</span>
-            </SelectItem>
-          </div>
-        </SelectContent>
-      </div>
+      <SelectContent
+        className=" w-full min-w-[250px] p-0"
+        position="popper"
+        align="end"
+        sideOffset={4}
+        ref={(ref) =>
+          ref?.addEventListener("touchend", (e) => e.preventDefault())
+        }
+      >
+        <div className="max-h-[320px] overflow-auto">
+          <SelectItem
+            value={"show"}
+            key={"show"}
+            className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+          >
+            <span className="mr-4 block lowercase text-gray-700 first-letter:uppercase">
+              All assets
+            </span>
+          </SelectItem>
+          <SelectItem
+            value={"hide"}
+            key={"hide"}
+            className="rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]"
+          >
+            <span className="mr-4 block lowercase text-gray-700 first-letter:uppercase">
+              Hide unavailable
+            </span>
+          </SelectItem>
+        </div>
+      </SelectContent>
     </Select>
   );
 }

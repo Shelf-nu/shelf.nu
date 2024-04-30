@@ -7,6 +7,11 @@ import { tw } from "~/utils/tw";
 
 import { SearchForm } from "./search-form";
 
+type SlotKeys = {
+  "left-of-search"?: ReactNode;
+  "right-of-search"?: ReactNode;
+};
+
 export const Filters = ({
   children,
   className,
@@ -19,7 +24,7 @@ export const Filters = ({
    * - left-of-search
    * - right-of-search
    */
-  slots?: Record<string, ReactNode>;
+  slots?: SlotKeys;
 }) => {
   const { search } = useLoaderData<SearchableIndexResponse>();
   const [searchParams] = useSearchParams();
@@ -60,7 +65,7 @@ export const Filters = ({
       <Form ref={formRef} className="w-full">
         {existingParamInputs}
         <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+          <div className="flex w-full flex-col gap-2 md:flex-row md:items-center">
             {slots?.["left-of-search"] || null}
             <SearchForm />
             {slots?.["right-of-search"] || null}

@@ -192,6 +192,13 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       senderId: authSession.userId,
     });
 
+    await createNote({
+      content: `Asset was created by **${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}**`,
+      type: "UPDATE",
+      userId: authSession.userId,
+      assetId: asset.id,
+    });
+
     if (asset.location) {
       await createNote({
         content: `**${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}** set the location of **${asset.title?.trim()}** to *[${asset.location.name.trim()}](/locations/${

@@ -9,6 +9,7 @@ import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
 
 const label: ErrorLabel = "Stripe";
+export const premiumIsEnabled = config.enablePremiumFeatures;
 
 export type CustomerWithSubscriptions = Stripe.Customer & {
   subscriptions: {
@@ -23,7 +24,7 @@ let _stripe: Stripe;
 function getStripeServerClient() {
   if (
     !_stripe &&
-    config.enablePremiumFeatures &&
+    premiumIsEnabled &&
     STRIPE_SECRET_KEY !== "" &&
     typeof STRIPE_SECRET_KEY === "string"
   ) {
@@ -201,7 +202,7 @@ export const createStripeCustomer = async ({
   userId: User["id"];
 }) => {
   try {
-    if (config.enablePremiumFeatures && stripe) {
+    if (premiumIsEnabled && stripe) {
       const { id: customerId } = await stripe.customers.create({
         email,
         name,
@@ -384,6 +385,7 @@ export const disabledTeamOrg = async ({
   >[];
   currentOrganization: Pick<Organization, "id" | "type">;
 }) => {
+  if (!premiumIsEnabled) return false;
   /**
    * We need to check a few things before disabling team orgs
    *
