@@ -7,6 +7,11 @@ import { tw } from "~/utils/tw";
 
 import { SearchForm } from "./search-form";
 
+type SlotKeys = {
+  "left-of-search"?: ReactNode;
+  "right-of-search"?: ReactNode;
+};
+
 export const Filters = ({
   children,
   className,
@@ -19,7 +24,7 @@ export const Filters = ({
    * - left-of-search
    * - right-of-search
    */
-  slots?: Record<string, ReactNode>;
+  slots?: SlotKeys;
 }) => {
   const { search } = useLoaderData<SearchableIndexResponse>();
   const [searchParams] = useSearchParams();

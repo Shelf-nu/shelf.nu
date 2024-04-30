@@ -41,13 +41,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
     /** Query the QR and include the asset and userId for later use */
     const qr = await db.qr
-      .findFirst({
+      .findUniqueOrThrow({
         where: {
           id: qrId,
         },
         select: {
           asset: true,
           userId: true,
+          organizationId: true,
         },
       })
       .catch((cause) => {
@@ -67,6 +68,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
         additionalData: { qrId },
         label: "QR",
         status: 400,
+      });
+    }
+
+    /**
+     * This should not happen as the user will be redirected to claim the code before they ever land on this page.
+     * We still handle it just in case also to keep TS happy.
+     */
+    if (!qr.organizationId || !qr?.userId) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This QR doesn't belong to any user or organization so it cannot be reported as found. If this issue persists, please contact support.",
+        title: "QR is not claimed",
+        label: "QR",
       });
     }
 
