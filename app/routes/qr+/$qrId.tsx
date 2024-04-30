@@ -56,17 +56,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`not-logged-in?scanId=${scan.id}&redirectTo=/qr/${id}`);
     }
 
+    /** Once the user is loged in and this loader gets re-validated,
+     * we update the scan with the userId so we know which user scanned it */
     await updateScan({
       id: scan.id,
       userId,
     });
 
     /**
-     * Does the QR code belong to any user.
-     * SKIP FOR NOW, AFTER MVP: QR codes sold on amazon. These will be created manually somehow by us and have no
-     * user assigned. We currently can't even do that because we have a unique constraint
-     * on the userId within Qr in the database.
+     * Does the QR code belong to any user or is it unclaimed?
      */
+    if (!qr.organizationId) {
+      /** We redirect to link where we handle the rest of the logic */
+      return redirect(`link?scanId=${scan.id}`);
+    }
+
     /**
      * Does the QR code belong to LOGGED IN user's any of organizations?
      * Redirect to page to report if found.

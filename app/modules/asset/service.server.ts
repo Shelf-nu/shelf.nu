@@ -373,7 +373,7 @@ async function getAssets(params: {
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
-    const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
     /** Default value of where. Takes the assetss belonging to current user */
     let where: Prisma.AssetWhereInput = { organizationId };
