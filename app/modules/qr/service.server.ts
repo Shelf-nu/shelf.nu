@@ -263,7 +263,7 @@ export const getPaginatedAndFilterableQrCodes = async ({
       search,
       batch,
     });
-    const totalPages = Math.ceil(totalQrCodes / 25);
+    const totalPages = Math.ceil(totalQrCodes / perPage);
 
     return {
       page,
