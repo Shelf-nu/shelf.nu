@@ -9,6 +9,7 @@ import {
   useSearchParams,
   Link,
 } from "@remix-run/react";
+import calendarStyles from "~/styles/layout/calendar.css?url"
 import Header from "~/components/layout/header";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
@@ -102,6 +103,10 @@ const dummyBookingsResponse = {
   organizationId: dummyOrganizationId,
   userId: dummyUserId,
 };
+
+export function links() {
+  return [{ rel: "stylesheet", href: calendarStyles }];
+}
 
 export const handle = {
   breadcrumb: () => <Link to="/calendar">Calendar</Link>,
