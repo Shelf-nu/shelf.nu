@@ -93,9 +93,9 @@ const dummyBookings = [
   },
 ];
 
-const getStatusClass = (status:any) => {
-  console.log(status)
-  
+const getStatusClass = (status: any) => {
+  console.log(status);
+
   switch (status) {
     case "CONFIRMED":
       return "ongoing";
@@ -165,7 +165,7 @@ export const loader = ({ request }: LoaderFunctionArgs) => {
         end: booking.to.toISOString(),
         extendedProps: {
           status: booking.status,
-        }
+        },
       }));
 
     const header = {
