@@ -22,9 +22,7 @@
 }
 
 .fc-today-button {
-  @apply ml-0 rounded-none border border-gray-400 bg-white text-black pt-[0.5em] !important;
-  border-left-width: 0 !important;
-  border-right-width: 0 !important;
+  @apply ml-0 rounded-none border border-gray-400 bg-white text-black pt-[0.5em] border-x-0 !important;
 }
 
 .fc-prev-button {
