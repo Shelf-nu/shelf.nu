@@ -164,7 +164,7 @@ export default function DuplicateAsset() {
         <Header hideBreadcrumbs classNames="[&>div]:border-b-0" />
 
         <div className="flex flex-col items-center gap-3 ">
-          <div className="flex items-center gap-3 rounded-md border p-4">
+          <div className="flex w-full items-center gap-3 rounded-md border p-4">
             <div className="flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
