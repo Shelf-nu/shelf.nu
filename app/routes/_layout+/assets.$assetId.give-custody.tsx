@@ -20,7 +20,13 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -80,6 +86,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/assets/${assetId}`);
     }
 
+    const searchParams = getCurrentSearchParams(request);
+
     /** We get all the team members that are part of the user's personal organization */
     const teamMembers = await db.teamMember
       .findMany({
@@ -93,7 +101,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         orderBy: {
           userId: "asc",
         },
-        take: 12,
+        take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
       })
       .catch((cause) => {
         throw new ShelfError({
