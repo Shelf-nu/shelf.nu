@@ -1,42 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 .fc-toolbar {
-  border: 1px solid #d5d6da;
-  padding: 10px;
-  margin: 0 !important;
-  border-bottom: none;
-  border-top-left-radius: 5px;
-  border-top-right-radius: 5px;
-}
-.fc-event-time {
-  display: none;
-}
-.fc-event-title {
-  margin-left: 4px;
-}
+    @apply border border-gray-300 p-2 m-0 !important;
+    border-bottom: none !important;
+    border-top-left-radius: 0.5rem !important;
+    border-top-right-radius: 0.5rem !important;
+  }
+  
+  .fc-event-time {
+    @apply hidden !important;
+  }
+  
+  .fc-event-title {
+    @apply ml-1 !important; 
+  }
+
 .fc-next-button {
-  margin-left: 0 !important;
-  border-top-left-radius: 0 !important;
-  border-bottom-left-radius: 0 !important;
-  border: 1px solid grey !important;
-  background: white !important;
-  color: #686767 !important;
-}
-.fc-today-button {
-  margin-left: 0 !important;
-  border-radius: 0 !important;
-  border-radius: 0 !important;
-  background-color: none !important;
-  padding-top: 0.5em !important;
-  border: 1px solid grey !important;
-  background: white !important;
-  color: black !important;
-  border-left: none !important;
-  border-right: none !important;
-}
-.fc-prev-button {
-  margin-left: 0 !important;
-  border-top-right-radius: 0 !important;
-  border-bottom-right-radius: 0 !important;
-  border: 1px solid grey !important;
-  background: white !important;
-  color: #686767 !important;
-}
+    @apply ml-0 rounded-tl-none rounded-bl-none border border-gray-400 bg-white text-gray-600 !important;
+  }
+  
+  .fc-today-button {
+    @apply ml-0 rounded-none border border-gray-400 bg-white text-black pt-[0.5em] !important;
+    border-left-width: 0 !important;
+    border-right-width: 0 !important;
+  }
+  
+  .fc-prev-button {
+    @apply ml-0 rounded-tr-none rounded-br-none border border-gray-400 bg-white text-gray-600 !important; 
+  }
+  
+
+.completed {
+    @apply bg-green-100 border-green-300;
+  }
+  
+  .completed .fc-event-title {
+    @apply text-green-700;
+  }
+  
+  .ongoing {
+    @apply bg-purple-100 border-purple-600;
+  }
+  
+  .ongoing .fc-event-title {
+    @apply text-purple-600;
+  }
+  
+  .reserved {
+    @apply bg-blue-100 border-blue-600;
+  }
+  
+  .reserved .fc-event-title {
+    @apply text-blue-600;
+  }
+  
+  .draft {
+    @apply bg-gray-100 border-gray-600; 
+  }
+  
+  .draft .fc-event-title {
+    @apply text-gray-700; 
+  }
+  
+  .fc-event:hover {
+    @apply bg-blue-600;
+  }
+  
+  .fc-event:hover .fc-event-title {
+    @apply text-white;
+  }
+  

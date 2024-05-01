@@ -78,7 +78,7 @@ const dummyBookings = [
     name: "April Booking 1",
     from: new Date("2024-04-05T14:00:00"),
     to: new Date("2024-04-10"),
-    status: "CONFIRMED",
+    status: "RESERVED",
     creatorId: "user-6",
     custodian: "Olivia Taylor",
   },
@@ -87,12 +87,28 @@ const dummyBookings = [
     name: "April Booking 2",
     from: new Date("2024-04-15T15:00:00"),
     to: new Date("2024-04-20"),
-    status: "CONFIRMED",
+    status: "COMPLETED",
     creatorId: "user-7",
     custodian: "William Davis",
   },
 ];
 
+const getStatusClass = (status:any) => {
+  console.log(status)
+  
+  switch (status) {
+    case "CONFIRMED":
+      return "ongoing";
+    case "COMPLETED":
+      return "completed";
+    case "RESERVED":
+      return "reserved";
+    case "DRAFT":
+      return "draft";
+    default:
+      return "";
+  }
+};
 // As per the DB Model
 const dummyBookingsResponse = {
   bookings: dummyBookings,
@@ -147,6 +163,9 @@ export const loader = ({ request }: LoaderFunctionArgs) => {
         }`,
         start: booking.from.toISOString(),
         end: booking.to.toISOString(),
+        extendedProps: {
+          status: booking.status,
+        }
       }));
 
     const header = {
@@ -191,10 +210,13 @@ const Calendar = () => {
             center: "",
             end: "prev today next",
           }}
-          initialView="dayGridMonth"
           timeZone="local"
           events={calendarEvents}
           datesSet={handleMonthChange}
+          eventClassNames={(info) => {
+            const eventClass = getStatusClass(info.event.extendedProps.status);
+            return [eventClass];
+          }}
         />
       </div>
     </>
