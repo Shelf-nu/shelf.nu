@@ -22,20 +22,20 @@ const dummyBookings = [
   {
     id: "booking-1",
     name: "January Booking 1",
-    from: new Date("2024-01-05T08:00:00"), // Including time
+    from: new Date("2024-01-05T08:00:00"),
     to: new Date("2024-01-10"),
     status: "CONFIRMED",
     creatorId: "user-1",
-    custodian: "John Doe", // Adding custodian name
+    custodian: "John Doe",
   },
   {
     id: "booking-2",
     name: "January Booking 2",
-    from: new Date("2024-01-15T09:30:00"), // Example starting time
+    from: new Date("2024-01-15T09:30:00"),
     to: new Date("2024-01-20"),
     status: "DRAFT",
     creatorId: "user-2",
-    custodian: "Jane Smith", // Adding custodian name
+    custodian: "Jane Smith",
   },
   {
     id: "booking-3",

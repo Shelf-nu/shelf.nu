@@ -10,6 +10,7 @@ import {
 } from "~/components/shared/dropdown";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { tw } from "~/utils/tw";
+import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import { DeleteAsset } from "./delete-asset";
 import { UpdateGpsCoordinatesForm } from "./update-gps-coordinates-form";
 import Icon from "../icons/icon";
@@ -21,16 +22,17 @@ const ConditionalActionsDropdown = () => {
   let [searchParams] = useSearchParams();
   const refIsQrScan = searchParams.get("ref") === "qr";
   const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
-  const [open, setOpen] = useState(defaultOpen);
   const [defaultApplied, setDefaultApplied] = useState(false);
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
+
+  const [dropdownRef, open, setOpen] = useControlledDropdownMenu(defaultOpen);
 
   useEffect(() => {
     if (defaultOpen && !defaultApplied) {
       setOpen(true);
       setDefaultApplied(true);
     }
-  }, [defaultOpen, defaultApplied]);
+  }, [defaultOpen, defaultApplied, setOpen]);
 
   return (
     <>
@@ -92,6 +94,7 @@ const ConditionalActionsDropdown = () => {
           asChild
           align="end"
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
+          ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
