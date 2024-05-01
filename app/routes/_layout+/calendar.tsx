@@ -9,8 +9,8 @@ import {
   useSearchParams,
   Link,
 } from "@remix-run/react";
-import calendarStyles from "~/styles/layout/calendar.css?url"
 import Header from "~/components/layout/header";
+import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
