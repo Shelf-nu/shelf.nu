@@ -8,6 +8,7 @@ import Header from "~/components/layout/header";
 import { getBookingsForCalendar } from "~/modules/booking/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
@@ -22,21 +23,6 @@ export function links() {
 
 export const handle = {
   breadcrumb: () => <Link to="/calendar">Calendar</Link>,
-};
-
-const getStatusClass = (status: any) => {
-  switch (status) {
-    case "CONFIRMED":
-      return "ongoing";
-    case "COMPLETED":
-      return "completed";
-    case "RESERVED":
-      return "reserved";
-    case "DRAFT":
-      return "draft";
-    default:
-      return "";
-  }
 };
 
 // Loader Function to Return Bookings Data
