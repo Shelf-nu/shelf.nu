@@ -24,7 +24,7 @@ export const handle = {
   breadcrumb: () => <Link to="/calendar">Calendar</Link>,
 };
 
-const getStatusClass = (status:any) => {
+const getStatusClass = (status: any) => {
   switch (status) {
     case "CONFIRMED":
       return "ongoing";
