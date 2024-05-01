@@ -2,13 +2,17 @@ import { useState, useEffect } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import FullCalendar from "@fullcalendar/react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate, useSearchParams } from "@remix-run/react";
-import { makeShelfError } from "~/utils/error";
-import { Link } from "@remix-run/react";
-import { error } from "~/utils/http.server";
+import {
+  useLoaderData,
+  useNavigate,
+  useSearchParams,
+  Link,
+} from "@remix-run/react";
 import Header from "~/components/layout/header";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { makeShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
 const dummyOrganizationId = "shelf";
 const dummyUserId = "shelfnu";
 
@@ -88,7 +92,6 @@ const dummyBookings = [
   },
 ];
 
-
 // As per the DB Model
 const dummyBookingsResponse = {
   bookings: dummyBookings,
@@ -104,30 +107,29 @@ export const handle = {
   breadcrumb: () => <Link to="/calendar">Calendar</Link>,
 };
 
-const formatTime = (date:any) => {
-  return date.toLocaleTimeString("en-US", { 
-    hour: 'numeric', 
-    minute: 'numeric', 
+const formatTime = (date: any) =>
+  date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "numeric",
     hour12: true,
-    meridiem: false 
+    meridiem: false,
   });
-};
 
 // Loader Function to Return Bookings Data
 export const loader = ({ request }: LoaderFunctionArgs) => {
-  try{
+  try {
     const url = new URL(request.url);
     const monthParam = url.searchParams.get("month");
     const yearParam = url.searchParams.get("year");
-  
+
     const currentMonth = monthParam
       ? parseInt(monthParam, 10) - 1
       : new Date().getMonth() + 1;
-    
+
     const currentYear = yearParam
       ? parseInt(yearParam, 10)
       : new Date().getFullYear();
-  
+
     const calendarEvents = dummyBookings
       .filter(
         (booking) =>
@@ -135,18 +137,19 @@ export const loader = ({ request }: LoaderFunctionArgs) => {
           booking.from.getFullYear() === currentYear
       )
       .map((booking) => ({
-        title: `${formatTime(booking.from)} | ${booking.name} | ${booking.custodian}`,
-      start: booking.from.toISOString(),
-      end: booking.to.toISOString(),
+        title: `${formatTime(booking.from)} | ${booking.name} | ${
+          booking.custodian
+        }`,
+        start: booking.from.toISOString(),
+        end: booking.to.toISOString(),
       }));
-  
+
     const header = {
       title: `Calendar`,
     };
-  
+
     return json({ header, calendarEvents });
-  }
-  catch(cause){
+  } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
   }
@@ -166,25 +169,23 @@ const Calendar = () => {
       : info.start.getMonth();
     const newYear = info.start.getFullYear();
     setSearchParams({
-      month:(newMonth+1).toString(),
-      year: newYear.toString()
-    })
+      month: (newMonth + 1).toString(),
+      year: newYear.toString(),
+    });
   };
 
   return (
     <>
-      <Header hidePageDescription={true}/>
+      <Header hidePageDescription={true} />
       <div className="mt-4">
         <FullCalendar
           plugins={[dayGridPlugin]}
           firstDay={1}
-          headerToolbar={
-            {
-              start: 'title',
-              center: '',
-              end: 'prev today next'
-            }
-          }
+          headerToolbar={{
+            start: "title",
+            center: "",
+            end: "prev today next",
+          }}
           initialView="dayGridMonth"
           timeZone="local"
           events={calendarEvents}

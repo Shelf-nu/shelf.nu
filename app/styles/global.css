@@ -251,13 +251,13 @@ dialog {
   border-top-left-radius: 5px;
   border-top-right-radius: 5px;
 }
-.fc-event-time{
+.fc-event-time {
   display: none;
 }
-.fc-event-title{
+.fc-event-title {
   margin-left: 4px;
 }
-.fc-next-button{
+.fc-next-button {
   margin-left: 0 !important;
   border-top-left-radius: 0 !important;
   border-bottom-left-radius: 0 !important;
@@ -265,7 +265,7 @@ dialog {
   background: white !important;
   color: #686767 !important;
 }
-.fc-today-button{
+.fc-today-button {
   margin-left: 0 !important;
   border-radius: 0 !important;
   border-radius: 0 !important;
@@ -277,7 +277,7 @@ dialog {
   border-left: none !important;
   border-right: none !important;
 }
-.fc-prev-button{
+.fc-prev-button {
   margin-left: 0 !important;
   border-top-right-radius: 0 !important;
   border-bottom-right-radius: 0 !important;
