@@ -235,6 +235,7 @@ export const AssetForm = ({
             initialDataKey="categories"
             countKey="totalCategories"
             closeOnSelect
+            selectionMode="set"
             extraContent={
               <Button
                 to="/categories/new"

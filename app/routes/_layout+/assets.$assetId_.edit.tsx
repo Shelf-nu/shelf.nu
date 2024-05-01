@@ -33,6 +33,7 @@ import {
   assertIsPost,
   data,
   error,
+  getCurrentSearchParams,
   getParams,
   parseData,
 } from "~/utils/http.server";
@@ -60,20 +61,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const asset = await getAsset({ organizationId, id });
 
-    const {
-      categories,
-      totalCategories,
-      tags,
-      locations,
-      totalLocations,
-      customFields,
-    } = await getAllEntriesForCreateAndEdit({
-      request,
+    const { categories, totalCategories, tags, locations, totalLocations } =
+      await getAllEntriesForCreateAndEdit({
+        request,
+        organizationId,
+        defaults: {
+          category: asset.categoryId,
+          location: asset.locationId,
+        },
+      });
+
+    const searchParams = getCurrentSearchParams(request);
+
+    const customFields = await getActiveCustomFields({
       organizationId,
-      defaults: {
-        category: asset.categoryId,
-        location: asset.locationId,
-      },
+      category: searchParams.get("category") ?? asset.categoryId,
     });
 
     const header: HeaderData = {
@@ -129,8 +131,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const clonedRequest = request.clone();
     const formData = await clonedRequest.formData();
 
+    const searchParams = getCurrentSearchParams(request);
+
     const customFields = await getActiveCustomFields({
       organizationId,
+      category:
+        searchParams.get("category") ?? String(formData.get("category")),
     });
 
     const FormSchema = mergedSchema({

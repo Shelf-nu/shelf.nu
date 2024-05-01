@@ -99,6 +99,7 @@ export async function getAsset({
                 helpText: true,
                 required: true,
                 type: true,
+                categories: true,
               },
             },
           },
@@ -373,7 +374,7 @@ async function getAssets(params: {
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
-    const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
     /** Default value of where. Takes the assetss belonging to current user */
     let where: Prisma.AssetWhereInput = { organizationId };
@@ -1122,7 +1123,7 @@ export async function getAllEntriesForCreateAndEdit({
   organizationId: Organization["id"];
   request: LoaderFunctionArgs["request"];
   defaults?: {
-    category?: string | null;
+    category?: string | string[] | null;
     tag?: string | null;
     location?: string | null;
   };
@@ -1143,14 +1144,25 @@ export async function getAllEntriesForCreateAndEdit({
       locationExcludedSelected,
       selectedLocation,
       totalLocations,
-      customFields,
     ] = await Promise.all([
       /** Get the categories */
       db.category.findMany({
-        where: { organizationId, id: { not: categorySelected } },
+        where: {
+          organizationId,
+          id: Array.isArray(categorySelected)
+            ? { notIn: categorySelected }
+            : { not: categorySelected },
+        },
         take: getAllEntries.includes("category") ? undefined : 12,
       }),
-      db.category.findMany({ where: { organizationId, id: categorySelected } }),
+      db.category.findMany({
+        where: {
+          organizationId,
+          id: Array.isArray(categorySelected)
+            ? { in: categorySelected }
+            : categorySelected,
+        },
+      }),
       db.category.count({ where: { organizationId } }),
 
       /** Get the tags */
@@ -1163,11 +1175,6 @@ export async function getAllEntriesForCreateAndEdit({
       }),
       db.location.findMany({ where: { organizationId, id: locationSelected } }),
       db.location.count({ where: { organizationId } }),
-
-      /** Get the custom fields */
-      db.customField.findMany({
-        where: { organizationId, active: { equals: true } },
-      }),
     ]);
 
     return {
@@ -1176,7 +1183,6 @@ export async function getAllEntriesForCreateAndEdit({
       tags,
       locations: [...selectedLocation, ...locationExcludedSelected],
       totalLocations,
-      customFields,
     };
   } catch (cause) {
     throw new ShelfError({

@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Asset, Booking, Category, Custody } from "@prisma/client";
+import { useEffect, useMemo } from "react";
+import {
+  type Asset,
+  type Booking,
+  type Category,
+  type Custody,
+} from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LinksFunction,
@@ -21,10 +26,10 @@ import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
-import Input from "~/components/forms/input";
 import { ChevronRight } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 
@@ -88,7 +93,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      excludeSearchFromView: true,
     });
 
     const modelName = {
@@ -103,6 +107,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header: {
           title: `Manage assets for ‘${booking?.name}’`,
           subHeading: "Fill up the booking with the assets of your choice",
+        },
+        searchFieldLabel: "Search assets",
+        searchFieldTooltip: {
+          title: "Search your asset database",
+          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
         },
         showModal: true,
         noScroll: true,
@@ -199,24 +208,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToNewBooking() {
-  const { booking, search, header } = useLoaderData<typeof loader>();
-  const [_searchParams, setSearchParams] = useSearchParams();
+  const { booking, header } = useLoaderData<typeof loader>();
+  const [_searchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
-  const [searchValue, setSearchValue] = useState(search || "");
-
-  function handleSearch(value: string) {
-    setSearchParams((prev) => {
-      prev.set("s", value);
-      return prev;
-    });
-  }
-  function clearSearch() {
-    setSearchParams((prev) => {
-      prev.delete("s");
-      return prev;
-    });
-  }
 
   const bookingAssetsIds = useMemo(
     () => booking?.assets.map((a) => a.id) || [],
@@ -247,60 +242,14 @@ export default function AddAssetsToNewBooking() {
       <Header
         {...header}
         hideBreadcrumbs={true}
-        classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
+        classNames="text-left  -mx-6 [&>div]:px-6 -mt-6"
       />
-
-      <div className="-mx-6 justify-between border-b px-6 pb-4 md:flex">
-        <div className="flex md:w-1/2">
-          <div className="relative flex-1">
-            <Input
-              type="text"
-              name="s"
-              label={"Search"}
-              aria-label={"Search"}
-              placeholder={"Search assets by name"}
-              defaultValue={search || ""}
-              hideLabel={true}
-              hasAttachedButton
-              className=" h-full flex-1 [&>span]:hidden"
-              inputClassName="pr-9"
-              onKeyUp={(e) => {
-                setSearchValue(e.currentTarget.value);
-                if (e.key == "Enter") {
-                  e.preventDefault();
-                  if (searchValue) {
-                    handleSearch(searchValue);
-                  }
-                }
-              }}
-            />
-            {search ? (
-              <Button
-                icon="x"
-                variant="tertiary"
-                disabled={isSearching}
-                onClick={clearSearch}
-                title="Clear search"
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
-              />
-            ) : null}
-          </div>
-
-          <Button
-            icon={isSearching ? "spinner" : "search"}
-            type="submit"
-            variant="secondary"
-            title="Search"
-            disabled={isSearching}
-            attachToInput
-            onClick={() => handleSearch(searchValue)}
-          />
-        </div>
-
-        <div className="mt-3 md:mt-0 md:w-[200px]">
-          <AvailabilitySelect />
-        </div>
-      </div>
+      <Filters
+        slots={{
+          "right-of-search": <AvailabilitySelect />,
+        }}
+        className="-mx-6 justify-between !border-t-0 border-b px-6 md:flex"
+      />
 
       <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
         <DynamicDropdown
