@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import type { SerializeFrom } from "@remix-run/node";
 import { useFetcher, useParams } from "@remix-run/react";
 import { useClientNotification } from "~/hooks/use-client-notification";
@@ -59,6 +58,8 @@ export const UpdateGpsCoordinatesForm = ({
   async function handleSubmit(
     e: React.MouseEvent<HTMLButtonElement, MouseEvent>
   ) {
+    callback();
+
     e.preventDefault();
     try {
       const coords = await requestGeoCoordinates();
@@ -79,13 +80,6 @@ export const UpdateGpsCoordinatesForm = ({
       // We dont need to do anything here because we are already showing a notification when the location permissions are rejected
     }
   }
-
-  useEffect(() => {
-    // If the fetcher has data, call the callback to close the dropdown
-    if (fetcher?.data) {
-      callback();
-    }
-  }, [callback, fetcher.data]);
 
   return (
     <Button
