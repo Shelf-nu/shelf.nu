@@ -14,7 +14,7 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
-import { schedulerKeys } from "./constants";
+import { bookingSchedulerEventsEnum, schedulerKeys } from "./constants";
 import {
   assetReservedEmailContent,
   cancelledBookingEmailContent,
@@ -64,14 +64,17 @@ async function cancelScheduler(b?: Booking | null) {
 export async function scheduleNextBookingJob({
   data,
   when,
-  key,
 }: {
   data: SchedulerData;
   when: Date;
-  key: string;
 }) {
   try {
-    const id = await scheduler.sendAfter(key, data, {}, when);
+    const id = await scheduler.sendAfter(
+      schedulerKeys.bookingQueue,
+      data,
+      {},
+      when
+    );
     await db.booking.update({
       where: { id: data.id },
       data: { activeSchedulerReference: id },
@@ -80,7 +83,7 @@ export async function scheduleNextBookingJob({
     throw new ShelfError({
       cause,
       message: "Something went wrong while scheduling the next booking job.",
-      additionalData: { ...data, when, key },
+      additionalData: { ...data, when },
       label,
     });
   }
@@ -267,8 +270,11 @@ export async function upsertBooking(
         when.setHours(when.getHours() - 1); //1hour before send checkout reminder
         promises.push(
           scheduleNextBookingJob({
-            data: { id: res.id, hints },
-            key: schedulerKeys.checkoutReminder,
+            data: {
+              id: res.id,
+              hints,
+              eventType: bookingSchedulerEventsEnum.checkoutReminder,
+            },
             when,
           })
         );
@@ -410,8 +416,11 @@ export async function upsertBooking(
       const when = new Date(res.from);
       when.setHours(when.getHours() - 1); //1hour before send checkout reminder
       await scheduleNextBookingJob({
-        data: { id: res.id, hints },
-        key: schedulerKeys.checkoutReminder,
+        data: {
+          id: res.id,
+          hints,
+          eventType: bookingSchedulerEventsEnum.checkoutReminder,
+        },
         when,
       });
     }
