@@ -164,7 +164,13 @@ export default function OtpPage() {
       <div className="mt-2 flex min-h-full flex-col justify-center">
         <div className="mx-auto w-full max-w-md px-8">
           <Form ref={zo.ref} method="post" className="space-y-6">
-            <Input name="otp" label="Code" required placeholder="133734" />
+            <Input
+              name="otp"
+              label="Code"
+              required
+              placeholder="133734"
+              data-test-id="otp"
+            />
             <input
               type="hidden"
               name="email"
@@ -190,7 +196,7 @@ export default function OtpPage() {
             )}
 
             <Button
-              data-test-id="create-account"
+              data-test-id="confirm-otp"
               type="submit"
               className="w-full "
               disabled={disabled}

@@ -41,7 +41,7 @@ export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
         hideLabel={true}
         type="email"
         name="email"
-        id="email"
+        id="otpEmail"
         inputClassName="w-full"
         placeholder="zaans@huisje.com"
         disabled={isLoading}

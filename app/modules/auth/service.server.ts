@@ -1,7 +1,7 @@
 import { isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "server/session";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { SERVER_URL } from "~/utils/env";
+import { NODE_ENV, SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -303,6 +303,12 @@ export async function verifyAuthSession(authSession: AuthSession) {
 
 export async function verifyOtpAndSignin(email: string, otp: string) {
   try {
+    if (NODE_ENV === "test" || NODE_ENV === "development") {
+      console.log(NODE_ENV);
+      // @TODO how do we get a session here and return it
+      // return null;
+    }
+
     const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
       email,
       token: otp,

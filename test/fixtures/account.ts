@@ -2,6 +2,7 @@ import { test as base } from "@playwright/test";
 import nodemailer from "nodemailer";
 import { faker } from "@faker-js/faker";
 import { expect } from "@playwright/test";
+import { generateRandomCode } from "~/modules/invite/helpers";
 
 type Account = {
   email: string;
@@ -16,11 +17,10 @@ export const test = base.extend<{}, { account: Account }>({
     async ({ browser }, use, workerInfo) => {
       // Unique username.
       const testAccount = await nodemailer.createTestAccount();
-
       const email = testAccount.user;
       const password = testAccount.pass;
-      const firstName = faker.name.firstName();
-      const lastName = faker.name.lastName();
+      const firstName = faker.person.firstName();
+      const lastName = faker.person.lastName();
 
       const page = await browser.newPage();
 
@@ -38,12 +38,16 @@ export const test = base.extend<{}, { account: Account }>({
       await page.goto("/");
       await page.click("[data-test-id=signupButton]");
       await expect(page).toHaveURL(/.*join/);
-      // await page.fill("#magic-link", email);
+      await page.fill("[data-test-id=email]", email);
+      await page.fill("[data-test-id=password]", password);
+      await page.fill("[data-test-id=confirmPassword]", password);
 
-      await page.click("[data-test-id=continueWithOTPButton]");
+      await page.click("[data-test-id=login]");
 
-      await expect(page.getByText("Check your emails")).toBeVisible();
+      await expect(page.getByText("Confirm your email")).toBeVisible();
 
+      await page.fill("[data-test-id=login]", "123456");
+      await page.click("[data-test-id=confirm-otp]");
       /** We are waiting to make sure the email arrives */
       await page.waitForTimeout(10000);
 
