@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { calcTimeDifference } from "~/utils/date-fns";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -451,6 +452,7 @@ export async function getBookings(params: {
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
+  extraInclude?: Prisma.BookingInclude;
 }) {
   const {
     organizationId,
@@ -465,6 +467,7 @@ export async function getBookings(params: {
     excludeBookingIds,
     bookingFrom,
     userId,
+    extraInclude,
   } = params;
 
   try {
@@ -570,6 +573,7 @@ export async function getBookings(params: {
               profilePicture: true,
             },
           },
+          ...(extraInclude || undefined),
         },
         orderBy: { from: "asc" },
       }),
@@ -762,6 +766,83 @@ export async function getBooking(
       message:
         "The booking you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { booking },
+      label,
+    });
+  }
+}
+
+export async function getBookingsForCalendar(params: {
+  request: Request;
+  organizationId: Organization["id"];
+  userId: string;
+  isSelfService: boolean;
+}) {
+  const { request, organizationId, userId, isSelfService = false } = params;
+  const url = new URL(request.url);
+  const monthParam = url.searchParams.get("month");
+  const yearParam = url.searchParams.get("year");
+
+  const currentMonth = monthParam
+    ? parseInt(monthParam, 10) - 1
+    : new Date().getMonth();
+  const currentYear = yearParam
+    ? parseInt(yearParam, 10)
+    : new Date().getFullYear();
+
+  // Create a new Date object for the first day of the month and adjust to UTC
+  const from = new Date(Date.UTC(currentYear, currentMonth, 1));
+
+  // Create a new Date object for the last day of the month and adjust to UTC
+  const to = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
+
+  // Set the time to the end of the day for 'to' date
+  to.setUTCHours(23, 59, 59, 999);
+
+  try {
+    const { bookings } = await getBookings({
+      organizationId,
+      page: 1,
+      perPage: 1000,
+      userId,
+      bookingFrom: from,
+      bookingTo: to,
+      ...(isSelfService && {
+        // If the user is self service, we only show bookings that belong to that user)
+        custodianUserId: userId,
+      }),
+      extraInclude: {
+        custodianTeamMember: true,
+        custodianUser: true,
+      },
+    });
+
+    return bookings
+      .filter((booking) => booking.from && booking.to)
+      .map((booking) => {
+        const custodianName = booking?.custodianUser
+          ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+          : booking.custodianTeamMember?.name;
+
+        const start = getDateTimeFormat(request, {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(booking.from as Date);
+
+        return {
+          title: `${start} | ${booking.name} | ${custodianName}`,
+          start: (booking.from as Date).toISOString(),
+          end: (booking.to as Date).toISOString(),
+          extendedProps: {
+            status: booking.status,
+          },
+        };
+      });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching the bookings for the calendar. Please try again or contact support.",
+      additionalData: { ...params },
       label,
     });
   }
