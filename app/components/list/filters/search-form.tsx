@@ -5,6 +5,7 @@ import {
   useSearchParams,
 } from "@remix-run/react";
 
+import debounce from "lodash.debounce";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import type { SearchableIndexResponse } from "~/modules/types";
@@ -34,6 +35,18 @@ export const SearchForm = () => {
     }
   }
 
+  function handleQueryChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const searchQuery = e.target.value;
+    if (!searchQuery) {
+      clearSearch();
+    } else {
+      setSearchParams((prev) => {
+        prev.set("s", searchQuery);
+        return prev;
+      });
+    }
+  }
+
   return (
     <div className="flex w-full md:w-auto">
       <div className="relative flex-1">
@@ -48,17 +61,7 @@ export const SearchForm = () => {
           className="w-full md:w-auto"
           inputClassName="pr-9"
           ref={searchInputRef}
-          onChange={(e) => {
-            const searchQuery = e.target.value;
-            if (!searchQuery) {
-              clearSearch();
-            } else {
-              setSearchParams((prev) => {
-                prev.set("s", searchQuery);
-                return prev;
-              });
-            }
-          }}
+          onChange={debounce(handleQueryChange, 800)}
         />
         {search ? (
           <Button
