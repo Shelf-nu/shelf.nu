@@ -6,7 +6,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -169,7 +169,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationPage() {
   const { location, mapData } = useLoaderData<typeof loader>();
-  const navigate = useNavigate();
 
   return (
     <div>
