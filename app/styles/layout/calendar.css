@@ -65,8 +65,9 @@
   @apply text-white;
 }
 
-.fc-theme-standard td, .fc-theme-standard th {
-  border: 1px solid #EAECF0;
+.fc-theme-standard td,
+.fc-theme-standard th {
+  border: 1px solid #eaecf0;
 }
 
 .fc-theme-standard .fc-scrollgrid {
