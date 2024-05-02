@@ -1,11 +1,10 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import {
   useLoaderData,
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
 
-import debounce from "lodash.debounce";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import type { SearchableIndexResponse } from "~/modules/types";
@@ -13,7 +12,6 @@ import { isFormProcessing } from "~/utils/form";
 import { SearchFieldTooltip } from "./search-field-tooltip";
 
 export const SearchForm = () => {
-  const [isTyping, setIsTyping] = useState(false);
   const [_searchParams, setSearchParams] = useSearchParams();
   const { search, modelName, searchFieldLabel } =
     useLoaderData<SearchableIndexResponse>();
@@ -36,21 +34,19 @@ export const SearchForm = () => {
     }
   }
 
-  const debouncedHandleChange = debounce(
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      const searchQuery = e.target.value;
-      if (!searchQuery) {
-        clearSearch();
-      } else {
-        setSearchParams((prev) => {
-          prev.set("s", searchQuery);
-          return prev;
-        });
-      }
-      setIsTyping(false);
-    },
-    100
-  );
+  const debouncedHandleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    const searchQuery = e.target.value;
+    if (!searchQuery) {
+      clearSearch();
+    } else {
+      setSearchParams((prev) => {
+        prev.set("s", searchQuery);
+        return prev;
+      });
+    }
+  };
 
   return (
     <div className="flex w-full md:w-auto">
@@ -66,16 +62,13 @@ export const SearchForm = () => {
           className="w-full md:w-auto"
           inputClassName="pr-9"
           ref={searchInputRef}
-          onChange={(e) => {
-            setIsTyping(true);
-            debouncedHandleChange(e);
-          }}
+          onChange={debouncedHandleChange}
         />
-        {search || isTyping ? (
+        {search || isSearching ? (
           <Button
-            icon={isTyping || isSearching ? "spinner" : "x"}
+            icon={isSearching ? "spinner" : "x"}
             variant="tertiary"
-            disabled={isTyping || isSearching}
+            disabled={isSearching}
             title="Clear search"
             className="absolute right-3.5 top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
             onClick={clearSearch}
