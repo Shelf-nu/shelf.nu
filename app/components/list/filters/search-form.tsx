@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import {
   useLoaderData,
   useNavigation,
@@ -13,6 +13,7 @@ import { isFormProcessing } from "~/utils/form";
 import { SearchFieldTooltip } from "./search-field-tooltip";
 
 export const SearchForm = () => {
+  const [isTyping, setIsTyping] = useState(false);
   const [_searchParams, setSearchParams] = useSearchParams();
   const { search, modelName, searchFieldLabel } =
     useLoaderData<SearchableIndexResponse>();
@@ -35,17 +36,21 @@ export const SearchForm = () => {
     }
   }
 
-  function handleQueryChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const searchQuery = e.target.value;
-    if (!searchQuery) {
-      clearSearch();
-    } else {
-      setSearchParams((prev) => {
-        prev.set("s", searchQuery);
-        return prev;
-      });
-    }
-  }
+  const debouncedHandleChange = debounce(
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const searchQuery = e.target.value;
+      if (!searchQuery) {
+        clearSearch();
+      } else {
+        setSearchParams((prev) => {
+          prev.set("s", searchQuery);
+          return prev;
+        });
+      }
+      setIsTyping(false);
+    },
+    100
+  );
 
   return (
     <div className="flex w-full md:w-auto">
@@ -61,13 +66,16 @@ export const SearchForm = () => {
           className="w-full md:w-auto"
           inputClassName="pr-9"
           ref={searchInputRef}
-          onChange={debounce(handleQueryChange, 800)}
+          onChange={(e) => {
+            setIsTyping(true);
+            debouncedHandleChange(e);
+          }}
         />
-        {search ? (
+        {search || isTyping ? (
           <Button
-            icon={isSearching ? "spinner" : "x"}
+            icon={isTyping || isSearching ? "spinner" : "x"}
             variant="tertiary"
-            disabled={isSearching}
+            disabled={isTyping || isSearching}
             title="Clear search"
             className="absolute right-3.5 top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
             onClick={clearSearch}
