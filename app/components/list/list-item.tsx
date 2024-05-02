@@ -1,22 +1,38 @@
-import { tw } from "~/utils/tw";
+import { Link, type LinkProps } from "@remix-run/react";
 
 export interface ListItemData {
   id: string;
 }
+
+export type ListItemProps = {
+  item: ListItemData;
+  children: React.ReactNode;
+  link?: ((itemId: string) => LinkProps) | null;
+  onClick?: ((itemId: string) => void) | null;
+};
+
 export const ListItem = ({
   item,
   children,
-  navigate,
-}: {
-  item: ListItemData;
-  children: React.ReactNode;
-  navigate?: (id: string) => void;
-}) => (
+  link = null,
+  onClick,
+}: ListItemProps) => (
   <tr
     key={item.id}
-    onClick={navigate ? () => navigate(item.id) : undefined}
-    className={tw("hover:bg-gray-50", navigate ? "cursor-pointer" : "")}
+    className="hover:bg-gray-50"
+    onClick={() => {
+      onClick && onClick(item.id);
+    }}
   >
-    {children}
+    {link ? (
+      <Link
+        {...link(item.id)}
+        className="m-0 contents w-full border p-0 align-middle"
+      >
+        {children}
+      </Link>
+    ) : (
+      children
+    )}
   </tr>
 );

@@ -302,7 +302,7 @@ export default function QrLinkExisting() {
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={handleSelectAsset}
+          onRowClick={handleSelectAsset}
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",
             text: "What are you waiting for? Create your first asset now!",

@@ -1,7 +1,6 @@
 import type { User } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -57,7 +56,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 export default function Area51() {
-  const navigate = useNavigate();
   return (
     <div>
       <h1>Admin dashboard</h1>
@@ -67,7 +65,7 @@ export default function Area51() {
         </Filters>
         <List
           ItemComponent={ListUserContent}
-          navigate={(itemId) => navigate(`../${itemId}`)}
+          link={(itemId) => ({ to: `../${itemId}` })}
         />
       </div>
     </div>

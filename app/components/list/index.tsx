@@ -6,6 +6,7 @@ import { tw } from "~/utils/tw";
 import { EmptyState } from "./empty-state";
 
 import { ListHeader } from "./list-header";
+import type { ListItemProps } from "./list-item";
 import { ListItem } from "./list-item";
 import { Pagination } from "./pagination";
 import { Table } from "../table";
@@ -17,15 +18,14 @@ export const List = ({
   ItemComponent,
   headerChildren,
   hideFirstHeaderColumn = false,
-  navigate,
   className,
   customEmptyStateContent,
+  link,
+  onRowClick,
 }: {
   ItemComponent: any;
   headerChildren?: ReactNode;
   hideFirstHeaderColumn?: boolean;
-  /** Function to be passed if the rows of the table should navigate */
-  navigate?: (id: string) => void;
   className?: string;
   customEmptyStateContent?: {
     title: string;
@@ -34,6 +34,8 @@ export const List = ({
     newButtonContent: string;
     buttonProps?: any;
   };
+  link?: ListItemProps["link"];
+  onRowClick?: ListItemProps["onClick"];
 }) => {
   const { items } = useLoaderData<IndexResponse>();
   const hasItems = items?.length > 0;
@@ -56,7 +58,12 @@ export const List = ({
             />
             <tbody>
               {items.map((item) => (
-                <ListItem item={item} key={item.id} navigate={navigate}>
+                <ListItem
+                  item={item}
+                  key={item.id}
+                  link={link}
+                  onClick={onRowClick}
+                >
                   <ItemComponent item={item} />
                 </ListItem>
               ))}

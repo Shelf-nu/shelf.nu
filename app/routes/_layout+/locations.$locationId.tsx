@@ -267,7 +267,7 @@ export default function LocationPage() {
             </Filters>
             <List
               ItemComponent={ListAssetContent}
-              navigate={(itemId) => navigate(`/assets/${itemId}`)}
+              link={(itemId) => ({ to: `/assets/${itemId}` })}
               headerChildren={
                 <>
                   <Th className="hidden md:table-cell">Category</Th>

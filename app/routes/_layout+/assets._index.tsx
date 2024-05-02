@@ -7,7 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -248,7 +248,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetIndexPage() {
-  const navigate = useNavigate();
   const hasFiltersToClear = useSearchParamHasValue(
     "category",
     "tag",
@@ -352,7 +351,7 @@ export default function AssetIndexPage() {
         </Filters>
         <List
           ItemComponent={ListAssetContent}
-          navigate={(itemId) => navigate(itemId)}
+          link={(itemId) => ({ to: itemId })}
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>

@@ -3,7 +3,7 @@ import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
-import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
+import { Link, Outlet, useMatches } from "@remix-run/react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
@@ -155,7 +155,6 @@ export type RouteHandleWithName = {
 };
 
 export default function BookingsIndexPage() {
-  const navigate = useNavigate();
   const matches = useMatches();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
@@ -188,7 +187,7 @@ export default function BookingsIndexPage() {
         />
         <List
           ItemComponent={ListAssetContent}
-          navigate={(id) => navigate(id)}
+          link={(id) => ({ to: id })}
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>

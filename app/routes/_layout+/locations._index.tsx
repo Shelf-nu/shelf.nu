@@ -1,7 +1,6 @@
 import type { Asset, Image as ImageDataType, Location } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -87,7 +86,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function LocationsIndexPage() {
-  const navigate = useNavigate();
   return (
     <>
       <Header>
@@ -105,7 +103,7 @@ export default function LocationsIndexPage() {
         <Filters />
         <List
           ItemComponent={ListItemContent}
-          navigate={(itemId) => navigate(itemId)}
+          link={(itemId) => ({ to: itemId })}
           headerChildren={
             <>
               <Th className="hidden md:table-cell">Assets</Th>

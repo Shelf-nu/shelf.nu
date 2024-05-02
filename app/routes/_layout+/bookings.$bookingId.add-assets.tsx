@@ -305,7 +305,7 @@ export default function AddAssetsToNewBooking() {
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={(assetId) => {
+          onRowClick={(assetId) => {
             setSelectedAssets((selectedAssets) =>
               selectedAssets.includes(assetId)
                 ? selectedAssets.filter((id) => id !== assetId)
