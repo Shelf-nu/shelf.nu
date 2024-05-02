@@ -7,12 +7,14 @@ import { json, redirect } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
+import { Button } from "~/components/shared/button";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
 } from "~/components/shared/tabs";
+import { WarningBox } from "~/components/shared/warning-box";
 import { CurrentPlanDetails } from "~/components/subscription/current-plan-details";
 import { CustomerPortalForm } from "~/components/subscription/customer-portal-form";
 import { Prices } from "~/components/subscription/prices";
@@ -196,21 +198,44 @@ export const handle = {
 export default function UserPage() {
   const { title, subTitle, prices, subscription } =
     useLoaderData<typeof loader>();
+  const isLegacyPricing =
+    subscription?.items?.data[0]?.price?.metadata.legacy === "true";
 
   return (
     <>
       <div className=" flex flex-col">
-        <div className="mb-8 mt-3 flex items-center gap-3 rounded border border-gray-300 p-4">
-          <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-            <InfoIcon />
+        <div className="mb-8 mt-3">
+          <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
+            <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+              <InfoIcon />
+            </div>
+            {!subscription ? (
+              <p className="text-[14px] font-medium text-gray-700">
+                You’re currently using the{" "}
+                <span className="font-semibold">FREE</span> version of Shelf
+              </p>
+            ) : (
+              <CurrentPlanDetails />
+            )}
           </div>
-          {!subscription ? (
-            <p className="text-[14px] font-medium text-gray-700">
-              You’re currently using the{" "}
-              <span className="font-semibold">FREE</span> version of Shelf
-            </p>
-          ) : (
-            <CurrentPlanDetails />
+          {isLegacyPricing && (
+            <WarningBox>
+              <p>
+                You are on a{" "}
+                <Button
+                  to="https://www.shelf.nu/legacy-plan-faq"
+                  target="_blank"
+                  variant="link"
+                >
+                  legacy pricing plan
+                </Button>
+                . We have since updated our pricing plans. <br />
+                You can view the new pricing plans in the customer portal. If
+                you cancel your subscription, you will not be able to renew it.
+                <br />
+                For any questions - get in touch with support
+              </p>
+            </WarningBox>
           )}
         </div>
 
@@ -223,18 +248,23 @@ export default function UserPage() {
         </div>
 
         <Tabs
-          defaultValue={subscription?.items.data[0]?.plan.interval || "month"}
+          defaultValue={subscription?.items.data[0]?.plan.interval || "year"}
           className="flex w-full flex-col"
         >
           <TabsList className="center mx-auto mb-8">
+            <TabsTrigger value="year">
+              Yearly{" "}
+              <span className="ml-2 rounded-[16px] bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700">
+                Save 54%
+              </span>
+            </TabsTrigger>
             <TabsTrigger value="month">Monthly</TabsTrigger>
-            <TabsTrigger value="year">Yearly (2 months free)</TabsTrigger>
           </TabsList>
-          <TabsContent value="month">
-            <Prices prices={prices["month"]} />
-          </TabsContent>
           <TabsContent value="year">
             <Prices prices={prices["year"]} />
+          </TabsContent>
+          <TabsContent value="month">
+            <Prices prices={prices["month"]} />
           </TabsContent>
         </Tabs>
       </div>
