@@ -289,7 +289,7 @@ export default function AssetIndexPage() {
                   as="button"
                   onClick={clearFilters}
                   variant="link"
-                  className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+                  className="block min-w-28 max-w-none font-normal text-gray-500 hover:text-gray-600"
                   type="button"
                 >
                   Clear all filters
