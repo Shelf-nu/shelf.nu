@@ -12,6 +12,7 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { calcTimeDifference } from "~/utils/date-fns";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
@@ -778,25 +779,11 @@ export async function getBookingsForCalendar(params: {
   isSelfService: boolean;
 }) {
   const { request, organizationId, userId, isSelfService = false } = params;
-  const url = new URL(request.url);
-  const monthParam = url.searchParams.get("month");
-  const yearParam = url.searchParams.get("year");
+  const searchParams = getCurrentSearchParams(request);
 
-  const currentMonth = monthParam
-    ? parseInt(monthParam, 10) - 1
-    : new Date().getMonth();
-  const currentYear = yearParam
-    ? parseInt(yearParam, 10)
-    : new Date().getFullYear();
-
-  // Create a new Date object for the first day of the month and adjust to UTC
-  const from = new Date(Date.UTC(currentYear, currentMonth, 1));
-
-  // Create a new Date object for the last day of the month and adjust to UTC
-  const to = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
-
-  // Set the time to the end of the day for 'to' date
-  to.setUTCHours(23, 59, 59, 999);
+  // @TODO we have to see how to handle this if there are no search params
+  const start = searchParams.get("start") as string;
+  const end = searchParams.get("end") as string;
 
   try {
     const { bookings } = await getBookings({
@@ -804,8 +791,8 @@ export async function getBookingsForCalendar(params: {
       page: 1,
       perPage: 1000,
       userId,
-      bookingFrom: from,
-      bookingTo: to,
+      bookingFrom: new Date(start),
+      bookingTo: new Date(end),
       ...(isSelfService && {
         // If the user is self service, we only show bookings that belong to that user)
         custodianUserId: userId,
@@ -816,7 +803,7 @@ export async function getBookingsForCalendar(params: {
       },
     });
 
-    return bookings
+    const events = bookings
       .filter((booking) => booking.from && booking.to)
       .map((booking) => {
         const custodianName = booking?.custodianUser
@@ -837,6 +824,8 @@ export async function getBookingsForCalendar(params: {
           },
         };
       });
+
+    return events;
   } catch (cause) {
     throw new ShelfError({
       cause,
