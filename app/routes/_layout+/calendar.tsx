@@ -98,7 +98,7 @@ const Calendar = () => {
   const handleGoToCurrentDate = () => {
     const calendarApi = calendarRef.current?.getApi();
     const today = new Date();
-    calendarApi?.gotoDate(today); 
+    calendarApi?.gotoDate(today);
   };
   return (
     <>
