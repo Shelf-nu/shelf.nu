@@ -13,6 +13,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import { Spinner } from "~/components/shared/spinner";
 import {
   PermissionAction,
   PermissionEntity,
@@ -59,6 +60,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 const Calendar = () => {
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const calendarRef = useRef<FullCalendar>(null);
 
   const handleNavigation = (navigateTo: any) => {
@@ -68,8 +70,7 @@ const Calendar = () => {
     } else if (navigateTo == "next") {
       calendarApi?.next();
     } else if (navigateTo == "today") {
-      const today = new Date();
-      calendarApi?.gotoDate(today);
+      calendarApi?.gotoDate(new Date());
     }
     updateTitle();
   };
@@ -97,29 +98,36 @@ const Calendar = () => {
           <div className="text-left font-sans text-lg font-semibold leading-[20px] text-[#101828]">
             {title}
           </div>
-          <ButtonGroup>
-            <Button
-              variant="secondary"
-              className="border-r p-[0.75em] text-[#667085]"
-              onClick={() => handleNavigation("prev")}
-            >
-              <ChevronLeftIcon />
-            </Button>
-            <Button
-              variant="secondary"
-              className="border-r px-3 py-2 text-sm font-semibold text-[#344054]"
-              onClick={() => handleNavigation("today")}
-            >
-              Today
-            </Button>
-            <Button
-              variant="secondary"
-              className="p-[0.75em] text-[#667085]"
-              onClick={() => handleNavigation("next")}
-            >
-              <ChevronRightIcon />
-            </Button>
-          </ButtonGroup>
+          <div className="flex items-center">
+            {isLoading && (
+              <div className="flex justify-center mr-3">
+                <Spinner />
+              </div>
+            )}
+            <ButtonGroup>
+              <Button
+                variant="secondary"
+                className="border-r p-[0.75em] text-[#667085]"
+                onClick={() => handleNavigation("prev")}
+              >
+                <ChevronLeftIcon />
+              </Button>
+              <Button
+                variant="secondary"
+                className="border-r px-3 py-2 text-sm font-semibold text-[#344054]"
+                onClick={() => handleNavigation("today")}
+              >
+                Today
+              </Button>
+              <Button
+                variant="secondary"
+                className="p-[0.75em] text-[#667085]"
+                onClick={() => handleNavigation("next")}
+              >
+                <ChevronRightIcon />
+              </Button>
+            </ButtonGroup>
+          </div>
         </div>
         {/* @TODO this needs to be further tested */}
         {error && (
@@ -140,6 +148,9 @@ const Calendar = () => {
             failure: function (error) {
               setError(error.message);
             },
+          }}
+          loading={(isFetching) => {
+            setIsLoading(isFetching);
           }}
           eventClassNames={(info) => {
             const eventClass = getStatusClass(info.event.extendedProps.status);
