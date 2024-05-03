@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import FullCalendar from "@fullcalendar/react";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
@@ -10,6 +10,10 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import { Button } from "~/components/shared/button";
+import { ButtonGroup } from "~/components/shared/button-group";
+import { useRef } from "react";
+import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import {
   PermissionAction,
   PermissionEntity,
@@ -55,10 +59,65 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 // Calendar Component
 const Calendar = () => {
   const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const calendarRef = useRef<FullCalendar>(null);
+
+  const handleNavigation = (navigateTo:any) => {
+    const calendarApi = calendarRef.current?.getApi();
+    if(navigateTo=="prev"){
+      calendarApi?.prev();
+    }
+    else if(navigateTo=="next"){
+      calendarApi?.next();
+    }
+    else if(navigateTo=="today"){
+      const today = new Date();
+      calendarApi?.gotoDate(today);
+    }
+    updateTitle();
+  }
+
+  const updateTitle = () => {
+    const calendarApi = calendarRef.current?.getApi();
+    if (calendarApi) {
+      const currentDate = calendarApi.getDate();
+      const currentMonth = currentDate.toLocaleString("default", { month: "long" });
+      const currentYear = currentDate.getFullYear();
+      setTitle(`${currentMonth} ${currentYear}`);
+    }
+  };
+
+  useEffect(()=>{
+    updateTitle();
+  },[])
   return (
     <>
       <Header hidePageDescription={true} />
       <div className="mt-4">
+      <div className="flex items-center justify-between gap-4 rounded-t-md border border-DEFAULT px-4 py-3">
+          <div className="text-left font-sans text-lg font-semibold leading-[20px] text-[#101828]">
+            {title}
+          </div>
+          <ButtonGroup>
+            <Button
+              variant="secondary"
+              className="border-r p-[0.75em] text-[#667085]"
+              onClick={()=>handleNavigation('prev')}
+            ><ChevronLeftIcon/></Button>
+            <Button
+              variant="secondary"
+              className="border-r px-3 py-2 text-sm font-semibold text-[#344054]"
+              onClick={()=>handleNavigation('today')}
+            >
+              Today
+            </Button>
+            <Button
+              variant="secondary"
+              className="p-[0.75em] text-[#667085]"
+              onClick={()=>handleNavigation('next')}
+            ><ChevronRightIcon/></Button>
+          </ButtonGroup>
+        </div>
         {/* @TODO this needs to be further tested */}
         {error && (
           <div className="relative rounded border border-red-400 bg-red-100 px-4 py-3 text-red-700">
@@ -66,9 +125,11 @@ const Calendar = () => {
           </div>
         )}
         <FullCalendar
+          ref={calendarRef}
           plugins={[dayGridPlugin]}
           firstDay={1}
           timeZone="local"
+          headerToolbar={false}
           events={{
             url: "/calendar/events",
             method: "GET",
