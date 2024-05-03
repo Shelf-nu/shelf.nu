@@ -8,12 +8,12 @@ import { Link } from "@remix-run/react";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
+import { Spinner } from "~/components/shared/spinner";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
-import { Spinner } from "~/components/shared/spinner";
 import {
   PermissionAction,
   PermissionEntity,
@@ -100,7 +100,7 @@ const Calendar = () => {
           </div>
           <div className="flex items-center">
             {isLoading && (
-              <div className="flex justify-center mr-3">
+              <div className="mr-3 flex justify-center">
                 <Spinner />
               </div>
             )}
