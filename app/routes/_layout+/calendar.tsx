@@ -62,8 +62,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 const Calendar = () => {
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const [isLoading, setIsLoading] = useState<boolean>();
   const calendarRef = useRef<FullCalendar>(null);
+  const ripple = useRef<HTMLDivElement>(null);
 
   const handleNavigation = (navigateTo: any) => {
     const calendarApi = calendarRef.current?.getApi();
@@ -89,11 +89,6 @@ const Calendar = () => {
     }
   };
 
-  useEffect(() => {
-    updateTitle();
-  }, []);
-
-  const ripple = useRef<HTMLDivElement>(null);
   const toggleSpinner = useCallback(
     (state: any) => {
       if (ripple.current) {
@@ -106,6 +101,11 @@ const Calendar = () => {
     },
     [ripple]
   );
+
+  useEffect(() => {
+    updateTitle();
+  }, []);
+
   return (
     <>
       <Header hidePageDescription={true} />
