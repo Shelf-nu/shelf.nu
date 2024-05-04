@@ -33,6 +33,7 @@ import {
   GraphIcon,
   ScanQRIcon,
   SwitchIcon,
+  KitIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -69,7 +70,8 @@ export type IconType =
   | "calendar"
   | "graph"
   | "scanQR"
-  | "switch";
+  | "switch"
+  | "kit";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -109,6 +111,7 @@ export const iconsMap: IconsMap = {
   graph: <GraphIcon />,
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
+  kit: <KitIcon />,
 };
 
 export default iconsMap;

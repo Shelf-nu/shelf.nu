@@ -1,11 +1,16 @@
-import type { Kit } from "@prisma/client";
+import type { Kit, Organization } from "@prisma/client";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
+import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { maybeUniqueConstraintViolation, ShelfError } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { UpdateKitPayload } from "./types";
+import { KITS_INCLUDE_FIELDS } from "../asset/fields";
 
 const label: ErrorLabel = "Kit";
 
@@ -97,6 +102,53 @@ export async function updateKitImage({
       cause,
       message: "Something went wrong while updating image for kit.",
       additionalData: { kitId, userId },
+      label,
+    });
+  }
+}
+
+export async function getPaginatedAndFilterableKits({
+  request,
+  organizationId,
+}: {
+  request: LoaderFunctionArgs["request"];
+  organizationId: Organization["id"];
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const paramsValues = getParamsValues(searchParams);
+
+  const { page, perPageParam } = paramsValues;
+
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
+
+    const [kits, totalKits] = await Promise.all([
+      db.kit.findMany({
+        skip,
+        take,
+        where: { organizationId },
+        include: KITS_INCLUDE_FIELDS,
+        orderBy: { createdAt: "desc" },
+      }),
+      db.kit.count({
+        where: {
+          organizationId,
+        },
+      }),
+    ]);
+
+    const totalPages = Math.ceil(totalKits / perPage);
+
+    return { page, perPage, kits, totalKits, totalPages };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching kits",
+      additionalData: { page, perPage, organizationId },
       label,
     });
   }

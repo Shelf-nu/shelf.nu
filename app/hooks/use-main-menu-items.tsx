@@ -15,6 +15,11 @@ export function useMainMenuItems() {
       label: "Assets",
     },
     {
+      icon: <Icon icon="kit" />,
+      to: "kits",
+      label: "Kits",
+    },
+    {
       icon: <Icon icon="category" />,
       to: "categories",
       label: "Categories",
