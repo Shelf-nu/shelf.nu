@@ -1,4 +1,4 @@
-import type { Kit, Organization } from "@prisma/client";
+import type { Kit, KitStatus, Organization, Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
@@ -117,7 +117,13 @@ export async function getPaginatedAndFilterableKits({
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
 
-  const { page, perPageParam } = paramsValues;
+  const status =
+    searchParams.get("status") === "ALL"
+      ? null
+      : (searchParams.get("status") as KitStatus | null);
+  const teamMember = searchParams.get("teamMember"); // custodian
+
+  const { page, perPageParam, search } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -126,11 +132,30 @@ export async function getPaginatedAndFilterableKits({
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
 
+    const where: Prisma.KitWhereInput = { organizationId };
+
+    if (search) {
+      where.name = {
+        contains: search.toLowerCase().trim(),
+        mode: "insensitive",
+      };
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (teamMember) {
+      Object.assign(where, {
+        custody: { custodianId: teamMember },
+      });
+    }
+
     const [kits, totalKits] = await Promise.all([
       db.kit.findMany({
         skip,
         take,
-        where: { organizationId },
+        where,
         include: KITS_INCLUDE_FIELDS,
         orderBy: { createdAt: "desc" },
       }),
@@ -143,7 +168,7 @@ export async function getPaginatedAndFilterableKits({
 
     const totalPages = Math.ceil(totalKits / perPage);
 
-    return { page, perPage, kits, totalKits, totalPages };
+    return { page, perPage, kits, totalKits, totalPages, search };
   } catch (cause) {
     throw new ShelfError({
       cause,

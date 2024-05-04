@@ -4,6 +4,7 @@ import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useNavigate } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import Header from "~/components/layout/header";
@@ -12,11 +13,12 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import { db } from "~/database/db.server";
 import type { KITS_INCLUDE_FIELDS } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -35,11 +37,35 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { kits, totalKits, perPage, page, totalPages } =
-      await getPaginatedAndFilterableKits({
+    const searchParams = getCurrentSearchParams(request);
+
+    const [
+      { kits, totalKits, perPage, page, totalPages, search },
+      teamMembers,
+      totalTeamMembers,
+    ] = await Promise.all([
+      getPaginatedAndFilterableKits({
         request,
         organizationId,
-      });
+      }),
+      db.teamMember
+        .findMany({
+          where: { deletedAt: null, organizationId },
+          include: { user: true },
+          orderBy: { userId: "asc" },
+          take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while fetching team members. Please try again or contact support.",
+            additionalData: { userId, organizationId },
+            label: "Assets",
+          });
+        }),
+      db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+    ]);
 
     if (totalPages !== 0 && page > totalPages) {
       return redirect("/kits");
@@ -62,7 +88,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalItems: totalKits,
         perPage,
         modelName,
+        search,
         searchFieldLabel: "Search kits",
+        teamMembers,
+        totalTeamMembers,
         searchFieldTooltip: {
           title: "Search your kits database",
           text: "Search kits based on name or description.",
@@ -95,7 +124,20 @@ export default function KitsIndexPage() {
           slots={{
             "left-of-search": <StatusFilter statusItems={KitStatus} />,
           }}
-        />
+        >
+          <DynamicDropdown
+            trigger={
+              <div className="flex cursor-pointer items-center gap-2">
+                Custodian{" "}
+                <ChevronRight className="hidden rotate-90 md:inline" />
+              </div>
+            }
+            model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+            label="Custodian"
+            countKey="totalTeamMembers"
+            initialDataKey="teamMembers"
+          />
+        </Filters>
 
         <List
           ItemComponent={ListContent}
