@@ -21,7 +21,6 @@ model Image {
 
   location     Location?
   organization Organization? @relation("orgImage")
-  kit          Kit?
 
   ownerOrg   Organization @relation("owner", fields: [ownerOrgId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   ownerOrgId String
@@ -65,6 +64,7 @@ model User {
   userOrganizations UserOrganization[]
   bookings          Booking[]          @relation("creator")
   custodies         Booking[]          @relation("custodian")
+  createdKits       Kit[]
 
   @@unique([email, username])
 }
@@ -390,6 +390,7 @@ model Organization {
   customFields CustomField[]
   images       Image[]       @relation("owner")
   bookings     Booking[]
+  kits         Kit[]
 }
 
 model UserOrganization {
@@ -620,13 +621,19 @@ model Kit {
   description String?
   status      KitStatus @default(AVAILABLE)
 
-  image   Image  @relation(fields: [imageId], references: [id])
-  imageId String @unique
+  image           String?
+  imageExpiration DateTime?
 
   assets  Asset[]
   qrCodes Qr[]
   notes   Note[]
   custody KitCustody?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
+
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdById String
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

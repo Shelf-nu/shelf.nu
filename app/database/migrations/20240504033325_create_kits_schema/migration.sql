@@ -16,7 +16,10 @@ CREATE TABLE "Kit" (
     "name" TEXT NOT NULL,
     "description" TEXT,
     "status" "KitStatus" NOT NULL DEFAULT 'AVAILABLE',
-    "imageId" TEXT NOT NULL,
+    "image" TEXT,
+    "imageExpiration" TIMESTAMP(3),
+    "organizationId" TEXT NOT NULL,
+    "createdById" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -35,9 +38,6 @@ CREATE TABLE "KitCustody" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Kit_imageId_key" ON "Kit"("imageId");
-
--- CreateIndex
 CREATE UNIQUE INDEX "KitCustody_kitId_key" ON "KitCustody"("kitId");
 
 -- AddForeignKey
@@ -50,7 +50,10 @@ ALTER TABLE "Note" ADD CONSTRAINT "Note_kitId_fkey" FOREIGN KEY ("kitId") REFERE
 ALTER TABLE "Qr" ADD CONSTRAINT "Qr_kitId_fkey" FOREIGN KEY ("kitId") REFERENCES "Kit"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Kit" ADD CONSTRAINT "Kit_imageId_fkey" FOREIGN KEY ("imageId") REFERENCES "Image"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Kit" ADD CONSTRAINT "Kit_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Kit" ADD CONSTRAINT "Kit_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "KitCustody" ADD CONSTRAINT "KitCustody_custodianId_fkey" FOREIGN KEY ("custodianId") REFERENCES "TeamMember"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
