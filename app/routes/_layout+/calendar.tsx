@@ -14,10 +14,12 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import FallbackLoading from "~/components/dashboard/fallback-loading";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
+import { ClientOnly } from "remix-utils/client-only";
 import { requirePermission } from "~/utils/roles.server";
 
 export function links() {
@@ -90,6 +92,7 @@ const Calendar = () => {
   useEffect(() => {
     updateTitle();
   }, []);
+
   return (
     <>
       <Header hidePageDescription={true} />
@@ -135,28 +138,27 @@ const Calendar = () => {
             {error}
           </div>
         )}
-        <FullCalendar
-          ref={calendarRef}
-          plugins={[dayGridPlugin]}
-          firstDay={1}
-          timeZone="local"
-          headerToolbar={false}
-          events={{
-            url: "/calendar/events",
-            method: "GET",
-            format: "json",
-            failure: function (error) {
-              setError(error.message);
-            },
-          }}
-          loading={(isFetching) => {
-            setIsLoading(isFetching);
-          }}
-          eventClassNames={(info) => {
-            const eventClass = getStatusClass(info.event.extendedProps.status);
-            return [eventClass];
-          }}
-        />
+        <ClientOnly fallback={<FallbackLoading className="size-[150px]" />}>
+          {() => (
+            <FullCalendar
+              ref={calendarRef}
+              plugins={[dayGridPlugin]}
+              firstDay={1}
+              timeZone="local"
+              headerToolbar={false}
+              events={{
+                url: "/calendar/events",
+                method: "GET",
+                failure: (err) => setError(err.message),
+              }}
+              loading={(isFetching) => setIsLoading(isFetching)}
+              eventClassNames={(info) => {
+                const eventClass = getStatusClass(info.event.extendedProps.status);
+                return [eventClass];
+              }}
+            />
+          )}
+        </ClientOnly>
       </div>
     </>
   );
