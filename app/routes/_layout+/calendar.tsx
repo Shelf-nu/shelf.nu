@@ -16,6 +16,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import { useCallback } from "react";
 import {
   PermissionAction,
   PermissionEntity,
@@ -62,9 +63,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 const Calendar = () => {
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState<boolean>();
   const calendarRef = useRef<FullCalendar>(null);
-
+  
   const handleNavigation = (navigateTo: any) => {
     const calendarApi = calendarRef.current?.getApi();
     if (navigateTo == "prev") {
@@ -93,6 +94,17 @@ const Calendar = () => {
     updateTitle();
   }, []);
 
+  const ripple = useRef<HTMLDivElement>(null);
+  const toggleSpinner = useCallback((state:any) => {
+    if (ripple.current) {
+        if (state) {
+            ripple.current.classList.remove("hidden");
+        }
+        else {
+            ripple.current.classList.add("hidden");
+        }
+    }
+}, [ripple]);
   return (
     <>
       <Header hidePageDescription={true} />
@@ -102,11 +114,9 @@ const Calendar = () => {
             {title}
           </div>
           <div className="flex items-center">
-            {isLoading && (
-              <div className="mr-3 flex justify-center">
-                <Spinner />
-              </div>
-            )}
+            <div ref={ripple} className="mr-3 flex justify-center">
+              <Spinner />
+            </div>
             <ButtonGroup>
               <Button
                 variant="secondary"
@@ -151,7 +161,7 @@ const Calendar = () => {
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
-              loading={(isFetching) => setIsLoading(isFetching)}
+              loading={(isFetching)=>toggleSpinner(isFetching)}
               eventClassNames={(info) => {
                 const eventClass = getStatusClass(
                   info.event.extendedProps.status
