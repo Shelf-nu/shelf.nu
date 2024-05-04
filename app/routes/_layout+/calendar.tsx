@@ -5,6 +5,8 @@ import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link } from "@remix-run/react";
+import { ClientOnly } from "remix-utils/client-only";
+import FallbackLoading from "~/components/dashboard/fallback-loading";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
@@ -14,12 +16,10 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
-import FallbackLoading from "~/components/dashboard/fallback-loading";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
-import { ClientOnly } from "remix-utils/client-only";
 import { requirePermission } from "~/utils/roles.server";
 
 export function links() {
@@ -153,7 +153,9 @@ const Calendar = () => {
               }}
               loading={(isFetching) => setIsLoading(isFetching)}
               eventClassNames={(info) => {
-                const eventClass = getStatusClass(info.event.extendedProps.status);
+                const eventClass = getStatusClass(
+                  info.event.extendedProps.status
+                );
                 return [eventClass];
               }}
             />
