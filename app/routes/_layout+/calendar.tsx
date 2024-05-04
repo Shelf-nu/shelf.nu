@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import FullCalendar from "@fullcalendar/react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
@@ -16,7 +16,6 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
-import { useCallback } from "react";
 import {
   PermissionAction,
   PermissionEntity,
@@ -65,7 +64,7 @@ const Calendar = () => {
   const [title, setTitle] = useState("");
   const [isLoading, setIsLoading] = useState<boolean>();
   const calendarRef = useRef<FullCalendar>(null);
-  
+
   const handleNavigation = (navigateTo: any) => {
     const calendarApi = calendarRef.current?.getApi();
     if (navigateTo == "prev") {
@@ -95,16 +94,18 @@ const Calendar = () => {
   }, []);
 
   const ripple = useRef<HTMLDivElement>(null);
-  const toggleSpinner = useCallback((state:any) => {
-    if (ripple.current) {
+  const toggleSpinner = useCallback(
+    (state: any) => {
+      if (ripple.current) {
         if (state) {
-            ripple.current.classList.remove("hidden");
+          ripple.current.classList.remove("hidden");
+        } else {
+          ripple.current.classList.add("hidden");
         }
-        else {
-            ripple.current.classList.add("hidden");
-        }
-    }
-}, [ripple]);
+      }
+    },
+    [ripple]
+  );
   return (
     <>
       <Header hidePageDescription={true} />
@@ -161,7 +162,7 @@ const Calendar = () => {
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
-              loading={(isFetching)=>toggleSpinner(isFetching)}
+              loading={(isFetching) => toggleSpinner(isFetching)}
               eventClassNames={(info) => {
                 const eventClass = getStatusClass(
                   info.event.extendedProps.status
