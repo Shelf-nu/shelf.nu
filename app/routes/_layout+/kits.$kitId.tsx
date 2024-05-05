@@ -1,7 +1,10 @@
+import type { Prisma } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { z } from "zod";
+import { AssetImage } from "~/components/assets/asset-image";
+import { ChevronRight } from "~/components/icons/library";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
@@ -10,10 +13,12 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ScanDetails } from "~/components/location/scan-details";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
-import { Th } from "~/components/table";
+import { Td, Th } from "~/components/table";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { getKit } from "~/modules/kit/service.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
@@ -127,7 +132,7 @@ export const handle = {
 
 export default function KitDetails() {
   const navigate = useNavigate();
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, items } = useLoaderData<typeof loader>();
 
   const isSelfService = useUserIsSelfService();
   const kitIsAvailable = kit.status === "AVAILABLE";
@@ -203,10 +208,19 @@ export default function KitDetails() {
         </div>
 
         <div className="w-full lg:ml-6">
+          <div className="flex w-full flex-col items-center justify-between rounded-t border-x border-t p-4 md:flex-row">
+            <div>
+              <h2 className="font-semibold">Assets</h2>
+              <p className="text-sm text-gray-600">{items.length} items</p>
+            </div>
+
+            <Button to="manage-assets">Manage Assets</Button>
+          </div>
           <List
+            className="overflow-x-visible !rounded-none md:overflow-x-auto md:!rounded-b"
             ItemComponent={ListContent}
+            hideFirstHeaderColumn
             navigate={(itemId) => navigate(`/assets/${itemId}`)}
-            className=" overflow-x-visible md:overflow-x-auto"
             customEmptyStateContent={{
               title: "Not assets in kit",
               text: "Start by adding your first asset.",
@@ -227,6 +241,79 @@ export default function KitDetails() {
   );
 }
 
-function ListContent() {
-  return <div>List</div>;
+function ListContent({
+  item,
+}: {
+  item: Prisma.AssetGetPayload<{
+    include: {
+      location: {
+        include: { image: { select: { id: true; updatedAt: true } } };
+      };
+      category: true;
+    };
+  }>;
+}) {
+  const { id, mainImage, mainImageExpiration, title, location, category } =
+    item;
+
+  return (
+    <>
+      <Td className="w-full p-0 md:p-0">
+        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex size-12 items-center justify-center">
+              <AssetImage
+                asset={{
+                  assetId: id,
+                  mainImage,
+                  mainImageExpiration,
+                  alt: title,
+                }}
+                className="size-full rounded-[4px] border object-cover"
+              />
+            </div>
+            <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
+              <div className="font-medium">{title}</div>
+              <div className="block md:hidden">
+                {category ? (
+                  <Badge color={category.color} withDot={false}>
+                    {category.name}
+                  </Badge>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <button className="block md:hidden">
+            <ChevronRight />
+          </button>
+        </div>
+      </Td>
+
+      <Td className="hidden md:table-cell">
+        {category ? (
+          <Badge color={category.color} withDot={false}>
+            {category.name}
+          </Badge>
+        ) : null}
+      </Td>
+
+      <Td className="hidden md:table-cell">
+        {location ? (
+          <div className="flex min-w-32 items-center justify-center gap-x-1 rounded-full bg-gray-100 p-1">
+            <Image
+              imageId={location.image?.id}
+              alt="img"
+              className="size-4 rounded-full object-cover"
+              updatedAt={location.image?.updatedAt}
+            />
+
+            <p className="text-xs font-medium">{location.name}</p>
+          </div>
+        ) : null}
+      </Td>
+
+      <Td>{""}</Td>
+    </>
+  );
 }

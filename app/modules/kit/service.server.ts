@@ -216,6 +216,14 @@ export async function getKit({
         excludeCategoriesQuery: true,
         excludeLocationQuery: true,
         excludeTagsQuery: true,
+        extraInclude: {
+          location: {
+            select: {
+              name: true,
+              image: { select: { id: true, updatedAt: true } },
+            },
+          },
+        },
       }),
     ]);
 

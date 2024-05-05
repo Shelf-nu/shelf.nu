@@ -46,5 +46,12 @@ export default function KitImage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <img {...imageProps} src={url} className={tw(className)} alt={alt} />;
+  return (
+    <img
+      {...imageProps}
+      src={url}
+      className={tw("rounded border-[0.75px] border-gray-900/5", className)}
+      alt={alt}
+    />
+  );
 }

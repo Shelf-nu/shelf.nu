@@ -6,6 +6,7 @@ import { useNavigate } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
+import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
@@ -171,7 +172,14 @@ function ListContent({
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
-              <div className="size-10 rounded bg-gray-200" />
+              <KitImage
+                kit={{
+                  image: item.image,
+                  imageExpiration: item.imageExpiration,
+                  alt: item.name,
+                  kitId: item.id,
+                }}
+              />
             </div>
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
