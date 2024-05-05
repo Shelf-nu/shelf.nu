@@ -11,6 +11,7 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { UpdateKitPayload } from "./types";
 import { KITS_INCLUDE_FIELDS } from "../asset/fields";
+import { getPaginatedAndFilterableAssets } from "../asset/service.server";
 
 const label: ErrorLabel = "Kit";
 
@@ -174,6 +175,64 @@ export async function getPaginatedAndFilterableKits({
       cause,
       message: "Something went wrong while fetching kits",
       additionalData: { page, perPage, organizationId },
+      label,
+    });
+  }
+}
+
+export async function getKit({
+  id,
+  organizationId,
+  request,
+}: Pick<Kit, "id" | "organizationId"> & {
+  request: LoaderFunctionArgs["request"];
+}) {
+  try {
+    const [kit, assets] = await Promise.all([
+      db.kit.findFirstOrThrow({
+        where: { id, organizationId },
+        include: {
+          custody: {
+            select: { createdAt: true, custodian: true },
+          },
+          notes: {
+            orderBy: { createdAt: "desc" },
+            include: {
+              user: {
+                select: { firstName: true, lastName: true },
+              },
+            },
+          },
+          qrCodes: true,
+          organization: {
+            select: { currency: true },
+          },
+        },
+      }),
+      getPaginatedAndFilterableAssets({
+        request,
+        organizationId,
+        kitId: id,
+        excludeCategoriesQuery: true,
+        excludeLocationQuery: true,
+        excludeTagsQuery: true,
+      }),
+    ]);
+
+    return {
+      kit,
+      assets: {
+        ...assets,
+        items: assets.assets,
+      },
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Kit not found!",
+      message:
+        "The kit you are trying to access does not exists or you do not have permission to access it.",
+      additionalData: { id, organizationId },
       label,
     });
   }
