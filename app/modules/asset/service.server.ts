@@ -10,6 +10,7 @@ import type {
   Organization,
   TeamMember,
   Booking,
+  Kit,
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
@@ -137,7 +138,7 @@ async function getAssetsFromView(params: {
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
   locationIds?: Location["id"][] | null;
-  kitId?: Asset["kitId"];
+  kitId?: Prisma.AssetWhereInput["kitId"];
 }) {
   const {
     organizationId,
@@ -362,7 +363,7 @@ async function getAssets(params: {
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
-  kitId?: Asset["kitId"];
+  kitId?: Prisma.AssetWhereInput["kitId"];
 }) {
   const {
     organizationId,
@@ -1223,7 +1224,7 @@ export async function getPaginatedAndFilterableAssets({
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
-  kitId?: Asset["kitId"];
+  kitId?: Prisma.AssetWhereInput["kitId"];
   extraInclude?: Prisma.AssetInclude;
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
@@ -2021,6 +2022,128 @@ export async function updateAssetQrCode({
       message: "Something went wrong while updating asset QR code",
       label,
       additionalData: { assetId, organizationId, newQrId },
+    });
+  }
+}
+
+export async function createBulkKitChangeNotes({
+  newlyAddedAssets,
+  removedAssets,
+  userId,
+  kit,
+}: {
+  newlyAddedAssets: Prisma.AssetGetPayload<{
+    select: { id: true; title: true; kit: true };
+  }>[];
+  removedAssets: Prisma.AssetGetPayload<{
+    select: { id: true; title: true; kit: true };
+  }>[];
+  userId: User["id"];
+  kit: Kit;
+}) {
+  try {
+    const user = await db.user
+      .findFirstOrThrow({
+        where: { id: userId },
+        select: { firstName: true, lastName: true },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "User not found",
+          additionalData: { userId },
+          label,
+        });
+      });
+
+    for (const asset of [...newlyAddedAssets, ...removedAssets]) {
+      const isAssetRemoved = removedAssets.some((a) => a.id === asset.id);
+      const isNewlyAdded = newlyAddedAssets.some((a) => a.id === asset.id);
+      const newKit = isAssetRemoved ? null : kit;
+      const currentKit = asset.kit ? asset.kit : null;
+
+      if (isNewlyAdded || isAssetRemoved) {
+        await createKitChangeNote({
+          currentKit,
+          newKit,
+          firstName: user.firstName ?? "",
+          lastName: user.lastName ?? "",
+          assetName: asset.title,
+          assetId: asset.id,
+          userId,
+          isRemoving: isAssetRemoved,
+        });
+      }
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while creating bulk kit change notes",
+      additionalData: {
+        userId,
+        newlyAddedAssetsIds: newlyAddedAssets.map((a) => a.id),
+        removedAssetsIds: removedAssets.map((a) => a.id),
+      },
+      label,
+    });
+  }
+}
+
+export async function createKitChangeNote({
+  currentKit,
+  newKit,
+  firstName,
+  lastName,
+  assetName,
+  assetId,
+  userId,
+  isRemoving,
+}: {
+  currentKit: Pick<Kit, "id" | "name"> | null;
+  newKit: Pick<Kit, "id" | "name"> | null;
+  firstName: string;
+  lastName: string;
+  assetName: Asset["title"];
+  assetId: Asset["id"];
+  userId: User["id"];
+  isRemoving: boolean;
+}) {
+  try {
+    const fullName = `${firstName.trim()} ${lastName.trim()}`;
+    let message = "";
+
+    /** User is changing from kit to another */
+    if (currentKit && newKit) {
+      message = `**${fullName}** changed kit of **${assetName.trim()}** from **[${currentKit.name.trim()}](/kits/${
+        currentKit.id
+      })** to **[${newKit.name.trim()}](/kits/${newKit.id})**`;
+    }
+
+    /** User is adding asset to a kit for first time */
+    if (newKit && !currentKit) {
+      message = `**${fullName}** added asset to **[${newKit.name.trim()}](/kits/${
+        newKit.id
+      })**`;
+    }
+
+    /** User is removing the asset from kit */
+    if (isRemoving && !newKit) {
+      message = `**${fullName}** removed asset from **[${currentKit?.name.trim()}](/kits/${currentKit?.id})**`;
+    }
+
+    await createNote({
+      content: message,
+      type: "UPDATE",
+      userId,
+      assetId,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a kit change note. Please try again or contact support",
+      additionalData: { userId, assetId },
+      label,
     });
   }
 }

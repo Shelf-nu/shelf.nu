@@ -224,6 +224,7 @@ export async function getKit({
       assets: {
         ...assets,
         items: assets.assets,
+        totalItems: assets.totalAssets,
       },
     };
   } catch (cause) {
