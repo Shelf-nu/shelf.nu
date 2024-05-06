@@ -270,6 +270,7 @@ async function getAssetsFromView(params: {
         include: {
           asset: {
             include: {
+              kit: true,
               category: true,
               tags: true,
               location: {
@@ -480,6 +481,7 @@ async function getAssets(params: {
         take,
         where,
         include: {
+          kit: true,
           category: true,
           tags: true,
           location: {
