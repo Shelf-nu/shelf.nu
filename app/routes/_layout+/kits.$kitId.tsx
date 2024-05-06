@@ -20,7 +20,7 @@ import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import { getKit } from "~/modules/kit/service.server";
+import { getAssetsForKits, getKit } from "~/modules/kit/service.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -54,11 +54,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { kit, assets } = await getKit({
-      id: kitId,
-      organizationId,
-      request,
-    });
+    const [kit, assets] = await Promise.all([
+      getKit({
+        id: kitId,
+        organizationId,
+        request,
+      }),
+      getAssetsForKits({
+        request,
+        organizationId,
+        kitId,
+      }),
+    ]);
 
     /** We get the first QR code(for now we can only have 1)
      * And using the ID of that qr code, we find the latest scan

@@ -138,7 +138,6 @@ async function getAssetsFromView(params: {
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
   locationIds?: Location["id"][] | null;
-  kitId?: Prisma.AssetWhereInput["kitId"];
 }) {
   const {
     organizationId,
@@ -153,7 +152,6 @@ async function getAssetsFromView(params: {
     hideUnavailable,
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
     locationIds,
-    kitId,
   } = params;
 
   try {
@@ -263,10 +261,6 @@ async function getAssetsFromView(params: {
       };
     }
 
-    if (kitId) {
-      Object.assign(where, { asset: { kitId } });
-    }
-
     const [assetSearch, totalAssets] = await Promise.all([
       /** Get the assets */
       db.assetSearchView.findMany({
@@ -363,7 +357,6 @@ async function getAssets(params: {
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
-  kitId?: Prisma.AssetWhereInput["kitId"];
 }) {
   const {
     organizationId,
@@ -378,7 +371,6 @@ async function getAssets(params: {
     bookingTo,
     hideUnavailable,
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
-    kitId,
   } = params;
 
   try {
@@ -479,10 +471,6 @@ async function getAssets(params: {
       where.location = {
         id: { in: locationIds },
       };
-    }
-
-    if (kitId) {
-      where.kitId = kitId;
     }
 
     const [assets, totalAssets] = await Promise.all([
@@ -1216,7 +1204,6 @@ export async function getAllEntriesForCreateAndEdit({
 export async function getPaginatedAndFilterableAssets({
   request,
   organizationId,
-  kitId,
   excludeCategoriesQuery = false,
   excludeTagsQuery = false,
   excludeSearchFromView = false,
@@ -1315,7 +1302,6 @@ export async function getPaginatedAndFilterableAssets({
       hideUnavailable,
       unhideAssetsBookigIds,
       locationIds,
-      kitId,
     });
     const totalPages = Math.ceil(totalAssets / perPage);
 

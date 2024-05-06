@@ -1,8 +1,7 @@
 import { useEffect, useMemo } from "react";
-import type { Asset } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
@@ -15,10 +14,8 @@ import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
-import {
-  createBulkKitChangeNotes,
-  getPaginatedAndFilterableAssets,
-} from "~/modules/asset/service.server";
+import { createBulkKitChangeNotes } from "~/modules/asset/service.server";
+import { getAssetsForKits } from "~/modules/kit/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -60,13 +57,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             label: "Kit",
           });
         }),
-      getPaginatedAndFilterableAssets({
-        request,
+      getAssetsForKits({
         organizationId,
-        excludeCategoriesQuery: true,
-        excludeLocationQuery: true,
-        excludeTagsQuery: true,
-        kitId: null, // we need assets which are not associated to any kits yet
+        request,
       }),
     ]);
 
@@ -88,8 +81,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         kit,
         ...assets,
-        items: assets.assets,
-        totalItems: assets.totalAssets,
         modelName,
         showModal: true,
         noScroll: true,
@@ -281,7 +272,13 @@ export default function ManageAssetsInKit() {
   );
 }
 
-const RowComponent = ({ item }: { item: Asset }) => {
+const RowComponent = ({
+  item,
+}: {
+  item: Prisma.AssetGetPayload<{
+    include: { kit: { select: { id: true; name: true } } };
+  }>;
+}) => {
   const selectedAssets = useAtomValue(kitsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
 
@@ -301,10 +298,16 @@ const RowComponent = ({ item }: { item: Asset }) => {
                 className="size-full rounded-[4px] border object-cover"
               />
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
                 {item.title}
               </p>
+
+              {item.kit?.name ? (
+                <div className="flex items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
+                  {item.kit.name}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

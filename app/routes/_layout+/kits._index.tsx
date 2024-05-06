@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { useNavigate } from "@remix-run/react";
+import { useLoaderData, useNavigate } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -110,6 +110,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function KitsIndexPage() {
+  const { items } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   return (
@@ -140,11 +141,15 @@ export default function KitsIndexPage() {
           />
         </Filters>
 
+        <div className="flex w-full flex-col rounded-t border-x border-t bg-white p-4">
+          <h2 className="font-semibold">Kits</h2>
+          <p className="text-sm text-gray-600">{items.length} items</p>
+        </div>
         <List
+          className="-mt-2 overflow-x-visible !rounded-none md:overflow-x-auto md:!rounded-b"
           ItemComponent={ListContent}
           hideFirstHeaderColumn
           navigate={(kitId) => navigate(kitId)}
-          className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
               <Th className="hidden md:table-cell">Name</Th>

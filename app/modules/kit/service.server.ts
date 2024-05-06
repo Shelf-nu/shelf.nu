@@ -1,4 +1,10 @@
-import type { Kit, KitStatus, Organization, Prisma } from "@prisma/client";
+import type {
+  AssetStatus,
+  Kit,
+  KitStatus,
+  Organization,
+  Prisma,
+} from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
@@ -11,7 +17,6 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { UpdateKitPayload } from "./types";
 import { KITS_INCLUDE_FIELDS } from "../asset/fields";
-import { getPaginatedAndFilterableAssets } from "../asset/service.server";
 
 const label: ErrorLabel = "Kit";
 
@@ -183,58 +188,32 @@ export async function getPaginatedAndFilterableKits({
 export async function getKit({
   id,
   organizationId,
-  request,
 }: Pick<Kit, "id" | "organizationId"> & {
   request: LoaderFunctionArgs["request"];
 }) {
   try {
-    const [kit, assets] = await Promise.all([
-      db.kit.findFirstOrThrow({
-        where: { id, organizationId },
-        include: {
-          custody: {
-            select: { createdAt: true, custodian: true },
-          },
-          notes: {
-            orderBy: { createdAt: "desc" },
-            include: {
-              user: {
-                select: { firstName: true, lastName: true },
-              },
-            },
-          },
-          qrCodes: true,
-          organization: {
-            select: { currency: true },
-          },
+    const kit = await db.kit.findFirstOrThrow({
+      where: { id, organizationId },
+      include: {
+        custody: {
+          select: { createdAt: true, custodian: true },
         },
-      }),
-      getPaginatedAndFilterableAssets({
-        request,
-        organizationId,
-        kitId: id,
-        excludeCategoriesQuery: true,
-        excludeLocationQuery: true,
-        excludeTagsQuery: true,
-        extraInclude: {
-          location: {
-            select: {
-              name: true,
-              image: { select: { id: true, updatedAt: true } },
+        notes: {
+          orderBy: { createdAt: "desc" },
+          include: {
+            user: {
+              select: { firstName: true, lastName: true },
             },
           },
         },
-      }),
-    ]);
-
-    return {
-      kit,
-      assets: {
-        ...assets,
-        items: assets.assets,
-        totalItems: assets.totalAssets,
+        qrCodes: true,
+        organization: {
+          select: { currency: true },
+        },
       },
-    };
+    });
+
+    return kit;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -242,6 +221,88 @@ export async function getKit({
       message:
         "The kit you are trying to access does not exists or you do not have permission to access it.",
       additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+export async function getAssetsForKits({
+  request,
+  organizationId,
+  extraWhere,
+  kitId,
+}: {
+  request: LoaderFunctionArgs["request"];
+  organizationId: Organization["id"];
+  kitId?: Kit["id"] | null;
+  extraWhere?: Prisma.AssetWhereInput;
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const paramsValues = getParamsValues(searchParams);
+  const status =
+    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
+      ? null
+      : (searchParams.get("status") as AssetStatus | null);
+
+  const { page, perPageParam, search, hideUnavailable } = paramsValues;
+
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
+
+    let where: Prisma.AssetWhereInput = { organizationId };
+    if (search) {
+      where.title = {
+        contains: search.toLowerCase().trim(),
+        mode: "insensitive",
+      };
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (hideUnavailable) {
+      //not disabled for booking
+      where.availableToBook = true;
+      //not assigned to team member
+      where.custody = null;
+    }
+
+    if (kitId) {
+      where.kitId = kitId;
+    }
+
+    const finalQuery = {
+      ...where,
+      ...extraWhere,
+    };
+
+    const [items, totalItems] = await Promise.all([
+      db.asset.findMany({
+        skip,
+        take,
+        where: finalQuery,
+        include: { kit: true },
+        orderBy: { createdAt: "desc" },
+      }),
+      db.asset.count({ where: finalQuery }),
+    ]);
+
+    const totalPages = Math.ceil(totalItems / perPage);
+
+    return { page, perPage, search, items, totalItems, totalPages };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Fail to fetch paginated and filterable assets",
+      additionalData: {
+        organizationId,
+        paramsValues,
+      },
       label,
     });
   }
