@@ -137,11 +137,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const newlyAddedAssets = await db.asset
       .findMany({
-        // we need assets which are associated to current kit or which are not associated to any kit at all
-        where: {
-          id: { in: assetIds },
-          OR: [{ kitId: null }, { kitId: kit.id }],
-        },
+        where: { id: { in: assetIds } },
         select: { id: true, title: true, kit: true },
       })
       .catch((cause) => {
