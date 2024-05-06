@@ -1,6 +1,6 @@
 import type { Kit } from "@prisma/client";
 import { CubeIcon } from "@radix-ui/react-icons";
-import { Form, useNavigation } from "@remix-run/react";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -48,7 +48,12 @@ export default function KitsForm({
 
   const zo = useZorm("NewKitForm", NewKitFormSchema);
 
-  const nameErrorMessage = zo.errors.name()?.message;
+  const actionData = useActionData<{
+    errors?: { name?: { message: string } };
+  }>();
+
+  const nameErrorMessage =
+    actionData?.errors?.name?.message ?? zo.errors.name()?.message;
 
   return (
     <Card className={tw("w-full md:w-min", className)}>
