@@ -53,7 +53,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const kit = await getKit({
       id: kitId,
       organizationId,
-      request,
     });
 
     const header: HeaderData = {

@@ -45,6 +45,10 @@ function ConditionalActionsDropdown() {
 
   const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
 
+  const someAssetIsNotAvailable = kit.assets.some(
+    (asset) => asset.status !== "AVAILABLE"
+  );
+
   const [dropdownRef, open, setOpen] = useControlledDropdownMenu(defaultOpen);
 
   useEffect(() => {
@@ -117,10 +121,13 @@ function ConditionalActionsDropdown() {
                   to="release-custody"
                   role="link"
                   variant="link"
-                  className="justify-start whitespace-nowrap
-                px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className={tw(
+                    "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700",
+                    someAssetIsNotAvailable && "pointer-events-none opacity-50"
+                  )}
                   width="full"
                   onClick={() => setOpen(false)}
+                  disabled={someAssetIsNotAvailable}
                 >
                   <span className="flex items-center gap-1">
                     <UserXIcon /> Release Custody
@@ -131,9 +138,13 @@ function ConditionalActionsDropdown() {
                   to="give-custody"
                   role="link"
                   variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className={tw(
+                    "justify-start px-4 py-3  text-gray-700 hover:text-gray-700",
+                    someAssetIsNotAvailable && "pointer-events-none opacity-50"
+                  )}
                   width="full"
                   onClick={() => setOpen(false)}
+                  disabled={someAssetIsNotAvailable}
                 >
                   <span className="flex items-center gap-2">
                     <Icon icon="user" /> Assign custody

@@ -74,7 +74,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getKit({
         id: kitId,
         organizationId,
-        request,
+        extraInclude: {
+          assets: { select: { status: true } },
+          custody: { select: { custodian: true } },
+        },
       }),
       getAssetsForKits({
         request,

@@ -191,13 +191,15 @@ export async function getPaginatedAndFilterableKits({
 export async function getKit({
   id,
   organizationId,
+  extraInclude,
 }: Pick<Kit, "id" | "organizationId"> & {
-  request: LoaderFunctionArgs["request"];
+  extraInclude?: Prisma.KitInclude;
 }) {
   try {
     const kit = await db.kit.findFirstOrThrow({
       where: { id, organizationId },
       include: {
+        ...extraInclude,
         custody: {
           select: { createdAt: true, custodian: true },
         },
