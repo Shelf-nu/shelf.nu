@@ -300,11 +300,11 @@ function ListContent({
 
       <Td className="hidden md:table-cell">
         {location ? (
-          <div className="flex min-w-32 items-center justify-center gap-x-1 rounded-full bg-gray-100 p-1">
+          <div className="flex h-7 min-w-32 items-center justify-center gap-x-1 rounded-full bg-gray-100">
             <Image
               imageId={location.image?.id}
               alt="img"
-              className="size-4 rounded-full object-cover"
+              className="size-4 shrink-0 rounded-full object-cover"
               updatedAt={location.image?.updatedAt}
             />
 
