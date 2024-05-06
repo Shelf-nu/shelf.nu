@@ -4,6 +4,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import DeleteKit from "./delete-kit";
 import Icon from "../icons/icon";
 import { ChevronRight, UserXIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -172,18 +173,13 @@ function ConditionalActionsDropdown() {
             </DropdownMenuItem>
 
             <DropdownMenuItem
-              className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
+              className="px-4 py-1 md:p-0"
               onSelect={(e) => {
                 e.preventDefault();
               }}
               disabled={kitIsCheckedOut}
             >
-              <span
-                className="flex items-center gap-2"
-                onClick={() => setOpen(false)}
-              >
-                <Icon icon="trash" /> Duplicate
-              </span>
+              <DeleteKit kit={kit} />
             </DropdownMenuItem>
           </div>
         </DropdownMenuContent>

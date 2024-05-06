@@ -7,12 +7,15 @@ import type {
 } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
 import { maybeUniqueConstraintViolation, ShelfError } from "~/utils/error";
+import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { UpdateKitPayload } from "./types";
@@ -305,5 +308,63 @@ export async function getAssetsForKits({
       },
       label,
     });
+  }
+}
+
+export async function deleteKit({
+  id,
+  organizationId,
+}: {
+  id: Kit["id"];
+  organizationId: Kit["organizationId"];
+}) {
+  try {
+    return await db.kit.delete({ where: { id, organizationId } });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while deleting kit",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+export async function deleteKitImage({
+  url,
+  bucketName = "kits",
+}: {
+  url: string;
+  bucketName?: string;
+}) {
+  try {
+    const path = extractImageNameFromSupabaseUrl({ url, bucketName });
+    if (!path) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot extract the image path from the URL",
+        additionalData: { url, bucketName },
+        label,
+      });
+    }
+
+    const { error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .remove([path]);
+
+    if (error) {
+      throw error;
+    }
+
+    return true;
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to delete kit image",
+        additionalData: { url, bucketName },
+        label,
+      })
+    );
   }
 }

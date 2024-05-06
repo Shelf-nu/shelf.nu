@@ -1,6 +1,10 @@
 import type { Prisma } from "@prisma/client";
-import { json } from "@remix-run/node";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  ActionFunctionArgs,
+} from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
@@ -20,13 +24,25 @@ import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import { getAssetsForKits, getKit } from "~/modules/kit/service.server";
+import {
+  deleteKit,
+  deleteKitImage,
+  getAssetsForKits,
+  getKit,
+} from "~/modules/kit/service.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { data, error, getParams } from "~/utils/http.server";
+import {
+  assertIsDelete,
+  data,
+  error,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import {
   PermissionAction,
@@ -136,6 +152,49 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   breadcrumb: () => "single",
 };
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  const { kitId } = getParams(params, z.object({ kitId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    assertIsDelete(request);
+
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.delete,
+    });
+
+    const { image } = parseData(
+      await request.formData(),
+      z.object({ image: z.string().optional() })
+    );
+
+    await deleteKit({ id: kitId, organizationId });
+
+    if (image) {
+      await deleteKitImage({ url: image });
+    }
+
+    sendNotification({
+      title: "Kit deleted",
+      message: "Your kit has been deleted successfully",
+      icon: { name: "trash", variant: "error" },
+      senderId: authSession.userId,
+    });
+
+    return redirect("/kits");
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, kitId });
+    return json(error(reason), { status: reason.status });
+  }
+}
 
 export default function KitDetails() {
   const navigate = useNavigate();
