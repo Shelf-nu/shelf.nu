@@ -15,6 +15,7 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { Notes } from "~/components/assets/notes";
 import { Switch } from "~/components/forms/switch";
+import Icon from "~/components/icons/icon";
 import { KitIcon } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
@@ -353,7 +354,7 @@ export default function AssetDetailsPage() {
               <div className="flex items-center gap-3">
                 <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
                   <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
-                    <KitIcon className="size-3" />
+                    <Icon icon="kit" />
                   </div>
                 </div>
 
