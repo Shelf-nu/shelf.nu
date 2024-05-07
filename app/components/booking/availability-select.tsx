@@ -44,9 +44,6 @@ export function AvailabilitySelect() {
         position="popper"
         align="end"
         sideOffset={4}
-        ref={(ref) =>
-          ref?.addEventListener("touchend", (e) => e.preventDefault())
-        }
       >
         <div className="max-h-[320px] overflow-auto">
           <SelectItem
