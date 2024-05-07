@@ -15,6 +15,7 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { Notes } from "~/components/assets/notes";
 import { Switch } from "~/components/forms/switch";
+import { KitIcon } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
@@ -344,6 +345,34 @@ export default function AssetDetailsPage() {
                   <input type="hidden" value="toggle" name="intent" />
                 </div>
               </fetcher.Form>
+            </Card>
+          ) : null}
+
+          {asset.kit?.name ? (
+            <Card className="my-3 py-3">
+              <div className="flex items-center gap-3">
+                <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
+                  <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
+                    <KitIcon className="size-3" />
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="mb-1 text-sm font-semibold">
+                    Included in kit
+                  </h3>
+                  <Button
+                    to={`/kits/${asset.kitId}`}
+                    role="link"
+                    variant="link"
+                    className={tw(
+                      "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
+                    )}
+                  >
+                    {asset.kit.name}
+                  </Button>
+                </div>
+              </div>
             </Card>
           ) : null}
 

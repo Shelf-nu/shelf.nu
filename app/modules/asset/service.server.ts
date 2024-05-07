@@ -105,6 +105,7 @@ export async function getAsset({
             },
           },
         },
+        kit: { select: { id: true, name: true } },
       },
     });
   } catch (cause) {
