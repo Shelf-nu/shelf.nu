@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import type { Prisma } from "@prisma/client";
+import { AssetStatus, type Prisma } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation } from "@remix-run/react";
@@ -14,8 +14,12 @@ import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
-import { createBulkKitChangeNotes } from "~/modules/asset/service.server";
+import {
+  createBulkKitChangeNotes,
+  createNote,
+} from "~/modules/asset/service.server";
 import { getAssetsForKits } from "~/modules/kit/service.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -116,10 +120,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       { additionalData: { userId, organizationId, kitId } }
     );
 
+    const user = await getUserByID(userId);
+
     const kit = await db.kit
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
-        include: { assets: { select: { id: true, title: true, kit: true } } },
+        include: {
+          assets: { select: { id: true, title: true, kit: true } },
+          custody: {
+            select: { custodian: { select: { id: true, name: true } } },
+          },
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -138,7 +149,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const newlyAddedAssets = await db.asset
       .findMany({
         where: { id: { in: assetIds } },
-        select: { id: true, title: true, kit: true },
+        select: { id: true, title: true, kit: true, custody: true },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -149,6 +160,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           label: "Assets",
         });
       });
+
+    /** An asset already in custody cannot be added to a kit */
+    const isSomeAssetInCustody = newlyAddedAssets.some(
+      (asset) => asset.custody && asset.kit?.id !== kit.id
+    );
+    if (isSomeAssetInCustody) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot add unavailable asset in a kit.",
+        additionalData: { userId, kitId },
+        label: "Kit",
+      });
+    }
 
     await db.kit.update({
       where: { id: kit.id, organizationId },
@@ -173,6 +197,43 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       removedAssets,
       userId,
     });
+
+    /**
+     * If as kit is in custody then the assets added to kit will also inherit the status
+     */
+    const assetsToInheritStatus = newlyAddedAssets.filter(
+      (asset) => !asset.custody
+    );
+
+    if (
+      kit.custody &&
+      kit.custody.custodian.id &&
+      assetsToInheritStatus.length > 0
+    ) {
+      await Promise.all([
+        ...assetsToInheritStatus.map((asset) =>
+          db.asset.update({
+            where: { id: asset.id },
+            data: {
+              status: AssetStatus.IN_CUSTODY,
+              custody: {
+                create: {
+                  custodian: { connect: { id: kit.custody?.custodian.id } },
+                },
+              },
+            },
+          })
+        ),
+        ...assetsToInheritStatus.map((asset) =>
+          createNote({
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${kit.custody?.custodian.name.trim()}** custody over ${asset.title.trim()}`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          })
+        ),
+      ]);
+    }
 
     return redirect(`/kits/${kitId}`);
   } catch (cause) {
