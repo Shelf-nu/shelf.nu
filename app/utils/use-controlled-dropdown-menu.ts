@@ -19,7 +19,14 @@ export function useControlledDropdownMenu(
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const alertDialog = document.querySelector('[role="alertdialog"]');
+
+      if (
+        ref.current &&
+        !ref.current.contains(target) &&
+        (!alertDialog || !alertDialog.contains(target))
+      ) {
         setOpen(false);
       }
     };
