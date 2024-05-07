@@ -1,5 +1,4 @@
 import type { Kit } from "@prisma/client";
-import { CubeIcon } from "@radix-ui/react-icons";
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
@@ -109,44 +108,26 @@ export default function KitsForm({
           />
         </FormRow>
 
-        <FormRow rowLabel="Image" className="border-b-0 pb-[10px]">
-          <div className="w-full">
-            <div className="mb-4 flex w-full gap-x-4">
-              <div className="flex size-16 items-center justify-center rounded border-[0.75px] border-gray-900/5 bg-gray-100">
-                <CubeIcon className="size-8" />
-              </div>
-
-              <label
-                htmlFor="kit-image"
-                className="flex h-32 flex-1 cursor-pointer flex-col items-center justify-center gap-y-3 rounded border border-gray-200 text-center"
-              >
-                <img
-                  src="/static/images/upload-icon.svg"
-                  alt="Upload"
-                  className="size-10"
-                />
-                <p className="text-xs text-gray-600">
-                  <span className="text-sm font-semibold text-primary-700">
-                    Click to upload
-                  </span>{" "}
-                  or drag and drop <br />
-                  SVG, PNG, JPG or GIF (max. 800x400px)
-                </p>
-              </label>
-            </div>
-            {!!fileError && (
-              <div className="text-sm text-error-500">{fileError}</div>
-            )}
-
-            <input
-              id="kit-image"
-              className="sr-only"
+        <FormRow rowLabel="Image" className="border-b-0 pt-[10px]">
+          <div>
+            <p className="hidden lg:block">
+              Accepts PNG, JPG or JPEG (max.4 MB)
+            </p>
+            <Input
               disabled={disabled}
               accept="image/png,.png,image/jpeg,.jpg,.jpeg"
-              name="image"
+              name="mainImage"
               type="file"
               onChange={validateFile}
+              label={"Main image"}
+              hideLabel
+              error={fileError}
+              className="mt-2"
+              inputClassName="border-0 shadow-none p-0 rounded-none"
             />
+            <p className="mt-2 lg:hidden">
+              Accepts PNG, JPG or JPEG (max.4 MB)
+            </p>
           </div>
         </FormRow>
       </Form>

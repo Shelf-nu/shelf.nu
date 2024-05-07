@@ -16,7 +16,6 @@ import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { Notes } from "~/components/assets/notes";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
-import { KitIcon } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
