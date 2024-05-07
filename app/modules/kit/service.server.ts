@@ -1,10 +1,5 @@
-import type {
-  AssetStatus,
-  Kit,
-  KitStatus,
-  Organization,
-  Prisma,
-} from "@prisma/client";
+import type { Kit, Organization, Prisma } from "@prisma/client";
+import { AssetStatus, KitStatus } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -20,6 +15,7 @@ import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { UpdateKitPayload } from "./types";
 import { KITS_INCLUDE_FIELDS } from "../asset/fields";
+import { createNote } from "../asset/service.server";
 
 const label: ErrorLabel = "Kit";
 
@@ -368,5 +364,64 @@ export async function deleteKitImage({
         label,
       })
     );
+  }
+}
+
+export async function releaseCustody({
+  kitId,
+  userId,
+}: {
+  kitId: Kit["id"];
+  userId: string;
+}) {
+  try {
+    const kit = await db.kit.findUniqueOrThrow({
+      where: { id: kitId },
+      select: {
+        name: true,
+        assets: true,
+        createdBy: { select: { firstName: true, lastName: true } },
+        custody: { select: { custodian: true } },
+      },
+    });
+
+    await Promise.all([
+      db.kit.update({
+        where: { id: kitId },
+        data: {
+          status: KitStatus.AVAILABLE,
+          custody: { delete: true },
+        },
+      }),
+      ...kit.assets.map((asset) =>
+        db.asset.update({
+          where: { id: asset.id },
+          data: {
+            status: AssetStatus.AVAILABLE,
+            custody: { delete: true },
+          },
+        })
+      ),
+      ...kit.assets.map((asset) =>
+        createNote({
+          content: `**${kit.createdBy.firstName?.trim()} ${kit.createdBy.lastName?.trim()}** has released **${kit
+            .custody?.custodian
+            .name}'s** custody over **${asset.title.trim()}**`,
+          type: "UPDATE",
+          userId,
+          assetId: asset.id,
+        })
+      ),
+    ]);
+
+    return kit;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while releasing the custody. Please try again or contact support.",
+      additionalData: { kitId },
+      label: "Custody",
+    });
   }
 }

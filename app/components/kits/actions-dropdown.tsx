@@ -121,13 +121,9 @@ function ConditionalActionsDropdown() {
                   to="release-custody"
                   role="link"
                   variant="link"
-                  className={tw(
-                    "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700",
-                    someAssetIsNotAvailable && "pointer-events-none opacity-50"
-                  )}
+                  className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
                   onClick={() => setOpen(false)}
-                  disabled={someAssetIsNotAvailable}
                 >
                   <span className="flex items-center gap-1">
                     <UserXIcon /> Release Custody

@@ -75,7 +75,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         id: kitId,
         organizationId,
         extraInclude: {
-          assets: { select: { status: true } },
+          assets: {
+            select: { status: true, custody: { select: { id: true } } },
+          },
           custody: { select: { custodian: true } },
         },
       }),
