@@ -284,7 +284,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     ];
 
     switch (intent) {
-      case "save": {
+      case "save":
+      case "reserve":
         const formData = await request.formData();
 
         let booking;
@@ -305,8 +306,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               organizationId,
               id,
               name,
+              ...(intent === "reserve"
+                ? { status: BookingStatus.RESERVED }
+                : {}),
             },
-            getClientHint(request)
+            getClientHint(request),
+            isSelfService
           );
         } else {
           /** WE are updating the whole booking */
@@ -338,40 +343,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               name,
               from,
               to,
+              ...(intent === "reserve"
+                ? { status: BookingStatus.RESERVED }
+                : {}),
             },
-            getClientHint(request)
+            getClientHint(request),
+            isSelfService
           );
         }
 
-        sendNotification({
-          title: "Booking saved",
-          message: "Your booking has been saved successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return json(data({ booking }), {
-          headers,
-        });
-      }
-      case "reserve": {
-        await upsertBooking(
-          { id, status: BookingStatus.RESERVED },
-          getClientHint(request),
-          isSelfService
-        );
-
-        sendNotification({
-          title: "Booking reserved",
-          message: "Your booking has been reserved successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return json(data({ success: true }), {
-          headers,
-        });
-      }
+        /** Only save and send save notification */
+        if (intent === "save") {
+          sendNotification({
+            title: "Booking saved",
+            message: "Your booking has been saved successfully",
+            icon: { name: "success", variant: "success" },
+            senderId: authSession.userId,
+          });
+          return json(data({ booking }), {
+            headers,
+          });
+        } else if (intent === "reserve") {
+          /** Send reserved notification */
+          sendNotification({
+            title: "Booking reserved",
+            message: "Your booking has been reserved successfully",
+            icon: { name: "success", variant: "success" },
+            senderId: authSession.userId,
+          });
+          return json(data({ success: true }), {
+            headers,
+          });
+        }
       case "delete": {
         if (isSelfService) {
           /**
