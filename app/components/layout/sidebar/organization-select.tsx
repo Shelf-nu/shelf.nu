@@ -26,14 +26,7 @@ export const OrganizationSelect = ({
       <SelectTrigger className="w-full px-3 py-2">
         <SelectValue />
       </SelectTrigger>
-      <SelectContent
-        position="popper"
-        className="w-full"
-        align="start"
-        ref={(ref) =>
-          ref?.addEventListener("touchend", (e) => e.preventDefault())
-        }
-      >
+      <SelectContent position="popper" className="w-full" align="start">
         <div className=" max-h-[320px] w-[253px] overflow-auto">
           {organizations.map((org) => (
             <SelectItem
