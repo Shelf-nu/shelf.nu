@@ -12,6 +12,12 @@ import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
 import {
@@ -28,6 +34,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -85,6 +92,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         kit,
         ...assets,
+        items: assets.items.map((asset) => ({
+          ...asset,
+          isInOtherCustody: Boolean(
+            asset?.custody?.id && asset.kitId !== kit.id
+          ),
+        })),
         modelName,
         showModal: true,
         noScroll: true,
@@ -226,7 +239,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         ),
         ...assetsToInheritStatus.map((asset) =>
           createNote({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${kit.custody?.custodian.name.trim()}** custody over ${asset.title.trim()}`,
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${kit.custody?.custodian.name.trim()}** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -279,12 +292,17 @@ export default function ManageAssetsInKit() {
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={(assetId) => {
-            setSelectedAssets((selectedAssets) =>
-              selectedAssets.includes(assetId)
-                ? selectedAssets.filter((id) => id !== assetId)
-                : [...selectedAssets, assetId]
-            );
+          navigate={(assetId, item) => {
+            /**
+             * We will select asset only if it is not in custody
+             */
+            if (!item.isInOtherCustody) {
+              setSelectedAssets((selectedAssets) =>
+                selectedAssets.includes(assetId)
+                  ? selectedAssets.filter((id) => id !== assetId)
+                  : [...selectedAssets, assetId]
+              );
+            }
           }}
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",
@@ -333,16 +351,26 @@ const RowComponent = ({
   item,
 }: {
   item: Prisma.AssetGetPayload<{
-    include: { kit: { select: { id: true; name: true } } };
-  }>;
+    include: {
+      kit: { select: { id: true; name: true } };
+      custody: { select: { id: true } };
+    };
+  }> & {
+    isInOtherCustody: boolean;
+  };
 }) => {
   const selectedAssets = useAtomValue(kitsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
 
   return (
     <>
-      <Td className="w-full p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:px-6">
+      <Td
+        className={tw(
+          "w-full p-0 md:p-0",
+          item.isInOtherCustody && "cursor-not-allowed"
+        )}
+      >
+        <div className="flex items-center justify-between gap-3 p-4 md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
               <AssetImage
@@ -361,17 +389,45 @@ const RowComponent = ({
               </p>
 
               {item.kit?.name ? (
-                <div className="flex items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
+                <div className="flex w-max items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
                   {item.kit.name}
                 </div>
               ) : null}
             </div>
           </div>
+
+          {/* Asset is in custody */}
+          {item.isInOtherCustody ? (
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-warning-700">
+                    In custody
+                  </div>
+                </TooltipTrigger>
+
+                <TooltipContent side="top" align="end" className="md:w-80">
+                  <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                    Asset is in custody
+                  </h2>
+                  <div className="text-wrap text-xs font-medium text-gray-500">
+                    Asset is currently in custody of a team member. <br /> Make
+                    sure the asset has an Available status in order to add it to
+                    this kit.
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : null}
         </div>
       </Td>
 
-      <Td>
-        <FakeCheckbox checked={checked} />
+      <Td
+        className={
+          item.isInOtherCustody ? "cursor-not-allowed opacity-50" : undefined
+        }
+      >
+        <FakeCheckbox checked={checked} disabled={item.isInOtherCustody} />
       </Td>
     </>
   );

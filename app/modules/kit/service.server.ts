@@ -287,7 +287,7 @@ export async function getAssetsForKits({
         skip,
         take,
         where: finalQuery,
-        include: { kit: true },
+        include: { kit: true, custody: { select: { id: true } } },
         orderBy: { createdAt: "desc" },
       }),
       db.asset.count({ where: finalQuery }),

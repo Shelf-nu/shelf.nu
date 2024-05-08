@@ -1,4 +1,10 @@
-export const FakeCheckbox = ({ checked }: { checked: boolean }) =>
+export const FakeCheckbox = ({
+  checked,
+  disabled,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+}) =>
   checked ? (
     <svg
       width="20"
@@ -25,7 +31,14 @@ export const FakeCheckbox = ({ checked }: { checked: boolean }) =>
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" fill="white" />
+      <rect
+        x="0.5"
+        y="0.5"
+        width="19"
+        height="19"
+        rx="5.5"
+        fill={disabled ? "#F2F4F7" : "white"}
+      />
       <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" stroke="#D0D5DD" />
     </svg>
   );
