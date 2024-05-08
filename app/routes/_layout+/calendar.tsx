@@ -16,6 +16,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
+import { useNavigate } from "@remix-run/react";
 import {
   PermissionAction,
   PermissionEntity,
@@ -68,6 +69,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 // Calendar Component
 const Calendar = () => {
+  const navigate = useNavigate(); 
   const { title } = useLoaderData<typeof loader>();
   const [error, setError] = useState<string | null>(null);
   const [calendarTitle, setCalendarTitle] = useState(title);
@@ -110,6 +112,12 @@ const Calendar = () => {
     },
     [ripple]
   );
+
+  const handleEventClick = (info:any) => {
+    info.jsEvent.preventDefault();
+    const bookingId = info.event.extendedProps.id; 
+    window.location.href = `/bookings/${bookingId}`;
+  }
 
   return (
     <>
@@ -162,6 +170,7 @@ const Calendar = () => {
               firstDay={1}
               timeZone="local"
               headerToolbar={false}
+              eventClick={handleEventClick}
               events={{
                 url: "/calendar/events",
                 method: "GET",
