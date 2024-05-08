@@ -178,12 +178,10 @@ model Note {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId  String
-  asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String
-  kit     Kit?    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  kitId   String?
 }
 
 enum NoteType {
@@ -210,9 +208,6 @@ model Qr {
 
   organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String?
-
-  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: Cascade)
-  kitId String?
 
   // This batch is used to group QR codes together when they are created as unclaimed and printed
   batch   PrintBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
@@ -625,8 +620,6 @@ model Kit {
   imageExpiration DateTime?
 
   assets  Asset[]
-  qrCodes Qr[]
-  notes   Note[]
   custody KitCustody?
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)

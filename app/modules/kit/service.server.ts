@@ -199,15 +199,6 @@ export async function getKit({
         custody: {
           select: { createdAt: true, custodian: true },
         },
-        notes: {
-          orderBy: { createdAt: "desc" },
-          include: {
-            user: {
-              select: { firstName: true, lastName: true },
-            },
-          },
-        },
-        qrCodes: true,
         organization: {
           select: { currency: true },
         },

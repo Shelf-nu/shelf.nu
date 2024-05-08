@@ -33,8 +33,6 @@ import {
   getAssetsForKits,
   getKit,
 } from "~/modules/kit/service.server";
-import { getScanByQrId } from "~/modules/scan/service.server";
-import { parseScanData } from "~/modules/scan/utils.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
@@ -42,7 +40,6 @@ import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams, parseData } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -87,26 +84,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }),
     ]);
 
-    /** We get the first QR code(for now we can only have 1)
-     * And using the ID of that qr code, we find the latest scan
-     */
-    const lastScan = kit.qrCodes[0]?.id
-      ? parseScanData({
-          scan: (await getScanByQrId({ qrId: kit.qrCodes[0].id })) ?? null,
-          userId,
-          request,
-        })
-      : null;
-
-    const notes = kit.notes.map((note) => ({
-      ...note,
-      dateDisplay: getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(note.createdAt),
-      content: parseMarkdownToReact(note.content),
-    }));
-
     let custody = null;
     if (kit.custody) {
       const date = new Date(kit.custody.createdAt);
@@ -135,9 +112,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         kit: {
           ...kit,
           custody,
-          notes,
         },
-        lastScan,
         header,
         ...assets,
         modelName,
