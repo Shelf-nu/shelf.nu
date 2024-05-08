@@ -821,6 +821,7 @@ export async function getBookingsForCalendar(params: {
           end: (booking.to as Date).toISOString(),
           extendedProps: {
             status: booking.status,
+            id: booking.id,
           },
         };
       });
