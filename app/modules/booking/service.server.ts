@@ -10,6 +10,7 @@ import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { calcTimeDifference } from "~/utils/date-fns";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -24,7 +25,7 @@ import {
   deletedBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import type { ClientHint, SchedulerData } from "./types";
+import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
 import { createNotes } from "../asset/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 
@@ -835,5 +836,84 @@ export async function getBookingsForCalendar(params: {
       additionalData: { ...params },
       label,
     });
+  }
+}
+export async function createNotesForBookingUpdate(
+  intent: BookingUpdateIntent,
+  booking: Booking & { assets: Pick<Asset, "id">[] },
+  user: { firstName: string; lastName: string; id: string }
+) {
+  switch (intent) {
+    case "checkOut":
+      await createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
+          booking.name
+        }](/bookings/${booking.id})**.`,
+        type: "UPDATE",
+        userId: user.id,
+        assetIds: booking.assets.map((a) => a.id),
+      });
+      break;
+    case "checkIn":
+      /** Create check-in notes for all assets */
+      await createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
+          booking.name
+        }](/bookings/${booking.id})**.`,
+        type: "UPDATE",
+        userId: user.id,
+        assetIds: booking.assets.map((a) => a.id),
+      });
+      break;
+    default:
+      break;
+  }
+}
+
+export function sendBookingUpdateNotification(
+  intent: BookingUpdateIntent,
+  senderId: string
+) {
+  /** The cases that are not covered here is because the action already reutns within the switch and takes care of the notification */
+  switch (intent) {
+    case "save":
+      sendNotification({
+        title: "Booking saved",
+        message: "Your booking has been saved successfully",
+        icon: { name: "success", variant: "success" },
+        senderId,
+      });
+      break;
+    case "reserve":
+      /** Send reserved notification */
+      sendNotification({
+        title: "Booking reserved",
+        message: "Your booking has been reserved successfully",
+        icon: { name: "success", variant: "success" },
+        senderId,
+      });
+
+      break;
+
+    case "checkOut":
+      sendNotification({
+        title: "Booking checked-out",
+        message: "Your booking has been checked-out successfully",
+        icon: { name: "success", variant: "success" },
+        senderId,
+      });
+
+      break;
+    case "checkIn":
+      sendNotification({
+        title: "Booking checked-in",
+        message: "Your booking has been checked-in successfully",
+        icon: { name: "success", variant: "success" },
+        senderId,
+      });
+      break;
+
+    default:
+      break;
   }
 }
