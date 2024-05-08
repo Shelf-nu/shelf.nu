@@ -58,11 +58,11 @@
 }
 
 .fc-event:hover {
-  @apply bg-blue-700;
+  @apply bg-blue-700 cursor-pointer;
 }
 
 .fc-event:hover .fc-event-title {
-  @apply text-white cursor-pointer;
+  @apply text-white;
 }
 
 .fc-day-today {
@@ -75,4 +75,8 @@
 .fc-theme-standard td,
 .fc-theme-standard th {
   @apply border border-[#EAECF0];
+}
+
+.fullcalendar-event-hover {
+  transition: all 0.3s; /* Optional: smooth transition */
 }
