@@ -24,3 +24,13 @@ export interface SchedulerData {
   hints: ClientHint;
   eventType: bookingSchedulerEventsEnum;
 }
+
+export type BookingUpdateIntent =
+  | "save"
+  | "reserve"
+  | "delete"
+  | "removeAsset"
+  | "checkOut"
+  | "checkIn"
+  | "archive"
+  | "cancel";
