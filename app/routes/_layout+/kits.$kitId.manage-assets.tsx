@@ -212,12 +212,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     /**
-     * If as kit is in custody then the assets added to kit will also inherit the status
+     * If a kit is in custody then the assets added to kit will also inherit the status
      */
     const assetsToInheritStatus = newlyAddedAssets.filter(
       (asset) => !asset.custody
     );
-
     if (
       kit.custody &&
       kit.custody.custodian.id &&
@@ -240,6 +239,32 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         ...assetsToInheritStatus.map((asset) =>
           createNote({
             content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${kit.custody?.custodian.name.trim()}** custody over **${asset.title.trim()}**`,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          })
+        ),
+      ]);
+    }
+
+    /**
+     * If a kit is in custody and some assets are removed,
+     * then we have to make the removed assets Available
+     */
+    if (removedAssets.length && kit.custody?.custodian.id) {
+      await Promise.all([
+        ...removedAssets.map((asset) =>
+          db.asset.update({
+            where: { id: asset.id },
+            data: {
+              status: AssetStatus.AVAILABLE,
+              custody: { delete: true },
+            },
+          })
+        ),
+        ...removedAssets.map((asset) =>
+          createNote({
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${kit.custody?.custodian.name.trim()}'s** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,

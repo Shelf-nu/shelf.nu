@@ -1,15 +1,16 @@
-import type { Prisma } from "@prisma/client";
+import { AssetStatus, type Prisma } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
   ActionFunctionArgs,
 } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ChevronRight } from "~/components/icons/library";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
+import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import ContextualModal from "~/components/layout/contextual-modal";
@@ -23,7 +24,9 @@ import { Card } from "~/components/shared/card";
 import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
+import { db } from "~/database/db.server";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { createNote } from "~/modules/asset/service.server";
 import {
   deleteKit,
   deleteKitImage,
@@ -32,17 +35,13 @@ import {
 } from "~/modules/kit/service.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
+import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import {
-  assertIsDelete,
-  data,
-  error,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import {
   PermissionAction,
@@ -167,8 +166,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    assertIsDelete(request);
-
     const { organizationId } = await requirePermission({
       userId,
       request,
@@ -176,25 +173,86 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.delete,
     });
 
-    const { image } = parseData(
-      await request.formData(),
-      z.object({ image: z.string().optional() })
+    const user = await getUserByID(userId);
+
+    const { intent, image } = parseData(
+      await request.clone().formData(),
+      z.object({
+        image: z.string().optional(),
+        intent: z.enum(["removeAsset", "delete"]),
+      }),
+      { additionalData: { userId, organizationId, kitId } }
     );
 
-    await deleteKit({ id: kitId, organizationId });
+    switch (intent) {
+      case "delete": {
+        await deleteKit({ id: kitId, organizationId });
 
-    if (image) {
-      await deleteKitImage({ url: image });
+        if (image) {
+          await deleteKitImage({ url: image });
+        }
+
+        sendNotification({
+          title: "Kit deleted",
+          message: "Your kit has been deleted successfully",
+          icon: { name: "trash", variant: "error" },
+          senderId: authSession.userId,
+        });
+
+        return redirect("/kits");
+      }
+      case "removeAsset": {
+        const { assetId } = parseData(
+          await request.formData(),
+          z.object({
+            assetId: z.string(),
+          }),
+          { additionalData: { userId, organizationId, kitId } }
+        );
+
+        const kit = await db.kit.update({
+          where: { id: kitId },
+          data: {
+            assets: { disconnect: { id: assetId } },
+          },
+          select: { name: true, custody: { select: { custodianId: true } } },
+        });
+
+        /**
+         * If kit was in custody then we have to make the asset available
+         */
+        if (kit.custody?.custodianId) {
+          await db.asset.update({
+            where: { id: assetId },
+            data: {
+              status: AssetStatus.AVAILABLE,
+              custody: { delete: true },
+            },
+          });
+        }
+
+        await createNote({
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** removed asset from **[${kit.name.trim()}](/kits/${kitId})**`,
+          type: "UPDATE",
+          userId,
+          assetId,
+        });
+
+        sendNotification({
+          title: "Asset removed",
+          message: "Your asset has been removed from the kit",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ kit }));
+      }
+
+      default: {
+        checkExhaustiveSwitch(intent);
+        return json(data(null));
+      }
     }
-
-    sendNotification({
-      title: "Kit deleted",
-      message: "Your kit has been deleted successfully",
-      icon: { name: "trash", variant: "error" },
-      senderId: authSession.userId,
-    });
-
-    return redirect("/kits");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
     return json(error(reason), { status: reason.status });
@@ -202,7 +260,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function KitDetails() {
-  const navigate = useNavigate();
   const { kit, items } = useLoaderData<typeof loader>();
 
   const isSelfService = useUserIsSelfService();
@@ -291,7 +348,6 @@ export default function KitDetails() {
             className="overflow-x-visible !rounded-none md:overflow-x-auto md:!rounded-b"
             ItemComponent={ListContent}
             hideFirstHeaderColumn
-            navigate={(itemId) => navigate(`/assets/${itemId}`)}
             customEmptyStateContent={{
               title: "Not assets in kit",
               text: "Start by adding your first asset.",
@@ -344,7 +400,13 @@ function ListContent({
               />
             </div>
             <div className="flex flex-row items-center gap-2 md:flex-col md:items-start md:gap-0">
-              <div className="font-medium">{title}</div>
+              <Button
+                to={`/assets/${item.id}`}
+                variant="link"
+                className="text-gray-900 hover:text-gray-700"
+              >
+                {item.title}
+              </Button>
               <div className="block md:hidden">
                 {category ? (
                   <Badge color={category.color} withDot={false}>
@@ -384,7 +446,9 @@ function ListContent({
         ) : null}
       </Td>
 
-      <Td>{""}</Td>
+      <Td className="pr-4 text-right">
+        <AssetRowActionsDropdown asset={item} />
+      </Td>
     </>
   );
 }

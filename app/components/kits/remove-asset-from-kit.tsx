@@ -1,6 +1,6 @@
-import type { Kit } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 import { Form } from "@remix-run/react";
-import { TrashIcon } from "../icons/library";
+import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 import {
   AlertDialog,
@@ -13,24 +13,17 @@ import {
   AlertDialogTrigger,
 } from "../shared/modal";
 
-type DeleteKitProps = {
-  kit: {
-    name: Kit["name"];
-    image: Kit["image"];
-  };
-};
-
-export default function DeleteKit({ kit }: DeleteKitProps) {
+export default function RemoveAssetFromKit({ asset }: { asset: Asset }) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
           variant="link"
           icon="trash"
-          className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
+          className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
           width="full"
         >
-          Delete
+          Remove
         </Button>
       </AlertDialogTrigger>
 
@@ -38,28 +31,26 @@ export default function DeleteKit({ kit }: DeleteKitProps) {
         <AlertDialogHeader>
           <div className="mx-auto md:m-0">
             <span className="flex size-12 items-center justify-center rounded-full bg-error-50 p-2 text-error-600">
-              <TrashIcon />
+              <Icon icon="trash" />
             </span>
           </div>
-          <AlertDialogTitle>Delete {kit.name}</AlertDialogTitle>
+          <AlertDialogTitle>Remove "{asset.title}" from kit</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete this kit? This action cannot be
-            undone.
+            Are you sure you want to remove this asset from the kit? Asset will
+            lose any status that is inherited by the kit.
           </AlertDialogDescription>
         </AlertDialogHeader>
+
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
               <Button variant="secondary">Cancel</Button>
             </AlertDialogCancel>
 
-            <Form method="delete">
-              {kit.image && (
-                <input type="hidden" value={kit.image} name="image" />
-              )}
-              <input type="hidden" value="delete" name="intent" />
-              <Button className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800">
-                Delete
+            <Form method="post">
+              <input type="hidden" name="assetId" value={asset.id} />
+              <Button name="intent" value="removeAsset">
+                Remove
               </Button>
             </Form>
           </div>
