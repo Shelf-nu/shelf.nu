@@ -81,7 +81,11 @@ function ConditionalActionsDropdown() {
           onClick={() => setOpen(!open)}
           asChild
         >
-          <Button variant="secondary">Actions</Button>
+          <Button variant="secondary">
+            <span className="flex items-center gap-2">
+              Actions <ChevronRight className="chev" />
+            </span>
+          </Button>
         </DropdownMenuTrigger>
 
         {/* using custom dropdown menu trigger on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
@@ -90,7 +94,9 @@ function ConditionalActionsDropdown() {
           className="sm:hidden"
           onClick={() => setOpen(true)}
         >
-          Actions
+          <span className="flex items-center gap-2">
+            Actions <ChevronRight className="chev" />
+          </span>
         </Button>
 
         {open && (

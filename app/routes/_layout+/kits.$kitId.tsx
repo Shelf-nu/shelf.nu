@@ -17,7 +17,6 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
-import { ScanDetails } from "~/components/location/scan-details";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
@@ -245,14 +244,7 @@ export default function KitDetails() {
       <Header
         subHeading={<KitStatusBadge status={kit.status} availableToBook />}
       >
-        {!isSelfService ? (
-          <>
-            <Button to="qr" variant="secondary" icon="barcode">
-              View QR code
-            </Button>
-            <ActionsDropdown />
-          </>
-        ) : null}
+        {!isSelfService ? <ActionsDropdown /> : null}
       </Header>
 
       <ContextualModal />
@@ -306,8 +298,6 @@ export default function KitDetails() {
             <span className="text-xs font-medium text-gray-600">ID</span>
             <div className="max-w-[250px] font-medium">{kit.id}</div>
           </Card>
-
-          {!isSelfService ? <ScanDetails /> : null}
         </div>
 
         <div className="w-full lg:ml-6">

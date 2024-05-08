@@ -7,11 +7,14 @@ import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { kitsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
+import { ChevronRight } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { Image } from "~/components/shared/image";
 import {
   Tooltip,
   TooltipContent,
@@ -23,8 +26,8 @@ import { db } from "~/database/db.server";
 import {
   createBulkKitChangeNotes,
   createNote,
+  getPaginatedAndFilterableAssets,
 } from "~/modules/asset/service.server";
-import { getAssetsForKits } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -68,9 +71,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             label: "Kit",
           });
         }),
-      getAssetsForKits({
-        organizationId,
+      getPaginatedAndFilterableAssets({
         request,
+        organizationId,
+        excludeSearchFromView: true,
       }),
     ]);
 
@@ -92,12 +96,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         kit,
         ...assets,
-        items: assets.items.map((asset) => ({
+        items: assets.assets.map((asset) => ({
           ...asset,
-          isInOtherCustody: Boolean(
-            asset?.custody?.id && asset.kitId !== kit.id
-          ),
+          isInOtherCustody: Boolean(asset?.custody && asset.kitId !== kit.id),
         })),
+        totalItems: assets.totalAssets,
         modelName,
         showModal: true,
         noScroll: true,
@@ -304,13 +307,61 @@ export default function ManageAssetsInKit() {
       <Header
         {...header}
         hideBreadcrumbs={true}
-        classNames="text-left -mx-6 [&>div]:px-6 -mt-6"
+        classNames="text-left mb-3 -mx-6 [&>div]:px-6 -mt-6"
       />
 
-      <Filters
-        className="-mx-6 justify-between !border-t-0 border-b px-6 md:flex"
-        searchClassName="!w-full"
-      />
+      <div className="-mx-6 border-b px-6 md:pb-3">
+        <Filters className="md:border-0 md:p-0"></Filters>
+      </div>
+
+      <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
+        <DynamicDropdown
+          trigger={
+            <div className="flex h-6 cursor-pointer items-center gap-2">
+              Categories <ChevronRight className="hidden rotate-90 md:inline" />
+            </div>
+          }
+          model={{ name: "category", queryKey: "name" }}
+          label="Filter by category"
+          initialDataKey="categories"
+          countKey="totalCategories"
+        />
+        <DynamicDropdown
+          trigger={
+            <div className="flex h-6 cursor-pointer items-center gap-2">
+              Tags <ChevronRight className="hidden rotate-90 md:inline" />
+            </div>
+          }
+          model={{ name: "tag", queryKey: "name" }}
+          label="Filter by tags"
+          initialDataKey="tags"
+          countKey="totalTags"
+        />
+        <DynamicDropdown
+          trigger={
+            <div className="flex h-6 cursor-pointer items-center gap-2">
+              Locations <ChevronRight className="hidden rotate-90 md:inline" />
+            </div>
+          }
+          model={{ name: "location", queryKey: "name" }}
+          label="Filter by Location"
+          initialDataKey="locations"
+          countKey="totalLocations"
+          renderItem={({ metadata }) => (
+            <div className="flex items-center gap-2">
+              <Image
+                imageId={metadata.imageId}
+                alt="img"
+                className={tw(
+                  "size-6 rounded-[2px] object-cover",
+                  metadata.description ? "rounded-b-none border-b-0" : ""
+                )}
+              />
+              <div>{metadata.name}</div>
+            </div>
+          )}
+        />
+      </div>
 
       {/* Body of the modal*/}
       <div className="-mx-6 flex-1 overflow-y-auto px-5 md:px-0">
