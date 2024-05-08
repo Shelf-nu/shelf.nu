@@ -10,11 +10,6 @@ export function useMainMenuItems() {
       label: "Dashboard",
     },
     {
-      icon: <Icon icon="calendar" />,
-      to: "calendar",
-      label: "Calendar",
-    },
-    {
       icon: <Icon icon="asset" />,
       to: "assets",
       label: "Assets",
@@ -33,6 +28,11 @@ export function useMainMenuItems() {
       icon: <Icon icon="location" />,
       to: "locations",
       label: "Locations",
+    },
+    {
+      icon: <Icon icon="calendar" />,
+      to: "calendar",
+      label: "Calendar",
     },
     {
       icon: <Icon icon="calendar" />,
