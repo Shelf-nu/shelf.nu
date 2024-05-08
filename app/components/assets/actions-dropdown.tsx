@@ -27,6 +27,10 @@ const ConditionalActionsDropdown = () => {
 
   const [dropdownRef, open, setOpen] = useControlledDropdownMenu(defaultOpen);
 
+  const assetIsPartOfUnavailableKit = Boolean(
+    asset.kit && asset.kit.status !== "AVAILABLE"
+  );
+
   useEffect(() => {
     if (defaultOpen && !defaultApplied) {
       setOpen(true);
@@ -106,10 +110,15 @@ const ConditionalActionsDropdown = () => {
                   to="release-custody"
                   role="link"
                   variant="link"
-                  className="justify-start whitespace-nowrap
-                px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className={tw(
+                    "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700",
+                    assetIsPartOfUnavailableKit
+                      ? "pointer-events-none cursor-not-allowed opacity-50"
+                      : ""
+                  )}
                   width="full"
                   onClick={() => setOpen(false)}
+                  disabled={assetIsPartOfUnavailableKit}
                 >
                   <span className="flex items-center gap-1">
                     <UserXIcon /> Release Custody
@@ -192,7 +201,7 @@ const ConditionalActionsDropdown = () => {
               onSelect={(e) => {
                 e.preventDefault();
               }}
-              disabled={assetIsCheckedOut}
+              disabled={assetIsCheckedOut || assetIsPartOfUnavailableKit}
             >
               <DeleteAsset asset={asset} />
             </DropdownMenuItem>
@@ -210,6 +219,11 @@ const ConditionalActionsDropdown = () => {
             {assetIsCheckedOut ? (
               <div className=" border-t p-2 text-left text-xs">
                 Some actions are disabled due to the asset being checked out.
+              </div>
+            ) : null}
+            {assetIsPartOfUnavailableKit ? (
+              <div className=" border-t p-2 text-left text-xs">
+                Some actions are disabled due to the asset being part of a kit.
               </div>
             ) : null}
           </div>
