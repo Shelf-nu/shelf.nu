@@ -126,21 +126,21 @@ const Calendar = () => {
             <ButtonGroup>
               <Button
                 variant="secondary"
-                className="border-r p-[0.75em] text-[#667085]"
+                className="border-r p-[0.75em] text-gray-500"
                 onClick={() => handleNavigation("prev")}
               >
                 <ChevronLeftIcon />
               </Button>
               <Button
                 variant="secondary"
-                className="border-r px-3 py-2 text-sm font-semibold text-[#344054]"
+                className="border-r px-3 py-2 text-sm font-semibold text-gray-700"
                 onClick={() => handleNavigation("today")}
               >
                 Today
               </Button>
               <Button
                 variant="secondary"
-                className="p-[0.75em] text-[#667085]"
+                className="p-[0.75em] text-gray-500"
                 onClick={() => handleNavigation("next")}
               >
                 <ChevronRightIcon />
