@@ -116,10 +116,10 @@ export default function KitsForm({
             <Input
               disabled={disabled}
               accept="image/png,.png,image/jpeg,.jpg,.jpeg"
-              name="mainImage"
+              name="image"
               type="file"
               onChange={validateFile}
-              label={"Main image"}
+              label="Image"
               hideLabel
               error={fileError}
               className="mt-2"

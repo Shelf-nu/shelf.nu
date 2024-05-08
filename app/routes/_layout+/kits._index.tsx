@@ -124,7 +124,14 @@ export default function KitsIndexPage() {
       <ListContentWrapper>
         <Filters
           slots={{
-            "left-of-search": <StatusFilter statusItems={KitStatus} />,
+            "left-of-search": (
+              <StatusFilter
+                statusItems={{
+                  [KitStatus.AVAILABLE]: KitStatus.AVAILABLE,
+                  [KitStatus.IN_CUSTODY]: KitStatus.IN_CUSTODY,
+                }}
+              />
+            ),
           }}
         >
           <DynamicDropdown

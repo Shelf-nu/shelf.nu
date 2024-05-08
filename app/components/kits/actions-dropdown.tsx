@@ -168,22 +168,6 @@ function ConditionalActionsDropdown() {
                 </span>
               </Button>
             </DropdownMenuItem>
-            <DropdownMenuItem className="px-4 py-1 md:p-0">
-              <Button
-                to="duplicate"
-                role="link"
-                variant="link"
-                className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
-                width="full"
-              >
-                <span
-                  className="flex items-center gap-2"
-                  onClick={() => setOpen(false)}
-                >
-                  <Icon icon="duplicate" /> Duplicate
-                </span>
-              </Button>
-            </DropdownMenuItem>
 
             <DropdownMenuItem
               className="px-4 py-1 md:p-0"
@@ -194,6 +178,11 @@ function ConditionalActionsDropdown() {
             >
               <DeleteKit kit={kit} />
             </DropdownMenuItem>
+            {someAssetIsNotAvailable && !kitCanBeReleased ? (
+              <div className=" border-t p-2 text-left text-xs">
+                Some actions are disabled due to assets not being Available.
+              </div>
+            ) : null}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
