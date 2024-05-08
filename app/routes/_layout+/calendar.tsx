@@ -4,7 +4,7 @@ import FullCalendar from "@fullcalendar/react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import Header from "~/components/layout/header";
@@ -48,7 +48,15 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       title: `Calendar`,
     };
 
-    return json(data({ header }));
+    const currentDate = new Date();
+    const currentMonth = currentDate.toLocaleString("default", {
+      month: "long",
+    });
+    const currentYear = currentDate.getFullYear();
+
+    const title = `${currentMonth} ${currentYear}`;
+
+    return json(data({ header, title }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
@@ -60,8 +68,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 // Calendar Component
 const Calendar = () => {
+  const { title } = useLoaderData<typeof loader>();
   const [error, setError] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
+  const [calendarTitle, setCalendarTitle] = useState(title);
   const calendarRef = useRef<FullCalendar>(null);
   const ripple = useRef<HTMLDivElement>(null);
 
@@ -85,7 +94,7 @@ const Calendar = () => {
         month: "long",
       });
       const currentYear = currentDate.getFullYear();
-      setTitle(`${currentMonth} ${currentYear}`);
+      setCalendarTitle(`${currentMonth} ${currentYear}`);
     }
   };
 
@@ -102,17 +111,13 @@ const Calendar = () => {
     [ripple]
   );
 
-  useEffect(() => {
-    updateTitle();
-  }, []);
-
   return (
     <>
       <Header hidePageDescription={true} />
       <div className="mt-4">
         <div className="flex items-center justify-between gap-4 rounded-t-md border border-DEFAULT px-4 py-3">
           <div className="text-left font-sans text-lg font-semibold leading-[20px] text-[#101828]">
-            {title}
+            {calendarTitle}
           </div>
           <div className="flex items-center">
             <div ref={ripple} className="mr-3 flex justify-center">
