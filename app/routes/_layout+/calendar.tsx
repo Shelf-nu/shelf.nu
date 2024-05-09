@@ -160,6 +160,11 @@ const Calendar = () => {
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
+              eventTimeFormat={{
+                hour: "numeric",
+                minute: "2-digit",
+                meridiem: "short",
+              }}
               loading={toggleSpinner}
             />
           )}

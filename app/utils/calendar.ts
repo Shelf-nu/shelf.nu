@@ -19,7 +19,7 @@ export function getStatusClasses(
   ];
   if (oneDayEvent) {
     classes.push(
-      "!bg-transparent hover:!bg-blue-700 [&>div.fc-daygrid-event-dot]:hover:!border-white"
+      "!bg-transparent hover:!bg-blue-700 [&>div.fc-daygrid-event-dot]:hover:!border-white [&>.fc-event-title]:!truncate"
     );
   }
   let statusClasses: string[] = [];

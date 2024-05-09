@@ -10,7 +10,7 @@
 }
 
 .fc-event-time {
-  @apply hidden !important;
+  @apply font-normal !important;
 }
 
 .fc-next-button {

@@ -9,7 +9,6 @@ import {
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
-import { getDateTimeFormat } from "~/utils/client-hints";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -812,12 +811,8 @@ export async function getBookingsForCalendar(params: {
           ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
           : booking.custodianTeamMember?.name;
 
-        const start = getDateTimeFormat(request, {
-          timeStyle: "short",
-        }).format(booking.from as Date);
-
         return {
-          title: `${start} | ${booking.name} | ${custodianName}`,
+          title: `| ${booking.name} | ${custodianName}`,
           start: (booking.from as Date).toISOString(),
           end: (booking.to as Date).toISOString(),
           url: `/bookings/${booking.id}`,
