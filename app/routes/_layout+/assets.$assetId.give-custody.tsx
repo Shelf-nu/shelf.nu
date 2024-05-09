@@ -269,6 +269,7 @@ export default function Custody() {
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
               placeholder="Select a team member"
+              allowClear
               closeOnSelect
               valueExtractor={(item) =>
                 JSON.stringify({ id: item.id, name: item.name })
