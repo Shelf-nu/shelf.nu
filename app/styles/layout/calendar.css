@@ -43,3 +43,7 @@
 .fc-theme-standard th {
   @apply border border-[#EAECF0];
 }
+
+.fc-daygrid-day-frame {
+  @apply min-h-[128px] !important;
+}

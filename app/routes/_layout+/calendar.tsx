@@ -165,6 +165,7 @@ const Calendar = () => {
                 minute: "2-digit",
                 meridiem: "short",
               }}
+              height="auto"
               loading={toggleSpinner}
             />
           )}
