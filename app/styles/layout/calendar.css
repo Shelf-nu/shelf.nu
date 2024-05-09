@@ -76,7 +76,3 @@
 .fc-theme-standard th {
   @apply border border-[#EAECF0];
 }
-
-.fullcalendar-event-hover {
-  transition: all 0.3s; /* Optional: smooth transition */
-}

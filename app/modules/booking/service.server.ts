@@ -812,7 +812,6 @@ export async function getBookingsForCalendar(params: {
           : booking.custodianTeamMember?.name;
 
         const start = getDateTimeFormat(request, {
-          dateStyle: "short",
           timeStyle: "short",
         }).format(booking.from as Date);
 
