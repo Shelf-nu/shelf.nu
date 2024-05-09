@@ -5,12 +5,12 @@
   border-top-right-radius: 0.5rem !important;
 }
 
-.fc-event-time {
-  @apply hidden !important;
+.fc {
+  @apply bg-white;
 }
 
-.fc-event-title {
-  @apply ml-1 !important;
+.fc-event-time {
+  @apply hidden !important;
 }
 
 .fc-next-button {

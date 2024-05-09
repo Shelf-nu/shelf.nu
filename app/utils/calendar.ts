@@ -7,6 +7,7 @@ export function getStatusClasses(
   /** Default classes */
   const classes = [
     "text-sm",
+    "!mx-1",
     "transition-colors",
     "!rounded-[4px]",
     "!font-normal",

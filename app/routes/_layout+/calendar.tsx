@@ -68,7 +68,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 // Calendar Component
 const Calendar = () => {
   const { title } = useLoaderData<typeof loader>();
-  const [error, setError] = useState<string | null>(null);
+  const [_error, setError] = useState<string | null>(null);
   const [calendarTitle, setCalendarTitle] = useState(title);
   const calendarRef = useRef<FullCalendar>(null);
   const ripple = useRef<HTMLDivElement>(null);
@@ -114,7 +114,7 @@ const Calendar = () => {
     <>
       <Header hidePageDescription={true} />
       <div className="mt-4">
-        <div className="flex items-center justify-between gap-4 rounded-t-md border border-DEFAULT px-4 py-3">
+        <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
           <div className="text-left font-sans text-lg font-semibold leading-[20px] text-[#101828]">
             {calendarTitle}
           </div>
@@ -147,12 +147,6 @@ const Calendar = () => {
             </ButtonGroup>
           </div>
         </div>
-        {/* @TODO this needs to be further tested */}
-        {error && (
-          <div className="relative rounded border border-red-400 bg-red-100 px-4 py-3 text-red-700">
-            {error}
-          </div>
-        )}
         <ClientOnly fallback={<FallbackLoading className="size-[150px]" />}>
           {() => (
             <FullCalendar
