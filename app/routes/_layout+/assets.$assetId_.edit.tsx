@@ -183,7 +183,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       id,
       title,
       description,
-      categoryId: category,
+      categoryId: category ? category : "uncategorized",
       tags,
       newLocationId,
       currentLocationId,
