@@ -14,7 +14,7 @@ export const LocationSelect = () => {
 
   const { asset } = useLoaderData<typeof loader>();
 
-  const [locationId, setLocationId] = useState(asset.locationId || undefined);
+  const [locationId, setLocationId] = useState(asset.locationId ?? undefined);
   const disabled = isFormProcessing(navigation.state);
 
   return (
@@ -28,7 +28,7 @@ export const LocationSelect = () => {
         <DynamicSelect
           disabled={disabled}
           fieldName="newLocationId"
-          defaultValue={locationId || undefined}
+          defaultValue={locationId}
           model={{ name: "location", queryKey: "name" }}
           label="Locations"
           initialDataKey="locations"

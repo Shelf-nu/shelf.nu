@@ -6,7 +6,7 @@ import { json, redirect } from "@remix-run/node";
 import {
   Form,
   Link,
-  useActionData,
+  // useActionData,
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
@@ -33,7 +33,13 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import { sendEmail } from "~/utils/mail.server";
 import {
   PermissionAction,
@@ -94,6 +100,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/assets/${assetId}`);
     }
 
+    const searchParams = getCurrentSearchParams(request);
+
     /** We get all the team members that are part of the user's personal organization */
     const teamMembers = await db.teamMember
       .findMany({
@@ -107,7 +115,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         orderBy: {
           userId: "asc",
         },
-        take: 12,
+        take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -392,7 +400,7 @@ export function links() {
 export default function Custody() {
   const { asset } = useLoaderData<typeof loader>();
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
-  const actionData = useActionData<typeof action>();
+  // const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const [assignCustody] = useAtom(assignCustodyUser);
@@ -426,6 +434,7 @@ export default function Custody() {
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
               placeholder="Select a team member"
+              allowClear
               closeOnSelect
               valueExtractor={(item) =>
                 JSON.stringify({ id: item.id, name: item.name })

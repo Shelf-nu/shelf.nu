@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
 import {
   Popover,
@@ -36,6 +36,12 @@ type Props = ModelFilterProps & {
   placeholder?: string;
   closeOnSelect?: boolean;
   valueExtractor?: (item: ModelFilterItem) => string;
+  excludeItems?: string[];
+  onChange?: ((value: string) => void) | null;
+  /**
+   * Allow item to unselect on clicking again
+   */
+  allowClear?: boolean;
 };
 
 export default function DynamicSelect({
@@ -55,6 +61,10 @@ export default function DynamicSelect({
   placeholder = `Select ${model.name}`,
   closeOnSelect = false,
   valueExtractor,
+  selectionMode = "none",
+  excludeItems,
+  onChange = null,
+  allowClear,
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -79,14 +89,43 @@ export default function DynamicSelect({
     model,
     countKey,
     initialDataKey,
-    selectionMode: "none",
+    selectionMode,
     valueExtractor,
   });
+
+  const itemsToRender = useMemo(
+    () =>
+      excludeItems ? items.filter((i) => !excludeItems.includes(i.id)) : items,
+    [excludeItems, items]
+  );
+
+  function handleItemChange(id: string) {
+    if (allowClear && selectedValue === id) {
+      setSelectedValue(undefined);
+    } else {
+      setSelectedValue(id);
+      handleSelectItemChange(id);
+    }
+
+    onChange && onChange(id);
+
+    if (closeOnSelect) {
+      setIsPopoverOpen(false);
+    }
+  }
+
+  useEffect(
+    function updateSelectedIfDefaultValueChange() {
+      setSelectedValue(defaultValue);
+    },
+    [defaultValue]
+  );
 
   return (
     <>
       <div className="relative w-full">
         <input
+          key={`${selectedValue}-${defaultValue}`}
           type="hidden"
           value={selectedValue}
           name={fieldName ?? model.name}
@@ -170,7 +209,7 @@ export default function DynamicSelect({
                     modelName={model.name}
                   />
                 )}
-                {items.map((item) => (
+                {itemsToRender.map((item) => (
                   <div
                     key={item.id}
                     className={tw(
@@ -178,11 +217,7 @@ export default function DynamicSelect({
                       item.id === selectedValue && "bg-gray-100"
                     )}
                     onClick={() => {
-                      setSelectedValue(item.id);
-                      handleSelectItemChange(item.id);
-                      if (closeOnSelect) {
-                        setIsPopoverOpen(false);
-                      }
+                      handleItemChange(item.id);
                     }}
                   >
                     <div>

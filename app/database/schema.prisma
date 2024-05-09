@@ -1,6 +1,6 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
@@ -138,6 +138,8 @@ model Category {
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String
 
+  customFields CustomField[]
+
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String
 
@@ -186,6 +188,7 @@ enum NoteType {
 }
 
 model Qr {
+  // @TODO we might need to change this to shorten the length of the id
   id String @id @default(cuid())
 
   // Version of the QR code based on spec from Denso wave
@@ -198,16 +201,40 @@ model Qr {
   asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
   assetId String?
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  userId String
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  userId String?
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
-  organizationId String
+  organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String?
+
+
+  
+  // This batch is used to group QR codes together when they are created as unclaimed and printed
+  batch   PrintBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  batchId String? 
+
   // DateTime
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   scans          Scan[]
 }
+
+model PrintBatch {
+  id String @id @default(cuid())
+
+  name String @unique
+
+  // This should be set to true, when QR code is exported for print
+  printed Boolean @default(false)
+
+  // Relationships
+  qrCodes Qr[]
+
+  // DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 
 // Stores a report for when a an asset is reported as found
 model ReportFound {
@@ -312,7 +339,7 @@ model TeamMember {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
-  bookings   Booking[]
+  bookings  Booking[]
 }
 
 model Custody {
@@ -472,6 +499,8 @@ model CustomField {
   createdBy User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId    String
 
+  categories Category[]
+
   // Datetime
   createdAt               DateTime                @default(now())
   updatedAt               DateTime                @updatedAt
@@ -576,6 +605,7 @@ model Announcement {
   updatedAt DateTime @updatedAt
 }
 
+
 enum BookingStatus {
   DRAFT
   RESERVED
@@ -592,13 +622,13 @@ model Booking {
   name   String
   status BookingStatus @default(DRAFT)
 
-  activeSchedulerReference   String?
+  activeSchedulerReference String?
 
   // Relationships
   creator   User   @relation("creator", fields: [creatorId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   creatorId String
 
-  custodianUser   User?  @relation("custodian", fields: [custodianUserId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  custodianUser   User?   @relation("custodian", fields: [custodianUserId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   custodianUserId String?
 
   custodianTeamMember   TeamMember? @relation(fields: [custodianTeamMemberId], references: [id], onDelete: Cascade, onUpdate: Cascade)

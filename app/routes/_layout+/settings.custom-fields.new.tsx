@@ -8,6 +8,7 @@ import {
   NewCustomFieldFormSchema,
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
+import { getAllEntriesForCreateAndEdit } from "~/modules/asset/service.server";
 
 import { createCustomField } from "~/modules/custom-field/service.server";
 import { assertUserCanCreateMoreCustomFields } from "~/modules/tier/service.server";
@@ -41,6 +42,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
     });
 
+    const { categories, totalCategories } = await getAllEntriesForCreateAndEdit(
+      {
+        organizationId,
+        request,
+      }
+    );
+
     const header = {
       title,
     };
@@ -48,6 +56,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         header,
+        categories,
+        totalCategories,
       })
     );
   } catch (cause) {
@@ -86,7 +96,8 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       NewCustomFieldFormSchema
     );
 
-    const { name, helpText, required, type, active, options } = payload;
+    const { name, helpText, required, type, active, options, categories } =
+      payload;
 
     await createCustomField({
       name,
@@ -97,6 +108,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       organizationId,
       userId: authSession.userId,
       options,
+      categories,
     });
 
     sendNotification({

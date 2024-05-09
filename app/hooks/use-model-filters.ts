@@ -60,7 +60,6 @@ export function useModelFilters({
     if (searchQuery && fetcher.data && !fetcher.data.error) {
       return itemsWithExtractedValue(fetcher.data.filters, valueExtractor);
     }
-
     return itemsWithExtractedValue(initialData[initialDataKey], valueExtractor);
   }, [fetcher.data, initialData, initialDataKey, searchQuery, valueExtractor]);
 
@@ -85,14 +84,20 @@ export function useModelFilters({
         } else {
           setSelectedItems((prev) => [...prev, value]);
           /** Otherwise, add the item in search params */
-          setSearchParams((prev) => {
-            if (selectionMode === "append") {
-              prev.append(model.name, value);
-            } else {
-              prev.set(model.name, value);
+          setSearchParams(
+            (prev) => {
+              if (selectionMode === "append") {
+                prev.append(model.name, value);
+              } else {
+                prev.set(model.name, value);
+              }
+              return prev;
+            },
+            {
+              // Prevent scroll reset when adding search params as this causes navigation and will send the user to the top of the page
+              preventScrollReset: true,
             }
-            return prev;
-          });
+          );
         }
       }
     },

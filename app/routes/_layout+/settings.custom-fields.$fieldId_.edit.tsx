@@ -14,6 +14,7 @@ import {
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { getAllEntriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   countActiveCustomFields,
   getCustomField,
@@ -48,6 +49,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const customField = await getCustomField({ organizationId, id });
 
+    const { categories, totalCategories } = await getAllEntriesForCreateAndEdit(
+      {
+        organizationId,
+        request,
+        defaults: { category: customField.categories.map((c) => c.id) },
+      }
+    );
+
     const header: HeaderData = {
       title: `Edit | ${customField.name}`,
     };
@@ -56,6 +65,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         customField,
         header,
+        categories,
+        totalCategories,
       })
     );
   } catch (cause) {
@@ -92,7 +103,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       NewCustomFieldFormSchema
     );
 
-    const { name, helpText, active, required, options } = payload;
+    const { name, helpText, active, required, options, categories } = payload;
 
     /** If they are activating a field, we have to make sure that they are not already at the limit */
     if (active) {
@@ -140,6 +151,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       active,
       required,
       options,
+      categories,
     });
 
     sendNotification({
@@ -177,6 +189,7 @@ export default function CustomFieldEditPage() {
           type={customField.type}
           active={customField.active}
           options={customField.options}
+          categories={customField.categories.map((c) => c.id)}
         />
       </div>
     </>

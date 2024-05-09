@@ -19,7 +19,6 @@ export const SearchForm = () => {
 
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
-  const submitButtonRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const label = searchFieldLabel ? searchFieldLabel : `Search by ${singular}`;
@@ -35,6 +34,20 @@ export const SearchForm = () => {
     }
   }
 
+  const debouncedHandleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    const searchQuery = e.target.value;
+    if (!searchQuery) {
+      clearSearch();
+    } else {
+      setSearchParams((prev) => {
+        prev.set("s", searchQuery);
+        return prev;
+      });
+    }
+  };
+
   return (
     <div className="flex w-full md:w-auto">
       <div className="relative flex-1">
@@ -45,21 +58,15 @@ export const SearchForm = () => {
           aria-label={label}
           placeholder={label}
           defaultValue={search || ""}
-          disabled={isSearching}
           hideLabel
-          hasAttachedButton
           className="w-full md:w-auto"
           inputClassName="pr-9"
           ref={searchInputRef}
-          onKeyDown={(e) => {
-            if (e.key == "Enter") {
-              submitButtonRef.current?.click();
-            }
-          }}
+          onChange={debouncedHandleChange}
         />
-        {search ? (
+        {search || isSearching ? (
           <Button
-            icon="x"
+            icon={isSearching ? "spinner" : "x"}
             variant="tertiary"
             disabled={isSearching}
             title="Clear search"
@@ -70,15 +77,6 @@ export const SearchForm = () => {
           <SearchFieldTooltip />
         )}
       </div>
-      <Button
-        icon={isSearching ? "spinner" : "search"}
-        type="submit"
-        variant="secondary"
-        title="Search"
-        disabled={isSearching}
-        attachToInput
-        ref={submitButtonRef}
-      />
     </div>
   );
 };

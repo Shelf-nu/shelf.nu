@@ -108,7 +108,9 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   onClick={toggleMobileNav}
                   title={item.label}
                 >
-                  <i className="icon pl-[2px] text-gray-500">{item.icon}</i>
+                  <i className="icon inline-flex pl-[2px] text-gray-500">
+                    {item.icon}
+                  </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
                     {item.label}
                   </span>
@@ -145,7 +147,9 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   onClick={toggleMobileNav}
                   title={item.label}
                 >
-                  <i className="icon pl-[2px] text-gray-500">{item.icon}</i>
+                  <i className="icon inline-flex pl-[2px] text-gray-500">
+                    {item.icon}
+                  </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
                     {item.label}
                   </span>
@@ -169,7 +173,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     workspaceSwitching ? "pointer-events-none" : ""
                   )}
                 >
-                  <i className="icon pl-[2px] text-gray-500">
+                  <i className="icon inline-flex pl-[2px] text-gray-500">
                     <Icon icon="switch" />
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
