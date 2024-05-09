@@ -8,6 +8,7 @@ import {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import { getStatusClasses } from "~/utils/calendar";
 import { getDateTimeFormat } from "~/utils/client-hints";
 import { calcTimeDifference } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -819,6 +820,8 @@ export async function getBookingsForCalendar(params: {
           title: `${start} | ${booking.name} | ${custodianName}`,
           start: (booking.from as Date).toISOString(),
           end: (booking.to as Date).toISOString(),
+          url: `/bookings/${booking.id}`,
+          classNames: getStatusClasses(booking.status),
           extendedProps: {
             status: booking.status,
             id: booking.id,

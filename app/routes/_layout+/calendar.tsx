@@ -4,7 +4,7 @@ import FullCalendar from "@fullcalendar/react";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useLoaderData, useNavigate } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import Header from "~/components/layout/header";
@@ -13,7 +13,6 @@ import { ButtonGroup } from "~/components/shared/button-group";
 import { Spinner } from "~/components/shared/spinner";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getStatusClass } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -68,7 +67,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 // Calendar Component
 const Calendar = () => {
-  const navigate = useNavigate();
   const { title } = useLoaderData<typeof loader>();
   const [error, setError] = useState<string | null>(null);
   const [calendarTitle, setCalendarTitle] = useState(title);
@@ -111,12 +109,6 @@ const Calendar = () => {
     },
     [ripple]
   );
-
-  const handleEventClick = (info: any) => {
-    info.jsEvent.preventDefault();
-    const bookingId = info.event.extendedProps.id;
-    window.location.href = `/bookings/${bookingId}`;
-  };
 
   return (
     <>
@@ -169,19 +161,12 @@ const Calendar = () => {
               firstDay={1}
               timeZone="local"
               headerToolbar={false}
-              eventClick={handleEventClick}
               events={{
                 url: "/calendar/events",
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
-              loading={(isFetching) => toggleSpinner(isFetching)}
-              eventClassNames={(info) => {
-                const eventClass = getStatusClass(
-                  info.event.extendedProps.status
-                );
-                return [eventClass];
-              }}
+              loading={toggleSpinner}
             />
           )}
         </ClientOnly>

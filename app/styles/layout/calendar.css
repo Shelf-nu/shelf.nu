@@ -25,15 +25,19 @@
   @apply ml-0 rounded-tr-none rounded-br-none border border-gray-400 bg-white text-gray-600 !important;
 }
 
-.completed {
+.fc-event-main {
+  color: inherit !important;
+}
+
+/* .completed {
   @apply bg-green-50 border-green-200;
 }
 
 .completed .fc-event-title {
   @apply text-green-700;
-}
+} */
 
-.ongoing {
+/* .ongoing {
   @apply bg-purple-50 border-purple-200;
 }
 
@@ -43,27 +47,27 @@
 
 .reserved {
   @apply bg-blue-50 border-blue-200;
-}
+} */
 
-.reserved .fc-event-title {
+/* .reserved .fc-event-title {
   @apply text-blue-700;
-}
+} */
 
-.draft {
+/* .draft {
   @apply bg-gray-100 border-gray-600;
 }
 
 .draft .fc-event-title {
   @apply text-gray-700;
-}
+} */
 
-.fc-event:hover {
+/* .fc-event:hover {
   @apply bg-blue-700 cursor-pointer;
-}
+} */
 
-.fc-event:hover .fc-event-title {
+/* .fc-event:hover .fc-event-title {
   @apply text-white;
-}
+} */
 
 .fc-day-today {
   @apply bg-primary-50 border-t-[1.5px] border-t-primary-200 border-l-[1.5px] border-l-primary-200 border-r-[1.5px] border-r-primary-200 border-b-[1.5px] border-b-primary-200 text-primary-700 !important;
