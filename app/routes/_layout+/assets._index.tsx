@@ -155,6 +155,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalTags,
         locations,
         totalLocations,
+        teamMembers,
+        totalTeamMembers,
       },
     ] = await Promise.all([
       getOrganizationTierLimit({
@@ -217,6 +219,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalTags,
         locations,
         totalLocations,
+        teamMembers,
+        totalTeamMembers,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -252,9 +256,15 @@ export default function AssetIndexPage() {
   const hasFiltersToClear = useSearchParamHasValue(
     "category",
     "tag",
-    "location"
+    "location",
+    "teamMember"
   );
-  const clearFilters = useClearValueFromParams("category", "tag", "location");
+  const clearFilters = useClearValueFromParams(
+    "category",
+    "tag",
+    "location",
+    "teamMember"
+  );
   const { canImportAssets } = useLoaderData<typeof loader>();
   const isSelfService = useUserIsSelfService();
 
@@ -298,7 +308,7 @@ export default function AssetIndexPage() {
               </div>
             ) : null}
 
-            <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
+            <div className="flex w-full items-center justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
               <DynamicDropdown
                 trigger={
                   <div className="flex cursor-pointer items-center gap-2">
@@ -346,6 +356,22 @@ export default function AssetIndexPage() {
                     <div>{metadata.name}</div>
                   </div>
                 )}
+              />
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Custodian{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{
+                  name: "teamMember",
+                  queryKey: "name",
+                  deletedAt: null,
+                }}
+                label="Search team members"
+                initialDataKey="teamMembers"
+                countKey="totalTeamMembers"
               />
             </div>
           </div>
