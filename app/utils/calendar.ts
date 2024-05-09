@@ -12,15 +12,10 @@ export function getStatusClasses(
     "!rounded-[4px]",
     "!font-normal",
     "py-[2px] px-[5px]",
-    "hover:bg-blue-700 focus:!bg-blue-700",
-    "hover:!border-blue-700 focus:!border-blue-700",
-    "hover:!text-blue-50 focus:!text-blue-50",
     "hover:cursor-pointer",
   ];
   if (oneDayEvent) {
-    classes.push(
-      "!bg-transparent hover:!bg-blue-700 [&>div.fc-daygrid-event-dot]:hover:!border-white [&>.fc-event-title]:!truncate"
-    );
+    classes.push(" [&>.fc-event-title]:!truncate bg-transparent");
   }
   let statusClasses: string[] = [];
   switch (status) {
@@ -32,6 +27,7 @@ export function getStatusClasses(
         "bg-gray-50",
         "border-gray-200",
         "[&>div.fc-daygrid-event-dot]:!border-gray-700",
+        "hover:!bg-gray-100 focus:!bg-gray-100",
       ];
       break;
     case "RESERVED":
@@ -40,6 +36,7 @@ export function getStatusClasses(
         "bg-blue-50",
         "border-blue-200",
         "[&>div.fc-daygrid-event-dot]:!border-blue-700",
+        "hover:!bg-blue-100 focus:!bg-blue-100",
       ];
       break;
     case "ONGOING":
@@ -48,6 +45,7 @@ export function getStatusClasses(
         "bg-purple-50",
         "border-purple-200",
         "[&>div.fc-daygrid-event-dot]:!border-purple-700",
+        "hover:!bg-purple-100 focus:!bg-purple-100",
       ];
       break;
     case "OVERDUE":
@@ -56,6 +54,7 @@ export function getStatusClasses(
         "bg-warning-50",
         "border-warning-200",
         "[&>div.fc-daygrid-event-dot]:!border-warning-700",
+        "hover:!bg-warning-100 focus:!bg-warning-100",
       ];
       break;
     case "COMPLETE":
@@ -64,6 +63,7 @@ export function getStatusClasses(
         "bg-success-50",
         "border-success-200",
         "[&>div.fc-daygrid-event-dot]:!border-success-700",
+        "hover:!bg-success-100 focus:!bg-success-100",
       ];
       break;
     default:
