@@ -15,7 +15,11 @@ import {
   DropdownMenuTrigger,
 } from "../shared/dropdown";
 
-export default function ActionsDropdown() {
+export default function ActionsDropdown({
+  fullWidth,
+}: {
+  fullWidth?: boolean;
+}) {
   const isHydrated = useHydrated();
 
   if (!isHydrated) {
@@ -30,12 +34,12 @@ export default function ActionsDropdown() {
 
   return (
     <div className="actions-dropdown flex">
-      <ConditionalActionsDropdown />
+      <ConditionalActionsDropdown fullWidth={fullWidth} />
     </div>
   );
 }
 
-function ConditionalActionsDropdown() {
+function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
   const { kit } = useLoaderData<typeof loader>();
   const kitCanBeReleased = kit.custody;
   const [searchParams] = useSearchParams();
@@ -77,7 +81,10 @@ function ConditionalActionsDropdown() {
         defaultOpen={defaultOpen}
       >
         <DropdownMenuTrigger
-          className="asset-actions hidden sm:flex"
+          className={tw(
+            "actions-dropdown hidden sm:flex",
+            fullWidth ? "w-full" : ""
+          )}
           onClick={() => setOpen(!open)}
           asChild
         >
@@ -91,7 +98,7 @@ function ConditionalActionsDropdown() {
         {/* using custom dropdown menu trigger on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
           variant="secondary"
-          className="sm:hidden"
+          className="actions-dropdown sm:hidden"
           onClick={() => setOpen(true)}
         >
           <span className="flex items-center gap-2">
@@ -174,13 +181,13 @@ function ConditionalActionsDropdown() {
               onSelect={(e) => {
                 e.preventDefault();
               }}
-              disabled={kitIsCheckedOut}
+              disabled={kitIsCheckedOut || someAssetIsNotAvailable}
             >
               <DeleteKit kit={kit} />
             </DropdownMenuItem>
-            {someAssetIsNotAvailable && !kitCanBeReleased ? (
+            {someAssetIsNotAvailable && kitCanBeReleased ? (
               <div className=" border-t p-2 text-left text-xs">
-                Some actions are disabled due to assets not being Available.
+                Some actions are disabled due to asset(s) not being Available.
               </div>
             ) : null}
           </div>

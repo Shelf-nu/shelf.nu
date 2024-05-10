@@ -4,6 +4,7 @@ import type {
   MetaFunction,
   LoaderFunctionArgs,
   ActionFunctionArgs,
+  LinksFunction,
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
@@ -17,6 +18,7 @@ import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
@@ -33,6 +35,7 @@ import {
   getKit,
 } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
+import dropdownCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat } from "~/utils/client-hints";
@@ -122,6 +125,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw json(error(reason));
   }
 }
+
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: dropdownCss },
+];
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title) },
@@ -234,7 +241,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function KitDetails() {
-  const { kit, items } = useLoaderData<typeof loader>();
+  const { kit } = useLoaderData<typeof loader>();
 
   const isSelfService = useUserIsSelfService();
   const kitIsAvailable = kit.status === "AVAILABLE";
@@ -301,32 +308,54 @@ export default function KitDetails() {
         </div>
 
         <div className="w-full lg:ml-6">
-          <div className="flex w-full flex-col items-center justify-between rounded-t border-x border-t p-4 md:flex-row">
-            <div>
-              <h2 className="font-semibold">Assets</h2>
-              <p className="text-sm text-gray-600">{items.length} items</p>
+          <TextualDivider text="Assets" className="mb-8 lg:hidden" />
+          <div className="mb-3 flex gap-4 lg:hidden">
+            <Button
+              as="button"
+              to="add-assets"
+              variant="primary"
+              icon="plus"
+              width="full"
+            >
+              Manage assets
+            </Button>
+            <div className="w-full">
+              <ActionsDropdown fullWidth />
             </div>
-
-            <Button to="manage-assets">Manage Assets</Button>
           </div>
-          <List
-            className="overflow-x-visible !rounded-none md:overflow-x-auto md:!rounded-b"
-            ItemComponent={ListContent}
-            hideFirstHeaderColumn
-            customEmptyStateContent={{
-              title: "Not assets in kit",
-              text: "Start by adding your first asset.",
-              newButtonContent: "Manage assets",
-              newButtonRoute: "manage-assets",
-            }}
-            headerChildren={
-              <>
-                <Th className="hidden md:table-cell">Name</Th>
-                <Th className="hidden md:table-cell">Category</Th>
-                <Th className="hidden md:table-cell">Location</Th>
-              </>
-            }
-          />
+
+          <div className="flex flex-col md:gap-2">
+            <Filters className="responsive-filters mb-2 lg:mb-0">
+              <div className="flex items-center justify-normal gap-6 xl:justify-end">
+                <div className="hidden lg:block">
+                  <Button
+                    as="button"
+                    to="manage-assets"
+                    variant="primary"
+                    icon="plus"
+                    className="whitespace-nowrap"
+                  >
+                    Manage assets
+                  </Button>
+                </div>
+              </div>
+            </Filters>
+            <List
+              ItemComponent={ListContent}
+              customEmptyStateContent={{
+                title: "Not assets in kit",
+                text: "Start by adding your first asset.",
+                newButtonContent: "Manage assets",
+                newButtonRoute: "manage-assets",
+              }}
+              headerChildren={
+                <>
+                  <Th className="hidden md:table-cell">Category</Th>
+                  <Th className="hidden md:table-cell">Location</Th>
+                </>
+              }
+            />
+          </div>
         </div>
       </div>
     </>
