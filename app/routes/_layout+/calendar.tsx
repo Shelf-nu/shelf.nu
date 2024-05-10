@@ -119,23 +119,13 @@ const Calendar = () => {
     | "COMPLETE";
 
   const statusClassesOnHover: Record<BookingStatus, string> = {
-    DRAFT: "#F2F4F7",
-    ARCHIVED: "#F2F4F7",
-    CANCELLED: "#F2F4F7",
-    RESERVED: "#D1E9FF",
-    ONGOING: "#EBE9FE",
-    OVERDUE: "#FEF0C7",
-    COMPLETE: "#DCFAE6",
-  };
-
-  const statusClasses: Record<BookingStatus, string> = {
-    DRAFT: "#F9FAFB",
-    ARCHIVED: "#F9FAFB",
-    CANCELLED: "#F9FAFB",
-    RESERVED: "#EFF8FF",
-    ONGOING: "#F4F3FF",
-    OVERDUE: "#FFFAEB",
-    COMPLETE: "#ECFDF3",
+    DRAFT: "!bg-gray-100",
+    ARCHIVED: "!bg-gray-100",
+    CANCELLED: "!bg-gray-100",
+    RESERVED: "!bg-blue-100",
+    ONGOING: "!bg-purple-100",
+    OVERDUE: "!bg-warning-100",
+    COMPLETE: "!bg-success-100",
   };
 
   const handleEventMouseEnter = (info: any) => {
@@ -144,7 +134,7 @@ const Calendar = () => {
     const elements = document.getElementsByClassName(className);
     for (let i = 0; i < elements.length; i++) {
       const element = elements[i] as HTMLElement;
-      element.style.backgroundColor = statusClassesOnHover[statusClass];
+      element.classList.add(statusClassesOnHover[statusClass]);
     }
   };
 
@@ -154,7 +144,7 @@ const Calendar = () => {
     const elements = document.getElementsByClassName(className);
     for (let i = 0; i < elements.length; i++) {
       const element = elements[i] as HTMLElement;
-      element.style.backgroundColor = statusClasses[statusClass];
+      element.classList.remove(statusClassesOnHover[statusClass]);
     }
   };
 
