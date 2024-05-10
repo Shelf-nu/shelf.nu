@@ -44,7 +44,8 @@ export default function DeleteKit({ kit }: DeleteKitProps) {
           <AlertDialogTitle>Delete {kit.name}</AlertDialogTitle>
           <AlertDialogDescription>
             Are you sure you want to delete this kit? This action cannot be
-            undone.
+            undone. Deleting a kit will not delete the assets. If the kit is
+            checked out, assets will be made available again.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
