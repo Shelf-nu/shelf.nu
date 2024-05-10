@@ -110,6 +110,55 @@ const Calendar = () => {
     [ripple]
   );
 
+  type BookingStatus =
+    | "DRAFT"
+    | "ARCHIVED"
+    | "CANCELLED"
+    | "RESERVED"
+    | "ONGOING"
+    | "OVERDUE"
+    | "COMPLETE";
+
+  const statusClassesOnHover: Record<BookingStatus, string> = {
+    DRAFT: "#F2F4F7",
+    ARCHIVED: "#F2F4F7",
+    CANCELLED: "#F2F4F7",
+    RESERVED: "#D1E9FF",
+    ONGOING: "#EBE9FE",
+    OVERDUE: "#FEF0C7",
+    COMPLETE: "#DCFAE6",
+  };
+
+  const statusClasses: Record<BookingStatus, string> = {
+    DRAFT: "#F9FAFB",
+    ARCHIVED: "#F9FAFB",
+    CANCELLED: "#F9FAFB",
+    RESERVED: "#EFF8FF",
+    ONGOING: "#F4F3FF",
+    OVERDUE: "#FFFAEB",
+    COMPLETE: "#ECFDF3",
+  };
+
+  const handleEventMouseEnter = (info: any) => {
+    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const className = "bookingId-" + info.event._def.extendedProps.id;
+    const elements = document.getElementsByClassName(className);
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i] as HTMLElement;
+      element.style.backgroundColor = statusClassesOnHover[statusClass];
+    }
+  };
+
+  const handleEventMouseLeave = (info: any) => {
+    const statusClass: BookingStatus = info.event._def.extendedProps.status;
+    const className = "bookingId-" + info.event._def.extendedProps.id;
+    const elements = document.getElementsByClassName(className);
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i] as HTMLElement;
+      element.style.backgroundColor = statusClasses[statusClass];
+    }
+  };
+
   return (
     <>
       <Header hidePageDescription={true} />
@@ -160,6 +209,8 @@ const Calendar = () => {
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
+              eventMouseEnter={handleEventMouseEnter}
+              eventMouseLeave={handleEventMouseLeave}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",
