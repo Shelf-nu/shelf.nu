@@ -116,7 +116,7 @@ export default function KitsIndexPage() {
     <>
       <Header>
         <Button to="new" role="link" aria-label="new kit" icon="kit">
-          New Kit
+          New kit
         </Button>
       </Header>
 
@@ -173,11 +173,12 @@ function ListContent({
 }) {
   return (
     <>
-      <Td className="whitespace-normal p-0 md:p-0">
+      <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
               <KitImage
+                className="size-full rounded-[4px] border object-cover"
                 kit={{
                   image: item.image,
                   imageExpiration: item.imageExpiration,
@@ -202,7 +203,9 @@ function ListContent({
         </div>
       </Td>
 
-      <Td className="hidden md:table-cell">{item.description}</Td>
+      <Td className="hidden max-w-96 truncate md:table-cell">
+        {item.description}
+      </Td>
 
       <Td className="hidden md:table-cell">{item._count.assets}</Td>
 

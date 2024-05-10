@@ -9,6 +9,7 @@ import type {
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ChevronRight } from "~/components/icons/library";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
@@ -397,10 +398,14 @@ function ListContent({
               <Button
                 to={`/assets/${item.id}`}
                 variant="link"
-                className="text-gray-900 hover:text-gray-700"
+                className="mb-1 text-gray-900 hover:text-gray-700"
               >
                 {item.title}
               </Button>
+              <AssetStatusBadge
+                status={item.status}
+                availableToBook={item.availableToBook}
+              />
               <div className="block md:hidden">
                 {category ? (
                   <Badge color={category.color} withDot={false}>
@@ -427,13 +432,20 @@ function ListContent({
 
       <Td className="hidden md:table-cell">
         {location ? (
-          <div className="flex h-7 min-w-28 items-center justify-center gap-x-1 rounded-full bg-gray-100">
-            <Image
-              imageId={location.image?.id}
-              alt="img"
-              className="size-4 shrink-0 rounded-full object-cover"
-              updatedAt={location.image?.updatedAt}
-            />
+          <div
+            className={tw(
+              "flex h-7 min-w-28 items-center justify-center gap-x-1.5 rounded-full bg-gray-100 py-0.5",
+              location.image ? "pl-1.5 pr-2" : "px-2"
+            )}
+          >
+            <div className="size-4 overflow-hidden rounded-full">
+              <Image
+                imageId={location.image?.id}
+                alt="img"
+                className="size-full object-cover"
+                updatedAt={location.image?.updatedAt}
+              />
+            </div>
 
             <p className="text-xs font-medium">{location.name}</p>
           </div>

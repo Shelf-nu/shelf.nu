@@ -1,5 +1,4 @@
 import { KitStatus } from "@prisma/client";
-import colors from "tailwindcss/colors";
 import { userFriendlyAssetStatus } from "../assets/asset-status-badge";
 import { Badge } from "../shared/badge";
 import { UnavailableBadge } from "../shared/unavailable-badge";
@@ -21,11 +20,11 @@ export function userFriendlyKitStatus(status: KitStatus) {
 export const assetStatusColorMap = (status: KitStatus) => {
   switch (status) {
     case KitStatus.IN_CUSTODY:
-      return colors.blue["700"];
+      return "#2E90FA";
     case KitStatus.CHECKED_OUT:
-      return colors.violet["700"];
+      return "#5925DC";
     default:
-      return colors.emerald["500"];
+      return "#12B76A";
   }
 };
 
