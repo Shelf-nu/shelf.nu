@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight, UserXIcon } from "~/components/icons/library";
 import {
@@ -19,24 +18,19 @@ import { Button } from "../shared/button";
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
   const assetCanBeReleased = asset.custody;
-  let [searchParams] = useSearchParams();
-  const refIsQrScan = searchParams.get("ref") === "qr";
-  const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
-  const [defaultApplied, setDefaultApplied] = useState(false);
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
 
-  const [dropdownRef, open, setOpen] = useControlledDropdownMenu(defaultOpen);
+  const {
+    ref: dropdownRef,
+    defaultApplied,
+    open,
+    defaultOpen,
+    setOpen,
+  } = useControlledDropdownMenu();
 
   const assetIsPartOfUnavailableKit = Boolean(
     asset.kit && asset.kit.status !== "AVAILABLE"
   );
-
-  useEffect(() => {
-    if (defaultOpen && !defaultApplied) {
-      setOpen(true);
-      setDefaultApplied(true);
-    }
-  }, [defaultOpen, defaultApplied, setOpen]);
 
   return (
     <>

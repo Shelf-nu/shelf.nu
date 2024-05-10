@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 import { tw } from "~/utils/tw";
@@ -42,25 +41,19 @@ export default function ActionsDropdown({
 function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
   const { kit } = useLoaderData<typeof loader>();
   const kitCanBeReleased = kit.custody;
-  const [searchParams] = useSearchParams();
-  const refIsQrScan = searchParams.get("ref") === "qr";
-  const [defaultApplied, setDefaultApplied] = useState(false);
   const kitIsCheckedOut = kit.status === "CHECKED_OUT";
-
-  const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
 
   const someAssetIsNotAvailable = kit.assets.some(
     (asset) => asset.status !== "AVAILABLE"
   );
 
-  const [dropdownRef, open, setOpen] = useControlledDropdownMenu(defaultOpen);
-
-  useEffect(() => {
-    if (defaultOpen && !defaultApplied) {
-      setOpen(true);
-      setDefaultApplied(true);
-    }
-  }, [defaultApplied, defaultOpen, setOpen]);
+  const {
+    ref: dropdownRef,
+    defaultApplied,
+    open,
+    defaultOpen,
+    setOpen,
+  } = useControlledDropdownMenu();
 
   return (
     <>
