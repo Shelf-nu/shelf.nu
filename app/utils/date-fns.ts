@@ -102,3 +102,33 @@ export function getBookingDefaultStartEndTimes() {
 
   return { startDate, endDate };
 }
+
+export function getWeekNumber(currentDate: Date) {
+  const start = new Date(currentDate.getFullYear(), 0, 1);
+  const diff = currentDate.getTime() - start.getTime();
+  const oneDay = 1000 * 60 * 60 * 24;
+  const day = Math.floor(diff / oneDay);
+  const week = Math.ceil((day - currentDate.getDay() + 1) / 7);
+  return week;
+}
+
+export function getWeekStartingAndEndingDates(currentDate: Date) {
+  // Get the day of the week as a number (0 for Sunday, 1 for Monday, etc.)
+  const day = currentDate.getDay();
+  const diffToMonday = day === 0 ? 6 : day - 1; // if day is Sunday(0), set diffToMonday as 6, else day - 1
+
+  // Calculate the start of the week
+  const start = new Date(currentDate);
+  start.setDate(currentDate.getDate() - diffToMonday);
+
+  // Calculate the end of the week
+  const end = new Date(currentDate);
+  end.setDate(start.getDate() + 6);
+
+  // Format the dates as strings
+  const options: Intl.DateTimeFormatOptions = { day: "numeric", month: "long" };
+  const startStr = start.toLocaleDateString(undefined, options);
+  const endStr = end.toLocaleDateString(undefined, options);
+
+  return [startStr, endStr];
+}

@@ -215,8 +215,10 @@ export async function createUser(
           organizationIds.push(organizationId);
         }
 
-        // @TODO this is weird and organizationIds is not used
-        // We haev to figure out why its being called 2 times and whats going on here
+        /** Create user organization association
+         * 1. For the personal org
+         * 2. For the org that the user is being attached to
+         */
         await Promise.all([
           createUserOrgAssociation(tx, {
             userId: user.id,

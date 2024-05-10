@@ -49,7 +49,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
           ) : null}
 
           {menuItemsTop.map((item) =>
-            item.to === "bookings" ? (
+            item.to === "bookings" || item.to === "calendar" ? (
               <li key={item.label}>
                 <ControlledActionButton
                   canUseFeature={canUseBookings}
@@ -71,8 +71,9 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                         </span>
                       </span>
                     ),
-                    message:
-                      "Bookings is a premium feature only available for Team workspaces. ",
+                    message: `${
+                      item.to[0].toUpperCase() + item.to.substring(1)
+                    } is a premium feature only available for Team workspaces.`,
                     ctaText: "upgrading to a team plan",
                   }}
                   buttonProps={{
