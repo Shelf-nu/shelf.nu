@@ -1,10 +1,10 @@
-export const FakeCheckbox = ({
-  checked,
-  disabled,
-}: {
-  checked: boolean;
-  disabled?: boolean;
-}) =>
+import type { SVGProps } from "react";
+
+type FakeCheckboxProps = SVGProps<SVGSVGElement> & {
+  checked?: boolean;
+};
+
+export const FakeCheckbox = ({ checked, ...svgProps }: FakeCheckboxProps) =>
   checked ? (
     <svg
       width="20"
@@ -12,6 +12,7 @@ export const FakeCheckbox = ({
       viewBox="0 0 20 20"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      {...svgProps}
     >
       <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" fill="#FEF6EE" />
       <path
@@ -30,6 +31,7 @@ export const FakeCheckbox = ({
       viewBox="0 0 20 20"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      {...svgProps}
     >
       <rect
         x="0.5"
@@ -37,7 +39,7 @@ export const FakeCheckbox = ({
         width="19"
         height="19"
         rx="5.5"
-        fill={disabled ? "#F2F4F7" : "white"}
+        fill="currentColor"
       />
       <rect x="0.5" y="0.5" width="19" height="19" rx="5.5" stroke="#D0D5DD" />
     </svg>

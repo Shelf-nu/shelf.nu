@@ -503,7 +503,13 @@ const RowComponent = ({
           item.isInOtherCustody ? "cursor-not-allowed opacity-50" : undefined
         }
       >
-        <FakeCheckbox checked={checked} disabled={item.isInOtherCustody} />
+        <FakeCheckbox
+          checked={checked}
+          className={tw(
+            "text-white",
+            item.isInOtherCustody ? "text-gray-200" : ""
+          )}
+        />
       </Td>
     </>
   );
