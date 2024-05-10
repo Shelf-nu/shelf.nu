@@ -816,10 +816,13 @@ export async function getBookingsForCalendar(params: {
           start: (booking.from as Date).toISOString(),
           end: (booking.to as Date).toISOString(),
           url: `/bookings/${booking.id}`,
-          classNames: getStatusClasses(
-            booking.status,
-            isOneDayEvent(booking.from as Date, booking.to as Date)
-          ),
+          classNames: [
+            `bookingId-${booking.id}`,
+            ...getStatusClasses(
+              booking.status,
+              isOneDayEvent(booking.from as Date, booking.to as Date)
+            ),
+          ],
           extendedProps: {
             status: booking.status,
             id: booking.id,
