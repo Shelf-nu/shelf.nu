@@ -178,7 +178,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
             >
               <DeleteKit kit={kit} />
             </DropdownMenuItem>
-            {someAssetIsNotAvailable && kitCanBeReleased ? (
+            {kitIsCheckedOut || someAssetIsNotAvailable ? (
               <div className=" border-t p-2 text-left text-xs">
                 Some actions are disabled due to asset(s) not being Available.
               </div>
