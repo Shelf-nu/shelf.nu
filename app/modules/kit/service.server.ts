@@ -186,18 +186,17 @@ export async function getPaginatedAndFilterableKits({
 
 export async function getKit({
   id,
-  organizationId,
   extraInclude,
-}: Pick<Kit, "id" | "organizationId"> & {
+}: Pick<Kit, "id"> & {
   extraInclude?: Prisma.KitInclude;
 }) {
   try {
     const kit = await db.kit.findFirstOrThrow({
-      where: { id, organizationId },
+      where: { id },
       include: {
         ...extraInclude,
         custody: {
-          select: { createdAt: true, custodian: true },
+          select: { id: true, createdAt: true, custodian: true },
         },
         organization: {
           select: { currency: true },
@@ -212,7 +211,7 @@ export async function getKit({
       title: "Kit not found!",
       message:
         "The kit you are trying to access does not exists or you do not have permission to access it.",
-      additionalData: { id, organizationId },
+      additionalData: { id },
       label,
     });
   }

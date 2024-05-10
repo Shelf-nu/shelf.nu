@@ -72,7 +72,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const [kit, assets] = await Promise.all([
       getKit({
         id: kitId,
-        organizationId,
         extraInclude: {
           assets: {
             select: { status: true, custody: { select: { id: true } } },

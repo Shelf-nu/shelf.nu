@@ -7,7 +7,6 @@ import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
-import { createNote } from "~/modules/asset/service.server";
 import { getKit } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
@@ -49,7 +48,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const kit = await getKit({
       id: kitId,
-      organizationId,
       extraInclude: {
         assets: { select: { status: true } },
       },
@@ -174,14 +172,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       /**
        * Create note for each asset
        */
-      ...kit.assets.map((asset) =>
-        createNote({
+      db.note.createMany({
+        data: kit.assets.map((asset) => ({
           content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
-        })
-      ),
+        })),
+      }),
     ]);
 
     sendNotification({

@@ -5,11 +5,10 @@ import { Form, useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database/db.server";
-import { releaseCustody } from "~/modules/kit/service.server";
+import { getKit, releaseCustody } from "~/modules/kit/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
@@ -34,43 +33,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const custody = await db.kitCustody
-      .findUnique({
-        where: { kitId },
-        select: { custodian: { select: { id: true, name: true } } },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message:
-            "Something went wrong while fetching custody. Please try again or contact support.",
-          additionalData: { userId, kitId },
-          label: "Kit",
-        });
-      });
-
-    if (!custody) {
+    const kit = await getKit({ id: kitId });
+    if (!kit.custody) {
       return redirect(`/kits/${kitId}`);
     }
-
-    const kit = await db.kit
-      .findUniqueOrThrow({
-        where: { id: kitId },
-        select: { name: true },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "We could not find the kit you are looking for.",
-          additionalData: { userId, kitId },
-          label: "Kit",
-        });
-      });
 
     return json(
       data({
         showModal: true,
-        custody,
         kit,
       })
     );
@@ -130,7 +100,7 @@ export function links() {
 }
 
 export default function ReleaseKitCustody() {
-  const { custody, kit } = useLoaderData<typeof loader>();
+  const { kit } = useLoaderData<typeof loader>();
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -145,7 +115,7 @@ export default function ReleaseKitCustody() {
           <h4>Releasing custody</h4>
           <p>
             Are you sure you want to release{" "}
-            <span className="font-medium">{custody?.custodian.name}’s</span>{" "}
+            <span className="font-medium">{kit.custody?.custodian.name}’s</span>{" "}
             custody over <span className="font-medium">{kit.name}</span>?
           </p>
         </div>
@@ -154,7 +124,7 @@ export default function ReleaseKitCustody() {
             <input
               type="hidden"
               name="custodianName"
-              value={custody?.custodian.name}
+              value={kit.custody?.custodian.name}
             />
             <Button
               to=".."

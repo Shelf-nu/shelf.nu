@@ -25,7 +25,6 @@ import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
 import {
   createBulkKitChangeNotes,
-  createNote,
   getPaginatedAndFilterableAssets,
 } from "~/modules/asset/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -55,7 +54,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const [kit, assets] = await Promise.all([
+    const [
+      kit,
+      {
+        assets,
+        totalAssets,
+        categories,
+        totalCategories,
+        tags,
+        totalTags,
+        locations,
+        totalLocations,
+        search,
+        page,
+        totalPages,
+        perPage,
+      },
+    ] = await Promise.all([
       db.kit
         .findFirstOrThrow({
           where: { id: kitId },
@@ -74,7 +89,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getPaginatedAndFilterableAssets({
         request,
         organizationId,
-        excludeSearchFromView: true,
       }),
     ]);
 
@@ -94,16 +108,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           title: "Search your asset database",
           text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
         },
+        showModal: true,
+        noScroll: true,
         kit,
-        ...assets,
-        items: assets.assets.map((asset) => ({
+        items: assets.map((asset) => ({
           ...asset,
           isInOtherCustody: Boolean(asset?.custody && asset.kitId !== kit.id),
         })),
-        totalItems: assets.totalAssets,
+        totalItems: totalAssets,
+        categories,
+        tags,
+        search,
+        page,
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
+        totalPages,
+        perPage,
         modelName,
-        showModal: true,
-        noScroll: true,
       })
     );
   } catch (cause) {
@@ -239,14 +262,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           })
         ),
-        ...assetsToInheritStatus.map((asset) =>
-          createNote({
+        db.note.createMany({
+          data: assetsToInheritStatus.map((asset) => ({
             content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${kit.custody?.custodian.name.trim()}** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
-          })
-        ),
+          })),
+        }),
       ]);
     }
 
@@ -256,23 +279,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     if (removedAssets.length && kit.custody?.custodian.id) {
       await Promise.all([
-        ...removedAssets.map((asset) =>
-          db.asset.update({
-            where: { id: asset.id },
-            data: {
-              status: AssetStatus.AVAILABLE,
-              custody: { delete: true },
-            },
-          })
-        ),
-        ...removedAssets.map((asset) =>
-          createNote({
+        db.custody.deleteMany({
+          where: { assetId: { in: removedAssets.map((a) => a.id) } },
+        }),
+        db.asset.updateMany({
+          where: { id: { in: removedAssets.map((a) => a.id) } },
+          data: { status: AssetStatus.AVAILABLE },
+        }),
+        db.note.createMany({
+          data: removedAssets.map((asset) => ({
             content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${kit.custody?.custodian.name.trim()}'s** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
-          })
-        ),
+          })),
+        }),
       ]);
     }
 

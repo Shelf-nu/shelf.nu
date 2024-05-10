@@ -2102,7 +2102,7 @@ export async function createKitChangeNote({
     let message = "";
 
     /** User is changing from kit to another */
-    if (currentKit && newKit) {
+    if (currentKit && newKit && currentKit.id !== newKit.id) {
       message = `**${fullName}** changed kit of **${assetName.trim()}** from **[${currentKit.name.trim()}](/kits/${
         currentKit.id
       })** to **[${newKit.name.trim()}](/kits/${newKit.id})**`;
@@ -2118,6 +2118,10 @@ export async function createKitChangeNote({
     /** User is removing the asset from kit */
     if (isRemoving && !newKit) {
       message = `**${fullName}** removed asset from **[${currentKit?.name.trim()}](/kits/${currentKit?.id})**`;
+    }
+
+    if (!message) {
+      return;
     }
 
     await createNote({
