@@ -35,7 +35,6 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    // @TODO here we have to handle self-service, and make sure they can only see bookings that belong to them
     await requirePermission({
       userId,
       request,
