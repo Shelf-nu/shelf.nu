@@ -45,5 +45,5 @@
 }
 
 .fc-daygrid-day-frame {
-  @apply min-h-[128px] !important;
+  @apply min-h-[200px] !important;
 }
