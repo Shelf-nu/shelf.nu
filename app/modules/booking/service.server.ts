@@ -782,7 +782,6 @@ export async function getBookingsForCalendar(params: {
   const { request, organizationId, userId, isSelfService = false } = params;
   const searchParams = getCurrentSearchParams(request);
 
-  // @TODO we have to see how to handle this if there are no search params
   const start = searchParams.get("start") as string;
   const end = searchParams.get("end") as string;
 
