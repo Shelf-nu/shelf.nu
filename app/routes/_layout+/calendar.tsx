@@ -209,7 +209,7 @@ const Calendar = () => {
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
-              dayMaxEvents={3}
+              dayMaxEvents={4}
               moreLinkClick="popover"
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
