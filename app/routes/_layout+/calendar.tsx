@@ -14,7 +14,6 @@ import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
 import { Spinner } from "~/components/shared/spinner";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { statusClassesOnHover } from "~/utils/calendar";
@@ -73,7 +72,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 // Calendar Component
 const Calendar = () => {
   const { title } = useLoaderData<typeof loader>();
-  const { isMd } = useViewportHeight();
+  const isMd = typeof window !== "undefined" ? window.innerWidth >= 768 : false;
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
   const [_error, setError] = useState<string | null>(null);
   const [calendarTitle, setCalendarTitle] = useState(title);
