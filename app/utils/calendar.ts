@@ -71,6 +71,15 @@ export function getStatusClasses(
 
   return [...classes, ...statusClasses];
 }
+export const statusClassesOnHover: Record<BookingStatus, string> = {
+  DRAFT: "!bg-gray-100",
+  ARCHIVED: "!bg-gray-100",
+  CANCELLED: "!bg-gray-100",
+  RESERVED: "!bg-blue-100",
+  ONGOING: "!bg-purple-100",
+  OVERDUE: "!bg-warning-100",
+  COMPLETE: "!bg-success-100",
+};
 
 export function isOneDayEvent(from: Date, to: Date) {
   const start = new Date(from);

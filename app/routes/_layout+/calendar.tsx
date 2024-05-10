@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback } from "react";
 import dayGridPlugin from "@fullcalendar/daygrid";
+import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
+import type { BookingStatus } from "@prisma/client";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
@@ -13,6 +15,7 @@ import { ButtonGroup } from "~/components/shared/button-group";
 import { Spinner } from "~/components/shared/spinner";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { statusClassesOnHover } from "~/utils/calendar";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -109,25 +112,6 @@ const Calendar = () => {
     [ripple]
   );
 
-  type BookingStatus =
-    | "DRAFT"
-    | "ARCHIVED"
-    | "CANCELLED"
-    | "RESERVED"
-    | "ONGOING"
-    | "OVERDUE"
-    | "COMPLETE";
-
-  const statusClassesOnHover: Record<BookingStatus, string> = {
-    DRAFT: "!bg-gray-100",
-    ARCHIVED: "!bg-gray-100",
-    CANCELLED: "!bg-gray-100",
-    RESERVED: "!bg-blue-100",
-    ONGOING: "!bg-purple-100",
-    OVERDUE: "!bg-warning-100",
-    COMPLETE: "!bg-success-100",
-  };
-
   const handleEventMouseEnter = (info: any) => {
     const statusClass: BookingStatus = info.event._def.extendedProps.status;
     const className = "bookingId-" + info.event._def.extendedProps.id;
@@ -189,7 +173,10 @@ const Calendar = () => {
           {() => (
             <FullCalendar
               ref={calendarRef}
-              plugins={[dayGridPlugin]}
+              plugins={[dayGridPlugin, listPlugin]}
+              initialView={
+                window.innerWidth < 765 ? "listWeek" : "dayGridMonth"
+              }
               firstDay={1}
               timeZone="local"
               headerToolbar={false}
@@ -198,7 +185,7 @@ const Calendar = () => {
                 method: "GET",
                 failure: (err) => setError(err.message),
               }}
-              dayMaxEvents={2}
+              dayMaxEvents={3}
               moreLinkClick="popover"
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
