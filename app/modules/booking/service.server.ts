@@ -812,7 +812,7 @@ export async function getBookingsForCalendar(params: {
           : booking.custodianTeamMember?.name;
 
         return {
-          title: `| ${booking.name} | ${custodianName}`,
+          title: `${booking.name} | ${custodianName}`,
           start: (booking.from as Date).toISOString(),
           end: (booking.to as Date).toISOString(),
           url: `/bookings/${booking.id}`,

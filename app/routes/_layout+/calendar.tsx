@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+import type { EventHoveringArg } from "@fullcalendar/core/index.js";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
@@ -13,9 +14,11 @@ import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
 import { Spinner } from "~/components/shared/spinner";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { statusClassesOnHover } from "~/utils/calendar";
+import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import {
@@ -70,12 +73,18 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 // Calendar Component
 const Calendar = () => {
   const { title } = useLoaderData<typeof loader>();
+  const { isMd } = useViewportHeight();
+  const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
   const [_error, setError] = useState<string | null>(null);
   const [calendarTitle, setCalendarTitle] = useState(title);
+  const [calendarSubtitle, setCalendarSubtitle] = useState(
+    isMd ? undefined : `${startingDay} - ${endingDay}`
+  );
+
   const calendarRef = useRef<FullCalendar>(null);
   const ripple = useRef<HTMLDivElement>(null);
 
-  const handleNavigation = (navigateTo: any) => {
+  const handleNavigation = (navigateTo: "prev" | "today" | "next") => {
     const calendarApi = calendarRef.current?.getApi();
     if (navigateTo == "prev") {
       calendarApi?.prev();
@@ -95,7 +104,11 @@ const Calendar = () => {
         month: "long",
       });
       const currentYear = currentDate.getFullYear();
+      const [startingDay, endingDay] =
+        getWeekStartingAndEndingDates(currentDate);
+
       setCalendarTitle(`${currentMonth} ${currentYear}`);
+      setCalendarSubtitle(`${startingDay} - ${endingDay}`);
     }
   };
 
@@ -112,7 +125,7 @@ const Calendar = () => {
     [ripple]
   );
 
-  const handleEventMouseEnter = (info: any) => {
+  const handleEventMouseEnter = (info: EventHoveringArg) => {
     const statusClass: BookingStatus = info.event._def.extendedProps.status;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
@@ -122,7 +135,7 @@ const Calendar = () => {
     }
   };
 
-  const handleEventMouseLeave = (info: any) => {
+  const handleEventMouseLeave = (info: EventHoveringArg) => {
     const statusClass: BookingStatus = info.event._def.extendedProps.status;
     const className = "bookingId-" + info.event._def.extendedProps.id;
     const elements = document.getElementsByClassName(className);
@@ -132,14 +145,27 @@ const Calendar = () => {
     }
   };
 
+  const handleWindowResize = () => {
+    const calendar = calendarRef?.current?.getApi();
+    if (calendar) {
+      calendar.changeView(isMd ? "dayGridMonth" : "listWeek");
+    }
+  };
+
   return (
     <>
       <Header hidePageDescription={true} />
       <div className="mt-4">
         <div className="flex items-center justify-between gap-4 rounded-t-md border bg-white px-4 py-3">
-          <div className="text-left font-sans text-lg font-semibold leading-[20px] text-[#101828]">
-            {calendarTitle}
+          <div>
+            <div className="text-left font-sans text-lg font-semibold leading-[20px] ">
+              {calendarTitle}
+            </div>
+            {!isMd ? (
+              <div className="text-gray-600">{calendarSubtitle}</div>
+            ) : null}
           </div>
+
           <div className="flex items-center">
             <div ref={ripple} className="mr-3 flex justify-center">
               <Spinner />
@@ -174,9 +200,7 @@ const Calendar = () => {
             <FullCalendar
               ref={calendarRef}
               plugins={[dayGridPlugin, listPlugin]}
-              initialView={
-                window.innerWidth < 765 ? "listWeek" : "dayGridMonth"
-              }
+              initialView={isMd ? "dayGridMonth" : "listWeek"}
               firstDay={1}
               timeZone="local"
               headerToolbar={false}
@@ -189,6 +213,7 @@ const Calendar = () => {
               moreLinkClick="popover"
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
+              windowResize={handleWindowResize}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",

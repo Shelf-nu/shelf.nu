@@ -26,6 +26,7 @@ export function getStatusClasses(
         "bg-gray-50",
         "border-gray-200",
         "[&>div.fc-daygrid-event-dot]:!border-gray-700",
+        "[&_.fc-list-event-dot]:!border-gray-700",
         "focus:!bg-gray-100",
       ];
       break;
@@ -35,6 +36,7 @@ export function getStatusClasses(
         "bg-blue-50",
         "border-blue-200",
         "[&>div.fc-daygrid-event-dot]:!border-blue-700",
+        "[&_.fc-list-event-dot]:!border-blue-700",
         "focus:!bg-blue-100",
       ];
       break;
@@ -44,6 +46,7 @@ export function getStatusClasses(
         "bg-purple-50",
         "border-purple-200",
         "[&>div.fc-daygrid-event-dot]:!border-purple-700",
+        "[&_.fc-list-event-dot]:!border-purple-700",
         "focus:!bg-purple-100",
       ];
       break;
@@ -53,6 +56,7 @@ export function getStatusClasses(
         "bg-warning-50",
         "border-warning-200",
         "[&>div.fc-daygrid-event-dot]:!border-warning-700",
+        "[&_.fc-list-event-dot]:!border-warning-700",
         "focus:!bg-warning-100",
       ];
       break;
@@ -62,6 +66,7 @@ export function getStatusClasses(
         "bg-success-50",
         "border-success-200",
         "[&>div.fc-daygrid-event-dot]:!border-success-700",
+        "[&_.fc-list-event-dot]:!border-success-700",
         "focus:!bg-success-100",
       ];
       break;

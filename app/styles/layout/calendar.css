@@ -31,6 +31,11 @@
 .fc-event-title {
   font-weight: inherit !important;
 }
+@media (min-width: 768px) {
+  .fc-event-title::before {
+    content: "| ";
+  }
+}
 
 .fc-day-today {
   @apply bg-primary-50 border-t-[1.5px] border-t-primary-200 border-l-[1.5px] border-l-primary-200 border-r-[1.5px] border-r-primary-200 border-b-[1.5px] border-b-primary-200 text-primary-700 !important;
