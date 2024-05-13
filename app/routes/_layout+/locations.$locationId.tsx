@@ -259,6 +259,7 @@ export default function LocationPage() {
                     to="add-assets"
                     variant="primary"
                     icon="plus"
+                    className="whitespace-nowrap"
                   >
                     Manage assets
                   </Button>

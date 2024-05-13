@@ -23,7 +23,13 @@ import {
 } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, parseData } from "~/utils/http.server";
+import {
+  assertIsPost,
+  data,
+  error,
+  getCurrentSearchParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -56,16 +62,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizationId,
     });
 
-    const {
-      categories,
-      totalCategories,
-      tags,
-      locations,
-      totalLocations,
-      customFields,
-    } = await getAllEntriesForCreateAndEdit({
+    const { categories, totalCategories, tags, locations, totalLocations } =
+      await getAllEntriesForCreateAndEdit({
+        organizationId,
+        request,
+      });
+
+    const searchParams = getCurrentSearchParams(request);
+
+    const customFields = await getActiveCustomFields({
       organizationId,
-      request,
+      category: searchParams.get("category"),
     });
 
     return json(
@@ -109,8 +116,11 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
 
+    const searchParams = getCurrentSearchParams(request);
+
     const customFields = await getActiveCustomFields({
       organizationId,
+      category: searchParams.get("category"),
     });
 
     const FormSchema = mergedSchema({
@@ -180,6 +190,13 @@ export async function action({ context, request }: LoaderFunctionArgs) {
       message: "Your asset has been created successfully",
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
+    });
+
+    await createNote({
+      content: `Asset was created by **${asset.user.firstName?.trim()} ${asset.user.lastName?.trim()}**`,
+      type: "UPDATE",
+      userId: authSession.userId,
+      assetId: asset.id,
     });
 
     if (asset.location) {

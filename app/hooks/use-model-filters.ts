@@ -2,7 +2,7 @@ import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
-import type { AllowedModelNames, loader } from "~/routes/api+/model-filters";
+import { type loader, type ModelFilters } from "~/routes/api+/model-filters";
 import { itemsWithExtractedValue } from "~/utils/model-filters";
 import useFetcherWithReset from "./use-fetcher-with-reset";
 
@@ -19,12 +19,9 @@ export type ModelFilterProps = {
   initialDataKey: string;
   /** name of key in loader which passing the total count */
   countKey: string;
-  model: {
-    /** name of the model for which the query has to run */
-    name: AllowedModelNames;
-    /** name of key for which we have to search the value */
-    key: string;
-  };
+
+  model: ModelFilters;
+
   /** If none is passed then values will not be added in query params */
   selectionMode?: "append" | "set" | "none";
 
@@ -63,7 +60,6 @@ export function useModelFilters({
     if (searchQuery && fetcher.data && !fetcher.data.error) {
       return itemsWithExtractedValue(fetcher.data.filters, valueExtractor);
     }
-
     return itemsWithExtractedValue(initialData[initialDataKey], valueExtractor);
   }, [fetcher.data, initialData, initialDataKey, searchQuery, valueExtractor]);
 
@@ -88,14 +84,20 @@ export function useModelFilters({
         } else {
           setSelectedItems((prev) => [...prev, value]);
           /** Otherwise, add the item in search params */
-          setSearchParams((prev) => {
-            if (selectionMode === "append") {
-              prev.append(model.name, value);
-            } else {
-              prev.set(model.name, value);
+          setSearchParams(
+            (prev) => {
+              if (selectionMode === "append") {
+                prev.append(model.name, value);
+              } else {
+                prev.set(model.name, value);
+              }
+              return prev;
+            },
+            {
+              // Prevent scroll reset when adding search params as this causes navigation and will send the user to the top of the page
+              preventScrollReset: true,
             }
-            return prev;
-          });
+          );
         }
       }
     },
@@ -109,14 +111,17 @@ export function useModelFilters({
       clearFilters();
     } else {
       setSearchQuery(e.currentTarget.value);
+
       fetcher.submit(
         {
-          model: model.name,
-          queryKey: model.key as string,
+          ...model,
           queryValue: e.currentTarget.value,
           selectedValues: selectedItems,
         },
-        { method: "GET", action: "/api/model-filters" }
+        {
+          method: "GET",
+          action: "/api/model-filters",
+        }
       );
     }
   };

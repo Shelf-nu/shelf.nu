@@ -232,7 +232,7 @@ export default function GeneralPage() {
         ref={zo.ref}
         replace
         encType="multipart/form-data"
-        className="border-t-DEFAULT"
+        className="border-t"
       >
         <FormRow
           rowLabel={"Workspace Name"}

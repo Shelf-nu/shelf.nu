@@ -27,6 +27,7 @@ export const handle = {
 
 const items = [
   { to: "users", content: "Users" },
+  { to: "qrs", content: "QR codes" },
   { to: "announcements", content: "Announcements" },
 ];
 

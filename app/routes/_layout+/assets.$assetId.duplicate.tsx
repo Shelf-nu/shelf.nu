@@ -11,6 +11,8 @@ import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import Input from "~/components/forms/input";
+import Icon from "~/components/icons/icon";
+import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database/db.server";
@@ -59,6 +61,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return json(
       data({
+        header: {
+          title: `Duplicate asset`,
+          subHeading: "Choose the amount of duplicates you want to create.",
+        },
         showModal: true,
         asset,
       })
@@ -151,32 +157,35 @@ export default function DuplicateAsset() {
 
   return (
     <Form ref={zo.ref} method="post">
-      <div className="modal-content-wrapper space-y-6">
-        <div className="w-full border-b pb-4 text-lg font-semibold">
-          Duplicate asset
+      <div className="modal-content-wrapper">
+        <div className="inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+          <Icon icon="duplicate" />
         </div>
+        <Header hideBreadcrumbs classNames="[&>div]:border-b-0" />
 
-        <div className="flex items-center gap-3 rounded-md border p-4">
-          <div className="flex size-12 shrink-0 items-center justify-center">
-            <AssetImage
-              asset={{
-                assetId: asset.id,
-                mainImage: asset.mainImage,
-                mainImageExpiration: asset.mainImageExpiration,
-                alt: asset.title,
-              }}
-              className="size-full rounded-[4px] border object-cover"
-            />
-          </div>
-          <div className="min-w-[130px]">
-            <span className="word-break mb-1 block font-medium">
-              {asset.title}
-            </span>
-            <div>
-              <AssetStatusBadge
-                status={asset.status}
-                availableToBook={asset.availableToBook}
+        <div className="flex flex-col items-center gap-3 ">
+          <div className="flex w-full items-center gap-3 rounded-md border p-4">
+            <div className="flex size-12 shrink-0 items-center justify-center">
+              <AssetImage
+                asset={{
+                  assetId: asset.id,
+                  mainImage: asset.mainImage,
+                  mainImageExpiration: asset.mainImageExpiration,
+                  alt: asset.title,
+                }}
+                className="size-full rounded-[4px] border object-cover"
               />
+            </div>
+            <div className="min-w-[130px]">
+              <span className="word-break mb-1 block font-medium">
+                {asset.title}
+              </span>
+              <div>
+                <AssetStatusBadge
+                  status={asset.status}
+                  availableToBook={asset.availableToBook}
+                />
+              </div>
             </div>
           </div>
 
@@ -198,7 +207,7 @@ export default function DuplicateAsset() {
             }
           />
         </div>
-        <div className="flex gap-3">
+        <div className="mt-6 flex gap-3">
           <Button
             to=".."
             variant="secondary"

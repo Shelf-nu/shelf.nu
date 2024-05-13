@@ -27,7 +27,13 @@ import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import { sendEmail } from "~/utils/mail.server";
 import {
   PermissionAction,
@@ -88,6 +94,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/assets/${assetId}`);
     }
 
+    const searchParams = getCurrentSearchParams(request);
+
     /** We get all the team members that are part of the user's personal organization */
     const teamMembers = await db.teamMember
       .findMany({
@@ -101,7 +109,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         orderBy: {
           userId: "asc",
         },
-        take: 12,
+        take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -420,12 +428,17 @@ export default function Custody() {
           <div className=" relative z-50 mb-6">
             <DynamicSelect
               disabled={disabled}
-              model={{ name: "teamMember", key: "name" }}
+              model={{
+                name: "teamMember",
+                queryKey: "name",
+                deletedAt: null,
+              }}
               fieldName="custodian"
               label="Team members"
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
               placeholder="Select a team member"
+              allowClear
               closeOnSelect
               valueExtractor={(item) =>
                 JSON.stringify({ id: item.id, name: item.name })

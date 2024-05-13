@@ -10,13 +10,27 @@ export async function createScan(params: {
   userId?: Scan["userId"];
   qrId: string;
   deleted?: boolean;
+  latitude?: Scan["latitude"];
+  longitude?: Scan["longitude"];
+  manuallyGenerated?: boolean;
 }) {
-  const { userAgent, userId, qrId, deleted = false } = params;
+  const {
+    userAgent,
+    userId,
+    qrId,
+    deleted = false,
+    latitude = null,
+    longitude = null,
+    manuallyGenerated = false,
+  } = params;
 
   try {
     const data = {
       userAgent,
       rawQrId: qrId,
+      latitude,
+      longitude,
+      manuallyGenerated,
     };
 
     /** If user id is passed, connect to that user */
@@ -64,6 +78,7 @@ export async function updateScan(params: {
   userId?: Scan["userId"];
   latitude?: Scan["latitude"];
   longitude?: Scan["longitude"];
+  manuallyGenerated?: boolean;
 }) {
   const { id, userId, latitude = null, longitude = null } = params;
 

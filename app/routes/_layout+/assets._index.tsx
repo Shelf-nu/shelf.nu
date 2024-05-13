@@ -291,7 +291,7 @@ export default function AssetIndexPage() {
                   as="button"
                   onClick={clearFilters}
                   variant="link"
-                  className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
+                  className="block min-w-28 max-w-none font-normal text-gray-500 hover:text-gray-600"
                   type="button"
                 >
                   Clear all filters
@@ -308,8 +308,8 @@ export default function AssetIndexPage() {
                     <ChevronRight className="hidden rotate-90 md:inline" />
                   </div>
                 }
-                model={{ name: "category", key: "name" }}
-                label="Filter by category"
+                model={{ name: "category", queryKey: "name" }}
+                label="Search categories"
                 initialDataKey="categories"
                 countKey="totalCategories"
               />
@@ -319,8 +319,8 @@ export default function AssetIndexPage() {
                     Tags <ChevronRight className="hidden rotate-90 md:inline" />
                   </div>
                 }
-                model={{ name: "tag", key: "name" }}
-                label="Filter by tags"
+                model={{ name: "tag", queryKey: "name" }}
+                label="Search tags"
                 initialDataKey="tags"
                 countKey="totalTags"
               />
@@ -331,8 +331,8 @@ export default function AssetIndexPage() {
                     <ChevronRight className="hidden rotate-90 md:inline" />
                   </div>
                 }
-                model={{ name: "location", key: "name" }}
-                label="Filter by Location"
+                model={{ name: "location", queryKey: "name" }}
+                label="Search locations"
                 initialDataKey="locations"
                 countKey="totalLocations"
                 renderItem={({ metadata }) => (

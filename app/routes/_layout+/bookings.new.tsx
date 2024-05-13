@@ -42,21 +42,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
-
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
-    const booking = await upsertBooking(
-      {
-        organizationId,
-        name: "Draft booking",
-        creatorId: authSession.userId,
-        // If the user is self service, we already set them as the custodian as that is the only possible option
-        ...(isSelfService && {
-          custodianUserId: authSession.userId,
-        }),
-      },
-      getClientHint(request)
-    );
 
     const [teamMembers, org] = await Promise.all([
       /**
@@ -107,7 +93,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return json(
       data({
         showModal: true,
-        booking,
+        isSelfService,
+        selfServiceId: authSession.userId,
         teamMembers,
       }),
       {
@@ -127,19 +114,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, role } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
+    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const formData = await request.formData();
-    const payload = parseData(formData, NewBookingFormSchema(), {
+    const payload = parseData(formData, NewBookingFormSchema(false, true), {
       additionalData: { userId, organizationId },
     });
 
-    const { name, custodian, id } = payload;
+    const { name, custodian } = payload;
     const hints = getHints(request);
 
     const fmt = "yyyy-MM-dd'T'HH:mm";
@@ -159,10 +147,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       {
         custodianUserId: custodian,
         organizationId,
-        id,
         name,
         from,
         to,
+        creatorId: authSession.userId,
+        ...(isSelfService && {
+          custodianUserId: authSession.userId,
+        }),
       },
       getClientHint(request)
     );
@@ -197,10 +188,10 @@ export const handle = {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
-  const { booking, teamMembers } = useLoaderData<typeof loader>();
+  const { isSelfService, selfServiceId } = useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
   return (
-    <div>
+    <div className="booking-inner-wrapper">
       <header className="mb-5">
         <h2>Create new booking</h2>
         <p>
@@ -211,17 +202,9 @@ export default function NewBooking() {
       </header>
       <div>
         <BookingForm
-          id={booking.id}
-          name={booking.name}
           startDate={startDate}
           endDate={endDate}
-          custodianUserId={
-            booking.custodianUserId ||
-            teamMembers.find(
-              (member) => member.user?.id === booking.custodianUserId
-            )?.id
-          }
-          isModal={true}
+          custodianUserId={isSelfService ? selfServiceId : undefined}
         />
       </div>
     </div>

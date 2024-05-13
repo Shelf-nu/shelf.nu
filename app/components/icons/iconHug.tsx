@@ -17,7 +17,7 @@ const sizeClasses: {
   [key in Props["size"]]: string;
 } = {
   /** 32px */
-  sm: "w-8 h-8",
+  sm: "w-5 h-5",
   /** 40px */
   md: "w-10 h-10",
   /** 44px */
@@ -35,15 +35,15 @@ export default function IconHug({ size = "sm", children, className }: Props) {
    */
   const sizeClass = sizeClasses[size];
   return (
-    <div
+    <span
       className={tw(
         "inline-flex items-center justify-center", //positioning
-        "rounded hover:cursor-pointer hover:bg-[#344054]", //styling
+        "rounded hover:cursor-pointer", //styling
         sizeClass,
         className
       )}
     >
       {children}
-    </div>
+    </span>
   );
 }

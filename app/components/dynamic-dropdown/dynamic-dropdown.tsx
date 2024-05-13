@@ -22,7 +22,7 @@ import Input from "../forms/input";
 import { CheckIcon } from "../icons/library";
 import { Button } from "../shared/button";
 
-import type { Icon } from "../shared/icons-map";
+import type { IconType } from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -31,7 +31,7 @@ type Props = ModelFilterProps & {
   style?: React.CSSProperties;
   trigger: React.ReactElement;
   label?: string;
-  searchIcon?: Icon;
+  searchIcon?: IconType;
   showSearch?: boolean;
   renderItem?: (item: ModelFilterItem) => React.ReactNode;
 };
@@ -114,8 +114,8 @@ export default function DynamicDropdown({
               <div className="filters-form relative border-y border-y-gray-200 p-3">
                 <Input
                   type="text"
-                  label={`Search ${label}`}
-                  placeholder={`Search ${label}`}
+                  label={label}
+                  placeholder={label}
                   hideLabel
                   className="text-gray-500"
                   icon={searchIcon}

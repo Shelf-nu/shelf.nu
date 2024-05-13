@@ -8,8 +8,14 @@ import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createScan, updateScan } from "~/modules/scan/service.server";
 import { setCookie } from "~/utils/cookies.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
-import { assertIsPost, data, error, getParams } from "~/utils/http.server";
+import { makeShelfError } from "~/utils/error";
+import {
+  assertIsPost,
+  data,
+  error,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.isAuthenticated
@@ -23,6 +29,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     /* Find the QR in the database */
     const qr = await getQr(id);
+    /** If the QR doesn't exist, getQR will throw a 404
+     *
+     * AFTER MVP: Here we have to consider a deleted User which will
+     * delete all the connected QRs.
+     * However, in real life there could be a physical QR code
+     * that is still there. Will we allow someone to claim it?
+     */
 
     /** Record the scan in the DB using the QR id
      * if the QR doesn't exist, we still record the scan
@@ -34,25 +47,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       deleted: !qr,
     });
 
-    /** If the QR doesn't exist, return a 404
-     *
-     * AFTER MVP: Here we have to consider a deleted User which will
-     * delete all the connected QRs.
-     * However, in real life there could be a physical QR code
-     * that is still there. Will we allow someone to claim it?
-     */
-    if (!qr) {
-      throw new ShelfError({
-        cause: null,
-        title: "QR is not found",
-        message:
-          "The QR you are trying to access does not exist or you do not have permission to access it.",
-        additionalData: { userId, id },
-        label: "QR",
-        status: 404,
-      });
-    }
-
     /**
      * Check if user is logged in.
      *  - If not, redirect to the login page, which will automatically then redirect back to here so all checks are performed again
@@ -62,17 +56,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`not-logged-in?scanId=${scan.id}&redirectTo=/qr/${id}`);
     }
 
+    /** Once the user is loged in and this loader gets re-validated,
+     * we update the scan with the userId so we know which user scanned it */
     await updateScan({
       id: scan.id,
       userId,
     });
 
     /**
-     * Does the QR code belong to any user.
-     * SKIP FOR NOW, AFTER MVP: QR codes sold on amazon. These will be created manually somehow by us and have no
-     * user assigned. We currently can't even do that because we have a unique constraint
-     * on the userId within Qr in the database.
+     * Does the QR code belong to any user or is it unclaimed?
      */
+    if (!qr.organizationId) {
+      /** We redirect to link where we handle the rest of the logic */
+      return redirect(`link?scanId=${scan.id}`);
+    }
+
     /**
      * Does the QR code belong to LOGGED IN user's any of organizations?
      * Redirect to page to report if found.
@@ -88,7 +86,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const userOrganizationIds = userOrganizations.map((org) => org.id);
     const personalOrganization = userOrganizations.find(
       (org) => org.type === "PERSONAL"
-    ) as Organization;
+    ) as Pick<Organization, "id">;
 
     if (!userOrganizationIds.includes(qr.organizationId)) {
       return redirect(`contact-owner?scanId=${scan.id}`);
@@ -129,16 +127,23 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const formData = await request.formData();
-    const latitude = formData.get("latitude") as string;
-    const longitude = formData.get("longitude") as string;
-    const scanId = formData.get("scanId") as string;
+    const { latitude, longitude, scanId } = parseData(
+      await request.formData(),
+      z.object({
+        latitude: z.string(),
+        longitude: z.string(),
+        scanId: z.string(),
+      })
+    );
 
-    await updateScan({
-      id: scanId,
-      latitude,
-      longitude,
-    });
+    /** This handles the automatic update when we have scanId formData */
+    if (scanId) {
+      await updateScan({
+        id: scanId,
+        latitude,
+        longitude,
+      });
+    }
 
     return json(data({ ok: true }));
   } catch (cause) {

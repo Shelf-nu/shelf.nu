@@ -10,6 +10,7 @@ export interface UpdateUserPayload {
   onboarded?: User["onboarded"];
   password?: string;
   confirmPassword?: string;
+  usedFreeTrial?: boolean;
 }
 
 export interface UpdateUserResponse {

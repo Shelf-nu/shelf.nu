@@ -7,4 +7,5 @@ export type CustomFieldDraftPayload = Pick<
   organizationId: Organization["id"];
   userId: User["id"];
   options?: CustomField["options"];
+  categories?: string[];
 };

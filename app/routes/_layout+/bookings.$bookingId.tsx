@@ -19,9 +19,11 @@ import { Badge } from "~/components/shared/badge";
 import { db } from "~/database/db.server";
 import { createNotes } from "~/modules/asset/service.server";
 import {
+  createNotesForBookingUpdate,
   deleteBooking,
   getBooking,
   removeAssets,
+  sendBookingUpdateNotification,
   upsertBooking,
 } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
@@ -34,7 +36,6 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
-import { dateForDateTimeInputValue } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import {
@@ -198,7 +199,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     return json(
       data({
         header,
-        booking: booking,
+        booking,
         modelName,
         items: assets,
         page,
@@ -237,7 +238,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   );
 
   try {
-    const { intent } = parseData(
+    const { intent, nameChangeOnly } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum([
@@ -250,6 +251,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "archive",
           "cancel",
         ]),
+        nameChangeOnly: z
+          .string()
+          .optional()
+          .transform((val) => (val === "yes" ? true : false)),
       }),
       {
         additionalData: { userId },
@@ -279,66 +284,95 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const headers = [
       setCookie(await setSelectedOrganizationIdCookie(organizationId)),
     ];
+    const formData = await request.formData();
 
     switch (intent) {
-      case "save": {
-        const formData = await request.formData();
-        const payload = parseData(formData, NewBookingFormSchema(), {
-          additionalData: { userId, id, organizationId, role },
-        });
+      case "save":
+      case "reserve":
+      case "checkOut":
+      case "checkIn":
+        // What status to set based on the intent
+        const intentToStatusMap = {
+          save: undefined,
+          reserve: BookingStatus.RESERVED,
+          checkOut: BookingStatus.ONGOING,
+          checkIn: BookingStatus.COMPLETE,
+        };
+        let upsertBookingData = {
+          organizationId,
+          id,
+        };
 
-        const { name, custodian } = payload;
-        const hints = getHints(request);
-        const startDate = formData.get("startDate")!.toString();
-        const endDate = formData.get("endDate")!.toString();
-        const fmt = "yyyy-MM-dd'T'HH:mm";
-        const from = DateTime.fromFormat(startDate, fmt, {
-          zone: hints.timeZone,
-        }).toJSDate();
-        const to = DateTime.fromFormat(endDate, fmt, {
-          zone: hints.timeZone,
-        }).toJSDate();
-        const booking = await upsertBooking(
-          {
+        // We are only changing the name so we do things simpler
+        if (nameChangeOnly) {
+          const { name } = parseData(
+            formData,
+            z.object({
+              name: z.string(),
+            }),
+            {
+              additionalData: { userId, id, organizationId, role },
+            }
+          );
+          Object.assign(upsertBookingData, {
+            name,
+          });
+        } else {
+          /** WE are updating the whole booking */
+          const payload = parseData(
+            formData,
+            NewBookingFormSchema(), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
+            {
+              additionalData: { userId, id, organizationId, role },
+            }
+          );
+
+          const { name, custodian } = payload;
+
+          const hints = getHints(request);
+          const startDate = formData.get("startDate")!.toString();
+          const endDate = formData.get("endDate")!.toString();
+          const fmt = "yyyy-MM-dd'T'HH:mm";
+          const from = DateTime.fromFormat(startDate, fmt, {
+            zone: hints.timeZone,
+          }).toJSDate();
+          const to = DateTime.fromFormat(endDate, fmt, {
+            zone: hints.timeZone,
+          }).toJSDate();
+
+          Object.assign(upsertBookingData, {
             custodianUserId: custodian,
-            organizationId,
-            id,
             name,
             from,
             to,
-          },
-          getClientHint(request)
-        );
+          });
+        }
 
-        sendNotification({
-          title: "Booking saved",
-          message: "Your booking has been saved successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+        // Add the status if it exists
+        Object.assign(upsertBookingData, {
+          ...(intentToStatusMap[intent] && {
+            status: intentToStatusMap[intent],
+          }),
         });
-
-        return json(data({ booking }), {
-          headers,
-        });
-      }
-      case "reserve": {
-        await upsertBooking(
-          { id, status: BookingStatus.RESERVED },
+        // Update and save the booking
+        const booking = await upsertBooking(
+          upsertBookingData,
           getClientHint(request),
           isSelfService
         );
 
-        sendNotification({
-          title: "Booking reserved",
-          message: "Your booking has been reserved successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
+        await createNotesForBookingUpdate(intent, booking, {
+          firstName: user?.firstName || "",
+          lastName: user?.lastName || "",
+          id: authSession.userId,
         });
 
-        return json(data({ success: true }), {
+        sendBookingUpdateNotification(intent, authSession.userId);
+
+        return json(data({ booking }), {
           headers,
         });
-      }
+
       case "delete": {
         if (isSelfService) {
           /**
@@ -414,62 +448,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           headers,
         });
       }
-      case "checkOut": {
-        const booking = await upsertBooking(
-          { id, status: BookingStatus.ONGOING },
-          getClientHint(request)
-        );
-
-        await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
-            booking.name
-          }](/bookings/${booking.id})**.`,
-          type: "UPDATE",
-          userId: authSession.userId,
-          assetIds: booking.assets.map((a) => a.id),
-        });
-
-        sendNotification({
-          title: "Booking checked-out",
-          message: "Your booking has been checked-out successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return json(data({ success: true }), {
-          headers,
-        });
-      }
-      case "checkIn": {
-        const booking = await upsertBooking(
-          {
-            id,
-            status: BookingStatus.COMPLETE,
-          },
-          getClientHint(request)
-        );
-
-        /** Create check-in notes for all assets */
-        await createNotes({
-          content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
-            booking.name
-          }](/bookings/${booking.id})**.`,
-          type: "UPDATE",
-          userId: authSession.userId,
-          assetIds: booking.assets.map((a) => a.id),
-        });
-
-        sendNotification({
-          title: "Booking checked-in",
-          message: "Your booking has been checked-in successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return json(data({ success: true }), {
-          headers,
-        });
-      }
       case "archive": {
         await upsertBooking(
           { id, status: BookingStatus.ARCHIVED },
@@ -482,10 +460,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
-
-        return json(data({ success: true }), {
-          headers,
-        });
+        return json(
+          { success: true },
+          {
+            headers,
+          }
+        );
       }
       case "cancel": {
         const cancelledBooking = await upsertBooking(
@@ -530,7 +510,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function BookingEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
-  const { booking, teamMembers } = useLoaderData<typeof loader>();
+  const { booking } = useLoaderData<typeof loader>();
 
   return (
     <>
@@ -548,26 +528,7 @@ export default function BookingEditPage() {
       />
 
       <div>
-        <BookingPageContent
-          id={booking.id}
-          name={booking.name}
-          startDate={
-            booking.from
-              ? dateForDateTimeInputValue(new Date(booking.from))
-              : undefined
-          }
-          endDate={
-            booking.to
-              ? dateForDateTimeInputValue(new Date(booking.to))
-              : undefined
-          }
-          custodianUserId={
-            booking.custodianUserId ||
-            teamMembers.find(
-              (member) => member.user?.id === booking.custodianUserId
-            )?.id
-          }
-        />
+        <BookingPageContent />
         <ContextualModal />
       </div>
     </>

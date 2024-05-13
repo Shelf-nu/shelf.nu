@@ -7,11 +7,14 @@ import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { locationsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
+import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
+import { ChevronRight } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { Image } from "~/components/shared/image";
 
 import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
@@ -28,6 +31,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -81,11 +85,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       tags,
       assets,
       totalPages,
+      totalCategories,
+      totalTags,
+      locations,
+      totalLocations,
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      excludeCategoriesQuery: true,
-      excludeTagsQuery: true,
       excludeSearchFromView: true,
     });
 
@@ -113,6 +119,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalPages,
         modelName,
         location,
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
       })
     );
   } catch (cause) {
@@ -310,7 +320,7 @@ export default function AddAssetsToLocation() {
   }, [location.id]);
 
   return (
-    <div className="flex max-h-full flex-col">
+    <div className="flex h-full max-h-full flex-col">
       <Header
         {...header}
         hideBreadcrumbs={true}
@@ -318,9 +328,57 @@ export default function AddAssetsToLocation() {
       />
 
       <div className="-mx-6 border-b px-6 md:pb-3">
-        <Filters className="md:border-0 md:p-0" />
+        <Filters className="md:border-0 md:p-0"></Filters>
       </div>
-      <div className="-mx-6 flex-1 overflow-y-auto px-5 md:px-0">
+      <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
+        <DynamicDropdown
+          trigger={
+            <div className="flex h-6 cursor-pointer items-center gap-2">
+              Categories <ChevronRight className="hidden rotate-90 md:inline" />
+            </div>
+          }
+          model={{ name: "category", queryKey: "name" }}
+          label="Filter by category"
+          initialDataKey="categories"
+          countKey="totalCategories"
+        />
+        <DynamicDropdown
+          trigger={
+            <div className="flex h-6 cursor-pointer items-center gap-2">
+              Tags <ChevronRight className="hidden rotate-90 md:inline" />
+            </div>
+          }
+          model={{ name: "tag", queryKey: "name" }}
+          label="Filter by tags"
+          initialDataKey="tags"
+          countKey="totalTags"
+        />
+        <DynamicDropdown
+          trigger={
+            <div className="flex h-6 cursor-pointer items-center gap-2">
+              Locations <ChevronRight className="hidden rotate-90 md:inline" />
+            </div>
+          }
+          model={{ name: "location", queryKey: "name" }}
+          label="Filter by Location"
+          initialDataKey="locations"
+          countKey="totalLocations"
+          renderItem={({ metadata }) => (
+            <div className="flex items-center gap-2">
+              <Image
+                imageId={metadata.imageId}
+                alt="img"
+                className={tw(
+                  "size-6 rounded-[2px] object-cover",
+                  metadata.description ? "rounded-b-none border-b-0" : ""
+                )}
+              />
+              <div>{metadata.name}</div>
+            </div>
+          )}
+        />
+      </div>
+      <div className="-mx-6  flex-1 overflow-y-auto px-5 md:px-0">
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
@@ -337,7 +395,7 @@ export default function AddAssetsToLocation() {
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
-          className="-mx-5 border-0"
+          className="-mx-5 flex h-full flex-col justify-between border-0"
         />
       </div>
       {/* Footer of the modal */}

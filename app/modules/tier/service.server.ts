@@ -280,13 +280,10 @@ export async function getOrganizationTierLimit({
   organizations,
 }: {
   organizationId?: string;
-  organizations: {
-    id: string;
-    type: OrganizationType;
-    name: string;
-    imageId: string | null;
-    userId: string;
-  }[];
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
 }) {
   try {
     /** Find the current organization as we need the owner */
