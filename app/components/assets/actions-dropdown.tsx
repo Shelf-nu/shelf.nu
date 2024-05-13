@@ -1,6 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
-import { ChevronRight, UserXIcon } from "~/components/icons/library";
+import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -115,7 +115,7 @@ const ConditionalActionsDropdown = () => {
                   disabled={assetIsPartOfUnavailableKit}
                 >
                   <span className="flex items-center gap-1">
-                    <UserXIcon /> Release Custody
+                    <Icon icon="take-custody" /> Release Custody
                   </span>
                 </Button>
               ) : (
@@ -128,7 +128,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon icon="user" /> Assign custody
+                    <Icon icon="give-custody" /> Assign custody
                   </span>
                 </Button>
               )}

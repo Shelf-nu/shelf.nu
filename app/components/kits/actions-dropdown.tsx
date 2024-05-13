@@ -5,7 +5,7 @@ import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import DeleteKit from "./delete-kit";
 import Icon from "../icons/icon";
-import { ChevronRight, UserXIcon } from "../icons/library";
+import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
 import {
   DropdownMenu,
@@ -132,7 +132,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-1">
-                    <UserXIcon /> Release Custody
+                    <Icon icon="take-custody" /> Release Custody
                   </span>
                 </Button>
               ) : (
@@ -149,7 +149,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                   disabled={someAssetIsNotAvailable}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon icon="user" /> Assign custody
+                    <Icon icon="give-custody" /> Assign custody
                   </span>
                 </Button>
               )}

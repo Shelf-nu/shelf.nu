@@ -1438,3 +1438,39 @@ export const KitIcon = (props: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
+
+export const GiveCustodyIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="100%"
+    height="100%"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.5}
+      d="m12.666 14 2-2m0 0-2-2m2 2h-4M8 10.333H5c-.93 0-1.396 0-1.774.115a2.666 2.666 0 0 0-1.778 1.778c-.115.378-.115.844-.115 1.774m8.333-9a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+    />
+  </svg>
+);
+
+export const TakeCustodyIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="100%"
+    height="100%"
+    fill="none"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.5}
+      d="m12.666 14-2-2m0 0 2-2m-2 2h4M8 10.333H5c-.93 0-1.396 0-1.774.115a2.666 2.666 0 0 0-1.778 1.778c-.115.378-.115.844-.115 1.774m8.333-9a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+    />
+  </svg>
+);
