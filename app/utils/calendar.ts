@@ -22,52 +22,52 @@ export function getStatusClasses(
     case "ARCHIVED":
     case "CANCELLED":
       statusClasses = [
-        "!text-gray-700",
-        "bg-gray-50",
-        "border-gray-200",
+        "md:!text-gray-700",
+        "md:bg-gray-50",
+        "md:border-gray-200",
         "[&>div.fc-daygrid-event-dot]:!border-gray-700",
         "[&_.fc-list-event-dot]:!border-gray-700",
-        "focus:!bg-gray-100",
+        "md:focus:!bg-gray-100",
       ];
       break;
     case "RESERVED":
       statusClasses = [
-        "!text-blue-700",
-        "bg-blue-50",
-        "border-blue-200",
+        "md:!text-blue-700",
+        "md:bg-blue-50",
+        "md:border-blue-200",
         "[&>div.fc-daygrid-event-dot]:!border-blue-700",
         "[&_.fc-list-event-dot]:!border-blue-700",
-        "focus:!bg-blue-100",
+        "md:focus:!bg-blue-100",
       ];
       break;
     case "ONGOING":
       statusClasses = [
-        "!text-purple-700",
-        "bg-purple-50",
-        "border-purple-200",
+        "md:!text-purple-700",
+        "md:bg-purple-50",
+        "md:border-purple-200",
         "[&>div.fc-daygrid-event-dot]:!border-purple-700",
         "[&_.fc-list-event-dot]:!border-purple-700",
-        "focus:!bg-purple-100",
+        "md:focus:!bg-purple-100",
       ];
       break;
     case "OVERDUE":
       statusClasses = [
-        "!text-warning-700",
-        "bg-warning-50",
-        "border-warning-200",
+        "md:!text-warning-700",
+        "md:bg-warning-50",
+        "md:border-warning-200",
         "[&>div.fc-daygrid-event-dot]:!border-warning-700",
         "[&_.fc-list-event-dot]:!border-warning-700",
-        "focus:!bg-warning-100",
+        "md:focus:!bg-warning-100",
       ];
       break;
     case "COMPLETE":
       statusClasses = [
-        "!text-success-700",
-        "bg-success-50",
-        "border-success-200",
+        "md:!text-success-700",
+        "md:bg-success-50",
+        "md:border-success-200",
         "[&>div.fc-daygrid-event-dot]:!border-success-700",
         "[&_.fc-list-event-dot]:!border-success-700",
-        "focus:!bg-success-100",
+        "md:focus:!bg-success-100",
       ];
       break;
     default:
@@ -77,13 +77,13 @@ export function getStatusClasses(
   return [...classes, ...statusClasses];
 }
 export const statusClassesOnHover: Record<BookingStatus, string> = {
-  DRAFT: "!bg-gray-100",
-  ARCHIVED: "!bg-gray-100",
-  CANCELLED: "!bg-gray-100",
-  RESERVED: "!bg-blue-100",
-  ONGOING: "!bg-purple-100",
-  OVERDUE: "!bg-warning-100",
-  COMPLETE: "!bg-success-100",
+  DRAFT: "md:!bg-gray-100",
+  ARCHIVED: "md:!bg-gray-100",
+  CANCELLED: "md:!bg-gray-100",
+  RESERVED: "md:!bg-blue-100",
+  ONGOING: "md:!bg-purple-100",
+  OVERDUE: "md:!bg-warning-100",
+  COMPLETE: "md:!bg-success-100",
 };
 
 export function isOneDayEvent(from: Date, to: Date) {
