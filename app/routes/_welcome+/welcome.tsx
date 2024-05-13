@@ -1,6 +1,7 @@
-import type { LinksFunction } from "@remix-run/node";
-import WelcomeCarousel from "~/components/welcome/carousel";
+import type { LinksFunction, MetaFunction } from "@remix-run/node";
+import { ChoosePlan } from "~/components/welcome/choose-plan";
 import carouselStyles from "~/styles/layout/carousel.css?url";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 export const links: LinksFunction = () => [
   {
@@ -12,11 +13,14 @@ export const links: LinksFunction = () => [
     href: carouselStyles,
   },
 ];
+export const meta: MetaFunction = () => [
+  { title: appendToMetaTitle("Welcome to shelf.nu") },
+];
 
 export default function Welcome() {
   return (
     <div>
-      <WelcomeCarousel />
+      <ChoosePlan />
     </div>
   );
 }
