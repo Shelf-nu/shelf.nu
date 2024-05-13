@@ -31,6 +31,11 @@ export function useMainMenuItems() {
     },
     {
       icon: <Icon icon="calendar" />,
+      to: "calendar",
+      label: "Calendar",
+    },
+    {
+      icon: <Icon icon="bookings" />,
       to: "bookings",
       label: "Bookings (beta)",
     },

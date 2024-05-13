@@ -14,8 +14,9 @@ export const init = async () => {
     } else {
       if (!global.scheduler) {
         global.scheduler = new PgBoss({
+          max: 5,
           connectionString: DIRECT_URL,
-          newJobCheckIntervalSeconds: 60 * 2,
+          newJobCheckIntervalSeconds: 60 * 5,
           noScheduling: true, //need to remove it, if we use cron schedulers in the future, but it comes with a cost of 2 additional polling every minute
         });
       }

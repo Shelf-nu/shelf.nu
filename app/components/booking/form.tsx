@@ -31,7 +31,6 @@ export const NewBookingFormSchema = (
 ) =>
   z
     .object({
-      // @TODO this is why its not working, because the id is required even on new bookings
       id:
         inputFieldIsDisabled || isNewBooking
           ? z.string().optional()
