@@ -181,7 +181,6 @@ export async function upsertCustomField(
       });
 
       if (!existingCustomField) {
-        // @TODO not sure how to handle this case
         const newCustomField = await createCustomField(def);
         customFields[def.name] = newCustomField;
       } else {

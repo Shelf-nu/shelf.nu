@@ -8,7 +8,6 @@ import { BookingForm } from "./form";
 export function BookingPageContent() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
 
-  // @TODO fix this
   const bookingStatus = useBookingStatus(booking);
 
   return (
