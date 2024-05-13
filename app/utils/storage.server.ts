@@ -23,10 +23,8 @@ export async function getPublicFileURL({
   filename: string;
   bucketName?: string;
 }) {
-  /** @TODO bucketExists should be updated to catch the error properly so it can be used within the try/catch when invoked */
-  await bucketExists(bucketName);
-
   try {
+    await bucketExists(bucketName);
     const { data } = getSupabaseAdmin()
       .storage.from(bucketName)
       .getPublicUrl(filename);
@@ -80,7 +78,6 @@ export async function createSignedUrl({
 async function bucketExists(bucketName: string) {
   const { error } = await getSupabaseAdmin().storage.getBucket(bucketName);
 
-  /** @TODO maybe we have to catch the error above. As there could be different errors on theory */
   if (error) {
     throw new ShelfError({
       label: "Storage",

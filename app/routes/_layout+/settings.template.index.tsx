@@ -7,6 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { z } from "zod";
 import { ErrorContent } from "~/components/errors";
 import { EmptyState } from "~/components/list/empty-state";
 import { ListHeader } from "~/components/list/list-header";
@@ -19,8 +20,8 @@ import { db } from "~/database/db.server";
 import { makeActive, makeDefault, makeInactive } from "~/modules/template";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -65,15 +66,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
         });
       });
 
-    // @TODO - you dont need to do that. The error should be handled in the catch block above. Dont forget to use findUniqueOrThrow
-    if (!user) {
-      throw new ShelfError({
-        cause: " User not found",
-        message: "User not found",
-        label: "Template",
-      });
-    }
-
     const modelName = {
       singular: "Template",
       plural: "Templates",
@@ -86,20 +78,21 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       if (template.isDefault) defaultTemplates[template.type] = template;
     });
 
-    // @TODO - data is not being returned properly. See docs
-    return json({
-      userId,
-      tier: user.tier,
-      modelName,
-      canCreateMoreTemplates: canCreateMoreTemplates({
-        tierLimit: user.tier.tierLimit,
-        totalTemplates: templates.length,
-      }),
-      items: templates,
-      totalItems: templates.length,
-      title: "Templates",
-      defaultTemplates,
-    });
+    return json(
+      data({
+        userId,
+        tier: user.tier,
+        modelName,
+        canCreateMoreTemplates: canCreateMoreTemplates({
+          tierLimit: user.tier.tierLimit,
+          totalTemplates: templates.length,
+        }),
+        items: templates,
+        totalItems: templates.length,
+        title: "Templates",
+        defaultTemplates,
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -107,73 +100,92 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
 };
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  // @TODO - this is outdated. Use getActionMethod and handle in try/catch
-  // assertIsPost(request);
-  const authSession = context.getSession();
-  let organizationId = null;
-
   try {
-    const { organizationId: orgId } = await requirePermission({
-      userId: authSession.userId,
-      request,
-      entity: PermissionEntity.template,
-      action: PermissionAction.update,
-    });
-    organizationId = orgId;
+    const method = getActionMethod(request);
 
-    const formData = await request.clone().formData();
-    // @TODO - not the correct way to parse form data. We have the new parseData function
-    const intent = formData.get("intent") as "toggleActive" | "makeDefault";
+    const authSession = context.getSession();
+    let organizationId = null;
 
-    switch (intent) {
-      case "toggleActive": {
-        const isActive = formData.get("isActive") === "true";
-        const templateId = formData.get("templateId") as string;
+    switch (method) {
+      case "POST": {
+        const { organizationId: orgId } = await requirePermission({
+          userId: authSession.userId,
+          request,
+          entity: PermissionEntity.template,
+          action: PermissionAction.update,
+        });
+        organizationId = orgId;
 
-        if (isActive) {
-          await makeInactive({
-            id: templateId,
-            organizationId,
-          });
-        } else {
-          await makeActive({
-            id: templateId,
-            organizationId,
-          });
+        const formData = await request.clone().formData();
+
+        const { intent } = parseData(
+          await request.formData(),
+          z.object({
+            intent: z.enum(["toggleActive", "makeDefault"]),
+          })
+        );
+
+        switch (intent) {
+          case "toggleActive": {
+            const { isActive, templateId } = parseData(
+              formData,
+              z.object({
+                isActive: z.boolean(),
+                templateId: z.string(),
+              })
+            );
+
+            if (isActive) {
+              await makeInactive({
+                id: templateId,
+                organizationId,
+              });
+            } else {
+              await makeActive({
+                id: templateId,
+                organizationId,
+              });
+            }
+
+            sendNotification({
+              title: "Template updated",
+              message: "Your template has been updated successfully",
+              icon: { name: "success", variant: "success" },
+              senderId: authSession.userId,
+            });
+
+            return redirect(`/settings/template`);
+          }
+          case "makeDefault": {
+            const { templateId, templateType } = parseData(
+              formData,
+              z.object({
+                templateId: z.string(),
+                templateType: z.enum(["Custody", "Booking"]),
+              })
+            );
+
+            await makeDefault({
+              id: templateId,
+              type: templateType as Template["type"],
+              organizationId,
+            });
+
+            sendNotification({
+              title: "Template updated",
+              message: "Your template has been updated successfully",
+              icon: { name: "success", variant: "success" },
+              senderId: authSession.userId,
+            });
+
+            return redirect(`/settings/template`);
+          }
         }
-
-        sendNotification({
-          title: "Template updated",
-          message: "Your template has been updated successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return redirect(`/settings/template`);
-      }
-      case "makeDefault": {
-        // @TODO - not the correct way to parse form data. We have the new parseData function
-        const templateId = formData.get("templateId") as string;
-        const templateType = formData.get("templateType") as Template["type"];
-
-        await makeDefault({
-          id: templateId,
-          type: templateType,
-          organizationId,
-        });
-
-        sendNotification({
-          title: "Template updated",
-          message: "Your template has been updated successfully",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return redirect(`/settings/template`);
       }
     }
+    throw notAllowedMethod(method);
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId: authSession.userId });
+    const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
   }
 }

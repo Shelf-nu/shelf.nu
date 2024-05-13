@@ -134,7 +134,6 @@ export const assertUserCanCreateMoreCustomFields = async ({
   }
 };
 
-// @TODO - this needs to be updated. Errors are not being thrown correctly the function
 export const assertUserCanCreateMoreTemplates = async ({
   userId,
 }: {
@@ -150,7 +149,14 @@ export const assertUserCanCreateMoreTemplates = async ({
   });
 
   if (!canCreateMore) {
-    throw new Error("Your user cannot create more templates");
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message: "Your user cannot create more templates",
+      additionalData: { userId },
+      label,
+      shouldBeCaptured: false,
+    });
   }
 };
 

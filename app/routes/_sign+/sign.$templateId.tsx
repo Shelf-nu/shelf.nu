@@ -5,6 +5,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import resolveConfig from "tailwindcss/resolveConfig";
+import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import Agreement from "~/components/sign/agreement";
 import AgreementPopup, {
@@ -13,15 +14,16 @@ import AgreementPopup, {
 
 import { db } from "~/database/db.server";
 import { createNote, getAsset } from "~/modules/asset/service.server";
-import {
-  initializePerPageCookieOnLayout,
-  setCookie,
-  userPrefs,
-} from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
-import { makeShelfError, ShelfError } from "~/utils/error";
-import { error } from "~/utils/http.server";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import {
+  data,
+  error,
+  getActionMethod,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -29,45 +31,22 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import tailwindConfig from "../../../tailwind.config";
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    // @TODO - this is not correct and should not be needed to be handled like this. The middleware will take care of this as long as its a private route
-    const user = authSession
-      ? await db.user.findUnique({
-          where: { email: authSession.email.toLowerCase() },
-          include: {
-            roles: true,
-            organizations: {
-              select: {
-                id: true,
-                name: true,
-                type: true,
-                imageId: true,
-              },
-            },
-          },
-        })
-      : undefined;
-
-    // @TODO - this is not needed
-    if (!user) {
-      return redirect("/login");
-    }
-
-    if (!user?.onboarded) {
-      return redirect("onboarding");
-    }
-
-    const cookie = await initializePerPageCookieOnLayout(request);
-
-    // @TODO - this is the right way to handle searchParams
-    const assigneeId = new URL(request.url).searchParams.get("assigneeId");
-    const assetId = new URL(request.url).searchParams.get("assetId");
-    // const templateId = params.templateId;
-    const userId = user?.id;
+    const { assigneeId, assetId } = getParams(
+      params,
+      z.object({
+        assigneeId: z.string(),
+        assetId: z.string(),
+      })
+    );
 
     const { organizationId } = await requirePermission({
       userId: authSession.userId,
@@ -75,17 +54,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       entity: PermissionEntity.template,
       action: PermissionAction.read,
     });
-
-    // @TODO - See comment above
-    if (!assetId || !assigneeId) {
-      throw new ShelfError({
-        cause: null,
-        message: "Malformed URL",
-        additionalData: { userId, assetId, assigneeId },
-        label: "Assets",
-        status: 400,
-      });
-    }
 
     if (userId !== assigneeId) {
       throw new ShelfError({
@@ -101,16 +69,6 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       id: assetId,
       organizationId,
     });
-
-    // @TODO - this is not correct and is already handled inside getAsset
-    if (!asset) {
-      throw new ShelfError({
-        cause: null,
-        message: "Asset not found",
-        status: 404,
-        label: "Assets",
-      });
-    }
 
     // @TODO needs fixing -
     // @ts-ignore
@@ -137,18 +95,24 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       });
     }
 
+    const user = await db.user.findUniqueOrThrow({
+      where: {
+        id: userId,
+      },
+      select: {
+        roles: true,
+      },
+    });
+
     return json(
-      {
+      data({
         user,
         currentOrganizationId: organizationId,
         enablePremium: ENABLE_PREMIUM_FEATURES,
         custody,
         template,
         isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
-      },
-      {
-        headers: [setCookie(await userPrefs.serialize(cookie))],
-      }
+      })
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -156,110 +120,85 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   }
 };
 
-export async function action({ context, request }: ActionFunctionArgs) {
-  // @TODO - this needs to be handled in the new way
-  // assertIsPost(request);
-  const authSession = context.getSession();
-  const { userId } = authSession;
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const method = getActionMethod(request);
 
   try {
-    const user = await db.user
-      // @TODO - needs to use findUniqueOrThrow
-      .findUnique({
-        where: {
-          id: userId,
-        },
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Error while fetching user",
-          status: 500,
-          label: "User",
+    switch (method) {
+      case "POST": {
+        const authSession = context.getSession();
+        const { userId } = authSession;
+        const user = await db.user.findUniqueOrThrow({
+          where: {
+            id: userId,
+          },
+          select: {
+            firstName: true,
+            lastName: true,
+          },
         });
-      });
 
-    // @TODO - see above
-    if (!user)
-      throw new ShelfError({
-        cause: null,
-        message: "User not found",
-        status: 404,
-        label: "User",
-      });
+        const { assetId } = getParams(
+          params,
+          z.object({
+            assetId: z.string(),
+          })
+        );
 
-    // @TODO - needs to be handled in the new way
-    const assetId = new URL(request.url).searchParams.get("assetId");
-    if (!assetId) {
-      throw new ShelfError({
-        cause: null,
-        message: "Asset not found",
-        status: 400,
-        label: "Assets",
-      });
+        const { signatureText, signatureImage } = parseData(
+          await request.formData(),
+          z.object({
+            signatureText: z.string(),
+            signatureImage: z.string(),
+          })
+        );
+
+        // Update the custody record
+        // @TODO - needs to be caught
+        await db.custody.update({
+          where: {
+            assetId,
+          },
+          data: {
+            signatureImage,
+            signatureText,
+            templateSigned: true,
+          },
+        });
+
+        // Update the asset status
+        // @TODO - needs to be caught
+        await db.asset.update({
+          where: {
+            id: assetId,
+          },
+          data: {
+            status: AssetStatus.IN_CUSTODY,
+          },
+        });
+
+        // Send out the notification
+        sendNotification({
+          title: "Asset signed",
+          message: "Your asset has been signed successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        // Create a note
+        await createNote({
+          content: `${user.firstName} ${user.lastName} signed the asset and now has custody of it`,
+          type: "UPDATE",
+          userId: userId,
+          assetId: assetId,
+        });
+
+        return redirect(`/assets/${assetId}`);
+      }
     }
-
-    // @TODO - needs to be handled in the new way
-    const formData = await request.clone().formData();
-    const signatureText = formData.get("signatureText") as string;
-    const signatureImage = formData.get("signatureImage") as string;
-
-    if (!signatureText && !signatureImage) {
-      throw new ShelfError({
-        cause: null,
-        message: "Signature is required",
-        status: 400,
-        label: "Template",
-      });
-    }
-
-    // Update the custody record
-    // @TODO - needs to be caught
-    await db.custody.update({
-      where: {
-        assetId,
-      },
-      data: {
-        signatureImage,
-        signatureText,
-        templateSigned: true,
-      },
-    });
-
-    // Update the asset status
-    // @TODO - needs to be caught
-    await db.asset.update({
-      where: {
-        id: assetId,
-      },
-      data: {
-        status: AssetStatus.IN_CUSTODY,
-      },
-    });
-
-    // Send out the notification
-    sendNotification({
-      title: "Asset signed",
-      message: "Your asset has been signed successfully",
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
-    });
-
-    // Create a note
-    await createNote({
-      content: `${user.firstName} ${user.lastName} signed the asset and now has custody of it`,
-      type: "UPDATE",
-      userId: userId,
-      assetId: assetId,
-    });
-
-    return redirect(`/assets/${assetId}`);
+    throw notAllowedMethod(method);
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
+    const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
   }
 }
