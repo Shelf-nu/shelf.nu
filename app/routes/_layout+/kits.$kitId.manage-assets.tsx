@@ -7,6 +7,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { kitsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
+import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
@@ -485,11 +486,18 @@ const RowComponent = ({
                 {item.title}
               </p>
 
-              {item.kit?.name ? (
-                <div className="flex w-max items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
-                  {item.kit.name}
-                </div>
-              ) : null}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <AssetStatusBadge
+                  status={item.status}
+                  availableToBook={item.availableToBook}
+                />
+
+                {item.kit?.name ? (
+                  <div className="flex w-max items-center justify-center rounded-full bg-gray-100 px-2 py-1 text-center text-xs font-medium">
+                    {item.kit.name}
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
 
