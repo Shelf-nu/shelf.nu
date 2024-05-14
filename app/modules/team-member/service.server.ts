@@ -192,3 +192,51 @@ export const getPaginatedAndFilterableTeamMembers = async ({
     });
   }
 };
+
+export async function getTeamMemberForCustodianFilter({
+  organizationId,
+  selectedTeamMembers = [],
+  getAll,
+}: {
+  organizationId: Organization["id"];
+  selectedTeamMembers?: TeamMember["id"][];
+  getAll?: boolean;
+}) {
+  try {
+    const [teamMemberExcludedSelected, teamMembersSelected, totalTeamMembers] =
+      await Promise.all([
+        db.teamMember.findMany({
+          where: { organizationId, id: { notIn: selectedTeamMembers } },
+          take: getAll ? undefined : 12,
+        }),
+        db.teamMember.findMany({
+          where: { organizationId, id: { in: selectedTeamMembers } },
+        }),
+        db.teamMember.count({ where: { organizationId } }),
+      ]);
+
+    /**
+     * If teamMember has a user associated then we have to use that user's id
+     * otherwise we have to use teamMember's id
+     */
+    const combinedTeamMembers = [
+      ...teamMembersSelected,
+      ...teamMemberExcludedSelected,
+    ].map((teamMember) => ({
+      ...teamMember,
+      id: teamMember.userId ? teamMember.userId : teamMember.id,
+    }));
+
+    return {
+      teamMembers: combinedTeamMembers,
+      totalTeamMembers,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch team members",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}

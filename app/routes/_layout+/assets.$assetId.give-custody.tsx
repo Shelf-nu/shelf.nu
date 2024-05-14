@@ -271,9 +271,10 @@ export default function Custody() {
               placeholder="Select a team member"
               allowClear
               closeOnSelect
-              valueExtractor={(item) =>
-                JSON.stringify({ id: item.id, name: item.name })
-              }
+              transformItem={(item) => ({
+                ...item,
+                id: JSON.stringify({ id: item.id, name: item.name }),
+              })}
             />
           </div>
           {actionData?.error ? (

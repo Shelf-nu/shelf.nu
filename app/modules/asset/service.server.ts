@@ -24,7 +24,10 @@ import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
 import { createLocationsIfNotExists } from "~/modules/location/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createTagsIfNotExists } from "~/modules/tag/service.server";
-import { createTeamMemberIfNotExists } from "~/modules/team-member/service.server";
+import {
+  createTeamMemberIfNotExists,
+  getTeamMemberForCustodianFilter,
+} from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
@@ -263,9 +266,17 @@ async function getAssetsFromView(params: {
     }
 
     if (teamMemberIds && teamMemberIds.length && where.asset) {
-      Object.assign(where, {
-        asset: { custody: { teamMemberId: { in: teamMemberIds } } },
-      });
+      where.asset.OR = [
+        ...(where.asset.OR ?? []),
+        {
+          custody: { teamMemberId: { in: teamMemberIds } },
+        },
+        {
+          bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
+        },
+        { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+        { custody: { custodian: { userId: { in: teamMemberIds } } } },
+      ];
     }
 
     const [assetSearch, totalAssets] = await Promise.all([
@@ -483,9 +494,17 @@ async function getAssets(params: {
     }
 
     if (teamMemberIds && teamMemberIds.length) {
-      Object.assign(where, {
-        custody: { teamMemberId: { in: teamMemberIds } },
-      });
+      where.OR = [
+        ...(where.OR ?? []),
+        {
+          custody: { teamMemberId: { in: teamMemberIds } },
+        },
+        { custody: { custodian: { userId: { in: teamMemberIds } } } },
+        {
+          bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
+        },
+        { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+      ];
     }
 
     const [assets, totalAssets] = await Promise.all([
@@ -1271,9 +1290,7 @@ export async function getPaginatedAndFilterableAssets({
       locationExcludedSelected,
       selectedLocations,
       totalLocations,
-      teamMemberExcludedSelected,
-      teamMembersSelected,
-      totalTeamMembers,
+      teamMembersData,
     ] = await Promise.all([
       db.category.findMany({
         where: { organizationId, id: { notIn: categoriesIds } },
@@ -1301,14 +1318,11 @@ export async function getPaginatedAndFilterableAssets({
       }),
       db.location.count({ where: { organizationId } }),
       // team members/custodian
-      db.teamMember.findMany({
-        where: { organizationId, id: { notIn: teamMemberIds } },
-        take: getAllEntries.includes("teamMember") ? undefined : 12,
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll: getAllEntries.includes("teamMember"),
       }),
-      db.teamMember.findMany({
-        where: { organizationId, id: { in: teamMemberIds } },
-      }),
-      db.teamMember.count({ where: { organizationId } }),
     ]);
 
     let getFunction = getAssetsFromView;
@@ -1351,8 +1365,7 @@ export async function getPaginatedAndFilterableAssets({
         ? []
         : [...selectedLocations, ...locationExcludedSelected],
       totalLocations,
-      teamMembers: [...teamMembersSelected, ...teamMemberExcludedSelected],
-      totalTeamMembers,
+      ...teamMembersData,
     };
   } catch (cause) {
     throw new ShelfError({
