@@ -1442,9 +1442,10 @@ export const KitIcon = (props: SVGProps<SVGSVGElement>) => (
 export const GiveCustodyIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
+    fill="none"
     width="100%"
     height="100%"
-    fill="none"
+    viewBox="0 0 16 16"
     {...props}
   >
     <path
@@ -1460,9 +1461,10 @@ export const GiveCustodyIcon = (props: SVGProps<SVGSVGElement>) => (
 export const TakeCustodyIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
+    fill="none"
     width="100%"
     height="100%"
-    fill="none"
+    viewBox="0 0 16 16"
     {...props}
   >
     <path
