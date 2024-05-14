@@ -38,6 +38,7 @@ import {
   GraphIcon,
   ScanQRIcon,
   SwitchIcon,
+  BookingsIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -80,7 +81,8 @@ export type IconType =
   | "calendar"
   | "graph"
   | "scanQR"
-  | "switch";
+  | "switch"
+  | "bookings";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -122,6 +124,7 @@ export const iconsMap: IconsMap = {
   sign: <SignIcon />,
   user: <UserIcon />,
   calendar: <CalendarIcon className="size-5" />,
+  bookings: <BookingsIcon />,
   graph: <GraphIcon />,
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
