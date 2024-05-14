@@ -10,6 +10,7 @@ import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import GrayBadge from "~/components/gray-badge";
 import { ChevronRight } from "~/components/icons/library";
 import ActionsDropdown from "~/components/kits/actions-dropdown";
 import AssetRowActionsDropdown from "~/components/kits/asset-row-actions-dropdown";
@@ -431,23 +432,17 @@ function ListContent({
 
       <Td className="hidden md:table-cell">
         {location ? (
-          <div
-            className={tw(
-              "flex h-7 min-w-28 items-center justify-center gap-x-1.5 rounded-full bg-gray-100 py-0.5",
-              location.image ? "pl-1.5 pr-2" : "px-2"
-            )}
-          >
-            <div className="size-4 overflow-hidden rounded-full">
+          <GrayBadge>
+            {location.image ? (
               <Image
-                imageId={location.image?.id}
+                imageId={location.image.id}
                 alt="img"
-                className="size-full object-cover"
+                className="mr-1 size-4 rounded-full object-cover"
                 updatedAt={location.image?.updatedAt}
               />
-            </div>
-
-            <p className="text-xs font-medium">{location.name}</p>
-          </div>
+            ) : null}
+            <span>{location.name}</span>
+          </GrayBadge>
         ) : null}
       </Td>
 

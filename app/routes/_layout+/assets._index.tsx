@@ -14,6 +14,7 @@ import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
+import GrayBadge from "~/components/gray-badge";
 import { ChevronRight, KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -521,13 +522,3 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
     </div>
   ) : null;
 };
-
-const GrayBadge = ({
-  children,
-}: {
-  children: string | JSX.Element | JSX.Element[];
-}) => (
-  <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
-    {children}
-  </span>
-);
