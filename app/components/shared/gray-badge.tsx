@@ -6,11 +6,7 @@ type GrayBadgeProps = PropsWithChildren<{
   style?: React.CSSProperties;
 }>;
 
-export default function GrayBadge({
-  className,
-  style,
-  children,
-}: GrayBadgeProps) {
+export function GrayBadge({ className, style, children }: GrayBadgeProps) {
   return (
     <span
       className={tw(

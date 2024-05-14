@@ -14,7 +14,6 @@ import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import GrayBadge from "~/components/gray-badge";
 import { ChevronRight, KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -24,6 +23,7 @@ import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import {

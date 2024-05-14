@@ -13,6 +13,7 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import type { KITS_INCLUDE_FIELDS } from "~/modules/asset/fields";
@@ -231,13 +232,3 @@ function ListContent({
     </>
   );
 }
-
-const GrayBadge = ({
-  children,
-}: {
-  children: string | JSX.Element | JSX.Element[];
-}) => (
-  <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
-    {children}
-  </span>
-);
