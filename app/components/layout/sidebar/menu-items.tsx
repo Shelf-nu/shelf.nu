@@ -17,8 +17,6 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
     useLoaderData<typeof loader>();
   const { menuItemsTop, menuItemsBottom } = useMainMenuItems();
   const location = useLocation();
-  /** We need to do this becasue of a special way we handle the bookings link that doesnt allow us to use NavLink currently */
-  const isBookingsRoute = location.pathname.includes("/bookings");
   const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
   return (
@@ -49,7 +47,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
           ) : null}
 
           {menuItemsTop.map((item) =>
-            item.to === "bookings" || item.to === "calendar" ? (
+            item.to === "bookings" ? (
               <li key={item.label}>
                 <ControlledActionButton
                   canUseFeature={canUseBookings}
@@ -87,7 +85,8 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                       canUseBookings
                         ? "justify-start focus:ring-0"
                         : "my-0 text-gray-500 hover:bg-gray-50 hover:text-gray-500",
-                      isBookingsRoute
+                      /** We need to do this becasue of a special way we handle the bookings link that doesnt allow us to use NavLink currently */
+                      location.pathname.includes(item.to)
                         ? "active bg-primary-50 text-primary-600"
                         : ""
                     ),
