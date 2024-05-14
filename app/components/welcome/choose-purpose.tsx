@@ -6,7 +6,7 @@ import Icon from "../icons/icon";
 import { CheckmarkIcon } from "../icons/library";
 import { Button } from "../shared/button";
 
-export function ChoosePlan() {
+export function ChoosePurpose() {
   const [selectedPlan, setSelectedPlan] = useState<"personal" | "team" | null>(
     null
   );
@@ -74,13 +74,13 @@ export function ChoosePlan() {
           </PlanBox>
         </div>
         <Button
-          to={selectedPlan === "team" ? "" : "/assets/new"}
+          to={selectedPlan === "team" ? "/select-plan" : "/assets/new"}
           width="full"
           className="mt-8"
           disabled={disabled}
         >
           {selectedPlan === "team"
-            ? "Start Free trial"
+            ? "Next: Select a plan"
             : "Create your first asset"}
         </Button>
       </div>

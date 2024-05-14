@@ -67,11 +67,6 @@ export async function loader({ context }: LoaderFunctionArgs) {
   try {
     const user = await getUserByID(userId);
 
-    /** If the user is already onboarded, we assume they finished the process so we send them to the index */
-    if (user.onboarded) {
-      return redirect("/");
-    }
-
     const authUser = await getAuthUserById(userId);
 
     const userSignedUpWithPassword =
