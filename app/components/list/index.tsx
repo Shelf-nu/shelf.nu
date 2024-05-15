@@ -6,6 +6,7 @@ import { tw } from "~/utils/tw";
 import { EmptyState } from "./empty-state";
 
 import { ListHeader } from "./list-header";
+import type { ListItemData } from "./list-item";
 import { ListItem } from "./list-item";
 import { Pagination } from "./pagination";
 import { Table } from "../table";
@@ -25,7 +26,7 @@ export const List = ({
   headerChildren?: ReactNode;
   hideFirstHeaderColumn?: boolean;
   /** Function to be passed if the rows of the table should navigate */
-  navigate?: (id: string) => void;
+  navigate?: (id: string, item: ListItemData) => void;
   className?: string;
   customEmptyStateContent?: {
     title: string;

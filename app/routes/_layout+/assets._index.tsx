@@ -1,4 +1,4 @@
-import type { Category, Asset, Tag, Custody } from "@prisma/client";
+import type { Category, Asset, Tag, Custody, Kit } from "@prisma/client";
 import { OrganizationRoles, AssetStatus } from "@prisma/client";
 import type {
   LinksFunction,
@@ -14,7 +14,7 @@ import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ImportButton } from "~/components/assets/import-button";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { ChevronRight } from "~/components/icons/library";
+import { ChevronRight, KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
@@ -23,8 +23,15 @@ import { Filters } from "~/components/list/filters";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import {
@@ -404,6 +411,7 @@ const ListAssetContent = ({
   item,
 }: {
   item: Asset & {
+    kit: Kit;
     category?: Category;
     tags?: Tag[];
     custody: Custody & {
@@ -419,7 +427,7 @@ const ListAssetContent = ({
     };
   };
 }) => {
-  const { category, tags, custody, location } = item;
+  const { category, tags, custody, location, kit } = item;
   const isSelfService = useUserIsSelfService();
   return (
     <>
@@ -427,7 +435,7 @@ const ListAssetContent = ({
       <Td className="w-full whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center">
+            <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -437,6 +445,22 @@ const ListAssetContent = ({
                 }}
                 className="size-full rounded-[4px] border object-cover"
               />
+
+              {kit?.id ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full border-2 border-white bg-gray-200">
+                        <KitIcon className="size-2" />
+                      </div>
+                    </TooltipTrigger>
+
+                    <TooltipContent side="top">
+                      <p className="text-sm">{kit.name}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null}
             </div>
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
@@ -528,13 +552,3 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
     </div>
   ) : null;
 };
-
-const GrayBadge = ({
-  children,
-}: {
-  children: string | JSX.Element | JSX.Element[];
-}) => (
-  <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
-    {children}
-  </span>
-);

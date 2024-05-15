@@ -1,21 +1,29 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "@remix-run/react";
+
+type UseControlledDropdownMenuReturn = {
+  ref: React.RefObject<HTMLDivElement>;
+  defaultOpen: boolean;
+  defaultApplied: boolean;
+  open: boolean;
+  setOpen: React.Dispatch<React.SetStateAction<boolean>>;
+};
 
 /**
  * Hook to control the state of a dropdown menu.
  * If the user clicks outside the dropdown, it will close.
  * It is important to add the ref to the DropdownMenuContent component, otherwise it wont work
- * @param initialState boolean
- * @returns [React.RefObject<HTMLDivElement>, boolean, React.Dispatch<React.SetStateAction<boolean>>]
+ *
+ * @returns {UseControlledDropdownMenuReturn}
  */
-export function useControlledDropdownMenu(
-  initialState: boolean
-): [
-  React.RefObject<HTMLDivElement>,
-  boolean,
-  React.Dispatch<React.SetStateAction<boolean>>,
-] {
-  const [isOpen, setOpen] = useState(initialState);
+export function useControlledDropdownMenu(): UseControlledDropdownMenuReturn {
   const ref = useRef<HTMLDivElement>(null);
+  const [searchParams] = useSearchParams();
+  const refIsQrScan = searchParams.get("ref") === "qr";
+  const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
+
+  const [open, setOpen] = useState(defaultOpen);
+  const [defaultApplied, setDefaultApplied] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -38,5 +46,18 @@ export function useControlledDropdownMenu(
     };
   }, []);
 
-  return [ref, isOpen, setOpen];
+  useEffect(() => {
+    if (defaultOpen && !defaultApplied) {
+      setOpen(true);
+      setDefaultApplied(true);
+    }
+  }, [defaultOpen, defaultApplied, setOpen]);
+
+  return {
+    ref,
+    defaultOpen,
+    defaultApplied,
+    open,
+    setOpen,
+  };
 }

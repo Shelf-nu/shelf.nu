@@ -32,7 +32,7 @@ export function TeamUsersActionsDropdown({
 }) {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);
-  const [ref, open, setOpen] = useControlledDropdownMenu(false);
+  const { ref, open, setOpen } = useControlledDropdownMenu();
 
   return (
     <>
