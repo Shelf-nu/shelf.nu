@@ -36,10 +36,11 @@ export default function SuccessfulSubscriptionModal() {
               </video>
               <div className="mb-8 text-center">
                 <h4 className="mb-1 text-[18px] font-semibold">
-                  You are now subscribed!
+                  You are all set!
                 </h4>
                 <p className="text-gray-600">
-                  Thank you, all {activeProduct?.name} features are unlocked.
+                  {activeProduct?.name} features unlocked.{" "}
+                  {isTeam && "Now, create a team workspace."}
                 </p>
               </div>
               {isTeam ? (

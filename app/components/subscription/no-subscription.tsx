@@ -1,7 +1,7 @@
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { useUserData } from "~/hooks/use-user-data";
 import { CustomerPortalForm } from "./customer-portal-form";
-import { plansIconsMap } from "./prices";
+import { plansIconsMap } from "./price-box";
 import { Button } from "../shared/button";
 
 export const NoSubscription = () => {
