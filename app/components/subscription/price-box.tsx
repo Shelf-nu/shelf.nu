@@ -128,7 +128,7 @@ export const PerWorkspaceTooltip = () => (
         <p className="text-xs font-medium text-gray-500">
           To enable multiple workspaces for your account, <br />
           please{" "}
-          <CrispButton variant="link" className="text-[12px] !w-auto">
+          <CrispButton variant="link" className="!w-auto text-[12px]">
             contact sales
           </CrispButton>
           .
