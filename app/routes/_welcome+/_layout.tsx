@@ -1,7 +1,10 @@
 import { Outlet } from "react-router";
 import { ErrorContent } from "~/components/errors";
+import { useCrisp } from "~/components/marketing/crisp";
 
 export default function OnboardingLayout() {
+  useCrisp();
+
   return (
     <div className="flex h-full min-h-screen flex-col ">
       <main className="relative flex size-full">
