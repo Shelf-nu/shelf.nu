@@ -37,7 +37,6 @@ export const PriceBox = ({
 
   const { shelf_tier } = price.product.metadata;
 
-  console.log(shelf_tier);
   return (
     <div
       className={tw(

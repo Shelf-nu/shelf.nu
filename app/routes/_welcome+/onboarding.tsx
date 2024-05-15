@@ -168,12 +168,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       );
     }
 
-    return redirect(
-      `/welcome${organizationId ? `?organizationId=${organizationId}` : ""}`,
-      {
-        headers,
-      }
-    );
+    return redirect(organizationId ? `/assets` : `/welcome`, {
+      headers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
