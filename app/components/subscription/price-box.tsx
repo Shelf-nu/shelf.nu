@@ -3,9 +3,17 @@ import { tw } from "~/utils/tw";
 import type { Price } from "./prices";
 import {
   DoubleLayerIcon,
+  HelpIcon,
   MultiLayerIcon,
   SingleLayerIcon,
 } from "../icons/library";
+import { CrispButton } from "../marketing/crisp";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../shared/tooltip";
 
 export const PriceBox = ({
   activePlan,
@@ -27,6 +35,9 @@ export const PriceBox = ({
         : price.unit_amount
       : null;
 
+  const { shelf_tier } = price.product.metadata;
+
+  console.log(shelf_tier);
   return (
     <div
       className={tw(
@@ -40,9 +51,7 @@ export const PriceBox = ({
       <div className="text-center">
         <div className="mb-5 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
           <i className=" inline-flex min-h-[20px] min-w-[20px] items-center justify-center">
-            {price.product.metadata.shelf_tier
-              ? plansIconsMap[price.product.metadata.shelf_tier]
-              : plansIconsMap["free"]}
+            {shelf_tier ? plansIconsMap[shelf_tier] : plansIconsMap["free"]}
           </i>
         </div>
         <div className="mb-3 flex items-center justify-center gap-2">
@@ -67,13 +76,29 @@ export const PriceBox = ({
               {price.recurring ? <span>/mo</span> : null}
             </div>
             <div className="text-gray-500">
-              {price?.recurring?.interval === "year" &&
-                `Billed annually ${(amount / 10).toLocaleString("en-US", {
-                  style: "currency",
-                  currency: price.currency,
-                  maximumFractionDigits: 0,
-                })}`}
+              {price?.recurring?.interval === "year" && (
+                <>
+                  <span>
+                    Billed annually{" "}
+                    {(amount / 10).toLocaleString("en-US", {
+                      style: "currency",
+                      currency: price.currency,
+                      maximumFractionDigits: 0,
+                    })}
+                  </span>
+                </>
+              )}
+
               {price?.recurring?.interval === "month" && `Billed montly`}
+
+              {shelf_tier === "tier_2" && (
+                <div className="flex items-center justify-center gap-1">
+                  <div className="text-sm font-normal text-gray-500">
+                    per workspace
+                  </div>{" "}
+                  <PerWorkspaceTooltip />
+                </div>
+              )}
             </div>
           </div>
         ) : null}
@@ -90,3 +115,25 @@ export const plansIconsMap: { [key: string]: JSX.Element } = {
   tier_1: <DoubleLayerIcon />,
   tier_2: <MultiLayerIcon />,
 };
+
+export const PerWorkspaceTooltip = () => (
+  <TooltipProvider delayDuration={100}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <i className="cursor-pointer text-gray-400 hover:text-gray-700">
+          <HelpIcon />
+        </i>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p className="text-xs font-medium text-gray-500">
+          To enable multiple workspaces for your account, <br />
+          please{" "}
+          <CrispButton variant="link" className="text-[12px] !w-auto">
+            contact sales
+          </CrispButton>
+          .
+        </p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
