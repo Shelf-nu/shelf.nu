@@ -11,6 +11,7 @@ export const Filters = ({
   children,
   className,
   slots,
+  searchClassName,
 }: {
   children?: ReactNode;
   className?: string;
@@ -20,6 +21,7 @@ export const Filters = ({
    * - right-of-search
    */
   slots?: SlotKeys;
+  searchClassName?: string;
 }) => (
   <div
     className={tw(
@@ -30,7 +32,7 @@ export const Filters = ({
     <div className="form-wrapper search-form w-full items-center justify-between gap-2 md:flex">
       <div className="flex w-full flex-col gap-2 md:flex-row md:items-center">
         {slots?.["left-of-search"] || null}
-        <SearchForm />
+        <SearchForm className={searchClassName} />
         {slots?.["right-of-search"] || null}
       </div>
       <div className="flex flex-1 justify-end">{children}</div>

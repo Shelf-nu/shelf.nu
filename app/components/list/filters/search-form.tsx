@@ -9,9 +9,10 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 import { SearchFieldTooltip } from "./search-field-tooltip";
 
-export const SearchForm = () => {
+export const SearchForm = ({ className }: { className?: string }) => {
   const [_searchParams, setSearchParams] = useSearchParams();
   const { search, modelName, searchFieldLabel } =
     useLoaderData<SearchableIndexResponse>();
@@ -49,7 +50,7 @@ export const SearchForm = () => {
   };
 
   return (
-    <div className="flex w-full md:w-auto">
+    <div className={tw("flex w-full md:w-auto", className)}>
       <div className="relative flex-1">
         <Input
           type="text"
