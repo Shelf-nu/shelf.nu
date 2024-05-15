@@ -93,7 +93,7 @@ export default function SelectPlan() {
       <img
         src="/static/images/shelf-symbol.png"
         alt="logo"
-        className="mb-4"
+        className="my-4 md:mt-0"
         width={32}
         height={32}
       />
@@ -101,7 +101,8 @@ export default function SelectPlan() {
         <h3>Select your payment plan</h3>
         <p>No credit card or payment required.</p>
       </div>
-      <div className="flex w-full gap-3 [&_.price-box]:py-4 [&_.price-slogan]:hidden">
+
+      <div className="mb-8 flex w-full flex-col items-stretch gap-3 md:flex-row [&_.price-box]:!mb-0 [&_.price-box]:py-4 [&_.price-slogan]:hidden">
         {prices.map((price) => (
           <PlanBox
             key={price.id}
@@ -117,7 +118,18 @@ export default function SelectPlan() {
               subscription={null}
               isTrialSubscription={false}
               customPlanName={
-                price.recurring?.interval === "year" ? "Yearly" : "Monthly"
+                price.recurring?.interval === "year" ? (
+                  <div className="text-center">
+                    Yearly{" "}
+                    <span className="block rounded-[16px] bg-primary-100 px-2 py-1 text-xs font-medium text-primary-700">
+                      Save 54%
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    Monthly <span className="block h-6"></span>
+                  </div>
+                )
               }
             />
           </PlanBox>
@@ -182,7 +194,7 @@ const PlanBox = ({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={tw(
-        "h-full w-1/2 transition-colors hover:cursor-pointer [&_.price-box]:!mb-4",
+        "h-full transition-colors hover:cursor-pointer md:w-1/2 [&_.price-box]:!mb-4",
         selected || isHovered ? activeClasses : "",
         rest.className
       )}

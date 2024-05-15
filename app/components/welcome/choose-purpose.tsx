@@ -62,7 +62,7 @@ export function ChoosePurpose() {
                 be accessing my workspace and they’ll be managing and/or
                 interacting with the asset inventory.
               </p>
-              <div className="mt-3 flex gap-4">
+              <div className="mt-3 flex flex-col gap-4 md:flex-row">
                 <div className="flex items-center gap-3">
                   <CheckmarkIcon /> <span>Free 14-day trial</span>
                 </div>

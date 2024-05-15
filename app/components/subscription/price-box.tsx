@@ -26,7 +26,7 @@ export const PriceBox = ({
   subscription: Stripe.Subscription | null;
   price: Price;
   isTrialSubscription: boolean;
-  customPlanName?: string;
+  customPlanName?: string | React.ReactNode;
 }) => {
   const amount =
     price.unit_amount != null
@@ -48,7 +48,7 @@ export const PriceBox = ({
       key={price.id}
     >
       <div className="text-center">
-        <div className="mb-5 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+        <div className="mb-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
           <i className=" inline-flex min-h-[20px] min-w-[20px] items-center justify-center">
             {shelf_tier ? plansIconsMap[shelf_tier] : plansIconsMap["free"]}
           </i>
@@ -74,7 +74,7 @@ export const PriceBox = ({
               })}
               {price.recurring ? <span>/mo</span> : null}
             </div>
-            <div className="text-gray-500">
+            <div className="text-xs text-gray-500">
               {price?.recurring?.interval === "year" && (
                 <>
                   <span>
@@ -92,7 +92,7 @@ export const PriceBox = ({
 
               {shelf_tier === "tier_2" && (
                 <div className="flex items-center justify-center gap-1">
-                  <div className="text-sm font-normal text-gray-500">
+                  <div className="text-xs font-normal text-gray-500">
                     per workspace
                   </div>{" "}
                   <PerWorkspaceTooltip />
@@ -127,7 +127,7 @@ export const PerWorkspaceTooltip = () => (
         <p className="text-xs font-medium text-gray-500">
           To enable multiple workspaces for your account, <br />
           please{" "}
-          <CrispButton variant="link" className="!w-auto text-[12px]">
+          <CrispButton variant="link" className="!w-auto text-xs">
             contact sales
           </CrispButton>
           .
