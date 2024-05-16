@@ -303,10 +303,16 @@ export async function verifyAuthSession(authSession: AuthSession) {
 
 export async function verifyOtpAndSignin(email: string, otp: string) {
   try {
-    if (NODE_ENV === "test" || NODE_ENV === "development") {
-      console.log(NODE_ENV);
-      // @TODO how do we get a session here and return it
-      // return null;
+    /** This is meant for e2e tests
+     * In that case we manually generate an OTP and use it to verify the email
+     */
+    if (NODE_ENV === "test") {
+      const { data } = await getSupabaseAdmin().auth.admin.generateLink({
+        type: "magiclink",
+        email: email,
+      });
+
+      otp = data.properties?.email_otp as string;
     }
 
     const { data, error } = await getSupabaseAdmin().auth.verifyOtp({

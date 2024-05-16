@@ -64,16 +64,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const { email, otp } = parseData(await request.formData(), OtpSchema, {
+        let { email, otp } = parseData(await request.formData(), OtpSchema, {
           message:
             "Invalid request. Please try again. If the issue persists, contact support.",
         });
 
         const authSession = await verifyOtpAndSignin(email, otp);
-        const userExists = Boolean(await findUserByEmail(email));
+        let user = await findUserByEmail(email);
+        const userExists = Boolean(user);
 
         if (!userExists) {
-          await createUser({
+          user = await createUser({
             ...authSession,
             username: randomUsernameFromEmail(authSession.email),
           });
@@ -87,13 +88,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // Setting the auth session and redirecting user to assets page
         context.setSession(authSession);
 
-        return redirect(safeRedirect("/assets"), {
-          headers: [
-            setCookie(
-              await setSelectedOrganizationIdCookie(personalOrganization.id)
-            ),
-          ],
-        });
+        return redirect(
+          safeRedirect(user?.onboarded ? "/assets" : "/onboarding"),
+          {
+            headers: [
+              setCookie(
+                await setSelectedOrganizationIdCookie(personalOrganization.id)
+              ),
+            ],
+          }
+        );
       }
     }
 

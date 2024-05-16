@@ -18,7 +18,7 @@ export const test = base.extend<{}, { account: Account }>({
       // Unique username.
       const testAccount = await nodemailer.createTestAccount();
       const email = testAccount.user;
-      const password = testAccount.pass;
+      const password = "1234qwer";
       const firstName = faker.person.firstName();
       const lastName = faker.person.lastName();
 
@@ -46,29 +46,8 @@ export const test = base.extend<{}, { account: Account }>({
 
       await expect(page.getByText("Confirm your email")).toBeVisible();
 
-      await page.fill("[data-test-id=login]", "123456");
+      await page.fill("[data-test-id=otp]", "123456");
       await page.click("[data-test-id=confirm-otp]");
-      /** We are waiting to make sure the email arrives */
-      await page.waitForTimeout(10000);
-
-      await page.goto("https://ethereal.email/login");
-
-      await page.fill("#address", email);
-      await page.fill("#password", password);
-      await page.getByRole("button", { name: "Log in" }).click();
-
-      await page.getByRole("link", { name: "Messages" }).click();
-      await page.getByRole("link", { name: "Your Magic Link" }).click();
-
-      const text = await page.innerText("#plaintext");
-      const regex = /\[([^\]]+)\]/;
-      const matches = text.match(regex);
-      let confirmUrl = "";
-      if (matches && matches.length > 0) {
-        confirmUrl = matches[1];
-      }
-
-      await page.goto(confirmUrl);
 
       // Wait for the field to be present on the DOM before filling it
       await page.waitForSelector('[data-test-id="firstName"]');
