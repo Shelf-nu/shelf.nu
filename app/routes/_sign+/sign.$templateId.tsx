@@ -74,17 +74,18 @@ export const loader = async ({
     // @ts-ignore
     const custody = asset.custody as Custody;
 
-    if (!custody) {
-      throw new ShelfError({
-        cause: null,
-        message: "Custody record not found",
-        status: 404,
-        label: "Custody",
-      });
-    }
-
     // @ts-ignore
     const template = custody.template as Template;
+
+    // Fetch the template PDF associated for the custody
+    const templateFile = await db.templateFile.findUniqueOrThrow({
+      where: {
+        revision_templateId: {
+          revision: custody.associatedTemplateVersion!,
+          templateId: custody.templateId!,
+        },
+      },
+    });
 
     if (!template) {
       throw new ShelfError({
@@ -111,6 +112,7 @@ export const loader = async ({
         enablePremium: ENABLE_PREMIUM_FEATURES,
         custody,
         template,
+        templateFile,
         isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
       })
     );
@@ -204,7 +206,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function Sign() {
-  const { template } = useLoaderData<typeof loader>();
+  const { template, templateFile } = useLoaderData<typeof loader>();
+  const templateUrl = templateFile.url;
   // const twConfig = resolveConfig(tailwindConfig);
   const [params, setParams] = useSearchParams();
   const showAgreementPopup = useCallback(() => {
