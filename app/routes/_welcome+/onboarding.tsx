@@ -23,7 +23,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
-import { SMTP_FROM } from "~/utils/env";
+import { ENABLE_PREMIUM_FEATURES, SMTP_FROM } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -65,11 +65,14 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const user = await getUserByID(userId);
+    if (!ENABLE_PREMIUM_FEATURES) {
+      return redirect("/assets");
+    }
 
+    const user = await getUserByID(userId);
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
     if (user.onboarded) {
-      return redirect("/");
+      return redirect("/assets");
     }
 
     const authUser = await getAuthUserById(userId);
@@ -165,12 +168,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       );
     }
 
-    return redirect(
-      `/welcome${organizationId ? `?organizationId=${organizationId}` : ""}`,
-      {
-        headers,
-      }
-    );
+    return redirect(organizationId ? `/assets` : `/welcome`, {
+      headers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

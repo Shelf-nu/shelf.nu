@@ -1,17 +1,9 @@
 import { useState } from "react";
-import type { LinksFunction } from "@remix-run/node";
 import { useSearchParams } from "@remix-run/react";
 import { ClientOnly } from "remix-utils/client-only";
 import { Pagination, Navigation } from "swiper/modules";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Button } from "../shared/button";
-
-export const links: LinksFunction = () => [
-  {
-    rel: "stylesheet",
-    href: "https://cdn.jsdelivr.net/npm/swiper@10/swiper-bundle.min.css",
-  },
-];
 
 export default function WelcomeCarousel() {
   return <ClientOnly fallback={null}>{() => <Carousel />}</ClientOnly>;

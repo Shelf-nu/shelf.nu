@@ -33,6 +33,10 @@ import {
   GraphIcon,
   ScanQRIcon,
   SwitchIcon,
+  KitIcon,
+  BookingsIcon,
+  GiveCustodyIcon,
+  TakeCustodyIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -69,7 +73,11 @@ export type IconType =
   | "calendar"
   | "graph"
   | "scanQR"
-  | "switch";
+  | "switch"
+  | "kit"
+  | "bookings"
+  | "give-custody"
+  | "take-custody";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -106,9 +114,13 @@ export const iconsMap: IconsMap = {
   send: <SendIcon />,
   user: <UserIcon />,
   calendar: <CalendarIcon className="size-5" />,
+  bookings: <BookingsIcon />,
   graph: <GraphIcon />,
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
+  kit: <KitIcon />,
+  "give-custody": <GiveCustodyIcon />,
+  "take-custody": <TakeCustodyIcon />,
 };
 
 export default iconsMap;

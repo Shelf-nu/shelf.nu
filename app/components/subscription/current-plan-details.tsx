@@ -12,6 +12,7 @@ export const CurrentPlanDetails = () => {
         You’re currently using the <b>{activeProduct?.name}</b> version of Shelf{" "}
         {isTrialSubscription ? " on a free trial" : ""}.
       </p>
+
       <div>
         {subscription?.canceled_at ? (
           <>

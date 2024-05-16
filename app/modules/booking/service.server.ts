@@ -8,9 +8,12 @@ import {
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
+import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { calcTimeDifference } from "~/utils/date-fns";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
+import { getCurrentSearchParams } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
@@ -22,7 +25,7 @@ import {
   deletedBookingEmailContent,
   sendCheckinReminder,
 } from "./email-helpers";
-import type { ClientHint, SchedulerData } from "./types";
+import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
 import { createNotes } from "../asset/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 
@@ -451,6 +454,7 @@ export async function getBookings(params: {
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
+  extraInclude?: Prisma.BookingInclude;
 }) {
   const {
     organizationId,
@@ -465,6 +469,7 @@ export async function getBookings(params: {
     excludeBookingIds,
     bookingFrom,
     userId,
+    extraInclude,
   } = params;
 
   try {
@@ -570,6 +575,7 @@ export async function getBookings(params: {
               profilePicture: true,
             },
           },
+          ...(extraInclude || undefined),
         },
         orderBy: { from: "asc" },
       }),
@@ -764,5 +770,152 @@ export async function getBooking(
       additionalData: { booking },
       label,
     });
+  }
+}
+
+export async function getBookingsForCalendar(params: {
+  request: Request;
+  organizationId: Organization["id"];
+  userId: string;
+  isSelfService: boolean;
+}) {
+  const { request, organizationId, userId, isSelfService = false } = params;
+  const searchParams = getCurrentSearchParams(request);
+
+  const start = searchParams.get("start") as string;
+  const end = searchParams.get("end") as string;
+
+  try {
+    const { bookings } = await getBookings({
+      organizationId,
+      page: 1,
+      perPage: 1000,
+      userId,
+      bookingFrom: new Date(start),
+      bookingTo: new Date(end),
+      ...(isSelfService && {
+        // If the user is self service, we only show bookings that belong to that user)
+        custodianUserId: userId,
+      }),
+      extraInclude: {
+        custodianTeamMember: true,
+        custodianUser: true,
+      },
+    });
+
+    const events = bookings
+      .filter((booking) => booking.from && booking.to)
+      .map((booking) => {
+        const custodianName = booking?.custodianUser
+          ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName}`
+          : booking.custodianTeamMember?.name;
+
+        return {
+          title: `${booking.name} | ${custodianName}`,
+          start: (booking.from as Date).toISOString(),
+          end: (booking.to as Date).toISOString(),
+          url: `/bookings/${booking.id}`,
+          classNames: [
+            `bookingId-${booking.id}`,
+            ...getStatusClasses(
+              booking.status,
+              isOneDayEvent(booking.from as Date, booking.to as Date)
+            ),
+          ],
+          extendedProps: {
+            status: booking.status,
+            id: booking.id,
+          },
+        };
+      });
+
+    return events;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching the bookings for the calendar. Please try again or contact support.",
+      additionalData: { ...params },
+      label,
+    });
+  }
+}
+export async function createNotesForBookingUpdate(
+  intent: BookingUpdateIntent,
+  booking: Booking & { assets: Pick<Asset, "id">[] },
+  user: { firstName: string; lastName: string; id: string }
+) {
+  switch (intent) {
+    case "checkOut":
+      await createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked out asset with **[${
+          booking.name
+        }](/bookings/${booking.id})**.`,
+        type: "UPDATE",
+        userId: user.id,
+        assetIds: booking.assets.map((a) => a.id),
+      });
+      break;
+    case "checkIn":
+      /** Create check-in notes for all assets */
+      await createNotes({
+        content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** checked in asset with **[${
+          booking.name
+        }](/bookings/${booking.id})**.`,
+        type: "UPDATE",
+        userId: user.id,
+        assetIds: booking.assets.map((a) => a.id),
+      });
+      break;
+    default:
+      break;
+  }
+}
+
+export function sendBookingUpdateNotification(
+  intent: BookingUpdateIntent,
+  senderId: string
+) {
+  /** The cases that are not covered here is because the action already reutns within the switch and takes care of the notification */
+  switch (intent) {
+    case "save":
+      sendNotification({
+        title: "Booking saved",
+        message: "Your booking has been saved successfully",
+        icon: { name: "success", variant: "success" },
+        senderId,
+      });
+      break;
+    case "reserve":
+      /** Send reserved notification */
+      sendNotification({
+        title: "Booking reserved",
+        message: "Your booking has been reserved successfully",
+        icon: { name: "success", variant: "success" },
+        senderId,
+      });
+
+      break;
+
+    case "checkOut":
+      sendNotification({
+        title: "Booking checked-out",
+        message: "Your booking has been checked-out successfully",
+        icon: { name: "success", variant: "success" },
+        senderId,
+      });
+
+      break;
+    case "checkIn":
+      sendNotification({
+        title: "Booking checked-in",
+        message: "Your booking has been checked-in successfully",
+        icon: { name: "success", variant: "success" },
+        senderId,
+      });
+      break;
+
+    default:
+      break;
   }
 }

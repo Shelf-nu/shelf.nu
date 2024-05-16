@@ -81,7 +81,7 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
         <ClientHintCheck nonce={nonce} />
-
+        <style data-fullcalendar />
         <Meta />
         {title ? <title>{title}</title> : null}
         <Links />

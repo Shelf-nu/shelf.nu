@@ -43,10 +43,9 @@ export default function DynamicDropdown({
   trigger,
   searchIcon = "search",
   model,
-  initialDataKey,
-  countKey,
   showSearch = true,
   renderItem,
+  ...hookProps
 }: Props) {
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -63,11 +62,7 @@ export default function DynamicDropdown({
     clearFilters,
     resetModelFiltersFetcher,
     getAllEntries,
-  } = useModelFilters({
-    model,
-    countKey,
-    initialDataKey,
-  });
+  } = useModelFilters({ model, ...hookProps });
 
   return (
     <div className="relative w-full text-center">

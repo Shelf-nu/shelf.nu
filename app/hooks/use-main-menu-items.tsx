@@ -15,6 +15,11 @@ export function useMainMenuItems() {
       label: "Assets",
     },
     {
+      icon: <Icon icon="kit" />,
+      to: "kits",
+      label: "Kits",
+    },
+    {
       icon: <Icon icon="category" />,
       to: "categories",
       label: "Categories",
@@ -31,6 +36,11 @@ export function useMainMenuItems() {
     },
     {
       icon: <Icon icon="calendar" />,
+      to: "calendar",
+      label: "Calendar",
+    },
+    {
+      icon: <Icon icon="bookings" />,
       to: "bookings",
       label: "Bookings (beta)",
     },
