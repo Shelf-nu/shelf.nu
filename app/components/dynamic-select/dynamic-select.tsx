@@ -60,6 +60,7 @@ export default function DynamicSelect({
   excludeItems,
   onChange = null,
   allowClear,
+  selectionMode = "none",
   ...hookProps
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -81,7 +82,7 @@ export default function DynamicSelect({
     resetModelFiltersFetcher,
     handleSelectItemChange,
     getAllEntries,
-  } = useModelFilters({ model, ...hookProps });
+  } = useModelFilters({ model, selectionMode, ...hookProps });
 
   const itemsToRender = useMemo(
     () =>

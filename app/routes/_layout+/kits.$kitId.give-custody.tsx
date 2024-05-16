@@ -237,7 +237,6 @@ export default function GiveKitCustody() {
             countKey="totalTeamMembers"
             placeholder="Select a team member"
             closeOnSelect
-            selectionMode="none"
             transformItem={(item) => ({
               ...item,
               id: JSON.stringify({ id: item.id, name: item.name }),
