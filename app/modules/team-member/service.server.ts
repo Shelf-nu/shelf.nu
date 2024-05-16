@@ -192,3 +192,76 @@ export const getPaginatedAndFilterableTeamMembers = async ({
     });
   }
 };
+
+export async function getTeamMemberForCustodianFilter({
+  organizationId,
+  selectedTeamMembers = [],
+  getAll,
+}: {
+  organizationId: Organization["id"];
+  selectedTeamMembers?: TeamMember["id"][];
+  getAll?: boolean;
+}) {
+  try {
+    const [
+      teamMemberExcludedSelected,
+      teamMembersSelected,
+      totalTeamMembers,
+      org,
+    ] = await Promise.all([
+      db.teamMember.findMany({
+        where: { organizationId, id: { notIn: selectedTeamMembers } },
+        take: getAll ? undefined : 12,
+      }),
+      db.teamMember.findMany({
+        where: { organizationId, id: { in: selectedTeamMembers } },
+      }),
+      db.teamMember.count({ where: { organizationId } }),
+      db.organization.findUnique({
+        where: { id: organizationId },
+        select: { owner: true },
+      }),
+    ]);
+
+    const allTeamMembers = [
+      ...teamMembersSelected,
+      ...teamMemberExcludedSelected,
+    ];
+
+    /**
+     * Owners can be assigned in bookings so have to add it to the list
+     */
+    if (org?.owner && typeof org.owner.id === "string") {
+      allTeamMembers.push({
+        id: "owner",
+        name: `${org.owner.firstName} ${org.owner.lastName} (Owner)`,
+        userId: org.owner.id,
+        organizationId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+      });
+    }
+
+    /**
+     * If teamMember has a user associated then we have to use that user's id
+     * otherwise we have to use teamMember's id
+     */
+    const combinedTeamMembers = allTeamMembers.map((teamMember) => ({
+      ...teamMember,
+      id: teamMember.userId ? teamMember.userId : teamMember.id,
+    }));
+
+    return {
+      teamMembers: combinedTeamMembers,
+      totalTeamMembers,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to fetch team members",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}

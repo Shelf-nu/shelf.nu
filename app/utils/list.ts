@@ -26,4 +26,5 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
       ? null
       : (searchParams.get("batch") as string | null),
   locationIds: searchParams.getAll("location"),
+  teamMemberIds: searchParams.getAll("teamMember") || [],
 });

@@ -237,9 +237,10 @@ export default function GiveKitCustody() {
             countKey="totalTeamMembers"
             placeholder="Select a team member"
             closeOnSelect
-            valueExtractor={(item) =>
-              JSON.stringify({ id: item.id, name: item.name })
-            }
+            transformItem={(item) => ({
+              ...item,
+              id: JSON.stringify({ id: item.id, name: item.name }),
+            })}
           />
         </div>
         {actionData?.error ? (

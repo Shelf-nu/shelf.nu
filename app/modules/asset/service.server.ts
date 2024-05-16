@@ -25,7 +25,10 @@ import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
 import { createLocationsIfNotExists } from "~/modules/location/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createTagsIfNotExists } from "~/modules/tag/service.server";
-import { createTeamMemberIfNotExists } from "~/modules/team-member/service.server";
+import {
+  createTeamMemberIfNotExists,
+  getTeamMemberForCustodianFilter,
+} from "~/modules/team-member/service.server";
 import type { AllowedModelNames } from "~/routes/api+/model-filters";
 
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
@@ -139,6 +142,7 @@ async function getAssetsFromView(params: {
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
   locationIds?: Location["id"][] | null;
+  teamMemberIds?: TeamMember["id"][] | null;
 }) {
   const {
     organizationId,
@@ -153,6 +157,7 @@ async function getAssetsFromView(params: {
     hideUnavailable,
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
     locationIds,
+    teamMemberIds,
   } = params;
 
   try {
@@ -262,6 +267,36 @@ async function getAssetsFromView(params: {
       };
     }
 
+    if (teamMemberIds && teamMemberIds.length && where.asset) {
+      where.asset.OR = [
+        ...(where.asset.OR ?? []),
+        {
+          custody: { teamMemberId: { in: teamMemberIds } },
+        },
+        {
+          bookings: {
+            some: {
+              custodianTeamMemberId: { in: teamMemberIds },
+              status: {
+                in: ["ONGOING", "OVERDUE"], // Only get bookings that are ongoing or overdue as those are the only states when the asset is actually in custody
+              },
+            },
+          },
+        },
+        {
+          bookings: {
+            some: {
+              custodianUserId: { in: teamMemberIds },
+              status: {
+                in: ["ONGOING", "OVERDUE"],
+              },
+            },
+          },
+        },
+        { custody: { custodian: { userId: { in: teamMemberIds } } } },
+      ];
+    }
+
     const [assetSearch, totalAssets] = await Promise.all([
       /** Get the assets */
       db.assetSearchView.findMany({
@@ -359,6 +394,7 @@ async function getAssets(params: {
   bookingFrom?: Booking["from"];
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
+  teamMemberIds?: TeamMember["id"][] | null;
 }) {
   const {
     organizationId,
@@ -373,6 +409,7 @@ async function getAssets(params: {
     bookingTo,
     hideUnavailable,
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
+    teamMemberIds,
   } = params;
 
   try {
@@ -473,6 +510,20 @@ async function getAssets(params: {
       where.location = {
         id: { in: locationIds },
       };
+    }
+
+    if (teamMemberIds && teamMemberIds.length) {
+      where.OR = [
+        ...(where.OR ?? []),
+        {
+          custody: { teamMemberId: { in: teamMemberIds } },
+        },
+        { custody: { custodian: { userId: { in: teamMemberIds } } } },
+        {
+          bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
+        },
+        { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+      ];
     }
 
     const [assets, totalAssets] = await Promise.all([
@@ -1243,6 +1294,7 @@ export async function getPaginatedAndFilterableAssets({
     hideUnavailable,
     unhideAssetsBookigIds,
     locationIds,
+    teamMemberIds,
   } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -1259,6 +1311,7 @@ export async function getPaginatedAndFilterableAssets({
       locationExcludedSelected,
       selectedLocations,
       totalLocations,
+      teamMembersData,
     ] = await Promise.all([
       db.category.findMany({
         where: { organizationId, id: { notIn: categoriesIds } },
@@ -1285,6 +1338,12 @@ export async function getPaginatedAndFilterableAssets({
         where: { organizationId, id: { in: locationIds } },
       }),
       db.location.count({ where: { organizationId } }),
+      // team members/custodian
+      getTeamMemberForCustodianFilter({
+        organizationId,
+        selectedTeamMembers: teamMemberIds,
+        getAll: getAllEntries.includes("teamMember"),
+      }),
     ]);
 
     let getFunction = getAssetsFromView;
@@ -1305,6 +1364,7 @@ export async function getPaginatedAndFilterableAssets({
       hideUnavailable,
       unhideAssetsBookigIds,
       locationIds,
+      teamMemberIds,
     });
     const totalPages = Math.ceil(totalAssets / perPage);
 
@@ -1326,6 +1386,7 @@ export async function getPaginatedAndFilterableAssets({
         ? []
         : [...selectedLocations, ...locationExcludedSelected],
       totalLocations,
+      ...teamMembersData,
     };
   } catch (cause) {
     throw new ShelfError({

@@ -35,7 +35,6 @@ type Props = ModelFilterProps & {
   disabled?: boolean;
   placeholder?: string;
   closeOnSelect?: boolean;
-  valueExtractor?: (item: ModelFilterItem) => string;
   excludeItems?: string[];
   onChange?: ((value: string) => void) | null;
   /**
@@ -53,18 +52,16 @@ export default function DynamicSelect({
   showSearch = true,
   defaultValue,
   model,
-  countKey,
-  initialDataKey,
   renderItem,
   extraContent,
   disabled,
   placeholder = `Select ${model.name}`,
   closeOnSelect = false,
-  valueExtractor,
-  selectionMode = "none",
   excludeItems,
   onChange = null,
   allowClear,
+  selectionMode = "none",
+  ...hookProps
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -85,13 +82,7 @@ export default function DynamicSelect({
     resetModelFiltersFetcher,
     handleSelectItemChange,
     getAllEntries,
-  } = useModelFilters({
-    model,
-    countKey,
-    initialDataKey,
-    selectionMode,
-    valueExtractor,
-  });
+  } = useModelFilters({ model, selectionMode, ...hookProps });
 
   const itemsToRender = useMemo(
     () =>

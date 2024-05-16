@@ -1,16 +1,16 @@
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 
-export function itemsWithExtractedValue(
+export function transformItemUsingTransformer(
   items: ModelFilterItem[],
-  valueExtractor?: (item: ModelFilterItem) => string
+  transformer?: (item: ModelFilterItem) => ModelFilterItem
 ): Array<ModelFilterItem> {
   return items.map((item) => {
-    const id =
-      typeof valueExtractor === "function" ? valueExtractor(item) : item.id;
+    /**
+     * Transforming the data based on user's provided transformer function
+     */
+    const transformedItem =
+      typeof transformer === "function" ? transformer(item) : item;
 
-    return {
-      ...item,
-      id,
-    };
+    return transformedItem;
   });
 }

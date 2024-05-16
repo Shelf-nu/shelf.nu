@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { type loader, type ModelFilters } from "~/routes/api+/model-filters";
-import { itemsWithExtractedValue } from "~/utils/model-filters";
+import { transformItemUsingTransformer } from "~/utils/model-filters";
 import useFetcherWithReset from "./use-fetcher-with-reset";
 
 export type ModelFilterItem = {
@@ -27,12 +27,12 @@ export type ModelFilterProps = {
 
   /**
    *
-   * A function to extract value/id of item on basis of item data
+   * A function to transform an item item on basis of item data
    *
    * @example
-   * (item) => JSON.stringify({ id: item.id, name: item.name })
+   * transformItem: (item) => ({ ...item, id: JSON.stringify({ id: item.id, name: item.name }) })
    */
-  valueExtractor?: (item: ModelFilterItem) => string;
+  transformItem?: (item: ModelFilterItem) => ModelFilterItem;
 };
 
 const GET_ALL_KEY = "getAll";
@@ -43,7 +43,7 @@ export function useModelFilters({
   countKey,
   initialDataKey,
   selectionMode = "append",
-  valueExtractor,
+  transformItem,
 }: ModelFilterProps) {
   const initialData = useLoaderData<any>();
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -58,10 +58,13 @@ export function useModelFilters({
 
   const items = useMemo(() => {
     if (searchQuery && fetcher.data && !fetcher.data.error) {
-      return itemsWithExtractedValue(fetcher.data.filters, valueExtractor);
+      return transformItemUsingTransformer(fetcher.data.filters, transformItem);
     }
-    return itemsWithExtractedValue(initialData[initialDataKey], valueExtractor);
-  }, [fetcher.data, initialData, initialDataKey, searchQuery, valueExtractor]);
+    return transformItemUsingTransformer(
+      initialData[initialDataKey],
+      transformItem
+    );
+  }, [fetcher.data, initialData, initialDataKey, searchQuery, transformItem]);
 
   const handleSelectItemChange = useCallback(
     (value: string) => {
