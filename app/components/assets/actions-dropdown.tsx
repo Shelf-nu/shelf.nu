@@ -181,11 +181,9 @@ const ConditionalActionsDropdown = () => {
                 variant="link"
                 className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                 width="full"
+                onClick={() => setOpen(false)}
               >
-                <span
-                  className="flex items-center gap-2"
-                  onClick={() => setOpen(false)}
-                >
+                <span className="flex items-center gap-2">
                   <Icon icon="duplicate" /> Duplicate
                 </span>
               </Button>
