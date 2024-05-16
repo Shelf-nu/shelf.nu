@@ -350,10 +350,6 @@ export default function AssetIndexPage() {
                 label="Search locations"
                 initialDataKey="locations"
                 countKey="totalLocations"
-                transformItem={(item) => ({
-                  ...item,
-                  id: item.metadata?.userId ? item.metadata.userId : item.id,
-                })}
                 renderItem={({ metadata }) => (
                   <div className="flex items-center gap-2">
                     <Image
@@ -380,6 +376,10 @@ export default function AssetIndexPage() {
                   queryKey: "name",
                   deletedAt: null,
                 }}
+                transformItem={(item) => ({
+                  ...item,
+                  id: item.metadata?.userId ? item.metadata.userId : item.id,
+                })}
                 label="Search team members"
                 initialDataKey="teamMembers"
                 countKey="totalTeamMembers"

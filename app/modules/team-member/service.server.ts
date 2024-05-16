@@ -210,13 +210,17 @@ export async function getTeamMemberForCustodianFilter({
       org,
     ] = await Promise.all([
       db.teamMember.findMany({
-        where: { organizationId, id: { notIn: selectedTeamMembers } },
+        where: {
+          organizationId,
+          id: { notIn: selectedTeamMembers },
+          deletedAt: null,
+        },
         take: getAll ? undefined : 12,
       }),
       db.teamMember.findMany({
         where: { organizationId, id: { in: selectedTeamMembers } },
       }),
-      db.teamMember.count({ where: { organizationId } }),
+      db.teamMember.count({ where: { organizationId, deletedAt: null } }),
       db.organization.findUnique({
         where: { id: organizationId },
         select: { owner: true },
