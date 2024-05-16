@@ -274,9 +274,25 @@ async function getAssetsFromView(params: {
           custody: { teamMemberId: { in: teamMemberIds } },
         },
         {
-          bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
+          bookings: {
+            some: {
+              custodianTeamMemberId: { in: teamMemberIds },
+              status: {
+                in: ["ONGOING", "OVERDUE"], // Only get bookings that are ongoing or overdue as those are the only states when the asset is actually in custody
+              },
+            },
+          },
         },
-        { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+        {
+          bookings: {
+            some: {
+              custodianUserId: { in: teamMemberIds },
+              status: {
+                in: ["ONGOING", "OVERDUE"],
+              },
+            },
+          },
+        },
         { custody: { custodian: { userId: { in: teamMemberIds } } } },
       ];
     }

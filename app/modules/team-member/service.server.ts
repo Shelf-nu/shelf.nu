@@ -234,7 +234,7 @@ export async function getTeamMemberForCustodianFilter({
     if (org?.owner && typeof org.owner.id === "string") {
       allTeamMembers.push({
         id: "owner",
-        name: "Owner",
+        name: `${org.owner.firstName} ${org.owner.lastName} (Owner)`,
         userId: org.owner.id,
         organizationId,
         createdAt: new Date(),
