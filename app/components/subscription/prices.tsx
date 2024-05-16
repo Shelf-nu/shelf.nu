@@ -1,7 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import type Stripe from "stripe";
 import type { loader } from "~/routes/_layout+/settings.subscription";
-import { shortenIntervalString } from "~/utils/shorten-interval-string";
 import { tw } from "~/utils/tw";
 import { FREE_PLAN } from "./helpers";
 import { PriceCta } from "./price-cta";
@@ -64,7 +63,12 @@ export const Price = ({
   const isFreePlan = price.id != "free";
   const features = price.product.metadata.features?.split(",") || [];
 
-  // icons to be mapped with different plans
+  const amount =
+    price.unit_amount != null
+      ? price?.recurring?.interval === "year"
+        ? price.unit_amount / 10
+        : price.unit_amount
+      : null;
 
   return (
     <div className="subscription-plan mb-12 w-full xl:mb-0 xl:max-w-[410px]">
@@ -96,16 +100,24 @@ export const Price = ({
               </div>
             ) : null}
           </div>
-          {price.unit_amount != null ? (
-            <div className=" mb-3 text-4xl font-semibold text-gray-900">
-              {(price.unit_amount / 100).toLocaleString("en-US", {
-                style: "currency",
-                currency: price.currency,
-                maximumFractionDigits: 0,
-              })}
-              {price.recurring ? (
-                <span>/{shortenIntervalString(price.recurring.interval)}</span>
-              ) : null}
+          {amount != null ? (
+            <div className="mb-3 ">
+              <div className=" text-4xl font-semibold text-gray-900">
+                {(amount / 100).toLocaleString("en-US", {
+                  style: "currency",
+                  currency: price.currency,
+                  maximumFractionDigits: 0,
+                })}
+                {price.recurring ? <span>/mo</span> : null}
+              </div>
+              <div className="text-gray-500">
+                {price?.recurring?.interval === "year" &&
+                  `Billed annually ${(amount / 10).toLocaleString("en-US", {
+                    style: "currency",
+                    currency: price.currency,
+                    maximumFractionDigits: 0,
+                  })}`}
+              </div>
             </div>
           ) : null}
           <p className="min-h-[48px] text-base text-gray-600">

@@ -77,10 +77,8 @@ const HoverMessage = ({
           {buttonContent.message}
           {!skipCta ? (
             <span>
-              Please consider{" "}
-              <Button to="/settings/subscription" variant={"link"}>
-                {buttonContent.ctaText}
-              </Button>
+              {" "}
+              Please switch to your team workspace to use this feature
             </span>
           ) : null}
           .

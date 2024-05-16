@@ -1,0 +1,54 @@
+.fc-toolbar {
+  @apply border border-gray-300 p-2 m-0 !important;
+  border-bottom: none !important;
+  border-top-left-radius: 0.5rem !important;
+  border-top-right-radius: 0.5rem !important;
+}
+
+.fc {
+  @apply bg-white;
+}
+
+.fc-event-time {
+  @apply font-normal !important;
+}
+
+.fc-next-button {
+  @apply ml-0 rounded-tl-none rounded-bl-none border border-gray-400 bg-white text-gray-600 !important;
+}
+
+.fc-today-button {
+  @apply ml-0 rounded-none border border-gray-400 bg-white text-black pt-[0.5em] border-x-0 !important;
+}
+
+.fc-prev-button {
+  @apply ml-0 rounded-tr-none rounded-br-none border border-gray-400 bg-white text-gray-600 !important;
+}
+
+.fc-event-main {
+  color: inherit !important;
+}
+.fc-event-title {
+  font-weight: inherit !important;
+}
+@media (min-width: 768px) {
+  .fc-event-title::before {
+    content: "| ";
+  }
+}
+
+.fc-day-today {
+  @apply bg-primary-50 border-t-[1.5px] border-t-primary-200 border-l-[1.5px] border-l-primary-200 border-r-[1.5px] border-r-primary-200 border-b-[1.5px] border-b-primary-200 text-primary-700 !important;
+}
+.fc-theme-standard .fc-scrollgrid {
+  @apply border border-[#EAECF0] border-t-0;
+}
+
+.fc-theme-standard td,
+.fc-theme-standard th {
+  @apply border border-[#EAECF0];
+}
+
+.fc-daygrid-day-frame {
+  @apply min-h-[200px] !important;
+}

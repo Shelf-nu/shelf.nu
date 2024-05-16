@@ -188,7 +188,6 @@ enum NoteType {
 }
 
 model Qr {
-  // @TODO we might need to change this to shorten the length of the id
   id String @id @default(cuid())
 
   // Version of the QR code based on spec from Denso wave
