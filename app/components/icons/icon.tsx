@@ -4,7 +4,7 @@ import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
 export interface IconProps {
-  icon?: IconType;
+  icon: IconType;
   disableWrap?: true;
 }
 const Icon = React.forwardRef<HTMLElement, IconProps>(function Icon(
