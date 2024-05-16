@@ -89,26 +89,16 @@ async function bucketExists(bucketName: string) {
 
 async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
-  {
-    filename,
-    contentType,
-    bucketName,
-    resizeOptions,
-    updateExisting,
-  }: UploadOptions
+  { filename, contentType, bucketName, resizeOptions }: UploadOptions
 ) {
   try {
     let file = resizeOptions
       ? await cropImage(fileData, resizeOptions)
       : await getFileArrayBuffer(fileData);
 
-    const { data, error } = updateExisting
-      ? await getSupabaseAdmin()
-          .storage.from(bucketName)
-          .update(filename, file, { contentType, upsert: true })
-      : await getSupabaseAdmin()
-          .storage.from(bucketName)
-          .upload(filename, file, { contentType, upsert: true });
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .upload(filename, file, { contentType });
 
     if (error) {
       throw error;
@@ -131,7 +121,6 @@ export interface UploadOptions {
   filename: string;
   contentType: string;
   resizeOptions?: ResizeOptions;
-  updateExisting?: boolean;
 }
 
 export async function parseFileFormData({
@@ -139,13 +128,11 @@ export async function parseFileFormData({
   newFileName,
   bucketName = "profile-pictures",
   resizeOptions,
-  updateExisting = false,
 }: {
   request: Request;
   newFileName: string;
   bucketName?: string;
   resizeOptions?: ResizeOptions;
-  updateExisting?: boolean;
 }) {
   try {
     await bucketExists(bucketName);
@@ -164,7 +151,6 @@ export async function parseFileFormData({
           contentType,
           bucketName,
           resizeOptions,
-          updateExisting,
         });
         return uploadedFilePath;
       }

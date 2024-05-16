@@ -4,7 +4,7 @@ import { AssetStatus, Roles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
-import resolveConfig from "tailwindcss/resolveConfig";
+// import resolveConfig from "tailwindcss/resolveConfig";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import Agreement from "~/components/sign/agreement";
@@ -205,7 +205,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function Sign() {
   const { template } = useLoaderData<typeof loader>();
-  const twConfig = resolveConfig(tailwindConfig);
+  // const twConfig = resolveConfig(tailwindConfig);
   const [params, setParams] = useSearchParams();
   const showAgreementPopup = useCallback(() => {
     params.set(AGREEMENT_POPUP_VISIBLE, "true");

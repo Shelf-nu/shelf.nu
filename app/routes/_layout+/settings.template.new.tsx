@@ -11,12 +11,12 @@ import {
   TemplateForm,
 } from "~/components/templates/form";
 
-import { createTemplate, updateTemplatePDF } from "~/modules/template";
+import { createTemplate, createTemplateRevision } from "~/modules/template";
 import { assertUserCanCreateMoreTemplates } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
-import { getActionMethod, parseData } from "~/utils/http.server";
+import { data, getActionMethod, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -28,16 +28,22 @@ const title = "New Template";
 export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
+  try {
+    await assertUserCanCreateMoreTemplates({ userId });
 
-  await assertUserCanCreateMoreTemplates({ userId });
+    const header = {
+      title,
+    };
 
-  const header = {
-    title,
-  };
-
-  return json({
-    header,
-  });
+    return json(
+      data({
+        header,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -56,72 +62,70 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
   try {
     switch (method) {
-      case "POST":
-        {
-          await assertUserCanCreateMoreTemplates({
-            userId: authSession.userId,
-          });
+      case "POST": {
+        await assertUserCanCreateMoreTemplates({
+          userId: authSession.userId,
+        });
 
-          const { organizationId } = await requirePermission({
-            userId: authSession.userId,
-            request,
-            entity: PermissionEntity.template,
-            action: PermissionAction.create,
-          });
+        const { organizationId } = await requirePermission({
+          userId: authSession.userId,
+          request,
+          entity: PermissionEntity.template,
+          action: PermissionAction.create,
+        });
 
-          const clonedData = request.clone();
+        const clonedData = request.clone();
 
-          const { name, type, description, signatureRequired, pdf } = parseData(
-            await request.formData(),
-            NewTemplateFormSchema
+        const { name, type, description, signatureRequired, pdf } = parseData(
+          await request.formData(),
+          NewTemplateFormSchema
+        );
+
+        // @TODO - this is not the correct way to check for file should be handled in schema
+        if (pdf.type === "application/octet-stream") {
+          return json(
+            {
+              errors: [
+                {
+                  code: "custom",
+                  message: "File is required.",
+                },
+              ],
+            },
+            {
+              status: 400,
+            }
           );
-
-          // @TODO - this is not the correct way to check for file should be handled in schema
-          if (pdf.type === "application/octet-stream") {
-            return json(
-              {
-                errors: [
-                  {
-                    code: "custom",
-                    message: "File is required.",
-                  },
-                ],
-              },
-              {
-                status: 400,
-              }
-            );
-          }
-
-          const { id } = await createTemplate({
-            name,
-            type,
-            description: description ?? "",
-            signatureRequired: signatureRequired ?? false,
-            userId: authSession.userId,
-            organizationId,
-          });
-
-          await updateTemplatePDF({
-            pdfName: pdf.name,
-            pdfSize: pdf.size,
-            request: clonedData,
-            templateId: id,
-            organizationId,
-          });
-
-          sendNotification({
-            title: "Template created",
-            message: "Your template has been created successfully",
-            icon: { name: "success", variant: "success" },
-            senderId: authSession.userId,
-          });
-
-          return redirect(`/settings/template`);
         }
 
-        throw notAllowedMethod(method);
+        const { id } = await createTemplate({
+          name,
+          type,
+          description: description ?? "",
+          signatureRequired: signatureRequired ?? false,
+          userId: authSession.userId,
+          organizationId,
+        });
+
+        await createTemplateRevision({
+          pdfName: pdf.name,
+          pdfSize: pdf.size,
+          request: clonedData,
+          templateId: id,
+          organizationId,
+        });
+
+        sendNotification({
+          title: "Template created",
+          message: "Your template has been created successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return redirect(`/settings/template`);
+      }
     }
+    throw notAllowedMethod(method);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

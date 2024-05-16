@@ -4,6 +4,7 @@ import {
   type Template,
   type User,
 } from "@prisma/client";
+import { v4 } from "uuid";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
@@ -82,11 +83,11 @@ export async function updateTemplate({
 
     /**
      * If the signatureRequired is true, we need to search through all the Custodies that
-     * have this tempalate associated with it. We will check if the templateSigned is false.
+     * have this template associated with it. We will check if the templateSigned is false.
      *
      * If it is false, this could mean a scenario that the custodian has the asset in custody
      * and wasn't required to sign the template. But since we are setting signatureRequired to true,
-     * we need to set the asset custory to "AVAILABLE" and furthermore, ask the custodian to sign
+     * we need to set the asset custody to "AVAILABLE" and furthermore, ask the custodian to sign
      * the template via mailing them.
      */
     if (signatureRequired === true) {
@@ -134,7 +135,7 @@ export async function updateTemplate({
   }
 }
 
-export async function updateTemplatePDF({
+export async function createTemplateRevision({
   request,
   pdfName,
   pdfSize,
@@ -148,40 +149,51 @@ export async function updateTemplatePDF({
   organizationId: User["id"];
 }) {
   try {
-    const res = await db.template.findFirst({
+    const template = await db.template.findFirst({
       where: { id: templateId, organizationId },
-      select: { name: true, pdfUrl: true },
     });
 
-    if (!res) return null;
+    if (!template) return null;
 
-    const newFileName: string = `${organizationId}/${templateId}`;
+    const pdfHash = v4();
+    const newFileName: string = `${organizationId}/${templateId}/${pdfHash}`;
     const fileData = await parseFileFormData({
       request,
       bucketName: "templates",
       newFileName,
-      updateExisting: res.pdfUrl !== null && res.pdfUrl !== undefined,
     });
 
     const pdf = fileData.get("pdf") as string;
 
     if (!pdf) return null;
 
-    const publicUrl = getPublicFileURL({
+    const publicUrl = await getPublicFileURL({
       bucketName: "templates",
       filename: newFileName,
     });
 
-    const data = {
-      pdfUrl: publicUrl + ".pdf",
-      pdfSize,
-      pdfName,
-    };
+    const [updatedTemplate, newRevision] = await db.$transaction([
+      // Update the latest revision of the template
+      db.template.update({
+        where: { id: templateId, organizationId },
+        data: {
+          lastRevision: template.lastRevision + 1,
+        },
+      }),
 
-    return await db.template.update({
-      where: { id: templateId, organizationId },
-      data,
-    });
+      // Create a new revision of the template PDF
+      db.templateFile.create({
+        data: {
+          name: pdfName,
+          size: pdfSize,
+          url: `${publicUrl}.pdf`,
+          revision: template.lastRevision + 1,
+          templateId,
+        },
+      }),
+    ]);
+
+    return { updatedTemplate, newRevision };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -276,6 +288,24 @@ export async function getTemplateById(id: Template["id"]) {
       title: "Template not found",
       message:
         "The template you are trying to access does not exist or you do not have permission to access it.",
+      additionalData: { id },
+      label: "Template",
+    });
+  }
+}
+
+export async function getLatestTemplateFile(id: Template["id"]) {
+  try {
+    return await db.templateFile.findFirst({
+      where: { templateId: id },
+      orderBy: { revision: "desc" },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Error fetching template file",
+      message:
+        "Something went wrong while fetching the template file. Please try again or contact support.",
       additionalData: { id },
       label: "Template",
     });

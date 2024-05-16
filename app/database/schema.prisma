@@ -486,6 +486,7 @@ model TemplateFile {
   revision Int
   size     Int // PDF size
   name     String // PDF file name
+  url      String // PDF file URL
 
   // Relationships
   template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)

@@ -6,7 +6,6 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
-import { parseFormAny } from "react-zorm";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
@@ -18,8 +17,10 @@ import {
 import {
   getTemplateById,
   updateTemplate,
-  updateTemplatePDF,
+  createTemplateRevision,
+  getLatestTemplateFile,
 } from "~/modules/template";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
@@ -37,18 +38,18 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
-  const authSession = context.getSession();
-  const { userId } = authSession;
-
-  const { templateId: id } = getParams(
-    params,
-    z.object({ templateId: z.string() }),
-    {
-      additionalData: { userId },
-    }
-  );
-
   try {
+    const authSession = context.getSession();
+    const { userId } = authSession;
+
+    const { templateId: id } = getParams(
+      params,
+      z.object({ templateId: z.string() }),
+      {
+        additionalData: { userId },
+      }
+    );
+
     await requirePermission({
       userId: authSession.userId,
       request,
@@ -70,6 +71,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     }
 
     const template = await getTemplateById(id);
+    const latestTemplateFileRevision = await getLatestTemplateFile(id);
 
     const header: HeaderData = {
       title: `Edit | ${template.name}`,
@@ -78,18 +80,18 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     return json(
       data({
         template,
+        latestTemplateFileRevision,
         header,
       })
     );
   } catch (cause) {
-    const reason = makeShelfError(cause, { userId });
+    const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
   }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  // @QUESTION This isn't working for some reason - because you are not returning the data correctly in the loader?
-  // { title: data ? appendToMetaTitle(data.header.title) : "" },
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export const handle = {
@@ -131,7 +133,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: authSession.userId,
         });
 
-        await updateTemplatePDF({
+        await createTemplateRevision({
           pdfName: pdf.name,
           pdfSize: pdf.size,
           request: clonedData,
@@ -160,7 +162,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function TemplateEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "";
-  const { template } = useLoaderData<typeof loader>();
+  const { template, latestTemplateFileRevision } =
+    useLoaderData<typeof loader>();
 
   return (
     <>
@@ -176,9 +179,10 @@ export default function TemplateEditPage() {
           description={template.description}
           type={template.type}
           signatureRequired={template.signatureRequired}
-          pdfUrl={template.pdfUrl}
-          pdfSize={template.pdfSize}
-          pdfName={template.pdfName}
+          pdfUrl={latestTemplateFileRevision!.url}
+          pdfSize={latestTemplateFileRevision!.size}
+          pdfName={latestTemplateFileRevision!.name}
+          version={latestTemplateFileRevision!.revision}
         />
       </div>
     </>
