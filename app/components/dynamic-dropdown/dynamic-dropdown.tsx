@@ -31,6 +31,8 @@ type Props = ModelFilterProps & {
   style?: React.CSSProperties;
   trigger: React.ReactElement;
   label?: string;
+  /** Overwrite the default placeholder will will be `Search ${model.name}s` */
+  placeholder?: string;
   searchIcon?: IconType;
   showSearch?: boolean;
   renderItem?: (item: ModelFilterItem) => React.ReactNode;
@@ -40,6 +42,7 @@ export default function DynamicDropdown({
   className,
   style,
   label = "Filter",
+  placeholder,
   trigger,
   searchIcon = "search",
   model,
@@ -110,7 +113,9 @@ export default function DynamicDropdown({
                 <Input
                   type="text"
                   label={label}
-                  placeholder={label}
+                  placeholder={
+                    placeholder ? placeholder : `Search ${model.name}s`
+                  }
                   hideLabel
                   className="text-gray-500"
                   icon={searchIcon}

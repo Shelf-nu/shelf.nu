@@ -324,7 +324,8 @@ export default function AssetIndexPage() {
                   </div>
                 }
                 model={{ name: "category", queryKey: "name" }}
-                label="Search categories"
+                label="Filter by category"
+                placeholder="Search categories"
                 initialDataKey="categories"
                 countKey="totalCategories"
               />
@@ -335,7 +336,7 @@ export default function AssetIndexPage() {
                   </div>
                 }
                 model={{ name: "tag", queryKey: "name" }}
-                label="Search tags"
+                label="Filter by tag"
                 initialDataKey="tags"
                 countKey="totalTags"
               />
@@ -347,7 +348,7 @@ export default function AssetIndexPage() {
                   </div>
                 }
                 model={{ name: "location", queryKey: "name" }}
-                label="Search locations"
+                label="Filter by location"
                 initialDataKey="locations"
                 countKey="totalLocations"
                 renderItem={({ metadata }) => (
@@ -380,7 +381,8 @@ export default function AssetIndexPage() {
                   ...item,
                   id: item.metadata?.userId ? item.metadata.userId : item.id,
                 })}
-                label="Search team members"
+                label="Filter by custodian"
+                placeholder="Search team members"
                 initialDataKey="teamMembers"
                 countKey="totalTeamMembers"
               />
