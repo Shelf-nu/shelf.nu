@@ -35,8 +35,8 @@ import {
   SwitchIcon,
   KitIcon,
   BookingsIcon,
-  GiveCustodyIcon,
-  TakeCustodyIcon,
+  CheckOutIcon,
+  CheckInIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -76,8 +76,8 @@ export type IconType =
   | "switch"
   | "kit"
   | "bookings"
-  | "give-custody"
-  | "take-custody";
+  | "check-out"
+  | "check-in";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -119,8 +119,8 @@ export const iconsMap: IconsMap = {
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
   kit: <KitIcon />,
-  "give-custody": <GiveCustodyIcon />,
-  "take-custody": <TakeCustodyIcon />,
+  "check-out": <CheckOutIcon />,
+  "check-in": <CheckInIcon />,
 };
 
 export default iconsMap;

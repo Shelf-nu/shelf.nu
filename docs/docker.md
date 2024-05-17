@@ -36,8 +36,7 @@ This will make sure you have a DATABASE that you are ready to connect to.
      --restart unless-stopped \
      ghcr.io/shelf-nu/shelf.nu:latest
    ```
-> [!NOTE]
-> `DATABASE_URL` and `DIRECT_URL` are mandatory when using Supabase Cloud. Learn more in [Get Started > Development](./get-started.md#development) section.
+   > [!NOTE] > `DATABASE_URL` and `DIRECT_URL` are mandatory when using Supabase Cloud. Learn more in [Get Started > Development](./get-started.md#development) section.
 
 ## Development
 
