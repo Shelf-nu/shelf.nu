@@ -15,7 +15,10 @@ export function ChoosePurpose() {
 
   return (
     <>
-      <div className="flex flex-col items-center p-4 sm:p-6">
+      <div
+        className="flex flex-col items-center p-4 sm:p-6"
+        data-test-id="choose-purpose-wrapper"
+      >
         <img
           src="/static/images/shelf-symbol.png"
           alt="logo"
@@ -95,6 +98,7 @@ const PlanBox = ({
   plan,
   selectedPlan,
   setSelectedPlan,
+  ...rest
 }: {
   plan: "personal" | "team";
   children: React.ReactNode;
@@ -114,6 +118,7 @@ const PlanBox = ({
         "flex items-start gap-4 rounded border p-4 transition-colors hover:cursor-pointer",
         selected || isHovered ? activeClasses : ""
       )}
+      {...rest}
     >
       {children}
     </div>

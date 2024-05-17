@@ -35,6 +35,7 @@ export default function SidebarBottom({ user, isSidebarMinimized }: Props) {
         <DropdownMenuTrigger
           onClick={() => setDropdownOpen((prev) => !prev)}
           className="w-full outline-none focus-visible:border-0"
+          data-test-id="user-actions-dropdown"
         >
           <div
             className={tw(
@@ -113,6 +114,7 @@ export default function SidebarBottom({ user, isSidebarMinimized }: Props) {
                 variant="link"
                 className="justify-start text-gray-700 hover:text-gray-700"
                 width="full"
+                data-test-id="logout"
               >
                 Log Out
               </Button>

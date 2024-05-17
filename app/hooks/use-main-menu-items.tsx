@@ -50,12 +50,12 @@ export function useMainMenuItems() {
       icon: <Icon icon="scanQR" />,
       to: "scanner",
       label: "QR scanner",
-      end: true,
     },
     {
       icon: <Icon icon="settings" />,
       to: "settings",
       label: "Settings",
+      "data-test-id": "settingsSidebarMenuItem",
       end: true,
     },
   ];

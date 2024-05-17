@@ -357,7 +357,7 @@ export const AssetForm = ({
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="ml-auto">
-            <Button type="submit" disabled={disabled}>
+            <Button type="submit" disabled={disabled} data-test-id="save-asset">
               Save
             </Button>
           </div>

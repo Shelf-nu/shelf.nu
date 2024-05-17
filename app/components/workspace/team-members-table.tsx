@@ -50,7 +50,11 @@ export const TeamMembersTable = () => {
                   <div>{teamMembers.length} items</div>
                 </div>
                 <div className="text-right">
-                  <Button variant="primary" to={`add-member`}>
+                  <Button
+                    variant="primary"
+                    to={`add-member`}
+                    data-test-id="add-nrm"
+                  >
                     <span className=" whitespace-nowrap">Add NRM</span>
                   </Button>
                 </div>

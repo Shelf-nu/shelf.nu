@@ -28,10 +28,20 @@ test("should allow you to make a asset", async ({ page, account }) => {
   expect(await focusedElement?.getAttribute("name")).toBe("title");
   await page.getByLabel("Name").fill(testAsset.title);
   await page.getByLabel("Description").fill(testAsset.description);
-  await page.getByRole("button", { name: "Save" }).click();
-  page.getByRole("heading", { name: testAsset.title });
+  await page.click(`[data-test-id="save-asset"]`);
+
   await page.click('[data-test-id="closeToast"]');
 
+  /**Make sure the asset you just created is showing in the list */
+  await expect(
+    page.locator(
+      'span.word-break.mb-1.block.font-medium:has-text("' +
+        testAsset.title +
+        '")'
+    )
+  ).toBeVisible({ timeout: 30000 });
+
+  await page.click('[data-test-id="user-actions-dropdown"]');
   await page.click('[data-test-id="logout"]');
   await expect(page).toHaveURL(/.*login/);
 });
@@ -53,10 +63,11 @@ test("should allow you to make a category", async ({ page, account }) => {
   await page.getByLabel("Description").fill(testCategory.description);
   await page.getByRole("button", { name: "Create" }).click();
 
-  await expect(page.getByText(testCategory.title)).toBeVisible();
+  await expect(page.getByText(testCategory.title)).toBeVisible({
+    timeout: 20000,
+  });
 
-  await page.click('[data-test-id="closeToast"]');
-
+  await page.click('[data-test-id="user-actions-dropdown"]');
   await page.click('[data-test-id="logout"]');
   await expect(page).toHaveURL(/.*login/);
 });
@@ -64,19 +75,21 @@ test("should allow you to make a category", async ({ page, account }) => {
 const teamMemberName = faker.name.firstName();
 test("should allow you to add team member", async ({ page, account }) => {
   await page.click('[data-test-id="settingsSidebarMenuItem"]');
-  await expect(page).toHaveURL(/.*settings\/user/);
-  // find link with text "Workspace" and click it
-  await page.getByRole("link", { name: "Workspace" }).click();
-  await expect(page).toHaveURL(/.*settings\/workspace/);
+  await expect(page).toHaveURL(/.*settings\/account/);
 
-  await page.getByRole("link", { name: "Add team member" }).click();
-  await expect(page).toHaveURL(/.*settings\/workspace\/[^]*\/add-member/);
+  await page.click('[data-test-id="teamTab"]');
+  await expect(page).toHaveURL(/.*settings\/team/);
+
+  await page.getByLabel("new team member").click();
+  await expect(page).toHaveURL(/.*settings\/team\/add-member/);
 
   await page.getByPlaceholder("Enter team member’s name").fill(teamMemberName);
   await page.getByRole("button", { name: "Add team member" }).click();
 
   await expect(page.getByText(teamMemberName)).toBeVisible();
-  await page.click('[data-test-id="closeToast"]');
+  await page.click('[data-test-id="user-actions-dropdown"]');
+  await page.click('[data-test-id="logout"]');
+  await expect(page).toHaveURL(/.*login/);
 });
 
 test("should allow you to check out an asset", async ({ page, account }) => {
@@ -88,15 +101,15 @@ test("should allow you to check out an asset", async ({ page, account }) => {
     page.getByRole("heading", { name: testAsset.title })
   ).toBeVisible();
 
-  await page.locator('[data-test-id="assetActionsButton"]').click();
-  await page.getByRole("link", { name: "Check out asset" }).click();
+  await page.click('[data-test-id="assetActionsButton"]');
+
+  await page.locator('[data-test-id="check-out-asset-button"]').click();
+
   await expect(page).toHaveURL(/.*assets\/[^]*\/check-out/);
-  await page.getByRole("combobox").click();
-  await page
-    .getByRole("option", { name: teamMemberName })
-    .locator("div")
-    .first()
-    .click();
+
+  await page.getByText("Select a team member").click();
+
+  await page.click(`[data-test-id="dynamic-select-item-${teamMemberName}"]`);
 
   await page.getByRole("button", { name: "Confirm" }).click();
 
@@ -131,8 +144,10 @@ test("should allow you to check in an asset", async ({ page, account }) => {
     page.getByRole("heading", { name: testAsset.title })
   ).toBeVisible();
 
-  await page.locator('[data-test-id="assetActionsButton"]').click();
-  await page.getByRole("link", { name: "Check in" }).click();
+  await page.click('[data-test-id="assetActionsButton"]');
+
+  await page.locator('[data-test-id="check-in-asset-button"]').click();
+
   await expect(page).toHaveURL(/.*assets\/[^]*\/check-in/);
   await page.getByRole("button", { name: "Confirm" }).click();
 

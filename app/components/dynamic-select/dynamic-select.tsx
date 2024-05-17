@@ -210,6 +210,7 @@ export default function DynamicSelect({
                     onClick={() => {
                       handleItemChange(item.id);
                     }}
+                    data-test-id={`dynamic-select-item-${item.name}`}
                   >
                     <div>
                       {typeof renderItem === "function" ? (

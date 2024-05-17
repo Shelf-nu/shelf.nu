@@ -49,23 +49,22 @@ export const test = base.extend<{}, { account: Account }>({
       await page.fill("[data-test-id=otp]", "123456");
       await page.click("[data-test-id=confirm-otp]");
 
-      // Wait for the field to be present on the DOM before filling it
-      await page.waitForSelector('[data-test-id="firstName"]');
-
       await page.fill('[data-test-id="firstName"]', firstName);
       await page.fill('[data-test-id="lastName"]', lastName);
 
-      await page.locator('[data-test-id="onboard"]').click();
+      await page.click('[data-test-id="onboard"]');
 
+      await page.waitForSelector('[data-test-id="choose-purpose-wrapper"]');
       await expect(page.getByText("How will you use shelf?")).toBeVisible();
 
-      // await page.click("[data-test-id=personal-plan]");
-      // await page.click("[data-test-id=next-button]");
+      await page.click("[data-test-id=personal-plan]");
+      await page.click("[data-test-id=next-button]");
 
-      // await expect(page).toHaveURL(/.*assets/);
-      // await expect(page.getByText("No assets on database")).toBeVisible();
-      // await page.click('[data-test-id="logout"]');
-      // await expect(page).toHaveURL(/.*login/);
+      await expect(page).toHaveURL(/.*assets/);
+
+      await page.click('[data-test-id="user-actions-dropdown"]');
+      await page.click('[data-test-id="logout"]');
+      await expect(page).toHaveURL(/.*login/);
 
       // Use the account value.
       await use({ email, password, firstName, lastName });

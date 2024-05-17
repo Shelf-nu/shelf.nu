@@ -9,6 +9,7 @@ export default function HorizontalTabs({ items }: HorizontalTabsProps) {
         <NavLink
           to={item.to}
           key={item.content}
+          data-test-id={`${item.to}Tab`}
           className={({ isActive }) =>
             `${
               index === 0 ? "pl-1 pr-3" : "px-3"
