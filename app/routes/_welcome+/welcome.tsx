@@ -11,6 +11,7 @@ export function loader() {
   if (!ENABLE_PREMIUM_FEATURES) {
     return redirect("/assets");
   }
+  return null;
 }
 
 export default function Welcome() {
