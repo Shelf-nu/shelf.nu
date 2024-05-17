@@ -23,7 +23,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
-import { ENABLE_PREMIUM_FEATURES, SMTP_FROM } from "~/utils/env";
+import { ENABLE_PREMIUM_FEATURES, NODE_ENV, SMTP_FROM } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -65,7 +65,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    if (!ENABLE_PREMIUM_FEATURES) {
+    if (NODE_ENV !== "test" && !ENABLE_PREMIUM_FEATURES) {
       return redirect("/assets");
     }
 

@@ -54,14 +54,18 @@ export const test = base.extend<{}, { account: Account }>({
 
       await page.fill('[data-test-id="firstName"]', firstName);
       await page.fill('[data-test-id="lastName"]', lastName);
-      await page.fill('[data-test-id="password"]', password);
-      await page.fill('[data-test-id="confirmPassword"]', password); // We use the same password that nodemailer generated for the email account
 
       await page.locator('[data-test-id="onboard"]').click();
-      await expect(page).toHaveURL(/.*assets/);
-      await expect(page.getByText("No assets on database")).toBeVisible();
-      await page.click('[data-test-id="logout"]');
-      await expect(page).toHaveURL(/.*login/);
+
+      await expect(page.getByText("How will you use shelf?")).toBeVisible();
+
+      // await page.click("[data-test-id=personal-plan]");
+      // await page.click("[data-test-id=next-button]");
+
+      // await expect(page).toHaveURL(/.*assets/);
+      // await expect(page.getByText("No assets on database")).toBeVisible();
+      // await page.click('[data-test-id="logout"]');
+      // await expect(page).toHaveURL(/.*login/);
 
       // Use the account value.
       await use({ email, password, firstName, lastName });

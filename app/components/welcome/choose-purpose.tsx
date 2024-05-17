@@ -35,6 +35,7 @@ export function ChoosePurpose() {
             plan="personal"
             selectedPlan={selectedPlan}
             setSelectedPlan={setSelectedPlan}
+            data-test-id="personal-plan"
           >
             <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
               <Icon icon="profile" />
@@ -78,6 +79,7 @@ export function ChoosePurpose() {
           width="full"
           className="mt-8"
           disabled={disabled}
+          data-test-id="next-button"
         >
           {selectedPlan === "team"
             ? "Next: Select a plan"
