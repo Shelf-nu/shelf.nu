@@ -142,7 +142,8 @@ export default function KitsIndexPage() {
               </div>
             }
             model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
-            label="Custodian"
+            label="Filter by custodian"
+            placeholder="Search team members"
             countKey="totalTeamMembers"
             initialDataKey="teamMembers"
           />

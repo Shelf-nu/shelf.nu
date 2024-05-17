@@ -339,6 +339,7 @@ export default function AddAssetsToLocation() {
           }
           model={{ name: "category", queryKey: "name" }}
           label="Filter by category"
+          placeholder="Search categories"
           initialDataKey="categories"
           countKey="totalCategories"
         />
@@ -349,7 +350,7 @@ export default function AddAssetsToLocation() {
             </div>
           }
           model={{ name: "tag", queryKey: "name" }}
-          label="Filter by tags"
+          label="Filter by tag"
           initialDataKey="tags"
           countKey="totalTags"
         />
@@ -360,7 +361,7 @@ export default function AddAssetsToLocation() {
             </div>
           }
           model={{ name: "location", queryKey: "name" }}
-          label="Filter by Location"
+          label="Filter by location"
           initialDataKey="locations"
           countKey="totalLocations"
           renderItem={({ metadata }) => (

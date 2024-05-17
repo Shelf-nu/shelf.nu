@@ -108,11 +108,11 @@ export default function ReleaseKitCustody() {
   return (
     <>
       <div className="modal-content-wrapper">
-        <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-gray-50 bg-gray-100 p-2 text-gray-600">
+        <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
           <UserXIcon />
         </div>
         <div className="mb-5">
-          <h4>Releasing custody</h4>
+          <h4>Check in kit</h4>
           <p>
             Are you sure you want to release{" "}
             <span className="font-medium">{kit.custody?.custodian.name}’s</span>{" "}

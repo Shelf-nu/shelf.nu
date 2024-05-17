@@ -23,7 +23,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
-import { ENABLE_PREMIUM_FEATURES, NODE_ENV, SMTP_FROM } from "~/utils/env";
+import { SMTP_FROM } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
@@ -65,10 +65,6 @@ export async function loader({ context }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    if (NODE_ENV !== "test" && !ENABLE_PREMIUM_FEATURES) {
-      return redirect("/assets");
-    }
-
     const user = await getUserByID(userId);
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
     if (user.onboarded) {
