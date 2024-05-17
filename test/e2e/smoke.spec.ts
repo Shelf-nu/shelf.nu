@@ -72,7 +72,7 @@ test("should allow you to make a category", async ({ page, account }) => {
   await expect(page).toHaveURL(/.*login/);
 });
 
-const teamMemberName = faker.name.firstName();
+const teamMemberName = faker.person.firstName();
 test("should allow you to add team member", async ({ page, account }) => {
   await page.click('[data-test-id="settingsSidebarMenuItem"]');
   await expect(page).toHaveURL(/.*settings\/account/);

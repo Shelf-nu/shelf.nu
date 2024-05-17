@@ -60,7 +60,7 @@ export const test = base.extend<{}, { account: Account }>({
       await page.click("[data-test-id=personal-plan]");
       await page.click("[data-test-id=next-button]");
 
-      await expect(page).toHaveURL(/.*assets/);
+      await expect(page).toHaveURL(/.*assets\/new/);
 
       await page.click('[data-test-id="user-actions-dropdown"]');
       await page.click('[data-test-id="logout"]');
