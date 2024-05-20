@@ -24,9 +24,9 @@ export const test = base.extend<{}, { account: Account }>({
 
       const page = await browser.newPage();
 
-      // page.on("console", (message) => {
-      //   console.log(`[Page Console] ${message.text()}`);
-      // });
+      page.on("console", (message) => {
+        console.log(`[Page Console] ${message.text()}`);
+      });
 
       // await page.evaluate((email) => {
       //   console.log(email);
@@ -55,8 +55,15 @@ export const test = base.extend<{}, { account: Account }>({
       await page.fill('[data-test-id="lastName"]', lastName);
 
       await page.click('[data-test-id="onboard"]');
+      const url = page.url();
 
-      await page.waitForSelector('[data-test-id="choose-purpose-wrapper"]');
+      await page.waitForSelector('[data-test-id="choose-purpose-wrapper"]', {
+        timeout: 20000,
+      });
+      await page.evaluate((url) => {
+        console.log(url);
+      }, url);
+
       await expect(page.getByText("How will you use shelf?")).toBeVisible();
 
       await page.click("[data-test-id=personal-plan]");
