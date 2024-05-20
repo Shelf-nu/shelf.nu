@@ -5,11 +5,11 @@ on:
   workflow_call:
     secrets:
       SMTP_PWD:
-        required: false
+        required: true
       SMTP_HOST:
-        required: false
+        required: true
       SMTP_USER:
-        required: false
+        required: true
       SESSION_SECRET:
         required: true
       SUPABASE_ANON_PUBLIC:
@@ -21,6 +21,8 @@ on:
       SERVER_URL:
         required: true
       DATABASE_URL:
+        required: true
+      DIRECT_URL:
         required: true
 
 jobs:
@@ -134,6 +136,7 @@ jobs:
           envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
           envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          envkey_DIRECT_URL: ${{ secrets.DIRECT_URL }}
           envkey_SMTP_PWD: ${{ secrets.SMTP_PWD }}
           envkey_SMTP_HOST: ${{ secrets.SMTP_HOST }}
           envkey_SMTP_USER: ${{ secrets.SMTP_USER }}
