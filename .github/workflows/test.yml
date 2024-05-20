@@ -4,6 +4,12 @@ on:
   pull_request_target:
   workflow_call:
     secrets:
+      SMTP_PWD:
+        required: false
+      SMTP_HOST:
+        required: false
+      SMTP_USER:
+        required: false
       SESSION_SECRET:
         required: true
       SUPABASE_ANON_PUBLIC:
@@ -36,12 +42,12 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -59,15 +65,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 🛑 Cancel Previous Runs
-        uses: styfle/cancel-workflow-action@0.11.0
+        uses: styfle/cancel-workflow-action@0.12.1
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -88,12 +94,12 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -115,12 +121,12 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: 🔑 Make envfile
-        uses: SpicyPizza/create-envfile@v2.0
+        uses: SpicyPizza/create-envfile@v2.0.3
         with:
           envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
@@ -134,7 +140,7 @@ jobs:
           file_name: .env
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -150,7 +156,7 @@ jobs:
       - name: Run Playwright tests
         run: npx playwright test
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-report
