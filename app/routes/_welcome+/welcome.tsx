@@ -8,7 +8,10 @@ export const meta: MetaFunction = () => [
 ];
 
 export function loader() {
-  if (NODE_ENV !== "test" && !ENABLE_PREMIUM_FEATURES) {
+  if (
+    (NODE_ENV !== "test" || process.env.CI !== "true") &&
+    !ENABLE_PREMIUM_FEATURES
+  ) {
     return redirect("/assets");
   }
   return null;

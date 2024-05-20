@@ -62,6 +62,7 @@ export const test = base.extend<{}, { account: Account }>({
       await page.click("[data-test-id=personal-plan]");
       await page.click("[data-test-id=next-button]");
 
+      await expect(page.getByText("Untitled Asset")).toBeVisible();
       await expect(page).toHaveURL(/.*assets\/new/);
 
       await page.click('[data-test-id="user-actions-dropdown"]');
