@@ -128,6 +128,9 @@ jobs:
           envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
           envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          envkey_SMTP_PWD: ${{ secrets.SMTP_PWD }}
+          envkey_SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          envkey_SMTP_USER: ${{ secrets.SMTP_USER }}
           file_name: .env
 
       - name: ⎔ Setup node
