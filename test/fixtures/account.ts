@@ -55,14 +55,10 @@ export const test = base.extend<{}, { account: Account }>({
       await page.fill('[data-test-id="lastName"]', lastName);
 
       await page.click('[data-test-id="onboard"]');
-      const url = page.url();
 
-      await page.waitForSelector('[data-test-id="choose-purpose-wrapper"]', {
-        timeout: 20000,
-      });
-      await page.evaluate((url) => {
-        console.log(url);
-      }, url);
+      // await page.waitForSelector('[data-test-id="choose-purpose-wrapper"]', {
+      //   timeout: 20000,
+      // });
 
       await expect(page.getByText("How will you use shelf?")).toBeVisible();
 

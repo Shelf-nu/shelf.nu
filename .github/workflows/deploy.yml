@@ -24,6 +24,8 @@ jobs:
       SMTP_PWD: ${{ secrets.SMTP_PWD }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
+      ENABLE_PREMIUM_FEATURES: ${{ secrets.ENABLE_PREMIUM_FEATURES }}
+      SEND_ONBOARDING_EMAIL: ${{ secrets.SEND_ONBOARDING_EMAIL }}
 
   build:
     name: 🐳 Build

@@ -24,6 +24,10 @@ on:
         required: true
       DIRECT_URL:
         required: true
+      SEND_ONBOARDING_EMAIL:
+        required: true
+      ENABLE_PREMIUM_FEATURES:
+        required: true
 
 jobs:
   authorize:
@@ -140,6 +144,8 @@ jobs:
           envkey_SMTP_PWD: ${{ secrets.SMTP_PWD }}
           envkey_SMTP_HOST: ${{ secrets.SMTP_HOST }}
           envkey_SMTP_USER: ${{ secrets.SMTP_USER }}
+          envkey_ENABLE_PREMIUM_FEATURES: ${{ secrets.ENABLE_PREMIUM_FEATURES }}
+          envkey_SEND_ONBOARDING_EMAIL: ${{ secrets.SEND_ONBOARDING_EMAIL }}
           file_name: .env
 
       - name: ⎔ Setup node
