@@ -49,6 +49,8 @@ export const test = base.extend<{}, { account: Account }>({
       await page.fill("[data-test-id=otp]", "123456");
       await page.click("[data-test-id=confirm-otp]");
 
+      await expect(page).toHaveURL(/.*onboarding/);
+
       await page.fill('[data-test-id="firstName"]', firstName);
       await page.fill('[data-test-id="lastName"]', lastName);
 

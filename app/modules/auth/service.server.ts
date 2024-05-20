@@ -306,7 +306,7 @@ export async function verifyOtpAndSignin(email: string, otp: string) {
     /** This is meant for e2e tests
      * In that case we manually generate an OTP and use it to verify the email
      */
-    if (NODE_ENV === "test") {
+    if (NODE_ENV === "test" || process.env.CI) {
       const { data } = await getSupabaseAdmin().auth.admin.generateLink({
         type: "magiclink",
         email: email,
