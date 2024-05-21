@@ -8,7 +8,6 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
-import { ErrorContent } from "~/components/errors";
 import { EmptyState } from "~/components/list/empty-state";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
@@ -290,12 +289,11 @@ export default function TemplatePage() {
   );
 }
 
-type TTemplate = Pick<
-  Template,
-  "id" | "name" | "type" | "isDefault" | "isActive" | "pdfSize" | "pdfUrl"
->;
-
-const TemplateRow = ({ item }: { item: TTemplate }) => (
+const TemplateRow = ({
+  item,
+}: {
+  item: Pick<Template, "id" | "name" | "type" | "isDefault" | "isActive">;
+}) => (
   <>
     <Td className="w-full">
       <div className="flex flex-col items-start justify-between">

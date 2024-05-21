@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
-import { ChevronRight, UserXIcon } from "~/components/icons/library";
+import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,21 +18,19 @@ import { Button } from "../shared/button";
 const ConditionalActionsDropdown = () => {
   const { asset } = useLoaderData<typeof loader>();
   const assetCanBeReleased = asset.custody;
-
-  let [searchParams] = useSearchParams();
-  const refIsQrScan = searchParams.get("ref") === "qr";
-  const defaultOpen = window.innerWidth <= 640 && refIsQrScan;
-  const [defaultApplied, setDefaultApplied] = useState(false);
   const assetIsCheckedOut = asset.status === "CHECKED_OUT";
 
-  const [dropdownRef, open, setOpen] = useControlledDropdownMenu(defaultOpen);
+  const {
+    ref: dropdownRef,
+    defaultApplied,
+    open,
+    defaultOpen,
+    setOpen,
+  } = useControlledDropdownMenu();
 
-  useEffect(() => {
-    if (defaultOpen && !defaultApplied) {
-      setOpen(true);
-      setDefaultApplied(true);
-    }
-  }, [defaultOpen, defaultApplied, setOpen]);
+  const assetIsPartOfUnavailableKit = Boolean(
+    asset.kit && asset.kit.status !== "AVAILABLE"
+  );
 
   return (
     <>
@@ -104,20 +101,26 @@ const ConditionalActionsDropdown = () => {
             >
               {assetCanBeReleased ? (
                 <Button
-                  to="release-custody"
+                  to="check-in"
                   role="link"
                   variant="link"
-                  className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
+                  className={tw(
+                    "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700",
+                    assetIsPartOfUnavailableKit
+                      ? "pointer-events-none cursor-not-allowed opacity-50"
+                      : ""
+                  )}
                   width="full"
                   onClick={() => setOpen(false)}
+                  disabled={assetIsPartOfUnavailableKit}
                 >
                   <span className="flex items-center gap-1">
-                    <UserXIcon /> Release Custody
+                    <Icon icon="check-in" /> Check in
                   </span>
                 </Button>
               ) : (
                 <Button
-                  to="give-custody"
+                  to="check-out"
                   role="link"
                   variant="link"
                   className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
@@ -125,7 +128,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon icon="user" /> Assign custody
+                    <Icon icon="check-out" /> Check out
                   </span>
                 </Button>
               )}
@@ -178,11 +181,9 @@ const ConditionalActionsDropdown = () => {
                 variant="link"
                 className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                 width="full"
+                onClick={() => setOpen(false)}
               >
-                <span
-                  className="flex items-center gap-2"
-                  onClick={() => setOpen(false)}
-                >
+                <span className="flex items-center gap-2">
                   <Icon icon="duplicate" /> Duplicate
                 </span>
               </Button>
@@ -192,7 +193,7 @@ const ConditionalActionsDropdown = () => {
               onSelect={(e) => {
                 e.preventDefault();
               }}
-              disabled={assetIsCheckedOut}
+              disabled={assetIsCheckedOut || assetIsPartOfUnavailableKit}
             >
               <DeleteAsset asset={asset} />
             </DropdownMenuItem>
@@ -210,6 +211,11 @@ const ConditionalActionsDropdown = () => {
             {assetIsCheckedOut ? (
               <div className=" border-t p-2 text-left text-xs">
                 Some actions are disabled due to the asset being checked out.
+              </div>
+            ) : null}
+            {assetIsPartOfUnavailableKit ? (
+              <div className=" border-t p-2 text-left text-xs">
+                Some actions are disabled due to the asset being part of a kit.
               </div>
             ) : null}
           </div>

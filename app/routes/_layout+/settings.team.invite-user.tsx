@@ -214,9 +214,9 @@ export default function InviteUser() {
 
           <SelectGroup>
             <SelectLabel className="pl-0">Role</SelectLabel>
-            <Select name="role" defaultValue={OrganizationRoles.ADMIN}>
+            <Select name="role">
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="Select user role" />
               </SelectTrigger>
               <SelectContent
                 position="popper"

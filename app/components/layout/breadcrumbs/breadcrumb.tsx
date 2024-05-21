@@ -29,6 +29,10 @@ export function Breadcrumb({
       breadcrumb =
         <span className="single-crumb">{match?.data?.booking?.name}</span> ||
         "Not found";
+    } else if (match?.data?.kit) {
+      breadcrumb =
+        <span className="single-crumb">{match?.data?.kit?.name}</span> ||
+        "Not found";
     } else {
       breadcrumb =
         <span className="single-crumb">{match?.data?.asset?.title}</span> ||

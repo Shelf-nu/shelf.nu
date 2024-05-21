@@ -1,5 +1,5 @@
 import { Link, useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/assets.$assetId.give-custody";
+import type { loader } from "~/routes/_layout+/assets.$assetId.check-out";
 import {
   Select,
   SelectTrigger,

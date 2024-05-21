@@ -66,10 +66,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
   try {
     const user = await getUserByID(userId);
-
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
     if (user.onboarded) {
-      return redirect("/");
+      return redirect("/assets");
     }
 
     const authUser = await getAuthUserById(userId);
@@ -165,12 +164,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       );
     }
 
-    return redirect(
-      `/welcome${organizationId ? `?organizationId=${organizationId}` : ""}`,
-      {
-        headers,
-      }
-    );
+    return redirect(organizationId ? `/assets` : `/welcome`, {
+      headers,
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

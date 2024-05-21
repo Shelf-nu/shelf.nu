@@ -414,11 +414,11 @@ export default function Custody() {
     <>
       <Form method="post">
         <div className="modal-content-wrapper">
-          <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-gray-50 bg-gray-100 p-2 text-gray-600">
+          <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
             <UserIcon />
           </div>
           <div className="mb-5">
-            <h4>Assign custody</h4>
+            <h4>Check out asset</h4>
             <p>
               This asset is currently available. You’re about to assign custody
               to one of your team members.
@@ -440,9 +440,10 @@ export default function Custody() {
               placeholder="Select a team member"
               allowClear
               closeOnSelect
-              valueExtractor={(item) =>
-                JSON.stringify({ id: item.id, name: item.name })
-              }
+              transformItem={(item) => ({
+                ...item,
+                id: JSON.stringify({ id: item.id, name: item.name }),
+              })}
             />
           </div>
           {assignCustody == null || assignCustody?.userId === null ? (

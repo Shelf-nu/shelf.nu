@@ -39,7 +39,6 @@
     "precommit": "npm run db:generate-type && npm run lint:fix && npm run format && npm run typecheck"
   },
   "dependencies": {
-    "@esbuild/linux-x64": "^0.21.3",
     "@fullcalendar/core": "^6.1.11",
     "@fullcalendar/daygrid": "^6.1.11",
     "@fullcalendar/list": "^6.1.11",
@@ -60,12 +59,10 @@
     "@radix-ui/react-toast": "1.1.5",
     "@radix-ui/react-tooltip": "^1.0.7",
     "@react-email/components": "0.0.14",
-    "@react-pdf-viewer/core": "^3.12.0",
     "@remix-run/css-bundle": "2.5.1",
     "@remix-run/node": "2.8.1",
     "@remix-run/react": "2.8.1",
     "@remix-run/serve": "2.8.1",
-    "@rollup/rollup-linux-x64-gnu": "^4.17.2",
     "@sentry/remix": "^7.101.0",
     "@stripe/react-stripe-js": "^2.5.0",
     "@stripe/stripe-js": "^3.0.2",
@@ -94,7 +91,6 @@
     "maplibre-gl": "^4.0.0",
     "nodemailer": "^6.9.9",
     "path-to-regexp": "^6.2.1",
-    "pdfjs-dist": "^3.4.120",
     "pg-boss": "^9.0.3",
     "pino": "^8.19.0",
     "pino-pretty": "^10.3.1",

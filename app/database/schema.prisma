@@ -65,6 +65,7 @@ model User {
   userOrganizations UserOrganization[]
   bookings          Booking[]          @relation("creator")
   custodies         Booking[]          @relation("custodian")
+  createdKits       Kit[]
 
   @@unique([email, username])
 }
@@ -92,6 +93,8 @@ model Asset {
   categoryId     String?
   location       Location?    @relation(fields: [locationId], references: [id])
   locationId     String?
+  kit            Kit?         @relation(fields: [kitId], references: [id])
+  kitId          String?
 
   custody         Custody?
   notes           Note[]
@@ -206,16 +209,14 @@ model Qr {
   organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String?
 
-
-  
   // This batch is used to group QR codes together when they are created as unclaimed and printed
   batch   PrintBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
-  batchId String? 
+  batchId String?
 
   // DateTime
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  scans          Scan[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  scans     Scan[]
 }
 
 model PrintBatch {
@@ -233,7 +234,6 @@ model PrintBatch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
-
 
 // Stores a report for when a an asset is reported as found
 model ReportFound {
@@ -334,6 +334,7 @@ model TeamMember {
   receivedInvites Invite[]
   user            User?        @relation(fields: [userId], references: [id], onUpdate: Cascade)
   userId          String?
+  kitCustodies    KitCustody[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -391,6 +392,7 @@ model Organization {
   images       Image[]       @relation("owner")
   templates    Template[]
   bookings     Booking[]
+  kits         Kit[]
 }
 
 model UserOrganization {
@@ -618,7 +620,6 @@ model Announcement {
   updatedAt DateTime @updatedAt
 }
 
-
 enum BookingStatus {
   DRAFT
   RESERVED
@@ -657,4 +658,46 @@ model Booking {
   updatedAt DateTime  @updatedAt @db.Timestamptz(3)
   from      DateTime? @db.Timestamptz(3)
   to        DateTime? @db.Timestamptz(3)
+}
+
+model Kit {
+  id String @id @default(cuid())
+
+  name        String
+  description String?
+  status      KitStatus @default(AVAILABLE)
+
+  image           String?
+  imageExpiration DateTime?
+
+  assets  Asset[]
+  custody KitCustody?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
+  organizationId String
+
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum KitStatus {
+  AVAILABLE
+  IN_CUSTODY
+  CHECKED_OUT
+}
+
+model KitCustody {
+  id String @id @default(cuid())
+
+  custodian   TeamMember @relation(fields: [custodianId], references: [id])
+  custodianId String
+
+  kit   Kit    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kitId String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

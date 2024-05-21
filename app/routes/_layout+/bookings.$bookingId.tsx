@@ -421,7 +421,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "removeAsset": {
         const { assetId } = parseData(
-          await request.formData(),
+          formData,
           z.object({
             assetId: z.string(),
           }),

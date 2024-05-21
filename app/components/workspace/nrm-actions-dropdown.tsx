@@ -29,7 +29,7 @@ export function TeamMembersActionsDropdown({
   }>;
 }) {
   const { organization } = useLoaderData<typeof loader>();
-  const [ref, open, setOpen] = useControlledDropdownMenu(false);
+  const { ref, open, setOpen } = useControlledDropdownMenu();
   const isPersonalOrg = useMemo(
     () => checkIsPersonalOrg(organization),
     [organization]

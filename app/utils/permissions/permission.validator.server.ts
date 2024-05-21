@@ -27,6 +27,7 @@ export enum PermissionEntity {
   generalSettings = "generalSettings",
   subscription = "subscription",
   template = "template",
+  kit = "kit",
 }
 
 export interface PermissionCheckProps {
@@ -64,6 +65,7 @@ const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.update,
     ],
+    [PermissionEntity.kit]: [PermissionAction.read],
   },
 };
 
