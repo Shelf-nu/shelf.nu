@@ -11,6 +11,7 @@ import {
 } from "~/components/shared/tooltip";
 import type { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { ActionsDropdown } from "./actions-dropdown";
@@ -27,7 +28,8 @@ import { ControlledActionButton } from "../shared/controlled-action-button";
  */
 export const NewBookingFormSchema = (
   inputFieldIsDisabled = false,
-  isNewBooking = false
+  isNewBooking = false,
+  hints?: ReturnType<typeof getHints>
 ) =>
   z
     .object({
@@ -40,9 +42,24 @@ export const NewBookingFormSchema = (
         : z.string().min(2, "Name is required"),
       startDate: inputFieldIsDisabled
         ? z.coerce.date().optional()
-        : z.coerce.date().refine((data) => data > new Date(), {
-            message: "Start date must be in the future",
-          }),
+        : z.coerce.date().refine(
+            (data) => {
+              let now;
+              if (hints?.timeZone) {
+                now = new Date(
+                  new Date().toLocaleString("en-US", {
+                    timeZone: hints.timeZone,
+                  })
+                );
+              } else {
+                now = new Date();
+              }
+              return data > now;
+            },
+            {
+              message: "Start date must be in the future",
+            }
+          ),
       endDate: inputFieldIsDisabled
         ? z.coerce.date().optional()
         : z.coerce.date(),
