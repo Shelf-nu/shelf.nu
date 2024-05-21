@@ -123,9 +123,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const formData = await request.formData();
-    const payload = parseData(formData, NewBookingFormSchema(false, true), {
-      additionalData: { userId, organizationId },
-    });
+
+    const payload = parseData(
+      formData,
+      NewBookingFormSchema(false, true, getHints(request)),
+      {
+        additionalData: { userId, organizationId },
+      }
+    );
 
     const { name, custodian } = payload;
     const hints = getHints(request);
@@ -139,6 +144,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         zone: hints.timeZone,
       }
     ).toJSDate();
+
     const to = DateTime.fromFormat(formData.get("endDate")!.toString()!, fmt, {
       zone: hints.timeZone,
     }).toJSDate();
