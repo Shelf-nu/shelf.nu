@@ -1,5 +1,5 @@
 import type { Template } from "@prisma/client";
-import { TierId } from "@prisma/client";
+import { TemplateType, TierId } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -16,7 +16,7 @@ import { ControlledActionButton } from "~/components/shared/controlled-action-bu
 import { Table, Td, Th } from "~/components/table";
 import { TemplateActionsDropdown } from "~/components/templates/template-actions-dropdown";
 import { db } from "~/database/db.server";
-import { makeActive, makeDefault, makeInactive } from "~/modules/template";
+import { makeDefault, toggleTemplateActiveState } from "~/modules/template";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
@@ -129,26 +129,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
             const { isActive, templateId } = parseData(
               formData,
               z.object({
-                isActive: z.boolean(),
+                isActive: z
+                  .string()
+                  .transform((val) => (val === "yes" ? true : false)),
                 templateId: z.string(),
               })
             );
 
-            if (isActive) {
-              await makeInactive({
-                id: templateId,
-                organizationId,
-              });
-            } else {
-              await makeActive({
-                id: templateId,
-                organizationId,
-              });
-            }
+            await toggleTemplateActiveState({
+              id: templateId,
+              active: !isActive,
+              organizationId: organizationId,
+            });
 
             sendNotification({
               title: "Template updated",
-              message: "Your template has been updated successfully",
+              message: `Your template has been successfully ${
+                isActive ? "deactivated" : "activated"
+              }`,
               icon: { name: "success", variant: "success" },
               senderId: authSession.userId,
             });
@@ -160,24 +158,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
               formData,
               z.object({
                 templateId: z.string(),
-                templateType: z.enum(["Custody", "Booking"]),
+                templateType: z.nativeEnum(TemplateType),
               })
             );
 
             await makeDefault({
               id: templateId,
-              type: templateType as Template["type"],
+              type: templateType,
               organizationId,
             });
 
             sendNotification({
               title: "Template updated",
-              message: "Your template has been updated successfully",
+              message: "Your default template has been successfully changed.",
               icon: { name: "success", variant: "success" },
               senderId: authSession.userId,
             });
 
-            return redirect(`/settings/template`);
+            return json(data({ changedDefault: true }));
           }
         }
       }
@@ -201,8 +199,8 @@ export default function TemplatePage() {
 
   let upgradeMessage =
     "You are currently able to create a max of 3 templates. If you want to create more than 3 Team templates, please get in touch with sales";
-  if (tier.id == TierId.free || tier.id == TierId.tier_1) {
-    upgradeMessage = `You cannot create more than ${tier.tierLimit} template on a ${tier.name} subscription. `;
+  if (tier.id !== TierId.tier_2) {
+    upgradeMessage = `You cannot create more than ${tier.tierLimit?.maxTemplates} templates on a ${tier.name} subscription. `;
   }
 
   return (
@@ -215,7 +213,7 @@ export default function TemplatePage() {
           </p>
         </div>
         <div className="mb-2.5 flex items-start justify-between gap-x-5 bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
-          <div className="w-2/5">
+          <div className="w-full max-w-[280px]">
             <h3 className="text-sm text-gray-600">PDF Templates</h3>
             <p className="text-sm text-gray-600">
               Use these templates to generate a PDF document for assigning
@@ -224,7 +222,7 @@ export default function TemplatePage() {
               first selected.
             </p>
           </div>
-          <div className="mb-2.5 flex w-3/5 flex-col items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
+          <div className="mb-2.5 flex w-full flex-col items-center justify-between bg-white md:rounded-[12px] md:border md:border-gray-200 md:px-6 md:py-5">
             {!hasItems ? (
               <EmptyState
                 customContent={{
@@ -300,7 +298,7 @@ const TemplateRow = ({
         <span className="text-text-sm font-medium text-gray-900">
           {item.name}
         </span>
-        <span className="text-text-sm font-light text-gray-600">
+        <span className="text-text-sm font-light lowercase text-gray-600 first-letter:uppercase">
           {item.type}
         </span>
       </div>
@@ -313,13 +311,12 @@ const TemplateRow = ({
       )}
     </Td>
     <Td>
-      {item.isActive ? (
-        <Badge color="#0dec5d">Active</Badge>
-      ) : (
-        <Badge color="#344054" withDot={false}>
-          Inactive
-        </Badge>
-      )}
+      <Badge
+        color={item.isActive ? "#0dec5d" : "#344054"}
+        withDot={item.isActive}
+      >
+        {item.isActive ? "Active" : "Inactive"}
+      </Badge>
     </Td>
     <Td>
       <TemplateActionsDropdown template={item} />

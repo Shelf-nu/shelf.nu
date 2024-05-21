@@ -1,5 +1,11 @@
+import { useEffect, useState } from "react";
 import type { Template } from "@prisma/client";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
 import { VerticalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
@@ -7,8 +13,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
+
 import { isFormProcessing } from "~/utils/form";
-import type { loader } from "../../routes/_layout+/settings.template.index";
+import { tw } from "~/utils/tw";
+import type {
+  loader,
+  action,
+} from "../../routes/_layout+/settings.template.index";
 import { Button } from "../shared/button";
 import {
   AlertDialog,
@@ -28,7 +39,8 @@ type TTemplate = Pick<
 
 export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
   const { defaultTemplates } = useLoaderData<typeof loader>();
-
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
   return (
     <>
       <DropdownMenu modal={false}>
@@ -68,7 +80,7 @@ export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
             <input
               type="hidden"
               name="isActive"
-              value={template.isActive + ""}
+              value={template.isActive ? "yes" : "no"}
             />
             <DropdownMenuItem
               onSelect={(e) => e.preventDefault()}
@@ -81,8 +93,14 @@ export function TemplateActionsDropdown({ template }: { template: TTemplate }) {
                 icon="deactivate"
                 role="link"
                 variant="link"
-                className="justify-start text-gray-700 hover:text-gray-700"
+                className={tw(
+                  "justify-start text-gray-700 hover:text-gray-700",
+                  template.isDefault || disabled
+                    ? "pointer-events-none border-gray-300 text-gray-300"
+                    : ""
+                )}
                 width="full"
+                disabled={disabled || template.isDefault}
               >
                 {template.isActive ? "Deactivate" : "Activate"}
               </Button>
@@ -98,98 +116,80 @@ const MakeDefaultButton = ({
   typeDefault,
   template,
 }: {
-  typeDefault?: TTemplate;
+  /** The default template for the current type */
+  typeDefault: TTemplate;
+  /** The template to set as default */
   template: TTemplate;
 }) => {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
 
+  /**
+   * We need to control this dialog because we have multiple and we need to manually close it after sucessfull submition of the form
+   */
+  const [open, setOpen] = useState(false);
+  const actionData = useActionData<typeof action>();
+
+  /**
+   * Close the dialog when the default template is changed based on action response
+   */
+  useEffect(() => {
+    if (actionData?.changedDefault) {
+      setOpen(false);
+    }
+  }, [actionData]);
+
   return (
     <>
-      {template.isDefault || !template.isActive ? (
-        <Button
-          disabled={true}
-          icon="star"
-          variant="tertiary"
-          className="w-full justify-start border-0 px-0 py-1"
-        >
-          Make default
-        </Button>
-      ) : typeDefault && typeDefault.id !== template.id ? (
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button
-              disabled={disabled}
-              variant="link"
-              className="w-full justify-start rounded-none border-b-2 text-gray-700 hover:bg-gray-100 hover:text-gray-700"
-              icon={"star"}
-              title={"Make default"}
-            >
-              Make default
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent className="relative w-full">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Change default template?</AlertDialogTitle>
-              <AlertDialogDescription>
-                <span className="font-semibold">{typeDefault.name}</span> is
-                already set as the default template for this type. Are you sure
-                you want to set{" "}
-                <span className="font-semibold">{template.name}</span> as the
-                default template?
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel asChild>
-                <Button variant="secondary">Cancel</Button>
-              </AlertDialogCancel>
-              <Form method="post">
-                <input type="hidden" name="templateId" value={template.id} />
-                <input
-                  type="hidden"
-                  name="templateType"
-                  value={template.type}
-                />
-                <input
-                  type="hidden"
-                  name="isActive"
-                  value={template.isActive.toString()}
-                />
-                <Button
-                  type="submit"
-                  name="intent"
-                  value="makeDefault"
-                  role="link"
-                  variant="primary"
-                >
-                  Confirm
-                </Button>
-              </Form>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      ) : (
-        <Form method="post">
-          <input type="hidden" name="templateId" value={template.id} />
-          <input type="hidden" name="templateType" value={template.type} />
-          <input
-            type="hidden"
-            name="isActive"
-            value={template.isActive.toString()}
-          />
+      <AlertDialog key={template.id} open={open} onOpenChange={setOpen}>
+        <AlertDialogTrigger asChild>
           <Button
-            name="intent"
-            value="makeDefault"
-            icon="star"
-            role="link"
+            disabled={disabled || template.isDefault || !template.isActive}
             variant="link"
-            className="justify-start  border-b-2 text-gray-700 hover:text-gray-700"
-            width="full"
+            className={tw(
+              "w-full justify-start rounded-none border-b-2 text-gray-700 hover:bg-gray-100 hover:text-gray-700",
+              disabled || template.isDefault || !template.isActive
+                ? "pointer-events-none border-gray-300 text-gray-300"
+                : ""
+            )}
+            icon={"star"}
+            title={"Make default"}
           >
             Make default
           </Button>
-        </Form>
-      )}
+        </AlertDialogTrigger>
+        <AlertDialogContent className="relative w-full">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change default template?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-semibold">{typeDefault.name}</span> is
+              already set as the default template for this type. Are you sure
+              you want to set{" "}
+              <span className="font-semibold">{template.name}</span> as the
+              default template?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild>
+              <Button variant="secondary">Cancel</Button>
+            </AlertDialogCancel>
+            <Form method="post">
+              <input type="hidden" name="templateId" value={template.id} />
+              <input type="hidden" name="templateType" value={template.type} />
+              <Button
+                type="submit"
+                name="intent"
+                value="makeDefault"
+                role="link"
+                variant="primary"
+                disabled={disabled}
+              >
+                Confirm
+              </Button>
+            </Form>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };

@@ -206,16 +206,19 @@ export async function createTemplateRevision({
   }
 }
 
-export async function makeInactive({
+export function toggleTemplateActiveState({
   id,
   organizationId,
-}: Pick<Template, "id"> & { organizationId: Organization["id"] }) {
+  active,
+}: Pick<Template, "id"> & {
+  organizationId: Organization["id"];
+  active: boolean;
+}) {
   try {
-    return await db.template.update({
+    return db.template.update({
       where: { id, organizationId },
       data: {
-        isActive: false,
-        isDefault: false,
+        isActive: active,
       },
     });
   } catch (cause) {
@@ -228,18 +231,6 @@ export async function makeInactive({
       label: "Template",
     });
   }
-}
-
-export function makeActive({
-  id,
-  organizationId,
-}: Pick<Template, "id"> & { organizationId: Organization["id"] }) {
-  return db.template.update({
-    where: { id, organizationId },
-    data: {
-      isActive: true,
-    },
-  });
 }
 
 export async function makeDefault({
@@ -259,7 +250,7 @@ export async function makeDefault({
     });
 
     // Make the selected template default
-    return await db.template.update({
+    return db.template.update({
       where: { id, organizationId },
       data: { isDefault: true },
     });

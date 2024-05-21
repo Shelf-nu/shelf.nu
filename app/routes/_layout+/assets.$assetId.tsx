@@ -289,7 +289,7 @@ export default function AssetDetailsPage() {
                           Asset status will change after signing. To cancel
                           custody assignment, go to{" "}
                           <span className="font-semibold text-gray-600">
-                            {"Actions > Release custody"}
+                            {"Actions > Check in"}
                           </span>
                         </div>
                       </div>

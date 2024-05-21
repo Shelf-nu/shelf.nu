@@ -490,7 +490,7 @@ const ListAssetContent = ({
                             Asset status will change after signing. To cancel
                             custody assignment, choose{" "}
                             <span className="font-semibold text-gray-600">
-                              Release custody
+                              {"Actions > Check in"}
                             </span>{" "}
                             action
                           </span>
