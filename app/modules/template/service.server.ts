@@ -250,7 +250,7 @@ export async function makeDefault({
     });
 
     // Make the selected template default
-    return db.template.update({
+    return await db.template.update({
       where: { id, organizationId },
       data: { isDefault: true },
     });

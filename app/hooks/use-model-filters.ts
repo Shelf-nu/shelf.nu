@@ -11,6 +11,8 @@ export type ModelFilterItem = {
   name: string;
   color?: string;
   metadata: Record<string, any>;
+  /** Handle any random field that could be coming from any model */
+  [key: string]: any;
 };
 
 export type ModelFilterProps = {

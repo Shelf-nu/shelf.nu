@@ -1,12 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AssetStatus, BookingStatus, TemplateType } from "@prisma/client";
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
-import { useAtom } from "jotai";
 import { z } from "zod";
-import { assignCustodyUser } from "~/atoms/assign-custody-user";
 
 import TemplateSelect from "~/components/custody/template-select";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
@@ -407,7 +405,22 @@ export default function Custody() {
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  const [assignCustody] = useAtom(assignCustodyUser);
+  const [selectedCustodyUser, setSelectedCustodyUser] = useState<{
+    id: string;
+    userId: string | null;
+    name: string;
+  } | null>(null);
+
+  const selectedCustodianHasUser = useMemo(
+    () => selectedCustodyUser?.userId !== null,
+    [selectedCustodyUser]
+  );
+
+  const shouldDisableSwitch = useMemo(
+    () => selectedCustodyUser === null || !selectedCustodianHasUser,
+    [selectedCustodyUser, selectedCustodianHasUser]
+  );
+
   const [addTemplateEnabled, setAddTemplateEnabled] = useState(false);
 
   return (
@@ -442,38 +455,39 @@ export default function Custody() {
               closeOnSelect
               transformItem={(item) => ({
                 ...item,
-                id: JSON.stringify({ id: item.id, name: item.name }),
+                id: JSON.stringify({
+                  id: item.id,
+                  name: item.name,
+                  userId: item?.userId,
+                }),
               })}
+              onChange={(value) => {
+                setSelectedCustodyUser(JSON.parse(value));
+              }}
             />
           </div>
-          {assignCustody == null || assignCustody?.userId === null ? (
-            <CustomTooltip
-              content={
-                <TooltipContent
-                  variant={
-                    assignCustody === null
-                      ? "USER_NOT_SELECTED"
-                      : "NON_COMPATIBLE_USER_SELECTED"
-                  }
-                />
-              }
-            >
-              <div className="flex gap-x-2">
+          {shouldDisableSwitch ? (
+            <div className="flex gap-x-2">
+              <CustomTooltip
+                content={
+                  <TooltipContent
+                    title={
+                      selectedCustodianHasUser
+                        ? "Please select a custodian"
+                        : "Custodian needs to be a registered user"
+                    }
+                    message={
+                      selectedCustodianHasUser
+                        ? "You need to select a custodian before you can add a PDF template."
+                        : "Signing PDFs is not allowed for NRM and non-users."
+                    }
+                  />
+                }
+              >
                 <Switch required={false} disabled={true} />
-                <div className="flex flex-col gap-y-1">
-                  <div className="text-md font-semibold text-gray-600">
-                    Add PDF Template
-                  </div>
-                  <p className="text-sm text-gray-500">
-                    Custodian needs to read (and sign) a document before
-                    receiving custody.{" "}
-                    <Link className="text-gray-700 underline" to="#">
-                      Learn more
-                    </Link>
-                  </p>
-                </div>
-              </div>
-            </CustomTooltip>
+              </CustomTooltip>
+              <PdfSwitchLabel />
+            </div>
           ) : (
             <div className="mb-5 flex gap-x-2">
               <Switch
@@ -483,18 +497,7 @@ export default function Custody() {
                 required={false}
                 disabled={disabled}
               />
-              <div className="flex flex-col gap-y-1">
-                <div className="text-md font-semibold text-gray-600">
-                  Add PDF Template
-                </div>
-                <p className="text-sm text-gray-500">
-                  Custodian needs to read (and sign) a document before receiving
-                  custody.{" "}
-                  <Link className="text-gray-700 underline" to="#">
-                    Learn more
-                  </Link>
-                </p>
-              </div>
+              <PdfSwitchLabel />
             </div>
           )}
 
@@ -538,7 +541,11 @@ export default function Custody() {
               variant="primary"
               width="full"
               type="submit"
-              disabled={disabled}
+              disabled={
+                disabled ||
+                selectedCustodyUser === null ||
+                selectedCustodyUser?.userId === null
+              }
             >
               Confirm
             </Button>
@@ -550,32 +557,30 @@ export default function Custody() {
 }
 
 function TooltipContent({
-  variant,
+  title,
+  message,
 }: {
-  variant: "USER_NOT_SELECTED" | "NON_COMPATIBLE_USER_SELECTED";
+  title: string;
+  message: string;
 }) {
   return (
     <div>
-      {variant === "USER_NOT_SELECTED" && (
-        <div>
-          <div className="text-md mb-2 font-semibold text-gray-700">
-            Please select a custodian
-          </div>
-          <div className="text-sm text-gray-500">
-            You need to select a custodian before you can add a PDF template.
-          </div>
-        </div>
-      )}
-      {variant === "NON_COMPATIBLE_USER_SELECTED" && (
-        <div>
-          <div className="text-md mb-2 font-semibold text-gray-700">
-            Custodian needs to be a registered user
-          </div>
-          <div className="text-sm text-gray-500">
-            Signing PDFs is not allowed for NRM and non-users.
-          </div>
-        </div>
-      )}
+      <div>
+        <div className="text-md mb-2 font-semibold text-gray-700">{title}</div>
+        <div className="text-sm text-gray-500">{message}</div>
+      </div>
     </div>
   );
 }
+
+const PdfSwitchLabel = () => (
+  <div className="flex flex-col gap-y-1">
+    <div className="text-md font-semibold text-gray-600">Add PDF Template</div>
+    <p className="text-sm text-gray-500">
+      Custodian needs to read (and sign) a document before receiving custody.{" "}
+      <Link className="text-gray-700 underline" to="#">
+        Learn more
+      </Link>
+    </p>
+  </div>
+);
