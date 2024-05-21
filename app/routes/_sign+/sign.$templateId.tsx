@@ -4,236 +4,211 @@ import { AssetStatus, Roles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
-import resolveConfig from "tailwindcss/resolveConfig";
+// import resolveConfig from "tailwindcss/resolveConfig";
+import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import Agreement from "~/components/sign/agreement";
 import AgreementPopup, {
   AGREEMENT_POPUP_VISIBLE,
 } from "~/components/sign/agreement-popup";
+
 import { db } from "~/database/db.server";
 import { createNote, getAsset } from "~/modules/asset/service.server";
-import {
-  initializePerPageCookieOnLayout,
-  setCookie,
-  userPrefs,
-} from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
-import { ShelfError } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import {
+  data,
+  error,
+  getActionMethod,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
 import tailwindConfig from "../../../tailwind.config";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // @ts-expect-error @TODO - update to use new method
-  const authSession = await requireAuthSession(request);
-  // @TODO - we need to look into doing a select as we dont want to expose all data always
-  const user = authSession
-    ? await db.user.findUnique({
-        where: { email: authSession.email.toLowerCase() },
-        include: {
-          roles: true,
-          organizations: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              imageId: true,
-            },
-          },
-          userOrganizations: {
-            where: {
-              userId: authSession.userId,
-            },
-            select: {
-              organization: true,
-            },
-          },
-        },
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const { assigneeId, assetId } = getParams(
+      params,
+      z.object({
+        assigneeId: z.string(),
+        assetId: z.string(),
       })
-    : undefined;
+    );
 
-  if (!user) {
-    return redirect("/login");
-  }
-
-  if (!user?.onboarded) {
-    return redirect("onboarding");
-  }
-
-  const cookie = await initializePerPageCookieOnLayout(request);
-
-  const assigneeId = new URL(request.url).searchParams.get("assigneeId");
-  const assetId = new URL(request.url).searchParams.get("assetId");
-  // const templateId = params.templateId;
-  const userId = user?.id;
-  // @ts-expect-error @TODO - update to use new method
-
-  const { organizationId } = await requireOrganisationId(authSession, request);
-
-  if (!assetId || !assigneeId) {
-    // @ts-expect-error @TODO - update to use new method
-    throw new ShelfError({
-      message: "Malformed URL",
-      status: 400,
-      title: "Malformed URL",
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.template,
+      action: PermissionAction.read,
     });
-  }
 
-  if (userId !== assigneeId) {
-    // @ts-expect-error @TODO - update to use new method
-    throw new ShelfError({
-      message: "Unauthorized",
-      status: 401,
-      title: "Unauthorized",
-    });
-  }
-
-  const asset = await getAsset({
-    id: assetId,
-    organizationId,
-  });
-
-  // @TODO needs fixing -
-  // @ts-ignore
-  const custody = asset.custody as Custody;
-
-  if (!custody) {
-    // @ts-expect-error @TODO - update to use new method
-    throw new ShelfError({
-      message: "Custody not found",
-      status: 404,
-      title: "Custody not found",
-    });
-  }
-
-  // @ts-ignore
-  const template = custody.template as Template;
-
-  if (!template) {
-    // @ts-expect-error @TODO - update to use new method
-    throw new ShelfError({
-      message: "Template not found",
-      status: 404,
-      title: "Template not found",
-    });
-  }
-
-  return json(
-    {
-      user,
-      currentOrganizationId: organizationId,
-      enablePremium: ENABLE_PREMIUM_FEATURES,
-      custody,
-      template,
-      isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
-    },
-    {
-      headers: [
-        setCookie(await userPrefs.serialize(cookie)),
-
-        setCookie(
-          // @ts-expect-error @TODO - update to use new method
-          await commitAuthSession(request, {
-            authSession,
-          })
-        ),
-      ],
+    if (userId !== assigneeId) {
+      throw new ShelfError({
+        cause: null,
+        message: "You are not authorized to sign this asset",
+        additionalData: { userId, assetId, assigneeId },
+        label: "Assets",
+        status: 401,
+      });
     }
-  );
+
+    const asset = await getAsset({
+      id: assetId,
+      organizationId,
+    });
+
+    // @TODO needs fixing -
+    // @ts-ignore
+    const custody = asset.custody as Custody;
+
+    // @ts-ignore
+    const template = custody.template as Template;
+
+    // Fetch the template PDF associated for the custody
+    const templateFile = await db.templateFile.findUniqueOrThrow({
+      where: {
+        revision_templateId: {
+          revision: custody.associatedTemplateVersion!,
+          templateId: custody.templateId!,
+        },
+      },
+    });
+
+    if (!template) {
+      throw new ShelfError({
+        cause: null,
+        message: "Template not found",
+        status: 404,
+        label: "Template",
+      });
+    }
+
+    const user = await db.user.findUniqueOrThrow({
+      where: {
+        id: userId,
+      },
+      select: {
+        roles: true,
+      },
+    });
+
+    return json(
+      data({
+        user,
+        currentOrganizationId: organizationId,
+        enablePremium: ENABLE_PREMIUM_FEATURES,
+        custody,
+        template,
+        templateFile,
+        isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
-export async function action({ request }: ActionFunctionArgs) {
-  // @ts-expect-error @TODO - update to use new method
-  assertIsPost(request);
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const method = getActionMethod(request);
 
-  // @ts-expect-error @TODO - update to use new method
-  const authSession = await requireAuthSession(request);
-  const userId = authSession.userId;
+  try {
+    switch (method) {
+      case "POST": {
+        const authSession = context.getSession();
+        const { userId } = authSession;
+        const user = await db.user.findUniqueOrThrow({
+          where: {
+            id: userId,
+          },
+          select: {
+            firstName: true,
+            lastName: true,
+          },
+        });
 
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      lastName: true,
-    },
-  });
+        const { assetId } = getParams(
+          params,
+          z.object({
+            assetId: z.string(),
+          })
+        );
 
-  // @ts-expect-error @TODO - update to use new method
-  if (!user) throw new ShelfError({ message: "User not found" });
+        const { signatureText, signatureImage } = parseData(
+          await request.formData(),
+          z.object({
+            signatureText: z.string(),
+            signatureImage: z.string(),
+          })
+        );
 
-  const assetId = new URL(request.url).searchParams.get("assetId");
-  if (!assetId) {
-    // @ts-expect-error @TODO - update to use new method
-    throw new ShelfError({
-      message: "Malformed URL",
-      status: 400,
-      title: "Malformed URL",
-    });
+        // Update the custody record
+        // @TODO - needs to be caught
+        await db.custody.update({
+          where: {
+            assetId,
+          },
+          data: {
+            signatureImage,
+            signatureText,
+            templateSigned: true,
+          },
+        });
+
+        // Update the asset status
+        // @TODO - needs to be caught
+        await db.asset.update({
+          where: {
+            id: assetId,
+          },
+          data: {
+            status: AssetStatus.IN_CUSTODY,
+          },
+        });
+
+        // Send out the notification
+        sendNotification({
+          title: "Asset signed",
+          message: "Your asset has been signed successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        // Create a note
+        await createNote({
+          content: `${user.firstName} ${user.lastName} signed the asset and now has custody of it`,
+          type: "UPDATE",
+          userId: userId,
+          assetId: assetId,
+        });
+
+        return redirect(`/assets/${assetId}`);
+      }
+    }
+    throw notAllowedMethod(method);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
   }
-
-  const formData = await request.clone().formData();
-  const signatureText = formData.get("signatureText") as string;
-  const signatureImage = formData.get("signatureImage") as string;
-
-  if (!signatureText && !signatureImage) {
-    // @ts-expect-error @TODO - update to use new method
-    throw new ShelfError({
-      message: "Signature required",
-      status: 400,
-      title: "Signature required",
-    });
-  }
-
-  // Update the custody record
-  await db.custody.update({
-    where: {
-      assetId,
-    },
-    data: {
-      signatureImage,
-      signatureText,
-      templateSigned: true,
-    },
-  });
-
-  // Update the asset status
-  await db.asset.update({
-    where: {
-      id: assetId,
-    },
-    data: {
-      status: AssetStatus.IN_CUSTODY,
-    },
-  });
-
-  // Send out the notification
-  sendNotification({
-    title: "Asset signed",
-    message: "Your asset has been signed successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: userId,
-  });
-
-  // Create a note
-  await createNote({
-    content: `${user.firstName} ${user.lastName} signed the asset and now has custody of it`,
-    type: "UPDATE",
-    userId: userId,
-    assetId: assetId,
-  });
-
-  return redirect(`/assets/${assetId}`, {
-    headers: {
-      // @ts-expect-error @TODO - update to use new method
-      "Set-Cookie": await commitAuthSession(request, { authSession }),
-    },
-  });
 }
 
 export default function Sign() {
-  const { template } = useLoaderData<typeof loader>();
-  const twConfig = resolveConfig(tailwindConfig);
+  const { template, templateFile } = useLoaderData<typeof loader>();
+  const templateUrl = templateFile.url;
+  // const twConfig = resolveConfig(tailwindConfig);
   const [params, setParams] = useSearchParams();
   const showAgreementPopup = useCallback(() => {
     params.set(AGREEMENT_POPUP_VISIBLE, "true");

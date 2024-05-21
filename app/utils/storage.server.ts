@@ -23,10 +23,8 @@ export async function getPublicFileURL({
   filename: string;
   bucketName?: string;
 }) {
-  /** @TODO bucketExists should be updated to catch the error properly so it can be used within the try/catch when invoked */
-  await bucketExists(bucketName);
-
   try {
+    await bucketExists(bucketName);
     const { data } = getSupabaseAdmin()
       .storage.from(bucketName)
       .getPublicUrl(filename);
@@ -80,7 +78,6 @@ export async function createSignedUrl({
 async function bucketExists(bucketName: string) {
   const { error } = await getSupabaseAdmin().storage.getBucket(bucketName);
 
-  /** @TODO maybe we have to catch the error above. As there could be different errors on theory */
   if (error) {
     throw new ShelfError({
       label: "Storage",
@@ -92,26 +89,16 @@ async function bucketExists(bucketName: string) {
 
 async function uploadFile(
   fileData: AsyncIterable<Uint8Array>,
-  {
-    filename,
-    contentType,
-    bucketName,
-    resizeOptions,
-    updateExisting,
-  }: UploadOptions
+  { filename, contentType, bucketName, resizeOptions }: UploadOptions
 ) {
   try {
     let file = resizeOptions
       ? await cropImage(fileData, resizeOptions)
       : await getFileArrayBuffer(fileData);
 
-    const { data, error } = updateExisting
-      ? await getSupabaseAdmin()
-          .storage.from(bucketName)
-          .update(filename, file, { contentType, upsert: true })
-      : await getSupabaseAdmin()
-          .storage.from(bucketName)
-          .upload(filename, file, { contentType, upsert: true });
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from(bucketName)
+      .upload(filename, file, { contentType });
 
     if (error) {
       throw error;
@@ -134,7 +121,6 @@ export interface UploadOptions {
   filename: string;
   contentType: string;
   resizeOptions?: ResizeOptions;
-  updateExisting?: boolean;
 }
 
 export async function parseFileFormData({
@@ -142,13 +128,11 @@ export async function parseFileFormData({
   newFileName,
   bucketName = "profile-pictures",
   resizeOptions,
-  updateExisting = false,
 }: {
   request: Request;
   newFileName: string;
   bucketName?: string;
   resizeOptions?: ResizeOptions;
-  updateExisting?: boolean;
 }) {
   try {
     await bucketExists(bucketName);
@@ -167,7 +151,6 @@ export async function parseFileFormData({
           contentType,
           bucketName,
           resizeOptions,
-          updateExisting,
         });
         return uploadedFilePath;
       }

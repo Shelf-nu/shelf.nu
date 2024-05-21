@@ -11,7 +11,7 @@ import styles from "~/styles/layout/custom-modal.css";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams } from "~/utils/http.server";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import { sendEmail } from "~/utils/mail.server";
 import {
   PermissionAction,
@@ -30,11 +30,10 @@ export const loader = async ({
     additionalData: { userId },
   });
   try {
-    // @TODO this needs to be updated as the action and entity are not correct
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
+      entity: PermissionEntity.template,
       action: PermissionAction.read,
     });
     const asset = await db.asset
@@ -65,8 +64,7 @@ export const loader = async ({
           message:
             "Something went wrong while fetching the asset. Please try again or contact support.",
           additionalData: { userId, assetId, organizationId },
-          // @TODO need to create a new label for templates and use it on all the exceptions
-          label: "Assets",
+          label: "Template",
         });
       });
 
@@ -109,38 +107,49 @@ export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
-export const action = async ({ request, params }: ActionFunctionArgs) => {
-  // @TODO - this needs to be updated to follow the new way of handling actions
+export const action = async ({
+  request,
+  context,
+  params,
+}: ActionFunctionArgs) => {
+  try {
+    const authSession = context.getSession();
 
-  // @ts-expect-error
-  const authSession = await requireAuthSession(request);
-  const formData = await request.formData();
-  const assetId = params.assetId as string;
-  const assetName = formData.get("assetName") as string;
-  const templateName = formData.get("templateName") as string;
-  const email = formData.get("email") as string;
+    const assetId = getParams(params, z.object({ assetId: z.string() }));
+    const { assetName, templateName, email } = parseData(
+      await request.formData(),
+      z.object({
+        assetName: z.string(),
+        templateName: z.string(),
+        email: z.string().email(),
+      })
+    );
 
-  sendNotification({
-    title: "Sending email...",
-    message: "Sending a link to the custodian to sign the template.",
-    icon: { name: "spinner", variant: "primary" },
-    senderId: authSession.userId,
-  });
+    sendNotification({
+      title: "Sending email...",
+      message: "Sending a link to the custodian to sign the template.",
+      icon: { name: "spinner", variant: "primary" },
+      senderId: authSession.userId,
+    });
 
-  await sendEmail({
-    to: email,
-    subject: `Custody of ${assetName} shared with you`,
-    text: `You have been given the custody of ${assetName}. To claim the custody, you must sign the ${templateName} document. Click on this link to sign the document: https://app.shelf.nu/sign/${assetId}`,
-  });
+    await sendEmail({
+      to: email,
+      subject: `Custody of ${assetName} shared with you`,
+      text: `You have been given the custody of ${assetName}. To claim the custody, you must sign the ${templateName} document. Click on this link to sign the document: https://app.shelf.nu/sign/${assetId}`,
+    });
 
-  sendNotification({
-    title: "Asset shared",
-    message: "An email has been sent to the custodian.",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
+    sendNotification({
+      title: "Asset shared",
+      message: "An email has been sent to the custodian.",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
 
-  return redirect(`/assets/${assetId}`);
+    return redirect(`/assets/${assetId}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
+  }
 };
 
 export default function ShareTemplate() {

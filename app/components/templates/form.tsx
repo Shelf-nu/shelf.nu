@@ -1,6 +1,6 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useState } from "react";
-import type { Template } from "@prisma/client";
+import type { Template, TemplateFile } from "@prisma/client";
 import { TemplateType } from "@prisma/client";
 import { Form, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
@@ -84,9 +84,10 @@ interface Props {
   description?: Template["description"];
   type?: Template["type"];
   signatureRequired?: Template["signatureRequired"];
-  pdfUrl?: Template["pdfUrl"];
-  pdfSize?: Template["pdfSize"];
-  pdfName?: Template["pdfName"];
+  pdfUrl?: TemplateFile["url"];
+  pdfSize?: TemplateFile["size"];
+  pdfName?: TemplateFile["name"];
+  version?: TemplateFile["revision"];
   isEdit?: boolean;
 }
 
@@ -98,6 +99,7 @@ export const TemplateForm = ({
   pdfSize,
   pdfUrl,
   pdfName,
+  version,
   isEdit = false,
 }: Props) => {
   const navigation = useNavigation();
@@ -139,7 +141,7 @@ export const TemplateForm = ({
         <Input
           label="Name"
           hideLabel
-          name={zo.fields.name()}
+          name={"name"}
           disabled={disabled}
           error={zo.errors.name()?.message}
           autoFocus
@@ -152,7 +154,7 @@ export const TemplateForm = ({
       </FormRow>
       <FormRow rowLabel="Type" className="border-b-0 pb-0" required={true}>
         <Select
-          name={zo.fields.type()}
+          name={"type"}
           defaultValue={selectedType}
           disabled={disabled}
           onValueChange={(val) =>
@@ -205,7 +207,7 @@ export const TemplateForm = ({
           label="Description"
           hideLabel
           inputType="textarea"
-          name={zo.fields.description()}
+          name={"description"}
           disabled={disabled}
           error={zo.errors.description()?.message}
           className="w-full border-b-0 pb-0"
@@ -251,7 +253,7 @@ export const TemplateForm = ({
             </div>
             <div>
               <Badge withDot={false} color="#0dec5d">
-                Current
+                Current (revision: {version})
               </Badge>
             </div>
           </Card>

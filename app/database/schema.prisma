@@ -350,9 +350,10 @@ model Custody {
   asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId String @unique
 
-  template       Template? @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  templateId     String?   @unique
-  templateSigned Boolean?  @default(false)
+  template                  Template? @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  templateId                String?   @unique
+  templateSigned            Boolean?  @default(false)
+  associatedTemplateVersion Int?
 
   signatureText  String?
   signatureImage String?
@@ -464,9 +465,7 @@ model Template {
   signatureRequired Boolean      @default(false)
   isDefault         Boolean      @default(false)
   isActive          Boolean      @default(true)
-  pdfUrl            String?
-  pdfSize           Int?
-  pdfName           String?
+  lastRevision      Int          @default(0)
 
   // Datetime
   createdAt DateTime @default(now())
@@ -479,6 +478,21 @@ model Template {
   organizationId String
 
   custodies Custody[]
+  files     TemplateFile[]
+}
+
+model TemplateFile {
+  id       String @id @default(cuid())
+  revision Int
+  size     Int // PDF size
+  name     String // PDF file name
+  url      String // PDF file URL
+
+  // Relationships
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  templateId String
+
+  @@unique([revision, templateId])
 }
 
 model CustomField {

@@ -3,13 +3,7 @@ import { AssetStatus, BookingStatus, TemplateType } from "@prisma/client";
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import {
-  Form,
-  Link,
-  // useActionData,
-  useLoaderData,
-  useNavigation,
-} from "@remix-run/react";
+import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { z } from "zod";
 import { assignCustodyUser } from "~/atoms/assign-custody-user";
@@ -129,13 +123,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     // We need to fetch all the templates that belong to the user's current organization
     // and the template type is CUSTODY
-    /** @TODO here you haev to throw if no template is found */
     const templates = await db.template.findMany({
       where: {
         organizationId,
         type: TemplateType.CUSTODY,
       },
     });
+
+    if (templates.length === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Something went wrong while deleting the note",
+        additionalData: { organizationId },
+        label: "Assets",
+      });
+    }
 
     const totalTeamMembers = await db.teamMember.count({
       where: {
@@ -174,38 +176,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { custodian, addTemplateEnabled, template } = parseData(
-      await request.formData(),
+    const formDataBase = z.object({
+      custodian: stringToJSONSchema.pipe(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+          userId: z.string(),
+        })
+      ),
+    });
+
+    const formData = z.discriminatedUnion("addTemplateEnabled", [
       z.object({
-        custodian: stringToJSONSchema.pipe(
-          z.object({
-            id: z.string(),
-            name: z.string(),
-            email: z.string(),
-            userId: z.string(),
-          })
-        ),
-        /** @TODO not sure how this data is sent. please double check and review this 
-         *  This was the original code but now we handle it dirrefently. Needs to be reviewed and handled using parseData and the new approach
-         * //   if (addTemplateEnabled && !template)
-          //     return json(
-          //       { error: "Please select a template", type: "TEMPLATE" },
-          //       { status: 400 }
-          //     );
-        */
-        addTemplateEnabled: z.boolean(),
-        /** @TODO not sure what data we are sending here. I just added the ID but please add teh other fields that are suppsoed to be there */
+        addTemplateEnabled: z.literal(false),
+        ...formDataBase.shape,
+      }),
+      z.object({
+        addTemplateEnabled: z.literal(true),
+        ...formDataBase.shape,
         template: stringToJSONSchema.pipe(
           z.object({
             id: z.string(),
           })
         ),
       }),
-      {
-        additionalData: { userId, assetId },
-        message: "Please select a custodian",
-      }
-    );
+    ]);
+
+    const parsedData = parseData(await request.formData(), formData, {
+      additionalData: { userId, assetId },
+      message: "Please select a custodian",
+    });
+
+    const { custodian, addTemplateEnabled } = parsedData;
 
     const user = await getUserByID(userId);
 
@@ -224,6 +227,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       templateObj = null;
 
     if (addTemplateEnabled) {
+      const template = parsedData.template;
       templateId = template.id;
 
       templateObj = await db.template
@@ -269,6 +273,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
               create: {
                 custodian: { connect: { id: custodianId as string } },
                 template: { connect: { id: templateId as string } },
+                associatedTemplateVersion: templateObj!.lastRevision,
               },
             },
           },
@@ -400,7 +405,6 @@ export function links() {
 export default function Custody() {
   const { asset } = useLoaderData<typeof loader>();
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
-  // const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const [assignCustody] = useAtom(assignCustodyUser);
