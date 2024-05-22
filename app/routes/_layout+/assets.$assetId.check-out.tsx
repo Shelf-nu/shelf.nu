@@ -174,7 +174,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const formDataBase = z.object({
+    const BaseSchema = z.object({
       custodian: stringToJSONSchema.pipe(
         z.object({
           id: z.string(),
@@ -185,14 +185,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       ),
     });
 
-    const formData = z.discriminatedUnion("addTemplateEnabled", [
+    const EnhancedSchema = z.discriminatedUnion("addTemplateEnabled", [
       z.object({
         addTemplateEnabled: z.literal(false),
-        ...formDataBase.shape,
+        ...BaseSchema.shape,
       }),
       z.object({
         addTemplateEnabled: z.literal(true),
-        ...formDataBase.shape,
+        ...BaseSchema.shape,
         template: stringToJSONSchema.pipe(
           z.object({
             id: z.string(),
@@ -201,7 +201,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }),
     ]);
 
-    const parsedData = parseData(await request.formData(), formData, {
+    const parsedData = parseData(await request.formData(), EnhancedSchema, {
       additionalData: { userId, assetId },
       message: "Please select a custodian",
     });
@@ -451,7 +451,7 @@ export default function Custody() {
               initialDataKey="teamMembers"
               countKey="totalTeamMembers"
               placeholder="Select a team member"
-              allowClear
+              allowClear={false}
               closeOnSelect
               transformItem={(item) => ({
                 ...item,
@@ -462,7 +462,17 @@ export default function Custody() {
                 }),
               })}
               onChange={(value) => {
-                setSelectedCustodyUser(JSON.parse(value));
+                const id = JSON.parse(value).id;
+                /**
+                 * When the value passed is the same as the current value,
+                 * that means the user is clicking the already selected item to disable it.
+                 * So we clear the state in that case*/
+                if (id === selectedCustodyUser?.id) {
+                  setSelectedCustodyUser(null);
+                  setAddTemplateEnabled(false);
+                } else {
+                  setSelectedCustodyUser(JSON.parse(value));
+                }
               }}
             />
           </div>

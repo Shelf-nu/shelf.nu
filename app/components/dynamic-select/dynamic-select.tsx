@@ -158,6 +158,7 @@ export default function DynamicSelect({
                     onClick={() => {
                       setSelectedValue(undefined);
                       clearFilters();
+                      onChange && onChange(selectedValue as string); // We know its a string because clear only shows if selected value is a string
                     }}
                   >
                     Clear selection

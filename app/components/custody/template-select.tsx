@@ -14,7 +14,7 @@ export default function TemplateSelect() {
   return (
     <div className="relative w-full">
       <Select name="template">
-        <SelectTrigger>
+        <SelectTrigger className="text-left">
           <SelectValue placeholder="Select a PDF template" />
         </SelectTrigger>
         <div>
@@ -27,7 +27,7 @@ export default function TemplateSelect() {
             }
           >
             {templates.length > 0 ? (
-              <div className=" max-h-[320px] overflow-auto">
+              <div className="max-h-[320px] overflow-auto">
                 {templates.map((template) => (
                   <SelectItem
                     key={template.id}
@@ -35,8 +35,9 @@ export default function TemplateSelect() {
                       id: template.id,
                       name: template.name,
                     })}
+                    className="flex cursor-pointer select-none items-center justify-between gap-4 px-6 py-4 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
                   >
-                    <span className=" flex-1 font-medium text-gray-900">
+                    <span className="flex-1 font-medium text-gray-900">
                       {template.name}
                     </span>
                   </SelectItem>
