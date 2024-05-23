@@ -170,6 +170,11 @@ export default function IndexLoginForm() {
           </div>
         </div>
       </Form>
+      <div className="mt-6 text-center">
+        <Button variant="link" to="/sso-login">
+          Login with SSO
+        </Button>
+      </div>
       <div className="mt-6">
         <div className="relative">
           <div className="absolute inset-0 flex items-center">

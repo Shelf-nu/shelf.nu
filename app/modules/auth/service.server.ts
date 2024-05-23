@@ -133,6 +133,38 @@ export async function signInWithEmail(email: string, password: string) {
   }
 }
 
+export async function signInWithSSO(email: string) {
+  try {
+    const { data, error } = await getSupabaseAdmin().auth.signInWithSSO({
+      domain: email.split("@")[1],
+      options: {
+        redirectTo: `${SERVER_URL}/oauth/callback`,
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data.url;
+  } catch (cause) {
+    let message =
+      "Something went wrong. Please try again later or contact support.";
+    let shouldBeCaptured = true;
+
+    if (cause?.code === "sso_provider_not_found") {
+      message = "No SSO provider assigned for your organization's domain";
+    }
+
+    throw new ShelfError({
+      cause,
+      message,
+      label,
+      shouldBeCaptured,
+    });
+  }
+}
+
 export async function sendOTP(email: string) {
   try {
     const { error } = await getSupabaseAdmin().auth.signInWithOtp({ email });

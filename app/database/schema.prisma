@@ -41,6 +41,7 @@ model User {
   customerId     String? @unique // Stripe customer id
   tierId         TierId  @default(free)
   tier           Tier    @relation(fields: [tierId], references: [id])
+  sso            Boolean @default(false)
 
   // Datetime
   createdAt DateTime @default(now())

@@ -162,6 +162,29 @@ export async function createUserOrAttachOrg({
   }
 }
 
+export async function createUserFromSSO(authSession: AuthSession) {
+  try {
+    const { email, userId } = authSession;
+
+    const user = await createUser({
+      email,
+      userId,
+      username: randomUsernameFromEmail(email),
+      isSSO: true,
+    });
+    return user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : `There was an issue with creating/attaching user with email: ${authSession.email}`,
+      additionalData: { email: authSession.email, userId: authSession.userId },
+      label,
+    });
+  }
+}
+
 export async function createUser(
   payload: Pick<
     AuthSession & { username: string },
@@ -170,9 +193,11 @@ export async function createUser(
     organizationId?: Organization["id"];
     roles?: OrganizationRoles[];
     firstName?: User["firstName"];
+    isSSO?: boolean;
   }
 ) {
-  const { email, userId, username, organizationId, roles, firstName } = payload;
+  const { email, userId, username, organizationId, roles, firstName, isSSO } =
+    payload;
 
   try {
     return await db.$transaction(
@@ -201,6 +226,11 @@ export async function createUser(
                 name: Roles["USER"],
               },
             },
+            ...(isSSO && {
+              // When user is coming from SSO, we set them as onboarded as we already have their first and last name and they dont need a password.
+              onboarded: true,
+              sso: true,
+            }),
           },
           include: {
             organizations: true,

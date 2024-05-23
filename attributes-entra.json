@@ -1,0 +1,13 @@
+{
+  "keys": {
+    "email": {
+      "name": "mail"
+    },
+    "firstName": {
+      "name": "givenname"
+    },
+    "lastName": {
+      "name": "surname"
+    }
+  }
+}
