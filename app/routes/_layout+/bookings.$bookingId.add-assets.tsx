@@ -21,6 +21,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
+import GroupedByKitAssets from "~/components/assets/grouped-by-kit-assets";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
@@ -33,6 +34,13 @@ import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 
+import { Spinner } from "~/components/shared/spinner";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
 import { Td } from "~/components/table";
 
 import {
@@ -48,7 +56,14 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
@@ -77,6 +92,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    const searchParams = getCurrentSearchParams(request);
+    const paramsValues = getParamsValues(searchParams);
+
     const {
       search,
       totalAssets,
@@ -93,6 +111,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
+      bookingTab: paramsValues.tab ? paramsValues.tab : "assets",
     });
 
     const modelName = {
@@ -209,9 +228,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function AddAssetsToNewBooking() {
   const { booking, header } = useLoaderData<typeof loader>();
-  const [_searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
+
+  const selectedTab = searchParams.get("tab") ?? "assets";
 
   const bookingAssetsIds = useMemo(
     () => booking?.assets.map((a) => a.id) || [],
@@ -238,90 +259,131 @@ export default function AddAssetsToNewBooking() {
   }, [booking.id]);
 
   return (
-    <div className="flex h-full max-h-full flex-col ">
+    <div className="flex h-full flex-col">
       <Header
         {...header}
         hideBreadcrumbs={true}
-        classNames="text-left  -mx-6 [&>div]:px-6 -mt-6"
+        classNames="text-left -mx-6 [&>div]:px-6 -mt-6"
       />
-      <Filters
-        slots={{
-          "right-of-search": <AvailabilitySelect />,
+
+      <Tabs
+        value={selectedTab}
+        className="-mx-6 flex-1 py-2"
+        onValueChange={(value) => {
+          setSearchParams((prev) => {
+            prev.set("tab", value);
+            return prev;
+          });
         }}
-        className="-mx-6 justify-between !border-t-0 border-b px-6 md:flex"
-      />
+      >
+        <div className="border-b px-6 pb-2">
+          <TabsList className="w-full">
+            <TabsTrigger className="flex-1" value="assets">
+              Assets
+            </TabsTrigger>
+            <TabsTrigger className="flex-1" value="kits">
+              Kits
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-      <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
-        <DynamicDropdown
-          trigger={
-            <div className="flex h-6 cursor-pointer items-center gap-2">
-              Categories <ChevronRight className="hidden rotate-90 md:inline" />
-            </div>
-          }
-          model={{ name: "category", queryKey: "name" }}
-          label="Filter by category"
-          placeholder="Search categories"
-          initialDataKey="categories"
-          countKey="totalCategories"
+        <Filters
+          slots={{
+            "right-of-search": <AvailabilitySelect />,
+          }}
+          className="justify-between !border-t-0 border-b px-6 md:flex"
         />
-        <DynamicDropdown
-          trigger={
-            <div className="flex h-6 cursor-pointer items-center gap-2">
-              Tags <ChevronRight className="hidden rotate-90 md:inline" />
+
+        <div className="flex justify-around gap-2 border-b p-3 lg:gap-4">
+          <DynamicDropdown
+            trigger={
+              <div className="flex h-6 cursor-pointer items-center gap-2">
+                Categories{" "}
+                <ChevronRight className="hidden rotate-90 md:inline" />
+              </div>
+            }
+            model={{ name: "category", queryKey: "name" }}
+            label="Filter by category"
+            placeholder="Search categories"
+            initialDataKey="categories"
+            countKey="totalCategories"
+          />
+          <DynamicDropdown
+            trigger={
+              <div className="flex h-6 cursor-pointer items-center gap-2">
+                Tags <ChevronRight className="hidden rotate-90 md:inline" />
+              </div>
+            }
+            model={{ name: "tag", queryKey: "name" }}
+            label="Filter by tag"
+            initialDataKey="tags"
+            countKey="totalTags"
+          />
+          <DynamicDropdown
+            trigger={
+              <div className="flex h-6 cursor-pointer items-center gap-2">
+                Locations{" "}
+                <ChevronRight className="hidden rotate-90 md:inline" />
+              </div>
+            }
+            model={{ name: "location", queryKey: "name" }}
+            label="Filter by location"
+            initialDataKey="locations"
+            countKey="totalLocations"
+            renderItem={({ metadata }) => (
+              <div className="flex items-center gap-2">
+                <Image
+                  imageId={metadata.imageId}
+                  alt="img"
+                  className={tw(
+                    "size-6 rounded-[2px] object-cover",
+                    metadata.description ? "rounded-b-none border-b-0" : ""
+                  )}
+                />
+                <div>{metadata.name}</div>
+              </div>
+            )}
+          />
+        </div>
+
+        {/* Body of the modal*/}
+        <TabsContent
+          className="flex-1 overflow-y-auto px-5 md:px-0"
+          value="assets"
+        >
+          {isSearching ? (
+            <div className="flex h-[400px] flex-1 items-center justify-center">
+              <Spinner />
             </div>
-          }
-          model={{ name: "tag", queryKey: "name" }}
-          label="Filter by tag"
-          initialDataKey="tags"
-          countKey="totalTags"
-        />
-        <DynamicDropdown
-          trigger={
-            <div className="flex h-6 cursor-pointer items-center gap-2">
-              Locations <ChevronRight className="hidden rotate-90 md:inline" />
-            </div>
-          }
-          model={{ name: "location", queryKey: "name" }}
-          label="Filter by location"
-          initialDataKey="locations"
-          countKey="totalLocations"
-          renderItem={({ metadata }) => (
-            <div className="flex items-center gap-2">
-              <Image
-                imageId={metadata.imageId}
-                alt="img"
-                className={tw(
-                  "size-6 rounded-[2px] object-cover",
-                  metadata.description ? "rounded-b-none border-b-0" : ""
-                )}
-              />
-              <div>{metadata.name}</div>
-            </div>
+          ) : (
+            <List
+              ItemComponent={RowComponent}
+              /** Clicking on the row will add the current asset to the atom of selected assets */
+              navigate={(assetId) => {
+                setSelectedAssets((selectedAssets) =>
+                  selectedAssets.includes(assetId)
+                    ? selectedAssets.filter((id) => id !== assetId)
+                    : [...selectedAssets, assetId]
+                );
+              }}
+              emptyStateClassName="py-10"
+              customEmptyStateContent={{
+                title: "You haven't added any assets yet.",
+                text: "What are you waiting for? Create your first asset now!",
+                newButtonRoute: "/assets/new",
+                newButtonContent: "New asset",
+              }}
+              className="-mx-5 flex h-full flex-col justify-between border-0"
+            />
           )}
-        />
-      </div>
-
-      {/* Body of the modal*/}
-      <div className="-mx-6 flex-1 overflow-y-auto px-5 md:px-0">
-        <List
-          ItemComponent={RowComponent}
-          /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={(assetId) => {
-            setSelectedAssets((selectedAssets) =>
-              selectedAssets.includes(assetId)
-                ? selectedAssets.filter((id) => id !== assetId)
-                : [...selectedAssets, assetId]
-            );
-          }}
-          customEmptyStateContent={{
-            title: "You haven't added any assets yet.",
-            text: "What are you waiting for? Create your first asset now!",
-            newButtonRoute: "/assets/new",
-            newButtonContent: "New asset",
-          }}
-          className="-mx-5 flex h-full flex-col justify-between border-0"
-        />
-      </div>
+        </TabsContent>
+        <TabsContent
+          value="kits"
+          className="mt-0 max-h-[576px] flex-1 overflow-y-auto px-5 md:px-0"
+        >
+          <GroupedByKitAssets />
+        </TabsContent>
+      </Tabs>
 
       {/* Footer of the modal */}
       <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">

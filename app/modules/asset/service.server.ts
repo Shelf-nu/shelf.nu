@@ -143,6 +143,7 @@ async function getAssetsFromView(params: {
   unhideAssetsBookigIds?: Booking["id"][];
   locationIds?: Location["id"][] | null;
   teamMemberIds?: TeamMember["id"][] | null;
+  tab?: string | null;
 }) {
   const {
     organizationId,
@@ -158,6 +159,7 @@ async function getAssetsFromView(params: {
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
     locationIds,
     teamMemberIds,
+    tab,
   } = params;
 
   try {
@@ -297,6 +299,16 @@ async function getAssetsFromView(params: {
       ];
     }
 
+    /**
+     * If user has selected the kits tab,
+     * then we have to filter for assets which belongs to a kit
+     */
+    if (tab === "kits" && where.asset) {
+      where.asset.kit = { isNot: null };
+    } else if (tab === "assets" && where.asset) {
+      where.asset.kit = null;
+    }
+
     const [assetSearch, totalAssets] = await Promise.all([
       /** Get the assets */
       db.assetSearchView.findMany({
@@ -395,6 +407,7 @@ async function getAssets(params: {
   bookingTo?: Booking["to"];
   unhideAssetsBookigIds?: Booking["id"][];
   teamMemberIds?: TeamMember["id"][] | null;
+  tab?: string | null;
 }) {
   const {
     organizationId,
@@ -410,6 +423,7 @@ async function getAssets(params: {
     hideUnavailable,
     unhideAssetsBookigIds, // works in conjuction with hideUnavailable, to show currentbooking assets
     teamMemberIds,
+    tab,
   } = params;
 
   try {
@@ -510,6 +524,16 @@ async function getAssets(params: {
       where.location = {
         id: { in: locationIds },
       };
+    }
+
+    /**
+     * If user has selected the kits tab,
+     * then we have to filter for assets which belongs to a kit
+     */
+    if (tab === "kits") {
+      where.kit = { isNot: null };
+    } else if (tab === "assets") {
+      where.kit = null;
     }
 
     if (teamMemberIds && teamMemberIds.length) {
@@ -1262,6 +1286,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeTagsQuery = false,
   excludeSearchFromView = false,
   excludeLocationQuery = false,
+  bookingTab,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1275,6 +1300,7 @@ export async function getPaginatedAndFilterableAssets({
    *  instead of the AssetSearchView
    */
   excludeSearchFromView?: boolean;
+  bookingTab?: "assets" | "kits";
 }) {
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
@@ -1365,6 +1391,7 @@ export async function getPaginatedAndFilterableAssets({
       unhideAssetsBookigIds,
       locationIds,
       teamMemberIds,
+      tab: bookingTab,
     });
     const totalPages = Math.ceil(totalAssets / perPage);
 
