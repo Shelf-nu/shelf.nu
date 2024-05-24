@@ -105,7 +105,7 @@ export function BookingAssetsColumn() {
             />
           </div>
 
-          <div className="overflow-x-auto border border-gray-200 bg-white md:mx-0 md:rounded-b">
+          <div className="overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">
             {!hasItems ? (
               <EmptyState
                 className="py-10"

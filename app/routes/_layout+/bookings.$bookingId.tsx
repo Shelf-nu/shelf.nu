@@ -251,6 +251,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "checkIn",
           "archive",
           "cancel",
+          "removeKit",
         ]),
         nameChangeOnly: z
           .string()
@@ -271,6 +272,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkIn: PermissionAction.checkin,
       archive: PermissionAction.update,
       cancel: PermissionAction.update,
+      removeKit: PermissionAction.update,
     };
 
     const { organizationId, role } = await requirePermission({
@@ -496,6 +498,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             headers,
           }
         );
+      }
+      case "removeKit": {
+        const { kitId } = parseData(formData, z.object({ kitId: z.string() }), {
+          additionalData: { userId, id, organizationId, role },
+        });
+
+        const kit = await db.kit.findUniqueOrThrow({
+          where: { id: kitId },
+          select: { assets: { select: { id: true } } },
+        });
+
+        const b = await removeAssets({
+          booking: { id, assetIds: kit.assets.map((a) => a.id) },
+          firstName: user?.firstName || "",
+          lastName: user?.lastName || "",
+          userId: authSession.userId,
+        });
+
+        sendNotification({
+          title: "Kit removed",
+          message: "Your kit has been removed from the booking",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ booking: b }), {
+          headers,
+        });
       }
       default: {
         checkExhaustiveSwitch(intent);

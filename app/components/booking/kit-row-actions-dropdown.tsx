@@ -81,7 +81,7 @@ function RemoveKitFromBooking({ kit }: { kit: Kit }) {
           </div>
           <AlertDialogTitle>Remove "{kit.name}" from booking</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to remove this asset from the booking?
+            Are you sure you want to remove this kit from the booking?
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
