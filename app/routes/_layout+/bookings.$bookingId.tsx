@@ -143,6 +143,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         include: {
           category: true,
           custody: true,
+          kit: true,
           bookings: {
             where: {
               // id: { not: booking.id },
