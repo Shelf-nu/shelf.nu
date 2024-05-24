@@ -12,11 +12,11 @@ import {
 } from "../shared/tooltip";
 
 /**
- * There are 3 reasons an asset can be unavailable:
+ * There are 4 reasons an asset can be unavailable:
  * 1. Its marked as not allowed for booking
  * 2. It is already in custody
  * 3. It is already booked for that period (within another booking)
- *
+ * 4. It is part of a kit and user is trying to add it individually
  * Each reason has its own tooltip and label
  */
 export function AvailabilityLabel({
@@ -26,6 +26,8 @@ export function AvailabilityLabel({
   asset: AssetWithBooking;
   isCheckedOut: boolean;
 }) {
+  const isPartOfKit = !!asset.kitId;
+
   const { booking } = useLoaderData<{ booking: Booking }>();
   /**
    * Marked as not allowed for booking
@@ -111,6 +113,20 @@ export function AvailabilityLabel({
             "This asset is currently checked out as part of another booking and should be available for your selected date range period"
           )
         }
+      />
+    );
+  }
+
+  /**
+   * Asset is part of a kit
+   */
+
+  if (isPartOfKit) {
+    return (
+      <AvailabilityBadge
+        badgeText="Part of kit"
+        tooltipTitle="Asset is part of a kit"
+        tooltipContent="Remove the asset from the kit to add it individually."
       />
     );
   }

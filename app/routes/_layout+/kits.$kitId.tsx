@@ -250,7 +250,12 @@ export default function KitDetails() {
   return (
     <>
       <Header
-        subHeading={<KitStatusBadge status={kit.status} availableToBook />}
+        subHeading={
+          <KitStatusBadge
+            status={kit.status}
+            availableToBook={kit.status === "AVAILABLE"}
+          />
+        }
       >
         {!isSelfService ? <ActionsDropdown /> : null}
       </Header>

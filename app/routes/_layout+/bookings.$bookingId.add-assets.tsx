@@ -348,7 +348,7 @@ export default function AddAssetsToNewBooking() {
 
         {/* Body of the modal*/}
         <TabsContent
-          className="flex-1 overflow-y-auto px-5 md:px-0"
+          className="h-[420px] flex-1 overflow-y-auto px-5 md:px-0"
           value="assets"
         >
           {isSearching ? (
@@ -359,7 +359,12 @@ export default function AddAssetsToNewBooking() {
             <List
               ItemComponent={RowComponent}
               /** Clicking on the row will add the current asset to the atom of selected assets */
-              navigate={(assetId) => {
+              navigate={(assetId, asset) => {
+                /** Only allow user to select if the asset is available */
+                if (!asset.availableToBook || !!asset.kitId) {
+                  return;
+                }
+
                 setSelectedAssets((selectedAssets) =>
                   selectedAssets.includes(assetId)
                     ? selectedAssets.filter((id) => id !== assetId)
@@ -379,7 +384,7 @@ export default function AddAssetsToNewBooking() {
         </TabsContent>
         <TabsContent
           value="kits"
-          className="mt-0 max-h-[576px] flex-1 overflow-y-auto px-5 md:px-0"
+          className="mt-0 h-[420px] flex-1 overflow-y-auto px-5 md:px-0"
         >
           <GroupedByKitAssets />
         </TabsContent>
@@ -433,11 +438,15 @@ export type AssetWithBooking = Asset & {
   bookings: Booking[];
   custody: Custody | null;
   category: Category;
+  kitId?: string | null;
 };
 
 const RowComponent = ({ item }: { item: AssetWithBooking }) => {
   const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
+
+  const isPartOfKit = !!item.kitId;
+
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -471,7 +480,11 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
       </Td>
 
       <Td>
-        <FakeCheckbox className="text-white" checked={checked} />
+        <FakeCheckbox
+          className={tw("text-white", isPartOfKit ? "text-gray-100" : "")}
+          checked={checked}
+          aria-disabled={isPartOfKit}
+        />
       </Td>
     </>
   );

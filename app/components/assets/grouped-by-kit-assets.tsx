@@ -6,6 +6,7 @@ import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { groupBy } from "~/utils/utils";
+import { AvailabilityBadge } from "../booking/availability-label";
 import { FakeCheckbox } from "../forms/fake-checkbox";
 import KitImage from "../kits/kit-image";
 import { EmptyState } from "../list/empty-state";
@@ -32,7 +33,7 @@ export default function GroupedByKitAssets({
     bookingsSelectedAssetsAtom
   );
 
-  const groupedItems = groupBy(items ?? [], (item) => item.kit.id);
+  const groupedItems = groupBy(items ?? [], (item) => item?.kit?.id);
 
   if (isLoading) {
     return (
@@ -70,13 +71,17 @@ export default function GroupedByKitAssets({
 
                 const isKitSelected =
                   selectedAssets.length > 0 &&
-                  selectedAssets.every((asset) => assetIds.includes(asset));
+                  assetIds.every((asset) => selectedAssets.includes(asset));
 
                 return (
                   <ListItem
                     item={kit}
                     key={kit.id}
                     navigate={() => {
+                      if (kit.status !== "AVAILABLE") {
+                        return;
+                      }
+
                       setSelectedAssets((prevSelected) => {
                         if (isKitSelected) {
                           return prevSelected.filter(
@@ -115,8 +120,21 @@ export default function GroupedByKitAssets({
                     </Td>
 
                     <Td>
+                      {kit.status !== "AVAILABLE" ? (
+                        <AvailabilityBadge
+                          badgeText="Includes unavailable assets"
+                          tooltipTitle="Includes asset(s) that are unavailable for bookings"
+                          tooltipContent="One or more assets in this kit are marked as unavailable for bookings. Make them available for bookings or remove the asset(s) from the kit."
+                        />
+                      ) : null}
+                    </Td>
+
+                    <Td>
                       <FakeCheckbox
-                        className="text-white"
+                        className={tw(
+                          "text-white",
+                          kit.status !== "AVAILABLE" ? "text-gray-100" : ""
+                        )}
                         checked={isKitSelected}
                       />
                     </Td>

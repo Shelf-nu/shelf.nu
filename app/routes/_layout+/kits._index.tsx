@@ -194,7 +194,10 @@ function ListContent({
                 {item.name}
               </span>
               <div>
-                <KitStatusBadge status={item.status} availableToBook={true} />
+                <KitStatusBadge
+                  status={item.status}
+                  availableToBook={item.status === "AVAILABLE"}
+                />
               </div>
             </div>
           </div>

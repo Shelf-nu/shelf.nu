@@ -305,7 +305,7 @@ async function getAssetsFromView(params: {
      */
     if (tab === "kits" && where.asset) {
       where.asset.kit = { isNot: null };
-    } else if (tab === "assets" && where.asset) {
+    } else if (hideUnavailable === true && tab === "assets" && where.asset) {
       where.asset.kit = null;
     }
 
