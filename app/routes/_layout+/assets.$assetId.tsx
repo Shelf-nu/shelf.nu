@@ -5,37 +5,27 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useFetcher, useLoaderData } from "@remix-run/react";
-
+import { useLoaderData } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
-import { useZorm } from "react-zorm";
 import { z } from "zod";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
-import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { Notes } from "~/components/assets/notes";
-import { Switch } from "~/components/forms/switch";
-import Icon from "~/components/icons/icon";
-import ContextualModal from "~/components/layout/contextual-modal";
-import ContextualSidebar from "~/components/layout/contextual-sidebar";
+import { Outlet } from "@remix-run/react";
+import {
+  createQr,
+  generateCode,
+  getQrByAssetId,
+} from "~/modules/qr/service.server";
+import HorizontalTabs from "~/components/layout/horizontal-tabs";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { ScanDetails } from "~/components/location/scan-details";
-
-import { Badge } from "~/components/shared/badge";
-import { Button } from "~/components/shared/button";
-import { Card } from "~/components/shared/card";
-import { Tag } from "~/components/shared/tag";
-import TextualDivider from "~/components/shared/textual-divider";
-import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   deleteAsset,
   getAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
-import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css?url";
@@ -43,20 +33,18 @@ import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
-import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
-import { isLink } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
-import { tw } from "~/utils/tw";
+import { getCurrentSearchParams } from "~/utils/http.server";
+type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
@@ -83,6 +71,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const locale = getLocale(request);
 
     const asset = await getAsset({ organizationId, id });
+
+    const searchParams = getCurrentSearchParams(request);
+    const size = (searchParams.get("size") || "medium") as SizeKeys;
+
+    let qr = await getQrByAssetId({ assetId:id });
+
+    if (!qr) {
+      /** If for some reason there is no QR, we create one and return it */
+      qr = await createQr({ assetId:id, userId, organizationId });
+    }
+
+    // Create a QR code with a URL
+    const { sizes, code } = await generateCode({
+      version: qr.version as TypeNumber,
+      errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
+      size,
+      qr,
+    });
 
     /** We get the first QR code(for now we can only have 1)
      * And using the ID of tha qr code, we find the latest scan
@@ -122,6 +128,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: asset.title,
     };
 
+    const qrObj = {
+      qr: code,
+      sizes,
+      showSidebar: true
+    }
+
     return json(
       data({
         asset: {
@@ -146,6 +158,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         lastScan,
         header,
         locale,
+        qrObj:{
+          ...qrObj
+        }
       })
     );
   } catch (cause) {
@@ -248,338 +263,37 @@ export const links: LinksFunction = () => [
 ];
 
 export default function AssetDetailsPage() {
-  const { asset, locale } = useLoaderData<typeof loader>();
-  const customFieldsValues =
-    asset.customFields?.length > 0
-      ? asset.customFields.filter((f) => f.value)
-      : [];
-  const assetIsAvailable = asset.status === "AVAILABLE";
+  const data = useLoaderData<typeof loader>();
+  let items = [
+    { to: "overview", content: "Overview" },
+    { to: "activity", content: "Activity" },
+  ];
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
-  const location = asset.location;
-  usePosition();
-  const fetcher = useFetcher();
-  const zo = useZorm(
-    "NewQuestionWizardScreen",
-    AvailabilityForBookingFormSchema
-  );
   const isSelfService = useUserIsSelfService();
-
+  
   return (
     <>
       <Header
+        asset={data.asset}
         subHeading={
           <div className="flex gap-2">
             <AssetStatusBadge
-              status={asset.status}
-              availableToBook={asset.availableToBook}
+              status={data.asset.status}
+              availableToBook={data.asset.availableToBook}
             />
-            {location ? (
-              <span className="inline-flex justify-center rounded-2xl bg-gray-100 px-[8px] py-[2px] text-center text-[12px] font-medium text-gray-700">
-                {location.name}
-              </span>
-            ) : null}
           </div>
         }
       >
         {!isSelfService ? (
-          <>
-            <Button to="qr" variant="secondary" icon="barcode">
-              View QR code
-            </Button>
-            <ActionsDropdown />
-          </>
+          <ActionsDropdown />
         ) : null}
       </Header>
-
-      <ContextualModal />
-      <div className="mt-8 block lg:flex">
-        <div className="shrink-0 overflow-hidden lg:w-[343px] xl:w-[400px]">
-          <AssetImage
-            asset={{
-              assetId: asset.id,
-              mainImage: asset.mainImage,
-              mainImageExpiration: asset.mainImageExpiration,
-              alt: asset.title,
-            }}
-            className={tw(
-              " h-auto w-full rounded border object-cover",
-              asset.description ? "rounded-b-none border-b-0" : ""
-            )}
-          />
-          {asset.description ? (
-            <Card className="mb-3 mt-0 rounded-t-none border-t-0">
-              <p className="whitespace-pre-wrap text-gray-600">
-                {asset.description}
-              </p>
-            </Card>
-          ) : null}
-          {!isSelfService ? (
-            <Card className="my-3">
-              <fetcher.Form
-                ref={zo.ref}
-                method="post"
-                onChange={(e) => fetcher.submit(e.currentTarget)}
-              >
-                <div className="flex justify-between gap-3">
-                  <div>
-                    <p className="text-[14px] font-medium text-gray-700">
-                      Available for bookings
-                    </p>
-                    <p className="text-[12px] text-gray-600">
-                      Asset is available for being used in bookings
-                    </p>
-                  </div>
-                  <Switch
-                    name={zo.fields.availableToBook()}
-                    disabled={isSelfService || isFormProcessing(fetcher.state)} // Disable for self service users
-                    defaultChecked={asset.availableToBook}
-                    required
-                    title={
-                      isSelfService
-                        ? "You do not have the permissions to change availability"
-                        : "Toggle availability"
-                    }
-                  />
-                  <input type="hidden" value="toggle" name="intent" />
-                </div>
-              </fetcher.Form>
-            </Card>
-          ) : null}
-
-          {asset.kit?.name ? (
-            <Card className="my-3 py-3">
-              <div className="flex items-center gap-3">
-                <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
-                  <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
-                    <Icon icon="kit" />
-                  </div>
-                </div>
-
-                <div>
-                  <h3 className="mb-1 text-sm font-semibold">
-                    Included in kit
-                  </h3>
-                  <Button
-                    to={`/kits/${asset.kitId}`}
-                    role="link"
-                    variant="link"
-                    className={tw(
-                      "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
-                    )}
-                  >
-                    {asset.kit.name}
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ) : null}
-
-          {/* We simply check if the asset is available and we can assume that if it't not, there is a custodian assigned */}
-          {!isSelfService && !assetIsAvailable && asset?.custody?.createdAt ? (
-            <Card className="my-3">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/static/images/default_pfp.jpg"
-                  alt="custodian"
-                  className="size-10 rounded"
-                />
-                <div>
-                  <p className="">
-                    In custody of{" "}
-                    <span className="font-semibold">
-                      {asset.custody?.custodian.name}
-                    </span>
-                  </p>
-                  <span>Since {asset.custody.dateDisplay}</span>
-                </div>
-              </div>
-            </Card>
-          ) : null}
-
-          <TextualDivider text="Details" className="mb-8 lg:hidden" />
-          <Card className="my-3">
-            <ul className="item-information">
-              <li className="mb-4 flex justify-between">
-                <span className="text-[12px] font-medium text-gray-600">
-                  ID
-                </span>
-                <div className="max-w-[250px]">{asset.id}</div>
-              </li>
-              <li className="mb-4 flex justify-between">
-                <span className="text-[12px] font-medium text-gray-600">
-                  Created
-                </span>
-                <div className="max-w-[250px]">{asset.createdAt}</div>
-              </li>
-
-              {asset?.category ? (
-                <li className="mb-4 flex justify-between">
-                  <span className="text-[12px] font-medium text-gray-600">
-                    Category
-                  </span>
-                  <div className="max-w-[250px]">
-                    <Badge color={asset.category?.color} withDot={false}>
-                      {asset.category?.name}
-                    </Badge>
-                  </div>
-                </li>
-              ) : (
-                <li className="mb-4 flex justify-between">
-                  <span className="text-[12px] font-medium text-gray-600">
-                    Category
-                  </span>
-                  <div className="max-w-[250px]">
-                    <Badge color={"#808080"} withDot={false}>
-                      Uncategorized
-                    </Badge>
-                  </div>
-                </li>
-              )}
-              {location ? (
-                <li className="mb-2 flex justify-between">
-                  <span className="text-[12px] font-medium text-gray-600">
-                    Location
-                  </span>
-                  <div className="max-w-[250px]">
-                    <Tag key={location.id} className="mb-2 ml-2">
-                      {location.name}
-                    </Tag>
-                  </div>
-                </li>
-              ) : null}
-              {asset?.tags?.length > 0 ? (
-                <li className="mb-2 flex justify-between">
-                  <span className="text-[12px] font-medium text-gray-600">
-                    Tags
-                  </span>
-                  <div className="text-right ">
-                    {asset.tags.map((tag) => (
-                      <Tag key={tag.id} className="mb-2 ml-2">
-                        {tag.name}
-                      </Tag>
-                    ))}
-                  </div>
-                </li>
-              ) : null}
-              {asset.organization && asset.valuation ? (
-                <li className="flex justify-between">
-                  <span className="text-[12px] font-medium text-gray-600">
-                    Value
-                  </span>
-                  <div className="max-w-[250px]">
-                    <Tag key={asset.valuation} className="mb-2 ml-2">
-                      <>
-                        {asset.valuation.toLocaleString(locale, {
-                          style: "currency",
-                          currency: asset.organization.currency,
-                        })}
-                      </>
-                    </Tag>
-                  </div>
-                </li>
-              ) : null}
-            </ul>
-          </Card>
-
-          {/* Here custom fields relates to AssetCustomFieldValue */}
-          {customFieldsValues?.length > 0 ? (
-            <>
-              <TextualDivider
-                text="Custom fields"
-                className="mb-8 pt-3 lg:hidden"
-              />
-              <Card className="my-3">
-                <ul className="item-information">
-                  {customFieldsValues.map((field, index) => {
-                    const customFieldDisplayValue = getCustomFieldDisplayValue(
-                      field.value as unknown as ShelfAssetCustomFieldValueType["value"]
-                    );
-                    return (
-                      <li
-                        className={tw(
-                          "flex justify-between",
-                          index === customFieldsValues.length - 1 ? "" : "mb-4 "
-                        )}
-                        key={field.id}
-                      >
-                        <span className="text-[12px] font-medium text-gray-600">
-                          {field.customField.name}
-                        </span>
-                        <div className="max-w-[250px] text-end">
-                          {isLink(customFieldDisplayValue) ? (
-                            <Button
-                              role="link"
-                              variant="link"
-                              className="text-gray text-end font-normal underline hover:text-gray-600"
-                              target="_blank"
-                              to={`${customFieldDisplayValue}?ref=shelf-webapp`}
-                            >
-                              {customFieldDisplayValue}
-                            </Button>
-                          ) : (
-                            customFieldDisplayValue
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </Card>
-            </>
-          ) : null}
-          {!isSelfService ? <ScanDetails /> : null}
-        </div>
-
-        <div className="w-full lg:ml-6">
-          {isSelfService ? (
-            <div className="flex h-full flex-col justify-center">
-              <div className="flex flex-col items-center justify-center  text-center">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width={56}
-                  height={56}
-                  fill="none"
-                >
-                  <rect
-                    width={48}
-                    height={48}
-                    x={4}
-                    y={4}
-                    fill="#FDEAD7"
-                    rx={24}
-                  />
-                  <rect
-                    width={48}
-                    height={48}
-                    x={4}
-                    y={4}
-                    stroke="#FEF6EE"
-                    strokeWidth={8}
-                    rx={24}
-                  />
-                  <path
-                    stroke="#EF6820"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="m26 31-3.075 3.114c-.43.434-.644.651-.828.667a.5.5 0 0 1-.421-.173c-.12-.14-.12-.446-.12-1.056v-1.56c0-.548-.449-.944-.99-1.024v0a3 3 0 0 1-2.534-2.533C18 28.219 18 27.96 18 27.445V22.8c0-1.68 0-2.52.327-3.162a3 3 0 0 1 1.311-1.311C20.28 18 21.12 18 22.8 18h7.4c1.68 0 2.52 0 3.162.327a3 3 0 0 1 1.311 1.311C35 20.28 35 21.12 35 22.8V27m0 11-2.176-1.513c-.306-.213-.46-.32-.626-.395a2.002 2.002 0 0 0-.462-.145c-.18-.033-.367-.033-.74-.033H29.2c-1.12 0-1.68 0-2.108-.218a2 2 0 0 1-.874-.874C26 34.394 26 33.834 26 32.714V30.2c0-1.12 0-1.68.218-2.108a2 2 0 0 1 .874-.874C27.52 27 28.08 27 29.2 27h5.6c1.12 0 1.68 0 2.108.218a2 2 0 0 1 .874.874C38 28.52 38 29.08 38 30.2v2.714c0 .932 0 1.398-.152 1.766a2 2 0 0 1-1.083 1.082c-.367.152-.833.152-1.765.152V38Z"
-                  />
-                </svg>
-                <h5>Insufficient permissions</h5>
-                <p>You are not allowed to view asset notes</p>
-              </div>
-            </div>
-          ) : (
-            <>
-              <TextualDivider text="Notes" className="mb-8 lg:hidden" />
-              <Notes />
-            </>
-          )}
-        </div>
+      <HorizontalTabs items={items} />
+      <div>
+        <Outlet context={data}/>
       </div>
-      <ContextualSidebar />
     </>
   );
 }

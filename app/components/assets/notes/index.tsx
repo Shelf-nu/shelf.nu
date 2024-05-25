@@ -1,4 +1,4 @@
-import { useLoaderData, useFetcher } from "@remix-run/react";
+import { useRouteLoaderData, useFetcher } from "@remix-run/react";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { useUserData } from "~/hooks/use-user-data";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
@@ -6,9 +6,11 @@ import { isFormProcessing } from "~/utils/form";
 import { NewNote } from "./new";
 import type { NoteWithDate } from "./note";
 import { Note } from "./note";
+import { useOutletContext } from "@remix-run/react";
 
 export const Notes = () => {
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset } = useOutletContext<any>();
+  
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
   const hasNotes = asset?.notes.length > 0;
