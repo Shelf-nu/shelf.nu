@@ -1,11 +1,6 @@
-import type {
-  MetaFunction,
-} from "@remix-run/node";
+import type { MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import {
-  useFetcher,
-  useOutletContext,
-} from "@remix-run/react";
+import { useFetcher, useOutletContext } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import AssetQR from "~/components/assets/asset-qr";
@@ -27,9 +22,7 @@ import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
-import {
-  data
-} from "~/utils/http.server";
+import { data } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
 import { tw } from "~/utils/tw";
 
