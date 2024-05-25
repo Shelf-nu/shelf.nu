@@ -1,7 +1,7 @@
 import { useLoaderData } from "@remix-run/react";
 import Heading from "~/components/shared/heading";
 import SubHeading from "~/components/shared/sub-heading";
-
+import { AssetImage } from "~/components/assets/asset-image";
 import { tw } from "~/utils/tw";
 import type { HeaderData } from "./types";
 import { Breadcrumbs } from "../breadcrumbs";
@@ -13,6 +13,7 @@ export default function Header({
   hidePageDescription = false,
   hideBreadcrumbs = false,
   classNames,
+  asset
 }: {
   /** Pass a title to replace the default route title set in the loader
    * This is very useful for interactive adjustments of the title
@@ -23,6 +24,7 @@ export default function Header({
   hidePageDescription?: boolean;
   hideBreadcrumbs?: boolean;
   classNames?: string;
+  asset?: any
 }) {
   const data = useLoaderData<{
     header?: HeaderData;
@@ -49,15 +51,28 @@ export default function Header({
         </>
       )}
       {!hidePageDescription && (
-        <div className="border-b border-gray-200 p-4">
-          <Heading as="h2" className="break-all text-[20px] font-semibold">
-            {title || header?.title}
-          </Heading>
-          {subHeading ? (
-            <SubHeading>{subHeading}</SubHeading>
-          ) : (
-            header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>
-          )}
+        <div className="flex items-center px-4 py-3 border-b border-gray-200">
+          {asset && <AssetImage
+            asset={{
+              assetId: asset.id,
+              mainImage: asset.mainImage,
+              mainImageExpiration: asset.mainImageExpiration,
+              alt: asset.title,
+            }}
+            className={tw(
+              "w-[56px] h-[56px] rounded border object-cover"
+            )}
+          />}
+          <div className="pl-4">
+            <Heading as="h2" className="break-all text-[20px] font-semibold">
+              {title || header?.title}
+            </Heading>
+            {subHeading ? (
+              <SubHeading>{subHeading}</SubHeading>
+            ) : (
+              header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>
+            )}
+          </div>
         </div>
       )}
     </header>
