@@ -8,15 +8,15 @@ type SizeKeys = "cable" | "small" | "medium" | "large";
 
 interface AssetType {
   asset: {
-    title: string;   
-  },
+    title: string;
+  };
   qrObj: {
-    qr:{
+    qr: {
       size: SizeKeys;
       id: string;
       src: string;
-    }
-  }
+    };
+  };
 }
 
 const AssetQR = ({ qrObj, asset }: AssetType) => {

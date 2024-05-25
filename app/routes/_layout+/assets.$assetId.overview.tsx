@@ -1,8 +1,8 @@
-import { Asset, Custody, Kit, Organization } from "@prisma/client";
+import type { ReactNode } from "react";
+import type { Asset, Custody, Kit, Organization } from "@prisma/client";
 import type { MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useFetcher, useOutletContext } from "@remix-run/react";
-import { ReactNode } from "react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import AssetQR from "~/components/assets/asset-qr";
@@ -19,7 +19,10 @@ import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import type { AssetCustomFieldsValuesWithFields, ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import type {
+  AssetCustomFieldsValuesWithFields,
+  ShelfAssetCustomFieldValueType,
+} from "~/modules/asset/types";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -52,22 +55,22 @@ type SizeKeys = "cable" | "small" | "medium" | "large";
 
 interface AssetType {
   asset: {
-    id: string,
-    createdAt: ReactNode,
-    category:{
-        id: string;
-        name: string;
-        description: string;
-        color: string;
-        createdAt: string;
-        updatedAt: string;
-        userId: string;
-    }
-    title: string;   
+    id: string;
+    createdAt: ReactNode;
+    category: {
+      id: string;
+      name: string;
+      description: string;
+      color: string;
+      createdAt: string;
+      updatedAt: string;
+      userId: string;
+    };
+    title: string;
     status: string;
     location: {
-      id: string,
-      name: string
+      id: string;
+      name: string;
     };
     customFields: AssetCustomFieldsValuesWithFields[];
     tags: {
@@ -88,15 +91,15 @@ interface AssetType {
       name: Kit["name"];
       image: Kit["image"];
     };
-  },
-  locale:string;
+  };
+  locale: string;
   qrObj: {
-    qr:{
+    qr: {
       size: SizeKeys;
       id: string;
       src: string;
-    }
-  }
+    };
+  };
 }
 
 export default function AssetOverview() {
