@@ -6,7 +6,20 @@ import { Button } from "~/components/shared/button";
 import { slugify } from "~/utils/slugify";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
-const AssetQR = ({ qrObj, asset }: any) => {
+interface AssetType {
+  asset: {
+    title: string;   
+  },
+  qrObj: {
+    qr:{
+      size: SizeKeys;
+      id: string;
+      src: string;
+    }
+  }
+}
+
+const AssetQR = ({ qrObj, asset }: AssetType) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
 

@@ -1,6 +1,8 @@
+import { Asset, Custody, Kit, Organization } from "@prisma/client";
 import type { MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useFetcher, useOutletContext } from "@remix-run/react";
+import { ReactNode } from "react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import AssetQR from "~/components/assets/asset-qr";
@@ -17,7 +19,7 @@ import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import type { AssetCustomFieldsValuesWithFields, ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -46,12 +48,62 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   breadcrumb: () => "Overview",
 };
+type SizeKeys = "cable" | "small" | "medium" | "large";
+
+interface AssetType {
+  asset: {
+    id: string,
+    createdAt: ReactNode,
+    category:{
+        id: string;
+        name: string;
+        description: string;
+        color: string;
+        createdAt: string;
+        updatedAt: string;
+        userId: string;
+    }
+    title: string;   
+    status: string;
+    location: {
+      id: string,
+      name: string
+    };
+    customFields: AssetCustomFieldsValuesWithFields[];
+    tags: {
+      id: string;
+      name: string;
+    }[];
+    description: string;
+    organization: {
+      name: Organization["name"];
+      currency?: Organization["currency"];
+    };
+    custody: {
+      createdAt: Custody["createdAt"];
+    };
+    valuation: Asset["valuation"];
+    availableToBook?: boolean;
+    kit: {
+      name: Kit["name"];
+      image: Kit["image"];
+    };
+  },
+  locale:string;
+  qrObj: {
+    qr:{
+      size: SizeKeys;
+      id: string;
+      src: string;
+    }
+  }
+}
 
 export default function AssetOverview() {
-  const { asset, locale, qrObj } = useOutletContext<any>();
+  const { asset, locale, qrObj } = useOutletContext<AssetType>();
   const customFieldsValues =
     asset.customFields?.length > 0
-      ? asset.customFields.filter((f: any) => f.value)
+      ? asset.customFields.filter((f) => f.value)
       : [];
   const assetIsAvailable = asset.status === "AVAILABLE";
   const location = asset.location;
@@ -134,7 +186,7 @@ export default function AssetOverview() {
                     Tags
                   </span>
                   <div className="-ml-2 w-3/5 text-gray-600">
-                    {asset.tags.map((tag: any) => (
+                    {asset.tags.map((tag) => (
                       <Tag key={tag.id} className="ml-2">
                         {tag.name}
                       </Tag>
@@ -171,7 +223,7 @@ export default function AssetOverview() {
               />
               <Card className="my-3 px-[-4] py-[-5]">
                 <ul className="item-information">
-                  {customFieldsValues.map((field: any, index: any) => {
+                  {customFieldsValues.map((field, index) => {
                     const customFieldDisplayValue = getCustomFieldDisplayValue(
                       field.value as unknown as ShelfAssetCustomFieldValueType["value"]
                     );
