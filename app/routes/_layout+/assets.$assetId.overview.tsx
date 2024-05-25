@@ -121,13 +121,13 @@ export default function AssetOverview() {
         <div className="shrink-0 overflow-hidden lg:w-[65%] xl:w-[65%]">
           <Card className="my-3 px-[-4] py-[-5]">
             <ul className="item-information">
-              <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+              <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                 <span className="w-[25%] text-[14px] font-medium text-gray-900">
                   ID
                 </span>
                 <div className="w-3/5 text-gray-600">{asset.id}</div>
               </li>
-              <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+              <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                 <span className="w-[25%] text-[14px] font-medium text-gray-900">
                   Created
                 </span>
@@ -135,7 +135,7 @@ export default function AssetOverview() {
               </li>
 
               {asset?.category ? (
-                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Category
                   </span>
@@ -146,7 +146,7 @@ export default function AssetOverview() {
                   </div>
                 </li>
               ) : (
-                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Category
                   </span>
@@ -158,7 +158,7 @@ export default function AssetOverview() {
                 </li>
               )}
               {location ? (
-                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Location
                   </span>
@@ -170,7 +170,7 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset.description ? (
-                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Description
                   </span>
@@ -180,7 +180,7 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset?.tags?.length > 0 ? (
-                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Tags
                   </span>
@@ -194,7 +194,7 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset.organization && asset.valuation ? (
-                <li className="flex w-full border-b-[1.5] border-b-gray-100 p-4">
+                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Value
                   </span>
@@ -229,7 +229,7 @@ export default function AssetOverview() {
                     return (
                       <li
                         className={tw(
-                          "flex w-full border-b-DEFAULT border-b-gray-100 p-4"
+                          "flex w-full border-b-[1.1px] border-b-gray-100 p-4"
                         )}
                         key={field.id}
                       >
