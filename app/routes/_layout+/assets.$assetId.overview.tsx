@@ -1,26 +1,24 @@
-import type {
-    ActionFunctionArgs,
-    LinksFunction,
-    LoaderFunctionArgs,
-    MetaFunction,
-  } from "@remix-run/node";
 import React from "react";
+import type {
+  ActionFunctionArgs,
+  LinksFunction,
+  LoaderFunctionArgs,
+  MetaFunction,
+} from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import {
+  useFetcher,
+  useLoaderData,
+  Outlet,
+  useOutletContext,
+} from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetImage } from "~/components/assets/asset-image";
+import AssetQR from "~/components/assets/asset-qr";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { Outlet } from "@remix-run/react";
-import { useOutletContext } from "@remix-run/react";
-import {
-createQr,
-generateCode,
-getQrByAssetId,
-} from "~/modules/qr/service.server";
-import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Notes } from "~/components/assets/notes";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
@@ -29,6 +27,7 @@ import ContextualSidebar from "~/components/layout/contextual-sidebar";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ScanDetails } from "~/components/location/scan-details";
 
 import { Badge } from "~/components/shared/badge";
@@ -39,11 +38,16 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
-deleteAsset,
-getAsset,
-updateAssetBookingAvailability,
+  deleteAsset,
+  getAsset,
+  updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import {
+  createQr,
+  generateCode,
+  getQrByAssetId,
+} from "~/modules/qr/service.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css?url";
@@ -55,25 +59,29 @@ import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { error, getParams, data, parseData } from "~/utils/http.server";
+import {
+  error,
+  getParams,
+  data,
+  parseData,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import { isLink } from "~/utils/misc";
 import {
-PermissionAction,
-PermissionEntity,
+  PermissionAction,
+  PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
 import { tw } from "~/utils/tw";
-import { getCurrentSearchParams } from "~/utils/http.server";
-import AssetQR from "~/components/assets/asset-qr";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export const AvailabilityForBookingFormSchema = z.object({
-    availableToBook: z
-      .string()
-      .transform((val) => val === "on")
-      .default("false"),
+  availableToBook: z
+    .string()
+    .transform((val) => val === "on")
+    .default("false"),
 });
 
 export function loader() {
@@ -91,57 +99,58 @@ export const handle = {
 };
 
 export default function AssetOverview() {
-    const { asset, locale, qrObj } = useOutletContext<any>();
-    const customFieldsValues =
-        asset.customFields?.length > 0
-        ? asset.customFields.filter((f:any) => f.value)
-        : [];
-    const assetIsAvailable = asset.status === "AVAILABLE";
-    const location = asset.location;
-    usePosition();
-    const fetcher = useFetcher();
-    const zo = useZorm(
-        "NewQuestionWizardScreen",
-        AvailabilityForBookingFormSchema
-    );
-    const isSelfService = useUserIsSelfService();
-    
-    return <div>
+  const { asset, locale, qrObj } = useOutletContext<any>();
+  const customFieldsValues =
+    asset.customFields?.length > 0
+      ? asset.customFields.filter((f: any) => f.value)
+      : [];
+  const assetIsAvailable = asset.status === "AVAILABLE";
+  const location = asset.location;
+  usePosition();
+  const fetcher = useFetcher();
+  const zo = useZorm(
+    "NewQuestionWizardScreen",
+    AvailabilityForBookingFormSchema
+  );
+  const isSelfService = useUserIsSelfService();
+
+  return (
+    <div>
       <ContextualModal />
       <div className="mt-[-16px] block lg:flex">
         <div className="shrink-0 overflow-hidden lg:w-[65%] xl:w-[65%]">
           <Card className="my-3 px-[-4] py-[-5]">
             <ul className="item-information">
-              <li className="p-4 flex w-full border-b-[1px] border-b-gray-100">
-                <span className="text-[14px] font-medium text-gray-900 w-[25%]">
+              <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                <span className="w-[25%] text-[14px] font-medium text-gray-900">
                   ID
                 </span>
-                <div className="w-[60%] text-gray-600">{asset.id}</div>
+                <div className="w-3/5 text-gray-600">{asset.id}</div>
               </li>
-              <li className="p-4 flex w-full border-b-[1px] border-b-gray-100">
-                <span className="text-[14px] w-[25%] font-medium text-gray-900">
+              <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                <span className="w-[25%] text-[14px] font-medium text-gray-900">
                   Created
                 </span>
-                <div className="w-[60%] text-gray-600">{asset.createdAt}</div>
+                <div className="w-3/5 text-gray-600">{asset.createdAt}</div>
               </li>
 
               {asset?.category ? (
-                <li className="p-4 flex w-full border-b-[1px] border-b-gray-100">
-                  <span className="text-[14px] w-[25%] font-medium text-gray-900">
+                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Category
                   </span>
-                  <div className="w-[60%] text-gray-600">
+                  <div className="w-3/5 text-gray-600">
                     <Badge color={asset.category?.color} withDot={false}>
                       {asset.category?.name}
                     </Badge>
                   </div>
                 </li>
               ) : (
-                <li className="p-4 flex w-full border-b-[1px] border-b-gray-100">
-                  <span className="text-[14px] w-[25%] font-medium text-gray-900">
+                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Category
                   </span>
-                  <div className="w-[60%] text-gray-600">
+                  <div className="w-3/5 text-gray-600">
                     <Badge color={"#808080"} withDot={false}>
                       Uncategorized
                     </Badge>
@@ -149,11 +158,11 @@ export default function AssetOverview() {
                 </li>
               )}
               {location ? (
-                <li className="p-4 flex w-full border-b-[1px] border-b-gray-100">
-                  <span className="text-[14px] w-[25%] font-medium text-gray-900">
+                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Location
                   </span>
-                  <div className="w-[60%] ml-[-0.5rem] text-gray-600">
+                  <div className="-ml-2 w-3/5 text-gray-600">
                     <Tag key={location.id} className="ml-2">
                       {location.name}
                     </Tag>
@@ -161,20 +170,22 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset.description ? (
-                <li className="p-4 flex w-full border-b-[1px] border-b-gray-100">
-                  <span className="text-[14px] w-[25%] font-medium text-gray-900">
+                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Description
                   </span>
-                  <div className="w-[60%] whitespace-pre-wrap text-gray-600">{asset.description}</div>
+                  <div className="w-3/5 whitespace-pre-wrap text-gray-600">
+                    {asset.description}
+                  </div>
                 </li>
               ) : null}
               {asset?.tags?.length > 0 ? (
-                <li className="p-4 flex w-full border-b-[1px] border-b-gray-100">
-                  <span className="text-[14px] w-[25%] font-medium text-gray-900">
+                <li className="flex w-full border-b-DEFAULT border-b-gray-100 p-4">
+                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Tags
                   </span>
-                  <div className="w-[60%] ml-[-0.5rem] text-gray-600">
-                    {asset.tags.map((tag:any) => (
+                  <div className="-ml-2 w-3/5 text-gray-600">
+                    {asset.tags.map((tag: any) => (
                       <Tag key={tag.id} className="ml-2">
                         {tag.name}
                       </Tag>
@@ -183,11 +194,11 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset.organization && asset.valuation ? (
-                <li className="p-4 flex w-full border-b-[1.5] border-b-gray-100">
-                  <span className="text-[14px] w-[25%] font-medium text-gray-900">
+                <li className="flex w-full border-b-[1.5] border-b-gray-100 p-4">
+                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
                     Value
                   </span>
-                  <div className="w-[60%] ml-[-0.5rem]">
+                  <div className="-ml-2 w-3/5">
                     <Tag key={asset.valuation} className="ml-2">
                       <>
                         {asset.valuation.toLocaleString(locale, {
@@ -211,21 +222,21 @@ export default function AssetOverview() {
               />
               <Card className="my-3 px-[-4] py-[-5]">
                 <ul className="item-information">
-                  {customFieldsValues.map((field:any, index:any) => {
+                  {customFieldsValues.map((field: any, index: any) => {
                     const customFieldDisplayValue = getCustomFieldDisplayValue(
                       field.value as unknown as ShelfAssetCustomFieldValueType["value"]
                     );
                     return (
                       <li
                         className={tw(
-                          "p-4 flex w-full border-b-[1px] border-b-gray-100"
+                          "flex w-full border-b-DEFAULT border-b-gray-100 p-4"
                         )}
                         key={field.id}
                       >
-                        <span className="text-[14px] w-[25%] font-medium text-gray-900">
+                        <span className="w-[25%] text-[14px] font-medium text-gray-900">
                           {field.customField.name}
                         </span>
-                        <div className="max-w-[250px] w-[60%] text-gray-600">
+                        <div className="w-3/5 max-w-[250px] text-gray-600">
                           {isLink(customFieldDisplayValue) ? (
                             <Button
                               role="link"
@@ -248,7 +259,7 @@ export default function AssetOverview() {
             </>
           ) : null}
         </div>
-        
+
         <div className="w-[35%] lg:ml-4">
           {!isSelfService ? (
             <Card className="my-3">
@@ -334,10 +345,11 @@ export default function AssetOverview() {
               </div>
             </Card>
           ) : null}
-          {asset && <AssetQR qrObj={qrObj} asset={asset}/>}
+          {asset && <AssetQR qrObj={qrObj} asset={asset} />}
           {!isSelfService ? <ScanDetails /> : null}
         </div>
       </div>
       <ContextualSidebar />
     </div>
+  );
 }

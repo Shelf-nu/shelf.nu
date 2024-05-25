@@ -5,27 +5,26 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, Outlet } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { Outlet } from "@remix-run/react";
-import {
-  createQr,
-  generateCode,
-  getQrByAssetId,
-} from "~/modules/qr/service.server";
-import HorizontalTabs from "~/components/layout/horizontal-tabs";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   deleteAsset,
   getAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
+import {
+  createQr,
+  generateCode,
+  getQrByAssetId,
+} from "~/modules/qr/service.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css?url";
@@ -35,7 +34,13 @@ import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import { error, getParams, data, parseData } from "~/utils/http.server";
+import {
+  error,
+  getParams,
+  data,
+  parseData,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 import {
   PermissionAction,
@@ -43,7 +48,6 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
-import { getCurrentSearchParams } from "~/utils/http.server";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export const AvailabilityForBookingFormSchema = z.object({
@@ -75,11 +79,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const searchParams = getCurrentSearchParams(request);
     const size = (searchParams.get("size") || "medium") as SizeKeys;
 
-    let qr = await getQrByAssetId({ assetId:id });
+    let qr = await getQrByAssetId({ assetId: id });
 
     if (!qr) {
       /** If for some reason there is no QR, we create one and return it */
-      qr = await createQr({ assetId:id, userId, organizationId });
+      qr = await createQr({ assetId: id, userId, organizationId });
     }
 
     // Create a QR code with a URL
@@ -131,8 +135,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const qrObj = {
       qr: code,
       sizes,
-      showSidebar: true
-    }
+      showSidebar: true,
+    };
 
     return json(
       data({
@@ -158,9 +162,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         lastScan,
         header,
         locale,
-        qrObj:{
-          ...qrObj
-        }
+        qrObj: {
+          ...qrObj,
+        },
       })
     );
   } catch (cause) {
@@ -272,7 +276,7 @@ export default function AssetDetailsPage() {
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
   const isSelfService = useUserIsSelfService();
-  
+
   return (
     <>
       <Header
@@ -286,13 +290,11 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        {!isSelfService ? (
-          <ActionsDropdown />
-        ) : null}
+        {!isSelfService ? <ActionsDropdown /> : null}
       </Header>
       <HorizontalTabs items={items} />
       <div>
-        <Outlet context={data}/>
+        <Outlet context={data} />
       </div>
     </>
   );

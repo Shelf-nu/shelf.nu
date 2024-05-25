@@ -1,13 +1,12 @@
-import React from 'react'
-import { useRef, useMemo } from 'react';
-import { slugify } from '~/utils/slugify';
-import { Button } from "~/components/shared/button";
+import React, { useRef, useMemo } from "react";
 import { changeDpiDataUrl } from "changedpi";
-import { useReactToPrint } from "react-to-print";
 import domtoimage from "dom-to-image";
+import { useReactToPrint } from "react-to-print";
+import { Button } from "~/components/shared/button";
+import { slugify } from "~/utils/slugify";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
-const AssetQR = ({qrObj, asset}:any) => {
+const AssetQR = ({ qrObj, asset }: any) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
 
@@ -60,11 +59,11 @@ const AssetQR = ({qrObj, asset}:any) => {
   });
   return (
     <div className="">
-        <div className="mb-4 w-auto rounded-xl border border-solid p-6 flex justify-center">
-            <QrLabel ref={captureDivRef} data={qrObj} title={asset.title} />
-        </div>
-        <ul className="description-list">
-          {/* <li className="mb-4 flex justify-between text-gray-600">
+      <div className="mb-4 flex w-auto justify-center rounded-xl border border-solid p-6">
+        <QrLabel ref={captureDivRef} data={qrObj} title={asset.title} />
+      </div>
+      <ul className="description-list">
+        {/* <li className="mb-4 flex justify-between text-gray-600">
             <label
               htmlFor="size"
               className="key max-w-[120px] break-words font-medium"
@@ -89,7 +88,7 @@ const AssetQR = ({qrObj, asset}:any) => {
               </Form>
             </span>
           </li> */}
-          {/* <li className="mb-4 flex justify-between text-gray-600">
+        {/* <li className="mb-4 flex justify-between text-gray-600">
             <span className="key max-w-[120px] break-words font-medium">
               File
             </span>
@@ -97,65 +96,65 @@ const AssetQR = ({qrObj, asset}:any) => {
               PNG
             </span>
           </li> */}
-        </ul>
-        {/* using this button to convert html to png and download image using the a tag below */}
-        <div className="flex items-center gap-3">
-            <Button
-            icon="download"
-            onClick={downloadQr}
-            download={`${slugify(asset.title)}-${qrObj.qr.size}-shelf-qr-code-${
-                qrObj.qr.id
-            }.png`}
-            ref={downloadQrBtnRef}
-            variant="secondary"
-            className="w-full"
-            >
-            Download
-            </Button>
-            <Button
-            icon="print"
-            variant="secondary"
-            className="w-full"
-            onClick={printQr}
-            >
-            Print
-            </Button>
-        </div>
+      </ul>
+      {/* using this button to convert html to png and download image using the a tag below */}
+      <div className="flex items-center gap-3">
+        <Button
+          icon="download"
+          onClick={downloadQr}
+          download={`${slugify(asset.title)}-${qrObj.qr.size}-shelf-qr-code-${
+            qrObj.qr.id
+          }.png`}
+          ref={downloadQrBtnRef}
+          variant="secondary"
+          className="w-full"
+        >
+          Download
+        </Button>
+        <Button
+          icon="print"
+          variant="secondary"
+          className="w-full"
+          onClick={printQr}
+        >
+          Print
+        </Button>
+      </div>
     </div>
-  )
-}
+  );
+};
 
 interface QrLabelProps {
-    data: {
-      qr: {
-        id: string;
-        size: SizeKeys;
-        src: string;
-      };
+  data: {
+    qr: {
+      id: string;
+      size: SizeKeys;
+      src: string;
     };
-    title: string;
-  }
-  
-  const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>((props, ref) => {
-    const { data, title } = props;
-    return (
-      <div
-        className="flex h-auto w-[80%] flex-col justify-center gap-3 rounded-md border-[5px] border-[#E3E4E8] bg-white px-8 py-[17px]"
-        ref={ref}
-      >
-        <div className="z-50 max-w-full truncate  text-center text-[12px] font-semibold text-black">
-          {title}
-        </div>
-        <figure className="qr-code z-[49] flex justify-center">
-          <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
-        </figure>
-        <div className="w-full text-center text-[12px]">
-          <span className="block  font-semibold text-black">{data.qr.id}</span>
-          <span className="block text-black">
-            Powered by <span className="font-semibold text-black">shelf.nu</span>
-          </span>
-        </div>
+  };
+  title: string;
+}
+
+const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>((props, ref) => {
+  const { data, title } = props;
+  return (
+    <div
+      className="flex h-auto w-4/5 flex-col justify-center gap-3 rounded-md border-[5px] border-[#E3E4E8] bg-white px-8 py-[17px]"
+      ref={ref}
+    >
+      <div className="z-50 max-w-full truncate  text-center text-[12px] font-semibold text-black">
+        {title}
       </div>
-    );
+      <figure className="qr-code z-[49] flex justify-center">
+        <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
+      </figure>
+      <div className="w-full text-center text-[12px]">
+        <span className="block  font-semibold text-black">{data.qr.id}</span>
+        <span className="block text-black">
+          Powered by <span className="font-semibold text-black">shelf.nu</span>
+        </span>
+      </div>
+    </div>
+  );
 });
-export default AssetQR
+export default AssetQR;

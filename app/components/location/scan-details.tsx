@@ -18,7 +18,7 @@ export function ScanDetails() {
   }
 
   return (
-    <div className="mt-4 border rounded-md lg:mb-0">
+    <div className="mt-4 rounded-md border lg:mb-0">
       {lastScan ? (
         <>
           {" "}
