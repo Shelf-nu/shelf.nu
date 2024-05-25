@@ -1,33 +1,18 @@
-import React from "react";
 import type {
-  ActionFunctionArgs,
-  LinksFunction,
-  LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { redirect, json } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import {
   useFetcher,
-  useLoaderData,
-  Outlet,
   useOutletContext,
 } from "@remix-run/react";
-import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import ActionsDropdown from "~/components/assets/actions-dropdown";
-import { AssetImage } from "~/components/assets/asset-image";
 import AssetQR from "~/components/assets/asset-qr";
-import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import { Notes } from "~/components/assets/notes";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
-
-import Header from "~/components/layout/header";
-import type { HeaderData } from "~/components/layout/header/types";
-import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ScanDetails } from "~/components/location/scan-details";
 
 import { Badge } from "~/components/shared/badge";
@@ -37,45 +22,16 @@ import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import {
-  deleteAsset,
-  getAsset,
-  updateAssetBookingAvailability,
-} from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import {
-  createQr,
-  generateCode,
-  getQrByAssetId,
-} from "~/modules/qr/service.server";
-import { getScanByQrId } from "~/modules/scan/service.server";
-import { parseScanData } from "~/modules/scan/utils.server";
-import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
-  error,
-  getParams,
-  data,
-  parseData,
-  getCurrentSearchParams,
+  data
 } from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md.server";
 import { isLink } from "~/utils/misc";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
-import { requirePermission } from "~/utils/roles.server";
-import { deleteAssetImage } from "~/utils/storage.server";
 import { tw } from "~/utils/tw";
-type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
