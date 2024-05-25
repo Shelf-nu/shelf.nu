@@ -63,7 +63,7 @@ export default function Header({
               className={tw("size-[56px] rounded border object-cover")}
             />
           )}
-          <div className="pl-4">
+          <div className={`${asset?"pl-4":""}`}>
             <Heading as="h2" className="break-all text-[20px] font-semibold">
               {title || header?.title}
             </Heading>
