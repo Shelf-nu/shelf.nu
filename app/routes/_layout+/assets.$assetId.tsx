@@ -280,14 +280,12 @@ export default function AssetDetailsPage() {
   return (
     <>
       <Header
-        asset={
-          {
-            assetId: data.asset.id,
-            mainImage: data.asset.mainImage,
-            mainImageExpiration: data.asset.mainImageExpiration,
-            alt: data.asset.title,
-          }
-        }
+        asset={{
+          assetId: data.asset.id,
+          mainImage: data.asset.mainImage,
+          mainImageExpiration: data.asset.mainImageExpiration,
+          alt: data.asset.title,
+        }}
         subHeading={
           <div className="flex gap-2">
             <AssetStatusBadge
