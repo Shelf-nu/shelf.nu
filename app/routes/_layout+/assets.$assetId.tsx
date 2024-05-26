@@ -159,6 +159,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               )
             : asset.customFields,
         },
+        formattedAsset:{
+          assetId: asset.id,
+          mainImage: asset.mainImage,
+          mainImageExpiration: asset.mainImageExpiration,
+          alt: asset.title
+        },
         lastScan,
         header,
         locale,
@@ -280,7 +286,7 @@ export default function AssetDetailsPage() {
   return (
     <>
       <Header
-        asset={data.asset}
+        asset={data.formattedAsset}
         subHeading={
           <div className="flex gap-2">
             <AssetStatusBadge
