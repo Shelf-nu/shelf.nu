@@ -159,11 +159,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               )
             : asset.customFields,
         },
-        formattedAsset:{
+        formattedAsset: {
           assetId: asset.id,
           mainImage: asset.mainImage,
           mainImageExpiration: asset.mainImageExpiration,
-          alt: asset.title
+          alt: asset.title,
         },
         lastScan,
         header,
