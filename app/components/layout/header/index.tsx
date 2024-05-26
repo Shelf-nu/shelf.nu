@@ -6,6 +6,23 @@ import { tw } from "~/utils/tw";
 import type { HeaderData } from "./types";
 import { Breadcrumbs } from "../breadcrumbs";
 
+interface Asset {
+  assetId: string;
+  mainImage: string | null;
+  mainImageExpiration: string | Date | null;
+  alt: string;
+}
+
+interface HeaderProps {
+  title?: string | null;
+  children?: React.ReactNode;
+  subHeading?: React.ReactNode;
+  hidePageDescription?: boolean;
+  hideBreadcrumbs?: boolean;
+  classNames?: string;
+  asset?: Asset;
+}
+
 export default function Header({
   title = null,
   children,
@@ -14,20 +31,10 @@ export default function Header({
   hideBreadcrumbs = false,
   classNames,
   asset,
-}: {
-  /** Pass a title to replace the default route title set in the loader
-   * This is very useful for interactive adjustments of the title
-   */
-  title?: string | null;
-  children?: React.ReactNode;
-  subHeading?: React.ReactNode;
-  hidePageDescription?: boolean;
-  hideBreadcrumbs?: boolean;
-  classNames?: string;
-  asset?: any;
-}) {
+}: HeaderProps) {
   const data = useLoaderData<{
     header?: HeaderData;
+    asset?: Asset;
   }>();
   const header = data?.header;
 
@@ -54,12 +61,7 @@ export default function Header({
         <div className="flex items-center border-b border-gray-200 px-4 py-3">
           {asset && (
             <AssetImage
-              asset={{
-                assetId: asset.id,
-                mainImage: asset.mainImage,
-                mainImageExpiration: asset.mainImageExpiration,
-                alt: asset.title,
-              }}
+              asset={asset}
               className={tw("size-[56px] rounded border object-cover")}
             />
           )}
