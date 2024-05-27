@@ -24,9 +24,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const { refreshToken, redirectTo } = parseData(
+        const { refreshToken, redirectTo, firstName, lastName } = parseData(
           await request.formData(),
           z.object({
+            firstName: z.string(),
+            lastName: z.string(),
             refreshToken: z.string(),
             redirectTo: z.string().optional(),
           })
@@ -38,7 +40,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
         /**
          * Cases we should handle:
-         * - [ ] Auth Account & User exists in our database - we just login the user
+         * - [x] Auth Account & User exists in our database - we just login the user
          * - [x] Auth Account exists but User doesn't exist in our database - we create a new user connecting it to authUser and login the user
          * - [ ] Auth Account(SSO version) doesn't exist but User exists in our database - we create a new authUser connecting it to user and login the user
          */
@@ -56,7 +58,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
         });
 
         if (!user) {
-          user = await createUserFromSSO(authSession);
+          user = await createUserFromSSO(authSession, {
+            firstName,
+            lastName,
+          });
         }
         // Set the auth session and redirect to the assets page
         context.setSession(authSession);
@@ -97,6 +102,7 @@ export default function LoginCallback() {
         // we should not trust what's happen client side
         // so, we only pick the refresh token, and let's back-end getting user session from it
         const refreshToken = supabaseSession?.refresh_token;
+        const user = supabaseSession?.user;
 
         if (!refreshToken) return;
 
@@ -104,6 +110,14 @@ export default function LoginCallback() {
 
         formData.append("refreshToken", refreshToken);
         formData.append("redirectTo", redirectTo);
+        formData.append(
+          "firstName",
+          user?.user_metadata?.custom_claims.firstName || ""
+        );
+        formData.append(
+          "lastName",
+          user?.user_metadata?.custom_claims.lastName || ""
+        );
 
         fetcher.submit(formData, { method: "post" });
       }
@@ -115,5 +129,6 @@ export default function LoginCallback() {
     };
   }, [fetcher, redirectTo]);
 
+  // @TODO here we need to add some nice UI
   return data?.error ? <div>{data.error.message}</div> : null;
 }

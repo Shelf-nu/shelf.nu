@@ -162,12 +162,21 @@ export async function createUserOrAttachOrg({
   }
 }
 
-export async function createUserFromSSO(authSession: AuthSession) {
+export async function createUserFromSSO(
+  authSession: AuthSession,
+  userData: {
+    firstName: string;
+    lastName: string;
+  }
+) {
   try {
     const { email, userId } = authSession;
+    const { firstName, lastName } = userData;
 
     const user = await createUser({
       email,
+      firstName,
+      lastName,
       userId,
       username: randomUsernameFromEmail(email),
       isSSO: true,
@@ -193,11 +202,20 @@ export async function createUser(
     organizationId?: Organization["id"];
     roles?: OrganizationRoles[];
     firstName?: User["firstName"];
+    lastName?: User["lastName"];
     isSSO?: boolean;
   }
 ) {
-  const { email, userId, username, organizationId, roles, firstName, isSSO } =
-    payload;
+  const {
+    email,
+    userId,
+    username,
+    organizationId,
+    roles,
+    firstName,
+    lastName,
+    isSSO,
+  } = payload;
 
   try {
     return await db.$transaction(
@@ -208,6 +226,7 @@ export async function createUser(
             id: userId,
             username,
             firstName,
+            lastName,
             organizations: {
               create: [
                 {
