@@ -46,6 +46,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
          */
 
         /**
+         * @TODO we need to make sure that the user from the callback is the same user we are trying to login
+         */
+
+        /**
          * Check if there is an existing user related to this auth session
          */
         let user = await db.user.findUnique({
@@ -117,6 +121,10 @@ export default function LoginCallback() {
         formData.append(
           "lastName",
           user?.user_metadata?.custom_claims.lastName || ""
+        );
+        formData.append(
+          "goupId",
+          user?.user_metadata?.custom_claims.groupId || ""
         );
 
         fetcher.submit(formData, { method: "post" });
