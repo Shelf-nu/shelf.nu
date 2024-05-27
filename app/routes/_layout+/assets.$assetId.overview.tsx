@@ -276,7 +276,7 @@ export default function AssetOverview() {
           ) : null}
         </div>
 
-        <div className="w-full md:w-[400px] lg:ml-4">
+        <div className="w-full md:w-[360px] lg:ml-4">
           {!isSelfService ? (
             <Card className="my-3">
               <fetcher.Form
