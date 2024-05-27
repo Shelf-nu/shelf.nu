@@ -10,8 +10,8 @@ interface AssetType {
   asset: {
     title: string;
   };
-  qrObj: {
-    qr: {
+  qrObj?: {
+    qr?: {
       size: SizeKeys;
       id: string;
       src: string;
@@ -25,10 +25,10 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
 
   const fileName = useMemo(
     () =>
-      `${slugify(asset?.title || "asset")}-${qrObj.qr.size}-shelf-qr-code-${
-        qrObj.qr.id
+      `${slugify(asset?.title || "asset")}-${qrObj?.qr?.size}-shelf-qr-code-${
+        qrObj?.qr?.id
       }.png`,
-    [asset, qrObj.qr.id, qrObj.qr.size]
+    [asset, qrObj?.qr?.id, qrObj?.qr?.size]
   );
 
   // const handleSizeChange = () => {
@@ -115,8 +115,8 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
         <Button
           icon="download"
           onClick={downloadQr}
-          download={`${slugify(asset.title)}-${qrObj.qr.size}-shelf-qr-code-${
-            qrObj.qr.id
+          download={`${slugify(asset.title)}-${qrObj?.qr?.size}-shelf-qr-code-${
+            qrObj?.qr?.id
           }.png`}
           ref={downloadQrBtnRef}
           variant="secondary"
@@ -138,8 +138,8 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
 };
 
 interface QrLabelProps {
-  data: {
-    qr: {
+  data?: {
+    qr?: {
       id: string;
       size: SizeKeys;
       src: string;
@@ -149,7 +149,7 @@ interface QrLabelProps {
 }
 
 const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>((props, ref) => {
-  const { data, title } = props;
+  const { data, title } = props ?? {};
   return (
     <div
       className="flex h-auto w-4/5 flex-col justify-center gap-3 rounded-md border-[5px] border-[#E3E4E8] bg-white px-8 py-[17px]"
@@ -159,10 +159,10 @@ const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>((props, ref) => {
         {title}
       </div>
       <figure className="qr-code z-[49] flex justify-center">
-        <img src={data.qr.src} alt={`${data.qr.size}-shelf-qr-code.png`} />
+        <img src={data?.qr?.src} alt={`${data?.qr?.size}-shelf-qr-code.png`} />
       </figure>
       <div className="w-full text-center text-[12px]">
-        <span className="block  font-semibold text-black">{data.qr.id}</span>
+        <span className="block  font-semibold text-black">{data?.qr?.id}</span>
         <span className="block text-black">
           Powered by <span className="font-semibold text-black">shelf.nu</span>
         </span>
