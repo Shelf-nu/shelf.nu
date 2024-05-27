@@ -12,7 +12,9 @@ import type { NoteWithDate } from "./note";
 import { Note } from "./note";
 
 export const Notes = () => {
-  const { asset } = useOutletContext<any>();
+  const { asset } = useRouteLoaderData<any>(
+    "routes/_layout+/assets.$assetId"
+  );
 
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
