@@ -4,13 +4,13 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import ContextualModal from "~/components/layout/contextual-modal";
 import { redirect, json } from "@remix-run/node";
 import { useLoaderData, Outlet, useMatches } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import ContextualModal from "~/components/layout/contextual-modal";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
