@@ -1,3 +1,4 @@
+import type { Asset } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { AssetImage } from "~/components/assets/asset-image";
 import Heading from "~/components/shared/heading";
@@ -5,7 +6,6 @@ import SubHeading from "~/components/shared/sub-heading";
 import { tw } from "~/utils/tw";
 import type { HeaderData } from "./types";
 import { Breadcrumbs } from "../breadcrumbs";
-import { Asset } from "@prisma/client";
 
 export default function Header({
   title = null,

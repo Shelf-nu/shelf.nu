@@ -122,17 +122,17 @@ export default function AssetOverview() {
     <div>
       <ContextualModal />
       <div className="mt-[-16px] block lg:flex">
-        <div className="shrink-0 overflow-hidden lg:w-[65%] xl:w-[65%]">
+        <div className="flex-1 overflow-hidden">
           <Card className="my-3 px-[-4] py-[-5]">
             <ul className="item-information">
               <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
-                <span className="w-[25%] text-[14px] font-medium text-gray-900">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   ID
                 </span>
                 <div className="w-3/5 text-gray-600">{asset.id}</div>
               </li>
               <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
-                <span className="w-[25%] text-[14px] font-medium text-gray-900">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   Created
                 </span>
                 <div className="w-3/5 text-gray-600">{asset.createdAt}</div>
@@ -140,7 +140,7 @@ export default function AssetOverview() {
 
               {asset?.category ? (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
-                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Category
                   </span>
                   <div className="w-3/5 text-gray-600">
@@ -151,7 +151,7 @@ export default function AssetOverview() {
                 </li>
               ) : (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
-                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Category
                   </span>
                   <div className="w-3/5 text-gray-600">
@@ -163,7 +163,7 @@ export default function AssetOverview() {
               )}
               {location ? (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
-                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Location
                   </span>
                   <div className="-ml-2 w-3/5 text-gray-600">
@@ -175,7 +175,7 @@ export default function AssetOverview() {
               ) : null}
               {asset.description ? (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
-                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Description
                   </span>
                   <div className="w-3/5 whitespace-pre-wrap text-gray-600">
@@ -185,7 +185,7 @@ export default function AssetOverview() {
               ) : null}
               {asset?.tags?.length > 0 ? (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
-                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Tags
                   </span>
                   <div className="-ml-2 w-3/5 text-gray-600">
@@ -199,7 +199,7 @@ export default function AssetOverview() {
               ) : null}
               {asset.organization && asset.valuation ? (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
-                  <span className="w-[25%] text-[14px] font-medium text-gray-900">
+                  <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Value
                   </span>
                   <div className="-ml-2 w-3/5">
@@ -226,7 +226,7 @@ export default function AssetOverview() {
               />
               <Card className="my-3 px-[-4] py-[-5]">
                 <ul className="item-information">
-                  {customFieldsValues.map((field, index) => {
+                  {customFieldsValues.map((field, _index) => {
                     const customFieldDisplayValue = getCustomFieldDisplayValue(
                       field.value as unknown as ShelfAssetCustomFieldValueType["value"]
                     );
@@ -237,7 +237,7 @@ export default function AssetOverview() {
                         )}
                         key={field.id}
                       >
-                        <span className="w-[25%] text-[14px] font-medium text-gray-900">
+                        <span className="w-1/4 text-[14px] font-medium text-gray-900">
                           {field.customField.name}
                         </span>
                         <div className="w-3/5 max-w-[250px] text-gray-600">
@@ -264,7 +264,7 @@ export default function AssetOverview() {
           ) : null}
         </div>
 
-        <div className="w-[35%] lg:ml-4">
+        <div className="w-full md:w-[400px] lg:ml-4">
           {!isSelfService ? (
             <Card className="my-3">
               <fetcher.Form
