@@ -18,6 +18,17 @@ import type { FlashData, SessionData } from "./session";
 // Server will not start if the env is not valid
 initEnv();
 
+/**
+ * installGlobals from remix doesnt work as it conflicts with some other packages that we use and overrides some of their types
+ * In our case the only type causing issue is File and it only happens in development mode
+ * So we will import it conditionally in development mode
+ * */
+if (env.NODE_ENV !== "production") {
+  void import("@remix-run/web-fetch").then((webFetch) => {
+    global.File = webFetch.File;
+  });
+}
+
 const mode = env.NODE_ENV === "test" ? "development" : env.NODE_ENV;
 
 const isProductionMode = mode === "production";
