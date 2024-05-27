@@ -1,17 +1,15 @@
-import {
-  useRouteLoaderData,
-  useFetcher,
-} from "@remix-run/react";
+import { useRouteLoaderData, useFetcher } from "@remix-run/react";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { useUserData } from "~/hooks/use-user-data";
 import { isFormProcessing } from "~/utils/form";
 import { NewNote } from "./new";
 import type { NoteWithDate } from "./note";
 import { Note } from "./note";
-import { AssetType } from '../../../routes/_layout+/assets.$assetId.overview';
+import type { AssetType } from "../../../routes/_layout+/assets.$assetId.overview";
 
 export const Notes = () => {
-  const { asset } = useRouteLoaderData<AssetType>("routes/_layout+/assets.$assetId") ?? {};
+  const { asset } =
+    useRouteLoaderData<AssetType>("routes/_layout+/assets.$assetId") ?? {};
 
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();

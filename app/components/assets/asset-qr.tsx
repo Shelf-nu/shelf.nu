@@ -25,9 +25,8 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
 
   const fileName = useMemo(
     () =>
-      `${slugify(asset?.title || "asset")}-${qrObj?.qr?.size}-shelf-qr-code-${
-        qrObj?.qr?.id
-      }.png`,
+      `${slugify(asset?.title || "asset")}-${qrObj?.qr
+        ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`,
     [asset, qrObj?.qr?.id, qrObj?.qr?.size]
   );
 
@@ -115,9 +114,8 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
         <Button
           icon="download"
           onClick={downloadQr}
-          download={`${slugify(asset.title)}-${qrObj?.qr?.size}-shelf-qr-code-${
-            qrObj?.qr?.id
-          }.png`}
+          download={`${slugify(asset.title)}-${qrObj?.qr
+            ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
           ref={downloadQrBtnRef}
           variant="secondary"
           className="w-full"

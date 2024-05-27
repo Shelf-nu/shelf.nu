@@ -2,7 +2,11 @@ import type { ReactNode } from "react";
 import type { Asset, Custody, Kit, Note, Organization } from "@prisma/client";
 import type { MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useFetcher, useOutletContext, useRouteLoaderData } from "@remix-run/react";
+import {
+  useFetcher,
+  useOutletContext,
+  useRouteLoaderData,
+} from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import AssetQR from "~/components/assets/asset-qr";
@@ -57,7 +61,7 @@ export interface AssetType {
   asset: {
     id: string;
     createdAt: Date;
-    notes:Note[];
+    notes: Note[];
     category: {
       id: string;
       name: string;
@@ -109,7 +113,7 @@ export default function AssetOverview() {
 
   // const { asset, locale, qrObj } = useOutletContext<AssetType>();
   // console.log(asset);
-  
+
   const customFieldsValues =
     asset && asset.customFields?.length > 0
       ? asset.customFields.filter((f) => f.value)
@@ -141,7 +145,9 @@ export default function AssetOverview() {
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   Created
                 </span>
-                <div className="w-3/5 text-gray-600">{asset && asset.createdAt}</div>
+                <div className="w-3/5 text-gray-600">
+                  {asset && asset.createdAt}
+                </div>
               </li>
 
               {asset?.category ? (
