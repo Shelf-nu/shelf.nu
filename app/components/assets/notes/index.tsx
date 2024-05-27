@@ -1,22 +1,21 @@
 import {
   useRouteLoaderData,
   useFetcher,
-  useOutletContext,
 } from "@remix-run/react";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { useUserData } from "~/hooks/use-user-data";
-import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { isFormProcessing } from "~/utils/form";
 import { NewNote } from "./new";
 import type { NoteWithDate } from "./note";
 import { Note } from "./note";
+import { AssetType } from '../../../routes/_layout+/assets.$assetId.overview';
 
 export const Notes = () => {
-  const { asset } = useRouteLoaderData<any>("routes/_layout+/assets.$assetId");
+  const { asset } = useRouteLoaderData<AssetType>("routes/_layout+/assets.$assetId") ?? {};
 
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
-  const hasNotes = asset?.notes.length > 0;
+  const hasNotes = asset?.notes && asset?.notes.length > 0;
   /* Importing fetcher here in the parent file such that we can use fetcher's states to know the status of form processing and form data render the frontend component on the fly (Optimistic UI) and in the new note form this fetcher is passed as a prop */
   const fetcher = useFetcher();
   let onSubmissionContent = "";
@@ -61,7 +60,7 @@ export const Notes = () => {
             />
             <h4>No Notes</h4>
             <p>
-              Your asset `{asset.title}` has no notes <br />
+              Your asset `{asset?.title}` has no notes <br />
               attached to it.
             </p>
           </div>

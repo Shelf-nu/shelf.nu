@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import type { Asset, Custody, Kit, Organization } from "@prisma/client";
+import type { Asset, Custody, Kit, Note, Organization } from "@prisma/client";
 import type { MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useFetcher, useOutletContext } from "@remix-run/react";
+import { useFetcher, useOutletContext, useRouteLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import AssetQR from "~/components/assets/asset-qr";
@@ -53,10 +53,11 @@ export const handle = {
 };
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
-interface AssetType {
+export interface AssetType {
   asset: {
     id: string;
-    createdAt: ReactNode;
+    createdAt: Date;
+    notes:Note[];
     category: {
       id: string;
       name: string;
@@ -103,13 +104,18 @@ interface AssetType {
 }
 
 export default function AssetOverview() {
-  const { asset, locale, qrObj } = useOutletContext<AssetType>();
+  const data = useRouteLoaderData<AssetType>("routes/_layout+/assets.$assetId");
+  const { asset, locale, qrObj } = data ?? {};
+
+  // const { asset, locale, qrObj } = useOutletContext<AssetType>();
+  // console.log(asset);
+  
   const customFieldsValues =
-    asset.customFields?.length > 0
+    asset && asset.customFields?.length > 0
       ? asset.customFields.filter((f) => f.value)
       : [];
-  const assetIsAvailable = asset.status === "AVAILABLE";
-  const location = asset.location;
+  const assetIsAvailable = asset && asset.status === "AVAILABLE";
+  const location = asset && asset.location;
   usePosition();
   const fetcher = useFetcher();
   const zo = useZorm(
@@ -129,13 +135,13 @@ export default function AssetOverview() {
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   ID
                 </span>
-                <div className="w-3/5 text-gray-600">{asset.id}</div>
+                <div className="w-3/5 text-gray-600">{asset?.id}</div>
               </li>
               <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   Created
                 </span>
-                <div className="w-3/5 text-gray-600">{asset.createdAt}</div>
+                <div className="w-3/5 text-gray-600">{asset && asset.createdAt}</div>
               </li>
 
               {asset?.category ? (
@@ -173,7 +179,7 @@ export default function AssetOverview() {
                   </div>
                 </li>
               ) : null}
-              {asset.description ? (
+              {asset?.description ? (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Description
@@ -183,7 +189,7 @@ export default function AssetOverview() {
                   </div>
                 </li>
               ) : null}
-              {asset?.tags?.length > 0 ? (
+              {asset && asset?.tags?.length > 0 ? (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Tags
@@ -197,7 +203,7 @@ export default function AssetOverview() {
                   </div>
                 </li>
               ) : null}
-              {asset.organization && asset.valuation ? (
+              {asset?.organization && asset.valuation ? (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Value
@@ -284,7 +290,7 @@ export default function AssetOverview() {
                   <Switch
                     name={zo.fields.availableToBook()}
                     disabled={isSelfService || isFormProcessing(fetcher.state)} // Disable for self service users
-                    defaultChecked={asset.availableToBook}
+                    defaultChecked={asset?.availableToBook}
                     required
                     title={
                       isSelfService
@@ -297,7 +303,7 @@ export default function AssetOverview() {
               </fetcher.Form>
             </Card>
           ) : null}
-          {asset.kit?.name ? (
+          {asset?.kit?.name ? (
             <Card className="my-3 py-3">
               <div className="flex items-center gap-3">
                 <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
