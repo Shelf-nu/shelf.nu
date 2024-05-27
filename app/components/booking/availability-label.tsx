@@ -22,9 +22,11 @@ import {
 export function AvailabilityLabel({
   asset,
   isCheckedOut,
+  showKitStatus,
 }: {
   asset: AssetWithBooking;
   isCheckedOut: boolean;
+  showKitStatus?: boolean;
 }) {
   const isPartOfKit = !!asset.kitId;
 
@@ -121,7 +123,7 @@ export function AvailabilityLabel({
    * Asset is part of a kit
    */
 
-  if (isPartOfKit) {
+  if (isPartOfKit && showKitStatus) {
     return (
       <AvailabilityBadge
         badgeText="Part of kit"

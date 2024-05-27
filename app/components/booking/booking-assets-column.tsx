@@ -16,6 +16,7 @@ import { AssetStatusBadge } from "../assets/asset-status-badge";
 import { EmptyState } from "../list/empty-state";
 import { ListHeader } from "../list/list-header";
 import { ListItem, type ListItemData } from "../list/list-item";
+import { Pagination } from "../list/pagination";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import { ControlledActionButton } from "../shared/controlled-action-button";
@@ -131,10 +132,9 @@ export function BookingAssetsColumn() {
                   <tbody>
                     {/* List all assets without kit at once */}
                     {assetsWithoutKits.map((asset) => (
-                      <ListAssetContent
-                        key={asset.id}
-                        item={asset as AssetWithBooking}
-                      />
+                      <ListItem key={asset.id} item={asset}>
+                        <ListAssetContent item={asset as AssetWithBooking} />
+                      </ListItem>
                     ))}
 
                     {/* List all the assets which are part of a kit */}
@@ -182,6 +182,7 @@ export function BookingAssetsColumn() {
                     })}
                   </tbody>
                 </Table>
+                <Pagination />
               </>
             )}
           </div>

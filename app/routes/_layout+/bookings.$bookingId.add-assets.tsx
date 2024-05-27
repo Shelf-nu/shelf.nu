@@ -259,7 +259,7 @@ export default function AddAssetsToNewBooking() {
   }, [booking.id]);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col">
       <Header
         {...header}
         hideBreadcrumbs={true}
@@ -348,7 +348,7 @@ export default function AddAssetsToNewBooking() {
 
         {/* Body of the modal*/}
         <TabsContent
-          className="h-[420px] flex-1 overflow-y-auto px-5 md:px-0"
+          className="flex-1 overflow-y-auto px-5 md:px-0"
           value="assets"
         >
           {isSearching ? (
@@ -384,7 +384,7 @@ export default function AddAssetsToNewBooking() {
         </TabsContent>
         <TabsContent
           value="kits"
-          className="mt-0 h-[420px] flex-1 overflow-y-auto px-5 md:px-0"
+          className="mt-0 flex-1 overflow-y-auto px-5 md:px-0 "
         >
           <GroupedByKitAssets />
         </TabsContent>
@@ -474,6 +474,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
 
       <Td className="text-right">
         <AvailabilityLabel
+          showKitStatus
           asset={item}
           isCheckedOut={item.status === "CHECKED_OUT"}
         />

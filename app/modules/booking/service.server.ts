@@ -151,7 +151,7 @@ export async function upsertBooking(
     if (assetIds?.length) {
       data.assets = {
         connect: assetIds.map((id) => ({
-          id,
+          id  ,
         })),
       };
     }
