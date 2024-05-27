@@ -4,8 +4,9 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
+import ContextualModal from "~/components/layout/contextual-modal";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData, Outlet } from "@remix-run/react";
+import { useLoaderData, Outlet, useMatches } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
@@ -276,7 +277,6 @@ export default function AssetDetailsPage() {
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
   const isSelfService = useUserIsSelfService();
-
   return (
     <>
       <Header
@@ -299,6 +299,7 @@ export default function AssetDetailsPage() {
       </Header>
       <HorizontalTabs items={items} />
       <div>
+        <ContextualModal />
         <Outlet context={data} />
       </div>
     </>
