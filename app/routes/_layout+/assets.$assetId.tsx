@@ -300,7 +300,7 @@ export default function AssetDetailsPage() {
       <HorizontalTabs items={items} />
       <div>
         <ContextualModal />
-        <Outlet/>
+        <Outlet />
       </div>
     </>
   );
