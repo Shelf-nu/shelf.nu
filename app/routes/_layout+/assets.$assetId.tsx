@@ -299,7 +299,6 @@ export default function AssetDetailsPage() {
       </Header>
       <HorizontalTabs items={items} />
       <div>
-        <ContextualModal />
         <Outlet />
       </div>
     </>
