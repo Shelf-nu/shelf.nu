@@ -1,6 +1,5 @@
-import type { Asset } from "@prisma/client";
+import React from "react";
 import { useLoaderData } from "@remix-run/react";
-import { AssetImage } from "~/components/assets/asset-image";
 import Heading from "~/components/shared/heading";
 import SubHeading from "~/components/shared/sub-heading";
 import { tw } from "~/utils/tw";
@@ -14,23 +13,16 @@ export default function Header({
   hidePageDescription = false,
   hideBreadcrumbs = false,
   classNames,
-  asset,
 }: {
   /** Pass a title to replace the default route title set in the loader
    * This is very useful for interactive adjustments of the title
    */
-  title?: string | null;
+  title?: string | React.ReactNode | null;
   children?: React.ReactNode;
   subHeading?: React.ReactNode;
   hidePageDescription?: boolean;
   hideBreadcrumbs?: boolean;
   classNames?: string;
-  asset?: {
-    assetId: Asset["id"];
-    mainImage: Asset["mainImage"];
-    mainImageExpiration: Date | string | null;
-    alt: string;
-  };
 }) {
   const data = useLoaderData<{
     header?: HeaderData;
@@ -57,16 +49,13 @@ export default function Header({
         </>
       )}
       {!hidePageDescription && (
-        <div className="flex items-center border-b border-gray-200 px-4 py-3">
-          {asset && (
-            <AssetImage
-              asset={asset}
-              className={tw("size-[56px] rounded border object-cover")}
-            />
-          )}
-          <div className={`${asset && "pl-4"}`}>
+        <div className={`flex items-center border-b border-gray-200 px-4 py-3`}>
+          {React.isValidElement(title) && title}
+          <div className={`${React.isValidElement(title) && "pl-4"}`}>
             <Heading as="h2" className="break-all text-[20px] font-semibold">
-              {title || header?.title}
+              {React.isValidElement(title)
+                ? header?.title
+                : title || header?.title}
             </Heading>
             {subHeading ? (
               <SubHeading>{subHeading}</SubHeading>

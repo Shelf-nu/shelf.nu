@@ -9,8 +9,8 @@ import { useLoaderData, Outlet, useMatches } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
+import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
-import ContextualModal from "~/components/layout/contextual-modal";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -49,6 +49,7 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { deleteAssetImage } from "~/utils/storage.server";
+import { tw } from "~/utils/tw";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export const AvailabilityForBookingFormSchema = z.object({
@@ -280,12 +281,17 @@ export default function AssetDetailsPage() {
   return (
     <>
       <Header
-        asset={{
-          assetId: data.asset.id,
-          mainImage: data.asset.mainImage,
-          mainImageExpiration: data.asset.mainImageExpiration,
-          alt: data.asset.title,
-        }}
+        title={
+          <AssetImage
+            asset={{
+              assetId: data.asset.id,
+              mainImage: data.asset.mainImage,
+              mainImageExpiration: data.asset.mainImageExpiration,
+              alt: data.asset.title,
+            }}
+            className={tw("size-[56px] rounded border object-cover")}
+          />
+        }
         subHeading={
           <div className="flex gap-2">
             <AssetStatusBadge
