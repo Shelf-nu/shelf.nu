@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import React from "react";
 import { useLoaderData } from "@remix-run/react";
 import Heading from "~/components/shared/heading";
@@ -6,6 +7,8 @@ import { tw } from "~/utils/tw";
 import type { HeaderData } from "./types";
 import { Breadcrumbs } from "../breadcrumbs";
 
+type SlotKeys = "left-of-title";
+
 export default function Header({
   title = null,
   children,
@@ -13,16 +16,18 @@ export default function Header({
   hidePageDescription = false,
   hideBreadcrumbs = false,
   classNames,
+  slots,
 }: {
   /** Pass a title to replace the default route title set in the loader
    * This is very useful for interactive adjustments of the title
    */
-  title?: string | React.ReactNode | null;
+  title?: string | null;
   children?: React.ReactNode;
   subHeading?: React.ReactNode;
   hidePageDescription?: boolean;
   hideBreadcrumbs?: boolean;
   classNames?: string;
+  slots?: Record<SlotKeys, ReactNode>;
 }) {
   const data = useLoaderData<{
     header?: HeaderData;
@@ -50,12 +55,10 @@ export default function Header({
       )}
       {!hidePageDescription && (
         <div className={`flex items-center border-b border-gray-200 px-4 py-3`}>
-          {React.isValidElement(title) && title}
-          <div className={`${React.isValidElement(title) && "pl-4"}`}>
+          {slots?.["left-of-title"] || null}
+          <div>
             <Heading as="h2" className="break-all text-[20px] font-semibold">
-              {React.isValidElement(title)
-                ? header?.title
-                : title || header?.title}
+              {title || header?.title}
             </Heading>
             {subHeading ? (
               <SubHeading>{subHeading}</SubHeading>

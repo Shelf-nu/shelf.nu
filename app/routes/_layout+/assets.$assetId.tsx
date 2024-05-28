@@ -5,7 +5,7 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import { useLoaderData, Outlet, useMatches } from "@remix-run/react";
+import { useLoaderData, Outlet } from "@remix-run/react";
 import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
 import { z } from "zod";
 import ActionsDropdown from "~/components/assets/actions-dropdown";
@@ -281,17 +281,19 @@ export default function AssetDetailsPage() {
   return (
     <>
       <Header
-        title={
-          <AssetImage
-            asset={{
-              assetId: data.asset.id,
-              mainImage: data.asset.mainImage,
-              mainImageExpiration: data.asset.mainImageExpiration,
-              alt: data.asset.title,
-            }}
-            className={tw("size-[56px] rounded border object-cover")}
-          />
-        }
+        slots={{
+          "left-of-title": (
+            <AssetImage
+              asset={{
+                assetId: data.asset.id,
+                mainImage: data.asset.mainImage,
+                mainImageExpiration: data.asset.mainImageExpiration,
+                alt: data.asset.title,
+              }}
+              className={tw("mr-4 size-[56px] rounded border object-cover")}
+            />
+          ),
+        }}
         subHeading={
           <div className="flex gap-2">
             <AssetStatusBadge
