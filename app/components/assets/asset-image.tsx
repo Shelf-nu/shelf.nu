@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { Asset } from "@prisma/client";
 
 import { useFetcher } from "@remix-run/react";
 import type { action } from "~/routes/api+/asset.refresh-main-image";
 import { tw } from "~/utils/tw";
+import { Dialog } from "../layout/dialog";
 
 export const AssetImage = ({
   asset,
@@ -29,6 +30,16 @@ export const AssetImage = ({
     updatedAssetMainImage ||
     "/static/images/asset-placeholder.jpg";
 
+    const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+    const handleOpenDialog = () => {
+      setIsDialogOpen(true);
+    };
+  
+    const handleCloseDialog = () => {
+      setIsDialogOpen(false);
+    };
+
   useEffect(() => {
     if (mainImage && mainImageExpiration) {
       const now = new Date();
@@ -45,6 +56,13 @@ export const AssetImage = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  return <img src={url} className={tw(className)} alt={alt} {...rest} />;
+  const classes = tw("p-6 gap-[10px] bg-gray-50 size-[100%] object-contain rounded");
+  return (
+    <>
+      <img onClick={handleOpenDialog} src={url} className={tw(className)} alt={alt} {...rest} />
+      <Dialog title={asset.alt} open={isDialogOpen} onClose={handleCloseDialog} noScroll={true}>
+        <img src={url} className={classes} alt={alt} {...rest} />
+      </Dialog>
+    </>
+  )
 };
