@@ -71,7 +71,7 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
   });
   return (
     <div className="">
-      <div className="mb-4 flex w-auto justify-center rounded border border-solid p-6 bg-white">
+      <div className="mb-4 flex w-auto justify-center rounded border border-solid bg-white p-6">
         <QrLabel ref={captureDivRef} data={qrObj} title={asset.title} />
       </div>
       <ul className="description-list">
