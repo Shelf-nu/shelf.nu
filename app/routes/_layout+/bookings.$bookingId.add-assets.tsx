@@ -19,10 +19,7 @@ import {
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
-import {
-  bookingSelectedKitAtom,
-  bookingsSelectedAssetsAtom,
-} from "~/atoms/selected-assets-atoms";
+import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import GroupedByKitAssets from "~/components/assets/grouped-by-kit-assets";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
@@ -37,6 +34,7 @@ import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 
+import { Spinner } from "~/components/shared/spinner";
 import {
   Tabs,
   TabsContent,
@@ -346,30 +344,37 @@ export default function AddAssetsToNewBooking() {
 
       {/* Body of the modal*/}
       <TabsContent value="assets" asChild>
-        <List
-          className="mt-0 h-full border-0"
-          ItemComponent={RowComponent}
-          /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={(assetId, asset) => {
-            /** Only allow user to select if the asset is available */
-            if (!asset.availableToBook || !!asset.kitId) {
-              return;
-            }
+        {isSearching && !navigation.formAction ? (
+          <div className="flex h-[400px] flex-1 flex-col items-center justify-center">
+            <Spinner />
+            <p>Fetching assets...</p>
+          </div>
+        ) : (
+          <List
+            className="mt-0 h-full border-0"
+            ItemComponent={RowComponent}
+            /** Clicking on the row will add the current asset to the atom of selected assets */
+            navigate={(assetId, asset) => {
+              /** Only allow user to select if the asset is available */
+              if (!asset.availableToBook || !!asset.kitId) {
+                return;
+              }
 
-            setSelectedAssets((selectedAssets) =>
-              selectedAssets.includes(assetId)
-                ? selectedAssets.filter((id) => id !== assetId)
-                : [...selectedAssets, assetId]
-            );
-          }}
-          emptyStateClassName="py-10"
-          customEmptyStateContent={{
-            title: "You haven't added any assets yet.",
-            text: "What are you waiting for? Create your first asset now!",
-            newButtonRoute: "/assets/new",
-            newButtonContent: "New asset",
-          }}
-        />
+              setSelectedAssets((selectedAssets) =>
+                selectedAssets.includes(assetId)
+                  ? selectedAssets.filter((id) => id !== assetId)
+                  : [...selectedAssets, assetId]
+              );
+            }}
+            emptyStateClassName="py-10"
+            customEmptyStateContent={{
+              title: "You haven't added any assets yet.",
+              text: "What are you waiting for? Create your first asset now!",
+              newButtonRoute: "/assets/new",
+              newButtonContent: "New asset",
+            }}
+          />
+        )}
       </TabsContent>
 
       <TabsContent value="kits" asChild>

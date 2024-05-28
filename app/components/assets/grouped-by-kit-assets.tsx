@@ -35,10 +35,11 @@ export default function GroupedByKitAssets({
 
   const groupedItems = groupBy(items ?? [], (item) => item?.kit?.id);
 
-  if (isLoading) {
+  if (isLoading && !navigation?.formAction) {
     return (
-      <div className="flex h-[400px] flex-1 items-center justify-center">
+      <div className="flex h-[400px] flex-1 flex-col items-center justify-center">
         <Spinner />
+        <p>Fetching kits...</p>
       </div>
     );
   }
@@ -46,7 +47,7 @@ export default function GroupedByKitAssets({
   return (
     <div
       className={tw(
-        "-mx-4 overflow-x-auto border-gray-200  bg-white md:mx-0 md:rounded",
+        "overflow-x-auto border-gray-200 bg-white md:mx-0 md:rounded",
         className
       )}
       style={style}
