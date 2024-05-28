@@ -488,7 +488,10 @@ const RowComponent = ({ item }: { item: AssetWithLocation }) => {
       </Td>
 
       <Td>
-        <FakeCheckbox className="text-white" checked={checked} />
+        <FakeCheckbox
+          className={tw("text-white", checked ? "text-primary" : "")}
+          checked={checked}
+        />
       </Td>
     </>
   );

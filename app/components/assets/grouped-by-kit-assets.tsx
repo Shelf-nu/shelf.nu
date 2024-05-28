@@ -134,7 +134,8 @@ export default function GroupedByKitAssets({
                       <FakeCheckbox
                         className={tw(
                           "text-white",
-                          kit.status !== "AVAILABLE" ? "text-gray-100" : ""
+                          kit.status !== "AVAILABLE" ? "text-gray-100" : "",
+                          isKitSelected ? "text-primary" : ""
                         )}
                         checked={isKitSelected}
                       />

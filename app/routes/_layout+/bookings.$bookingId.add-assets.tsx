@@ -437,6 +437,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
   const checked = selectedAssets.some((id) => id === item.id);
 
   const isPartOfKit = !!item.kitId;
+  const isAddedThroughKit = isPartOfKit && checked;
 
   return (
     <>
@@ -465,6 +466,7 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
 
       <Td className="text-right">
         <AvailabilityLabel
+          isAddedThroughKit={isAddedThroughKit}
           showKitStatus
           asset={item}
           isCheckedOut={item.status === "CHECKED_OUT"}
@@ -473,7 +475,13 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
 
       <Td>
         <FakeCheckbox
-          className={tw("text-white", isPartOfKit ? "text-gray-100" : "")}
+          className={tw(
+            "text-white",
+            isPartOfKit ? "text-gray-100" : "",
+            checked ? "text-primary" : "",
+            isAddedThroughKit ? "text-gray-300" : ""
+          )}
+          fillColor={isPartOfKit ? "#F2F4F7" : undefined}
           checked={checked}
           aria-disabled={isPartOfKit}
         />

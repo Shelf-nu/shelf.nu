@@ -536,7 +536,8 @@ const RowComponent = ({
           checked={checked}
           className={tw(
             "text-white",
-            item.isInOtherCustody ? "text-gray-200" : ""
+            item.isInOtherCustody ? "text-gray-200" : "",
+            checked ? "text-primary" : ""
           )}
         />
       </Td>

@@ -23,10 +23,12 @@ export function AvailabilityLabel({
   asset,
   isCheckedOut,
   showKitStatus,
+  isAddedThroughKit,
 }: {
   asset: AssetWithBooking;
   isCheckedOut: boolean;
   showKitStatus?: boolean;
+  isAddedThroughKit?: boolean;
 }) {
   const isPartOfKit = !!asset.kitId;
 
@@ -120,9 +122,21 @@ export function AvailabilityLabel({
   }
 
   /**
+   * User is viewing all assets and the assets is added in a booking through kit
+   */
+  if (isAddedThroughKit) {
+    return (
+      <AvailabilityBadge
+        badgeText="Added through kit"
+        tooltipTitle="Asset was added through a kit"
+        tooltipContent="Remove the asset from the kit to add it individually."
+      />
+    );
+  }
+
+  /**
    * Asset is part of a kit
    */
-
   if (isPartOfKit && showKitStatus) {
     return (
       <AvailabilityBadge
