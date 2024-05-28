@@ -290,7 +290,9 @@ export default function AssetDetailsPage() {
                 mainImageExpiration: data.asset.mainImageExpiration,
                 alt: data.asset.title,
               }}
-              className={tw("mr-4 size-[56px] rounded border object-cover cursor-pointer")}
+              className={tw(
+                "mr-4 size-[56px] cursor-pointer rounded border object-cover"
+              )}
             />
           ),
         }}

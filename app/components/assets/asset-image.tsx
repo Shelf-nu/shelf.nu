@@ -30,15 +30,15 @@ export const AssetImage = ({
     updatedAssetMainImage ||
     "/static/images/asset-placeholder.jpg";
 
-    const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
 
-    const handleOpenDialog = () => {
-      setIsDialogOpen(true);
-    };
-  
-    const handleCloseDialog = () => {
-      setIsDialogOpen(false);
-    };
+  const handleOpenDialog = () => {
+    setIsDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setIsDialogOpen(false);
+  };
 
   useEffect(() => {
     if (mainImage && mainImageExpiration) {
@@ -56,13 +56,26 @@ export const AssetImage = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const classes = tw("p-6 gap-[10px] bg-gray-50 size-[100%] object-contain rounded");
+  const classes = tw(
+    "size-full gap-[10px] rounded bg-gray-50 object-contain p-6"
+  );
   return (
     <>
-      <img onClick={handleOpenDialog} src={url} className={tw(className)} alt={alt} {...rest} />
-      <Dialog title={asset.alt} open={isDialogOpen} onClose={handleCloseDialog} noScroll={true}>
+      <img
+        onClick={handleOpenDialog}
+        src={url}
+        className={tw(className)}
+        alt={alt}
+        {...rest}
+      />
+      <Dialog
+        title={asset.alt}
+        open={isDialogOpen}
+        onClose={handleCloseDialog}
+        noScroll={true}
+      >
         <img src={url} className={classes} alt={alt} {...rest} />
       </Dialog>
     </>
-  )
+  );
 };

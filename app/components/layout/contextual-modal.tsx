@@ -1,6 +1,7 @@
+import type { ReactNode } from "react";
+import { useCallback } from "react";
 import { Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
-import { ReactNode, useCallback } from "react";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -16,7 +17,7 @@ const Dialog = ({
 }) => {
   const matches = useMatches();
   const prevRoute = matches[matches.length - 2];
-  
+
   const navigate = useNavigate();
   const handleBackdropClose = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {

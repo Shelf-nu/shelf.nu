@@ -9,7 +9,7 @@ export const Dialog = ({
   open,
   noScroll,
   onClose,
-  title
+  title,
 }: {
   children: ReactNode;
   open: boolean;
@@ -24,11 +24,11 @@ export const Dialog = ({
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.target !== e.currentTarget) return;
       navigate(prevRoute);
-      onClose(); 
+      onClose();
     },
     [prevRoute, navigate, onClose]
   );
-  
+
   return open ? (
     <div className="dialog-backdrop" onClick={handleBackdropClose}>
       <dialog className="dialog w-[90%]" open={true}>
@@ -38,45 +38,43 @@ export const Dialog = ({
             noScroll ? "md:h-[90vh]" : "md:overflow-y-auto"
           )}
         >
-          <div className="flex pl-6 pr-6 h-[10%] justify-between">
+          <div className="flex h-[10%] justify-between px-6">
             <div>
-              <div className=" text-gray-900 text-lg font-semibold">{title}</div>
-              <div className="text-gray-600 font-normal text-sm">1 image(s)</div>
+              <div className=" text-lg font-semibold text-gray-900">
+                {title}
+              </div>
+              <div className="text-sm font-normal text-gray-600">
+                1 image(s)
+              </div>
             </div>
             <Button
               to={prevRoute}
               variant="link"
-              className={
-                "leading-none text-gray-500 md:right-6 mt-[-10px]"
-              }
+              className={"mt-[-10px] leading-none text-gray-500 md:right-6"}
               onClick={onClose}
             >
               <XIcon />
             </Button>
           </div>
-          <div className="h-4/5 border-y-2  border-gray-200 flex items-center justify-center">
+          <div className="flex h-4/5  items-center justify-center border-y-2 border-gray-200">
             {children}
           </div>
-          <div className="h-[10%] py-3 px-6 flex justify-end gap-3">
-            <div className="border rounded flex items-center px-4 py-2 border-gray-300">
+          <div className="flex h-[10%] justify-end gap-3 px-6 py-3">
+            <div className="flex items-center rounded border border-gray-300 px-4 py-2">
               <Button
                 to={prevRoute}
                 variant="link"
-                className={
-                  "leading-none text-gray-500 md:right-6"
-                }
+                className={"leading-none text-gray-500 md:right-6"}
                 onClick={onClose}
               >
                 Edit image(s)
               </Button>
             </div>
-            <div className="border rounded flex items-center px-4 py-2 border-gray-300">
+            <div className="flex items-center rounded border border-gray-300 px-4 py-2">
               <Button
                 to={prevRoute}
                 variant="link"
-                className={
-                  "leading-none text-gray-500 md:right-6"
-                }
+                className={"leading-none text-gray-500 md:right-6"}
                 onClick={onClose}
               >
                 Close
