@@ -1,4 +1,5 @@
 import type {
+  Asset,
   Organization,
   PrintBatch,
   Prisma,
@@ -434,5 +435,43 @@ export async function claimQrCode({
       additionalData: { id, organizationId, userId },
       label,
     });
+  }
+}
+
+export async function getQrCodeMaps({
+  assets,
+  userId,
+  organizationId,
+  size,
+}: {
+  assets: Asset[];
+  organizationId: string;
+  userId: string;
+  size: "small" | "medium" | "large" | "cable";
+}) {
+  try {
+    return await Promise.all(
+      assets?.map(async ({ id: assetId }) => {
+        try {
+          let qr = await getQrByAssetId({ assetId });
+
+          if (!qr) {
+            qr = await createQr({ assetId, userId, organizationId });
+          }
+
+          const { code } = await generateCode({
+            version: qr.version as TypeNumber,
+            errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
+            size,
+            qr,
+          });
+          return code.src ? [assetId, code] : null;
+        } catch (error) {
+          return null;
+        }
+      })
+    );
+  } catch (err) {
+    return null;
   }
 }
