@@ -43,6 +43,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * - [x] Auth Account & User exists in our database - we just login the user
          * - [x] Auth Account exists but User doesn't exist in our database - we create a new user connecting it to authUser and login the user
          * - [ ] Auth Account(SSO version) doesn't exist but User exists in our database - we create a new authUser connecting it to user and login the user
+         * - [ ] Auth account exists but is not added to IDP
+         * - [ ] Auth account DOESN'T exist and is not added to IDP
+         * - [ ] User tries to reset password for a user that is only SSO
          */
 
         /**
@@ -54,7 +57,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
          */
         let user = await db.user.findUnique({
           where: {
-            id: authSession.userId,
+            email: authSession.email,
           },
           include: {
             organizations: true,
@@ -121,10 +124,6 @@ export default function LoginCallback() {
         formData.append(
           "lastName",
           user?.user_metadata?.custom_claims.lastName || ""
-        );
-        formData.append(
-          "goupId",
-          user?.user_metadata?.custom_claims.groupId || ""
         );
 
         fetcher.submit(formData, { method: "post" });
