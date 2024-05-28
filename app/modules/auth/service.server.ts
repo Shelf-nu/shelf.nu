@@ -133,10 +133,10 @@ export async function signInWithEmail(email: string, password: string) {
   }
 }
 
-export async function signInWithSSO(email: string) {
+export async function signInWithSSO(domain: string) {
   try {
     const { data, error } = await getSupabaseAdmin().auth.signInWithSSO({
-      domain: email.split("@")[1],
+      domain,
       options: {
         redirectTo: `${SERVER_URL}/oauth/callback`,
       },

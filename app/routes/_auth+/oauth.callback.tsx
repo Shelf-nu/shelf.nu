@@ -1,17 +1,23 @@
 import { useEffect } from "react";
 
 import { json, redirect } from "@remix-run/node";
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { useActionData, useFetcher, useSearchParams } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { useFetcher, useSearchParams } from "@remix-run/react";
 import { z } from "zod";
+import { Button } from "~/components/shared/button";
+import { Spinner } from "~/components/shared/spinner";
 import { db } from "~/database/db.server";
 import { supabaseClient } from "~/integrations/supabase/client";
-import { refreshAccessToken } from "~/modules/auth/service.server";
+import {
+  getAuthUserById,
+  refreshAccessToken,
+} from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { createUserFromSSO } from "~/modules/user/service.server";
 import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
+  data,
   error,
   getActionMethod,
   parseData,
@@ -42,7 +48,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * Cases we should handle:
          * - [x] Auth Account & User exists in our database - we just login the user
          * - [x] Auth Account exists but User doesn't exist in our database - we create a new user connecting it to authUser and login the user
-         * - [ ] Auth Account(SSO version) doesn't exist but User exists in our database - we create a new authUser connecting it to user and login the user
+         * - [x] Auth Account(SSO version) doesn't exist but User exists in our database - We show an error as we dont allow SSO users to have an email based identity
          * - [ ] Auth account exists but is not added to IDP
          * - [ ] Auth account DOESN'T exist and is not added to IDP
          * - [ ] User tries to reset password for a user that is only SSO
@@ -69,6 +75,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
             firstName,
             lastName,
           });
+        } else {
+          /** We check if there is already a auth user with the same id of the user we found
+           * If the user is already connected to an email account, we should throw an error
+           * Because we dont allow SSO users to have an email based identity
+           */
+          const authUser = await getAuthUserById(user.id);
+          if (authUser?.app_metadata?.provider === "email") {
+            throw new ShelfError({
+              cause: null,
+              title: "User already exists",
+              message:
+                "It looks like the email you're using is linked to a personal account in Shelf. Please contact our support team to update your personal workspace to a different email account.",
+              label: "Auth",
+            });
+          }
         }
         // Set the auth session and redirect to the assets page
         context.setSession(authSession);
@@ -90,9 +111,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 }
 
+export function loader({ context }: LoaderFunctionArgs) {
+  const title = "Signing in via SSO";
+  const subHeading = "Please wait while we connect your account";
+
+  if (context.isAuthenticated) {
+    return redirect("/assets");
+  }
+
+  return json(data({ title, subHeading }));
+}
 export default function LoginCallback() {
-  const data = useActionData<typeof action>();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<typeof action>();
+  const { data } = fetcher;
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? "/assets";
 
@@ -136,6 +167,18 @@ export default function LoginCallback() {
     };
   }, [fetcher, redirectTo]);
 
-  // @TODO here we need to add some nice UI
-  return data?.error ? <div>{data.error.message}</div> : null;
+  return (
+    <div className="flex justify-center text-center">
+      {data?.error ? (
+        <div>
+          <div className="text-sm text-error-500">{data.error.message}</div>
+          <Button to="/" className="mt-4">
+            Back to login
+          </Button>
+        </div>
+      ) : (
+        <Spinner />
+      )}
+    </div>
+  );
 }

@@ -19,21 +19,21 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getActionMethod, parseData } from "~/utils/http.server";
-import { validEmail } from "~/utils/misc";
+import { isValidDomain } from "~/utils/misc";
 
 const SSOLoginFormSchema = z.object({
-  email: z
+  domain: z
     .string()
     .transform((email) => email.toLowerCase())
-    .refine(validEmail, () => ({
-      message: "Please enter a valid email",
+    .refine(isValidDomain, () => ({
+      message: "Please enter a valid domain name",
     })),
   redirectTo: z.string().optional(),
 });
 
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in with SSO";
-  const subHeading = "Enter your email to login with SSO.";
+  const subHeading = "Enter your company's domain to login with SSO.";
 
   if (context.isAuthenticated) {
     return redirect("/assets");
@@ -48,11 +48,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const { email } = parseData(
+        const { domain } = parseData(
           await request.formData(),
           SSOLoginFormSchema
         );
-        const url = await signInWithSSO(email);
+        const url = await signInWithSSO(domain);
 
         return redirect(url);
       }
@@ -80,17 +80,17 @@ export default function SSOLogin() {
         <Form method="post" ref={zo.ref}>
           <div className="flex flex-col gap-3">
             <Input
-              data-test-id="email"
-              label="Email address"
-              placeholder="zaans@yourdomain.com"
+              data-test-id="domain"
+              label="Company domain"
+              placeholder="yourdomain.com"
               required
               autoFocus={true}
-              name={zo.fields.email()}
-              type="email"
-              autoComplete="email"
+              name={zo.fields.domain()}
+              type="text"
+              autoComplete="domain"
               disabled={disabled}
               inputClassName="w-full"
-              error={zo.errors.email()?.message}
+              error={zo.errors.domain()?.message}
             />
             <Button
               className="text-center"
