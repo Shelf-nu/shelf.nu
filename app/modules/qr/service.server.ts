@@ -438,40 +438,41 @@ export async function claimQrCode({
   }
 }
 
-export async function getQrCodeMaps({
-  assets,
-  userId,
-  organizationId,
-  size,
-}: {
+interface QRCodeMapParams {
   assets: Asset[];
   organizationId: string;
   userId: string;
   size: "small" | "medium" | "large" | "cable";
-}) {
+}
+
+export async function getQrCodeMaps({
+  assets,
+  size,
+}: QRCodeMapParams): Promise<Map<string, string>> {
+  const finalMap = new Map<string, string>();
+
   try {
-    return await Promise.all(
-      assets?.map(async ({ id: assetId }) => {
-        try {
-          let qr = await getQrByAssetId({ assetId });
-
-          if (!qr) {
-            qr = await createQr({ assetId, userId, organizationId });
-          }
-
-          const { code } = await generateCode({
-            version: qr.version as TypeNumber,
-            errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
-            size,
-            qr,
-          });
-          return code.src ? [assetId, code] : null;
-        } catch (error) {
-          return null;
+    const qrCodePromises = assets.map(async (asset) => {
+      try {
+        let qr = await getQrByAssetId({ assetId: asset.id });
+        const qrCode = qr ? await generateCode({
+          version: qr.version as TypeNumber,
+          errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
+          size,
+          qr,
+        }): null;
+        if (qrCode?.code){
+          finalMap.set(asset.id, qrCode?.code?.src || "");
         }
-      })
-    );
+      } catch (error) {
+        // Handle the error if needed
+        console.error(`Error processing asset with id ${asset.id}:`, error);
+      }
+    });
+
+    await Promise.all(qrCodePromises);
   } catch (err) {
-    return null;
+    console.error("Error generating QR code maps:", err);
   }
+  return finalMap;
 }
