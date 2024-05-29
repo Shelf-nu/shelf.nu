@@ -1,4 +1,4 @@
-import { useLoaderData, useSubmit, useLocation } from "@remix-run/react";
+import { useLoaderData, useSubmit } from "@remix-run/react";
 import { Divider } from "@tremor/react";
 import { ChevronRight } from "~/components/icons/library";
 import {
