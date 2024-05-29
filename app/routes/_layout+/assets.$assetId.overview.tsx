@@ -62,6 +62,7 @@ export interface AssetType {
     id: string;
     createdAt: Date;
     notes: Note[];
+    kitId: Asset["kitId"];
     category: {
       id: string;
       name: string;
@@ -88,6 +89,10 @@ export interface AssetType {
       currency?: Organization["currency"];
     };
     custody: {
+      custodian: {
+        name: string;
+      }
+      dateDisplay: Date;
       createdAt: Custody["createdAt"];
     };
     valuation: Asset["valuation"];
@@ -110,9 +115,6 @@ export interface AssetType {
 export default function AssetOverview() {
   const data = useRouteLoaderData<AssetType>("routes/_layout+/assets.$assetId");
   const { asset, locale, qrObj } = data ?? {};
-
-  // const { asset, locale, qrObj } = useOutletContext<AssetType>();
-  // console.log(asset);
 
   const customFieldsValues =
     asset && asset.customFields?.length > 0
@@ -323,14 +325,14 @@ export default function AssetOverview() {
                     Included in kit
                   </h3>
                   <Button
-                    // to={`/kits/${asset.kitId}`}
+                    to={`/kits/${asset.kitId}`}
                     role="link"
                     variant="link"
                     className={tw(
                       "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
                     )}
                   >
-                    {/* {asset.kit.name} */}
+                    {asset.kit.name}
                     Video Production Kit IV
                   </Button>
                 </div>
@@ -351,12 +353,10 @@ export default function AssetOverview() {
                   <p className="">
                     In custody of{" "}
                     <span className="font-semibold">
-                      {/* {asset.custody?.custodian.name} */}
-                      Bhavya jain
+                      {asset.custody?.custodian.name}
                     </span>
                   </p>
-                  {/* <span>Since {asset.custody.dateDisplay}</span> */}
-                  <span>Since Random Date</span>
+                  <span>Since {asset.custody.dateDisplay}</span>
                 </div>
               </div>
             </Card>
