@@ -270,6 +270,7 @@ export const links: LinksFunction = () => [
 
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
+  
   let items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },

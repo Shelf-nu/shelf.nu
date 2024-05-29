@@ -1,13 +1,31 @@
-import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
-import type { loader } from "~/routes/_layout+/assets.$assetId";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
 import { HelpIcon } from "../icons/library";
 import { InfoTooltip } from "../shared/info-tooltip";
+import { ReactNode } from "react";
 
-export function ScanDetails() {
-  const { lastScan } = useLoaderData<typeof loader>();
+export interface lastScanType {
+  lastScan?: {
+    coordinates: string;
+    dateTime: ReactNode;
+    ua: {
+      device: {
+        model: string;
+        vendor: string;
+      },
+      browser: {
+        name: string;
+      },
+      os: {
+        name: string;
+      }
+    }
+    manuallyGenerated: boolean;
+  }
+}
+
+export function ScanDetails({lastScan}: lastScanType) {
   let latitude, longitude;
 
   const hasLocation = lastScan?.coordinates !== "Unknown location";

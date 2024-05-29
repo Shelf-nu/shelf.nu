@@ -1,7 +1,6 @@
-import type { ReactNode } from "react";
 import type { Asset, Custody, Kit, Note, Organization } from "@prisma/client";
 import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { useFetcher, useRouteLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -20,7 +19,6 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
-  deleteAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type {
@@ -35,14 +33,7 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
-import { requirePermission } from "~/utils/roles.server";
-import { deleteAssetImage } from "~/utils/storage.server";
 import { tw } from "~/utils/tw";
-
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
     .string()
@@ -118,6 +109,7 @@ export interface AssetType {
       src: string;
     };
   };
+  lastScan: any;
 }
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
@@ -161,7 +153,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function AssetOverview() {
   const data = useRouteLoaderData<AssetType>("routes/_layout+/assets.$assetId");
-  const { asset, locale, qrObj } = data ?? {};
+  const { asset, locale, qrObj, lastScan } = data ?? {};
 
   const customFieldsValues =
     asset && asset.customFields?.length > 0
@@ -263,7 +255,7 @@ export default function AssetOverview() {
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Value
                   </span>
-                  <div className="-ml-2 w-3/5">
+                  <div className="-ml-2 w-3/5 mb-2">
                     <Tag key={asset.valuation} className="ml-2">
                       <>
                         {asset.valuation.toLocaleString(locale, {
@@ -409,7 +401,7 @@ export default function AssetOverview() {
             </Card>
           ) : null}
           {asset && <AssetQR qrObj={qrObj} asset={asset} />}
-          {!isSelfService ? <ScanDetails /> : null}
+          {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
         </div>
       </div>
       <ContextualSidebar />
