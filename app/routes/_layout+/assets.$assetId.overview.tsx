@@ -129,34 +129,29 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
   try {
     const formData = await request.formData();
-
     const { intent } = parseData(
       formData,
       z.object({ intent: z.enum(["toggle"]) })
     );
 
-    switch (intent) {
-      case "toggle": {
-        const { availableToBook } = parseData(
-          formData,
-          AvailabilityForBookingFormSchema
-        );
+    if (intent === "toggle") {
+      const { availableToBook } = parseData(
+        formData,
+        AvailabilityForBookingFormSchema
+      );
 
-        await updateAssetBookingAvailability(id, availableToBook);
+      await updateAssetBookingAvailability(id, availableToBook);
 
-        sendNotification({
-          title: "Asset availability status updated successfully",
-          message: "Your asset's availability for booking has been updated",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return json(data(null));
-      }
-      default: {
-        checkExhaustiveSwitch(intent);
-        return json(data(null));
-      }
+      sendNotification({
+        title: "Asset availability status updated successfully",
+        message: "Your asset's availability for booking has been updated",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+      return json(data(null));
+    } else {
+      checkExhaustiveSwitch(intent);
+      return json(data(null));
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
