@@ -371,8 +371,12 @@ model Organization {
   image   Image?  @relation("orgImage", fields: [imageId], references: [id])
   imageId String? @unique
 
-  // members           TeamMember[]
-  // assets            Asset[]
+  // Not required. It will only be created for orgs that need sso
+  // We can know if an org has SSO by checking the ssoDetailsId
+  enabledSso Boolean @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
+  ssoDetailsId String?
+  ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
+
   locations         Location[]
   categories        Category[]
   tags              Tag[]
@@ -413,6 +417,19 @@ enum OrganizationRoles {
   TEAM_MEMBER
   OWNER
   SELF_SERVICE
+}
+
+model SsoDetails {
+  id String @id @default(cuid())
+  
+  // The domain of the organization
+  domain String @unique
+
+  organizations Organization[]
+
+  // Datetime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.

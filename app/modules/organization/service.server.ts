@@ -45,6 +45,19 @@ export const getOrganizationByUserId = async ({
   }
 };
 
+export const getOrganizationBySsoDomain = async (domain: string) =>
+  db.organization.findFirst({
+    // We dont throw as we need to handle the case where no organization is found for the domain in the app logic
+    where: {
+      ssoDetails: {
+        is: {
+          domain: domain,
+        },
+      },
+      type: "TEAM",
+    },
+  });
+
 export async function createOrganization({
   name,
   userId,

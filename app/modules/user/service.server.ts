@@ -29,6 +29,7 @@ import {
 import { randomUsernameFromEmail } from "~/utils/user";
 import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
+import { getOrganizationBySsoDomain } from "../organization/service.server";
 
 const label: ErrorLabel = "User";
 
@@ -172,6 +173,11 @@ export async function createUserFromSSO(
   try {
     const { email, userId } = authSession;
     const { firstName, lastName } = userData;
+    const domain = email.split("@")[1];
+    /** Find the Org related to the domain that the user is logging in via
+     * @TODO what do we do if we can't find one. Do we refuse the process?
+     */
+    const org = await getOrganizationBySsoDomain(domain);
 
     const user = await createUser({
       email,
@@ -180,6 +186,7 @@ export async function createUserFromSSO(
       userId,
       username: randomUsernameFromEmail(email),
       isSSO: true,
+      organizationId: org?.id || undefined,
     });
     return user;
   } catch (cause) {

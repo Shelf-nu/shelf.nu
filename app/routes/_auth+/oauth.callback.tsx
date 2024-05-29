@@ -45,17 +45,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
         const authSession = await refreshAccessToken(refreshToken);
 
         /**
-         * Cases we should handle:
+         * Cases to handle:
          * - [x] Auth Account & User exists in our database - we just login the user
          * - [x] Auth Account exists but User doesn't exist in our database - we create a new user connecting it to authUser and login the user
          * - [x] Auth Account(SSO version) doesn't exist but User exists in our database - We show an error as we dont allow SSO users to have an email based identity
-         * - [ ] Auth account exists but is not added to IDP
-         * - [ ] Auth account DOESN'T exist and is not added to IDP
-         * - [ ] User tries to reset password for a user that is only SSO
-         */
-
-        /**
-         * @TODO we need to make sure that the user from the callback is the same user we are trying to login
+         * - [x] Auth account exists but is not present in IDP - an employee gets removed from an app. This is handled by IDP
+         * - [x] Auth account DOESN'T exist and is not added to IDP - this is handled by IDP. They give an error if its not authenticated
+         * - [x] User tries to reset password for a user that is only SSO
+         * - [x] User tries to use normal login for a user that is only SSO - we Dont actually need to check that because SSO users will not habe a password they know. As long as we dont allow them to change pwd it should be fine.
          */
 
         /**
@@ -79,6 +76,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           /** We check if there is already a auth user with the same id of the user we found
            * If the user is already connected to an email account, we should throw an error
            * Because we dont allow SSO users to have an email based identity
+           * @TODO at this point we already have an SSO auth.user created. We need to delete them to keep the app clean.
            */
           const authUser = await getAuthUserById(user.id);
           if (authUser?.app_metadata?.provider === "email") {

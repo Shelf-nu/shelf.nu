@@ -1,5 +1,6 @@
 import { isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "server/session";
+import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
@@ -201,6 +202,20 @@ export async function sendResetPasswordLink(email: string) {
 
 export async function updateAccountPassword(id: string, password: string) {
   try {
+    const user = await db.user.findFirst({
+      where: { id },
+      select: {
+        sso: true,
+      },
+    });
+    if (user?.sso) {
+      throw new ShelfError({
+        cause: null,
+        message: "You cannot update the password of an SSO user.",
+        label,
+      });
+    }
+
     const { error } = await getSupabaseAdmin().auth.admin.updateUserById(id, {
       password,
     });
