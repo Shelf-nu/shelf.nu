@@ -1,5 +1,3 @@
-import fs from "fs/promises";
-import path from "path";
 import type {
   Asset,
   Booking,
@@ -35,9 +33,7 @@ export async function fetchAllPdfRelatedData(
   role: OrganizationRoles | undefined
 ): Promise<PdfDbResult> {
   const booking = await getBooking({ id: bookingId, organizationId });
-  if (!booking) {
-    throw new Error("Booking not found");
-  }
+
   if (
     role === OrganizationRoles.SELF_SERVICE &&
     booking.custodianUserId !== userId
@@ -50,6 +46,7 @@ export async function fetchAllPdfRelatedData(
       shouldBeCaptured: false,
     });
   }
+
   const [assets, organization] = await Promise.all([
     db.asset.findMany({
       where: {
@@ -134,46 +131,6 @@ export const getBookingAssetsCustomHeader = ({
         </div>
     `;
 };
-
-// export function getBookingPdfTemplateData({
-//   booking,
-//   assets,
-//   organization,
-//   assetIdToQrCodeMap,
-// }: PdfDbResult) {
-//   const orgImageBlob = organization?.image?.blob;
-//   const base64Image = orgImageBlob
-//     ? `data:image/png;base64,${orgImageBlob.toString("base64")}`
-//     : "";
-//   return {
-//     booking: `Booking Checklist for ${booking.name}`,
-//     name: booking.name ?? "",
-//     orgName: organization?.name ?? "",
-//     custodian: `${booking?.custodianUser?.firstName ?? ""} ${
-//       booking?.custodianUser?.lastName ?? ""
-//     } <${booking?.custodianUser?.email ?? ""}>`,
-//     bookingPeriod:
-//       booking?.from && booking?.to
-//         ? `${new Date(booking.from).toLocaleString()} - ${new Date(
-//             booking.to
-//           ).toLocaleString()}`
-//         : "",
-//     items: assets?.map((asset) => ({
-//       name: asset.title ?? "",
-//       category: asset?.category?.name ?? "",
-//       location: asset?.location ? asset?.location?.name ?? "" : "",
-//       code: assetIdToQrCodeMap.get(asset.id) || "",
-//       mainImage: asset?.mainImage || "",
-//     })),
-//     headerTemplate: getBookingAssetsCustomHeader(base64Image, booking.name),
-//   };
-// }
-
-// export async function getTemplatePath(template: string): Promise<string> {
-//   const templatePath = path.resolve(process.cwd(), template);
-//   const result = await fs.readFile(templatePath, "utf-8");
-//   return result;
-// }
 
 export async function generatePdfContent(
   htmlContent: string,

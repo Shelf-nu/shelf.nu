@@ -9,6 +9,7 @@ import {
   generatePdfContent,
   getBookingAssetsCustomHeader,
 } from "~/modules/booking/pdf-helpers";
+import { SERVER_URL } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 
 import { error, getParams } from "~/utils/http.server";
@@ -205,7 +206,10 @@ const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
                 >
                   {index + 1}
                   <img
-                    src={asset?.mainImage || ""}
+                    src={
+                      asset?.mainImage ||
+                      `${SERVER_URL}/static/images/asset-placeholder.jpg`
+                    }
                     alt="Asset"
                     style={styles.img}
                   />
