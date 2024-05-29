@@ -150,7 +150,7 @@ const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>((props, ref) => {
   const { data, title } = props ?? {};
   return (
     <div
-      className="flex w-full aspect-square flex-col justify-center gap-3 rounded border-[5px] border-[#E3E4E8] bg-white py-[17px]"
+      className="flex aspect-square w-full flex-col justify-center gap-3 rounded border-[5px] border-[#E3E4E8] bg-white py-[17px]"
       ref={ref}
     >
       <div className="max-w-full truncate text-center text-[12px] font-semibold text-black">
