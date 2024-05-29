@@ -600,7 +600,6 @@ model Booking {
   organizationId String
 
   assets Asset[]
-  kits   Kit[]
 
   // Datetime
   createdAt DateTime  @default(now()) @db.Timestamptz(3)
@@ -619,9 +618,8 @@ model Kit {
   image           String?
   imageExpiration DateTime?
 
-  assets   Asset[]
-  custody  KitCustody?
-  bookings Booking[]
+  assets  Asset[]
+  custody KitCustody?
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String
