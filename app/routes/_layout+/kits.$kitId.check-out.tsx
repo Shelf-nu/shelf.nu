@@ -48,6 +48,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     const kit = await getKit({
       id: kitId,
+      organizationId,
       extraInclude: {
         assets: { select: { status: true } },
       },
@@ -125,7 +126,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
+      entity: PermissionEntity.kit,
       action: PermissionAction.update,
     });
 
