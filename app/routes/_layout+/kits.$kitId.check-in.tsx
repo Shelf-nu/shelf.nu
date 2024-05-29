@@ -26,14 +26,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.update,
     });
 
-    const kit = await getKit({ id: kitId });
+    const kit = await getKit({ id: kitId, organizationId });
     if (!kit.custody) {
       return redirect(`/kits/${kitId}`);
     }
