@@ -57,7 +57,7 @@ export const AssetImage = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const classes = tw(
-    "size-full gap-[10px] rounded bg-gray-50 object-contain p-6"
+    "size-full gap-[10px] rounded bg-gray-50 object-contain md:p-6"
   );
   return (
     <>
