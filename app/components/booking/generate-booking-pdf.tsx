@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import { tw } from "~/utils/tw";
 import { Spinner } from "../shared/spinner";
 
 export const GenerateBookingPdf = ({
@@ -70,41 +71,44 @@ export const GenerateBookingPdf = ({
               Generate PDF...
             </Button>
           </AlertDialogTrigger>
-          <AlertDialogContent>
+          <AlertDialogContent className="flex h-[90vh] w-[90vw] max-w-[90vw] flex-col">
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Generate Booking Checklist PDF for {booking?.name}
+                Generate Booking Checklist PDF for "{booking?.name}"
               </AlertDialogTitle>
               <AlertDialogDescription>
                 {errorMessage || "You can either preview or download the PDF."}
-                {!iframeLoaded && (
-                  <div className="h-500 m-4 flex flex-1 flex-col items-center justify-center text-center">
-                    <Spinner />
-                    <p className="mt-2">Generating PDF...</p>
-                  </div>
-                )}
-                {totalAssets && (
-                  <div style={{ display: iframeLoaded ? "block" : "none" }}>
-                    <iframe
-                      id="pdfPreview"
-                      width="100%"
-                      height="500px"
-                      onLoad={handleIframeLoad}
-                      className="mt-4"
-                      src={url}
-                      title="Booking PDF"
-                      allowFullScreen={true}
-                    />
-                  </div>
-                )}
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <AlertDialogFooter>
-              <div className="flex justify-center gap-2">
-                <AlertDialogCancel asChild>
-                  <Button variant="secondary">Cancel</Button>
-                </AlertDialogCancel>
-              </div>
+            <div className="grow">
+              {/** Show spinner if no iframe */}
+              {!iframeLoaded && (
+                <div className="m-4  flex h-full flex-1 flex-col items-center justify-center text-center">
+                  <Spinner />
+                  <p className="mt-2">Generating PDF...</p>
+                </div>
+              )}
+              {totalAssets && (
+                <div
+                  className={tw(iframeLoaded ? "block" : "hidden", "h-full")}
+                >
+                  <iframe
+                    id="pdfPreview"
+                    width="100%"
+                    height="100%"
+                    onLoad={handleIframeLoad}
+                    className="mt-4"
+                    src={url}
+                    title="Booking PDF"
+                    allowFullScreen={true}
+                  />
+                </div>
+              )}
+            </div>
+            <AlertDialogFooter className="mt-4">
+              <AlertDialogCancel asChild>
+                <Button variant="secondary">Cancel</Button>
+              </AlertDialogCancel>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
