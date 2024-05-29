@@ -70,8 +70,8 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
     content: () => captureDivRef.current,
   });
   return (
-    <div className="">
-      <div className="mb-4 flex w-auto justify-center rounded border border-solid bg-white p-6">
+    <div className="w-full">
+      <div className="mb-4 flex w-full justify-center rounded border border-solid bg-white p-6">
         <QrLabel ref={captureDivRef} data={qrObj} title={asset.title} />
       </div>
       <ul className="description-list">
@@ -150,7 +150,7 @@ const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>((props, ref) => {
   const { data, title } = props ?? {};
   return (
     <div
-      className="flex aspect-square w-full flex-col justify-center gap-3 rounded border-[5px] border-[#E3E4E8] bg-white py-[17px]"
+      className="flex aspect-square w-[350px] flex-col justify-center gap-3 rounded border-[5px] border-[#E3E4E8] bg-white py-[17px]"
       ref={ref}
     >
       <div className="max-w-full truncate text-center text-[12px] font-semibold text-black">
