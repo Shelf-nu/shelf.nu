@@ -31,11 +31,11 @@ export const Dialog = ({
 
   return open ? (
     <div className="dialog-backdrop" onClick={handleBackdropClose}>
-      <dialog className="dialog md:w-[90%] w-full" open={true}>
+      <dialog className="dialog w-full md:w-[90%]" open={true}>
         <div
           className={tw(
-            "relative z-10  bg-white pt-4 shadow-lg md:max-h-[85vh] md:rounded h-full",
-            noScroll ? "md:h-[90vh]" : "md:overflow-y-auto h-full"
+            "relative z-10  h-full bg-white pt-4 shadow-lg md:max-h-[85vh] md:rounded",
+            noScroll ? "md:h-[90vh]" : "h-full md:overflow-y-auto"
           )}
         >
           <div className="flex h-[10%] justify-between px-6">
@@ -59,12 +59,12 @@ export const Dialog = ({
           <div className="flex h-4/5 items-center justify-center border-y-2 border-gray-200">
             {children}
           </div>
-          <div className="flex w-full h-[10%] justify-center md:justify-end gap-3 px-6 py-3">
+          <div className="flex h-[10%] w-full justify-center gap-3 px-6 py-3 md:justify-end">
             <div className="flex w-1/2 items-center justify-center rounded border border-gray-300 px-4 py-2 md:w-[10%]">
               <Button
                 to={prevRoute}
                 variant="link"
-                className={"leading-none text-gray-500 text-center md:right-6"}
+                className={"text-center leading-none text-gray-500 md:right-6"}
                 onClick={onClose}
               >
                 Edit image(s)
