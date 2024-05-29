@@ -95,10 +95,15 @@ export async function fetchAllPdfRelatedData(
   };
 }
 
-const getBookingAssetsCustomHeader = (
-  base64Image?: string,
-  bookName?: string
-) => `
+export const getBookingAssetsCustomHeader = ({
+  organization,
+  booking,
+}: PdfDbResult) => {
+  const orgImageBlob = organization?.image?.blob;
+  const base64Image = orgImageBlob
+    ? `data:image/png;base64,${orgImageBlob.toString("base64")}`
+    : "";
+  return `
         <style>
             .header {
                 font-size: 10px;
@@ -124,50 +129,51 @@ const getBookingAssetsCustomHeader = (
         <div class="header">
             <img src="${base64Image}" alt="logo">
             <span class="text">${
-              bookName || ""
+              booking?.name || ""
             } | <span class="date"></span> | Page <span class="pageNumber"></span>/<span class="totalPages"></span></span>
         </div>
     `;
+};
 
-export function getBookingPdfTemplateData({
-  booking,
-  assets,
-  organization,
-  assetIdToQrCodeMap,
-}: PdfDbResult) {
-  const orgImageBlob = organization?.image?.blob;
-  const base64Image = orgImageBlob
-    ? `data:image/png;base64,${orgImageBlob.toString("base64")}`
-    : "";
-  return {
-    booking: `Booking Checklist for ${booking.name}`,
-    name: booking.name ?? "",
-    orgName: organization?.name ?? "",
-    custodian: `${booking?.custodianUser?.firstName ?? ""} ${
-      booking?.custodianUser?.lastName ?? ""
-    } <${booking?.custodianUser?.email ?? ""}>`,
-    bookingPeriod:
-      booking?.from && booking?.to
-        ? `${new Date(booking.from).toLocaleString()} - ${new Date(
-            booking.to
-          ).toLocaleString()}`
-        : "",
-    items: assets?.map((asset) => ({
-      name: asset.title ?? "",
-      category: asset?.category?.name ?? "",
-      location: asset?.location ? asset?.location?.name ?? "" : "",
-      code: assetIdToQrCodeMap.get(asset.id) || "",
-      mainImage: asset?.mainImage || "",
-    })),
-    headerTemplate: getBookingAssetsCustomHeader(base64Image, booking.name),
-  };
-}
+// export function getBookingPdfTemplateData({
+//   booking,
+//   assets,
+//   organization,
+//   assetIdToQrCodeMap,
+// }: PdfDbResult) {
+//   const orgImageBlob = organization?.image?.blob;
+//   const base64Image = orgImageBlob
+//     ? `data:image/png;base64,${orgImageBlob.toString("base64")}`
+//     : "";
+//   return {
+//     booking: `Booking Checklist for ${booking.name}`,
+//     name: booking.name ?? "",
+//     orgName: organization?.name ?? "",
+//     custodian: `${booking?.custodianUser?.firstName ?? ""} ${
+//       booking?.custodianUser?.lastName ?? ""
+//     } <${booking?.custodianUser?.email ?? ""}>`,
+//     bookingPeriod:
+//       booking?.from && booking?.to
+//         ? `${new Date(booking.from).toLocaleString()} - ${new Date(
+//             booking.to
+//           ).toLocaleString()}`
+//         : "",
+//     items: assets?.map((asset) => ({
+//       name: asset.title ?? "",
+//       category: asset?.category?.name ?? "",
+//       location: asset?.location ? asset?.location?.name ?? "" : "",
+//       code: assetIdToQrCodeMap.get(asset.id) || "",
+//       mainImage: asset?.mainImage || "",
+//     })),
+//     headerTemplate: getBookingAssetsCustomHeader(base64Image, booking.name),
+//   };
+// }
 
-export async function getTemplatePath(template: string): Promise<string> {
-  const templatePath = path.resolve(process.cwd(), template);
-  const result = await fs.readFile(templatePath, "utf-8");
-  return result;
-}
+// export async function getTemplatePath(template: string): Promise<string> {
+//   const templatePath = path.resolve(process.cwd(), template);
+//   const result = await fs.readFile(templatePath, "utf-8");
+//   return result;
+// }
 
 export async function generatePdfContent(
   htmlContent: string,
