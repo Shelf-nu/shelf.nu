@@ -76,8 +76,7 @@ export const GenerateBookingPdf = ({
                 Generate Booking Checklist PDF for {booking?.name}
               </AlertDialogTitle>
               <AlertDialogDescription>
-                {errorMessage ||
-                  "You can either preview or download the PDF."}
+                {errorMessage || "You can either preview or download the PDF."}
                 {!iframeLoaded && (
                   <div className="h-500 m-4 flex flex-1 flex-col items-center justify-center text-center">
                     <Spinner />

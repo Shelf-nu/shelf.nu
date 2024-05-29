@@ -455,13 +455,15 @@ export async function getQrCodeMaps({
     const qrCodePromises = assets.map(async (asset) => {
       try {
         let qr = await getQrByAssetId({ assetId: asset.id });
-        const qrCode = qr ? await generateCode({
-          version: qr.version as TypeNumber,
-          errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
-          size,
-          qr,
-        }): null;
-        if (qrCode?.code){
+        const qrCode = qr
+          ? await generateCode({
+              version: qr.version as TypeNumber,
+              errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
+              size,
+              qr,
+            })
+          : null;
+        if (qrCode?.code) {
           finalMap.set(asset.id, qrCode?.code?.src || "");
         }
       } catch (error) {

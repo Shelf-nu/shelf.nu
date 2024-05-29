@@ -97,7 +97,8 @@ export async function fetchAllPdfRelatedData(
 
 const getBookingAssetsCustomHeader = (
   base64Image?: string,
-  bookName?: string) => `
+  bookName?: string
+) => `
         <style>
             .header {
                 font-size: 10px;
