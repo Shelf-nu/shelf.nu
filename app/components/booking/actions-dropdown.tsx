@@ -47,7 +47,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
       <DropdownMenuPortal>
         <DropdownMenuContent
           align="end"
-          className="order w-[180px] rounded-md bg-white p-1.5 text-right "
+          className="order w-[220px] rounded-md bg-white p-1.5 text-right "
         >
           {isOngoing || isReserved || isOverdue ? (
             <DropdownMenuItem asChild>
@@ -107,7 +107,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
             <DeleteBooking booking={booking} />
           ) : null}
           <Divider className="my-2" />
-          {<GenerateBookingPdf booking={booking} />}
+          <GenerateBookingPdf booking={booking} />
         </DropdownMenuContent>
       </DropdownMenuPortal>
     </DropdownMenu>
