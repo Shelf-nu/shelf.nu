@@ -1,9 +1,9 @@
+import type { ReactNode } from "react";
 import { Button } from "~/components/shared/button";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
 import { HelpIcon } from "../icons/library";
 import { InfoTooltip } from "../shared/info-tooltip";
-import { ReactNode } from "react";
 
 export interface lastScanType {
   lastScan?: {
@@ -13,19 +13,19 @@ export interface lastScanType {
       device: {
         model: string;
         vendor: string;
-      },
+      };
       browser: {
         name: string;
-      },
+      };
       os: {
         name: string;
-      }
-    }
+      };
+    };
     manuallyGenerated: boolean;
-  }
+  };
 }
 
-export function ScanDetails({lastScan}: lastScanType) {
+export function ScanDetails({ lastScan }: lastScanType) {
   let latitude, longitude;
 
   const hasLocation = lastScan?.coordinates !== "Unknown location";

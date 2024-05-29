@@ -18,9 +18,7 @@ import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import {
-  updateAssetBookingAvailability,
-} from "~/modules/asset/service.server";
+import { updateAssetBookingAvailability } from "~/modules/asset/service.server";
 import type {
   AssetCustomFieldsValuesWithFields,
   ShelfAssetCustomFieldValueType,
@@ -255,7 +253,7 @@ export default function AssetOverview() {
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Value
                   </span>
-                  <div className="-ml-2 w-3/5 mb-2">
+                  <div className="-ml-2 mb-2 w-3/5">
                     <Tag key={asset.valuation} className="ml-2">
                       <>
                         {asset.valuation.toLocaleString(locale, {
