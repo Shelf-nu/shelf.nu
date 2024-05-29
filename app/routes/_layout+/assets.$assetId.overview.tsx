@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import type { Asset, Custody, Kit, Note, Organization } from "@prisma/client";
-import type { MetaFunction } from "@remix-run/node";
+import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import {
   useFetcher,
-  useOutletContext,
   useRouteLoaderData,
 } from "@remix-run/react";
+import { makeShelfError } from "~/utils/error";
+import { redirect } from "@remix-run/node";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import AssetQR from "~/components/assets/asset-qr";
@@ -15,7 +17,18 @@ import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import { ScanDetails } from "~/components/location/scan-details";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
+import {
+  error,
+  getParams,
+  data,
+  parseData,
+} from "~/utils/http.server";
+import {
+  deleteAsset,
+  updateAssetBookingAvailability,
+} from "~/modules/asset/service.server";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
@@ -27,13 +40,17 @@ import type {
   AssetCustomFieldsValuesWithFields,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
-
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
-import { data } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
 import { tw } from "~/utils/tw";
+import { deleteAssetImage } from "~/utils/storage.server";
 
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
@@ -110,6 +127,50 @@ export interface AssetType {
       src: string;
     };
   };
+}
+
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+  const { assetId: id } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    const formData = await request.formData();
+
+    const { intent } = parseData(
+      formData,
+      z.object({ intent: z.enum(["toggle"]) })
+    );
+
+    switch (intent) {
+      case "toggle": {
+        const { availableToBook } = parseData(
+          formData,
+          AvailabilityForBookingFormSchema
+        );
+
+        await updateAssetBookingAvailability(id, availableToBook);
+
+        sendNotification({
+          title: "Asset availability status updated successfully",
+          message: "Your asset's availability for booking has been updated",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data(null));
+      }
+      default: {
+        checkExhaustiveSwitch(intent);
+        return json(data(null));
+      }
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    return json(error(reason), { status: reason.status });
+  }
 }
 
 export default function AssetOverview() {
