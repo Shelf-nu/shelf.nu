@@ -269,7 +269,7 @@ export const links: LinksFunction = () => [
 ];
 
 export default function AssetDetailsPage() {
-  const data = useLoaderData<typeof loader>();
+  const { asset } = useLoaderData<typeof loader>();
   let items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
@@ -285,22 +285,23 @@ export default function AssetDetailsPage() {
           "left-of-title": (
             <AssetImage
               asset={{
-                assetId: data.asset.id,
-                mainImage: data.asset.mainImage,
-                mainImageExpiration: data.asset.mainImageExpiration,
-                alt: data.asset.title,
+                assetId: asset.id,
+                mainImage: asset.mainImage,
+                mainImageExpiration: asset.mainImageExpiration,
+                alt: asset.title,
               }}
               className={tw(
                 "mr-4 size-[56px] cursor-pointer rounded border object-cover"
               )}
+              withPreview
             />
           ),
         }}
         subHeading={
           <div className="flex gap-2">
             <AssetStatusBadge
-              status={data.asset.status}
-              availableToBook={data.asset.availableToBook}
+              status={asset.status}
+              availableToBook={asset.availableToBook}
             />
           </div>
         }
