@@ -1,14 +1,8 @@
 import type { ReactNode } from "react";
 import type { Asset, Custody, Kit, Note, Organization } from "@prisma/client";
 import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import {
-  useFetcher,
-  useRouteLoaderData,
-} from "@remix-run/react";
-import { makeShelfError } from "~/utils/error";
-import { redirect } from "@remix-run/node";
-import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { json, redirect } from "@remix-run/node";
+import { useFetcher, useRouteLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import AssetQR from "~/components/assets/asset-qr";
@@ -17,18 +11,7 @@ import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import { ScanDetails } from "~/components/location/scan-details";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
 
-import {
-  error,
-  getParams,
-  data,
-  parseData,
-} from "~/utils/http.server";
-import {
-  deleteAsset,
-  updateAssetBookingAvailability,
-} from "~/modules/asset/service.server";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
@@ -36,21 +19,29 @@ import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import {
+  deleteAsset,
+  updateAssetBookingAvailability,
+} from "~/modules/asset/service.server";
 import type {
   AssetCustomFieldsValuesWithFields,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { error, getParams, data, parseData } from "~/utils/http.server";
+import { isLink } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
-import { isFormProcessing } from "~/utils/form";
-import { isLink } from "~/utils/misc";
-import { tw } from "~/utils/tw";
 import { deleteAssetImage } from "~/utils/storage.server";
+import { tw } from "~/utils/tw";
 
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
@@ -108,7 +99,7 @@ export interface AssetType {
     custody: {
       custodian: {
         name: string;
-      }
+      };
       dateDisplay: Date;
       createdAt: Custody["createdAt"];
     };
