@@ -19,7 +19,10 @@ import {
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
-import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
+import {
+  bookingsSelectedAssetsAtom,
+  bookingsSelectedKitsAtom,
+} from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import GroupedByKitAssets from "~/components/assets/grouped-by-kit-assets";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
@@ -32,6 +35,7 @@ import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 
 import { Spinner } from "~/components/shared/spinner";
@@ -227,7 +231,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToNewBooking() {
-  const { booking, header } = useLoaderData<typeof loader>();
+  const { booking, header, items } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -243,10 +247,22 @@ export default function AddAssetsToNewBooking() {
     bookingsSelectedAssetsAtom
   );
 
+  const [selectedKits, setSelectedKits] = useAtom(bookingsSelectedKitsAtom);
+
   const removedAssetIds = useMemo(
     () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
     [bookingAssetsIds, selectedAssets]
   );
+
+  const selectedItems = items.filter((item) =>
+    selectedAssets.includes(item.id)
+  );
+
+  const totalAssetsSelected =
+    selectedTab === "assets"
+      ? selectedItems.filter((i) => !i.kitId).length
+      : booking.assets.filter((a) => !a.kitId).length;
+  const totalKitsSelected = selectedKits.length;
 
   /**
    * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per booking
@@ -256,6 +272,14 @@ export default function AddAssetsToNewBooking() {
    */
   useEffect(() => {
     setSelectedAssets(bookingAssetsIds);
+
+    // selected kits in booking
+    const kitIds = booking.assets
+      .filter((a) => !!a.kitId)
+      .map((a) => a.kitId) as unknown as string[];
+    const uniqKitIds = new Set(kitIds);
+
+    setSelectedKits([...uniqKitIds]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking.id]);
 
@@ -278,11 +302,17 @@ export default function AddAssetsToNewBooking() {
 
       <div className="border-b px-6 py-2">
         <TabsList className="w-full">
-          <TabsTrigger className="flex-1" value="assets">
-            Assets
+          <TabsTrigger className="flex-1 gap-x-2" value="assets">
+            Assets{" "}
+            {totalAssetsSelected > 0 ? (
+              <GrayBadge>{totalAssetsSelected}</GrayBadge>
+            ) : null}
           </TabsTrigger>
           <TabsTrigger className="flex-1 gap-x-2" value="kits">
             Kits
+            {totalKitsSelected ? (
+              <GrayBadge>{totalKitsSelected}</GrayBadge>
+            ) : null}
           </TabsTrigger>
         </TabsList>
       </div>

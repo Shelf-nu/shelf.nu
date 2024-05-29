@@ -1,7 +1,10 @@
 import type { Kit } from "@prisma/client";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
-import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
+import {
+  bookingsSelectedAssetsAtom,
+  bookingsSelectedKitsAtom,
+} from "~/atoms/selected-assets-atoms";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -33,7 +36,35 @@ export default function GroupedByKitAssets({
     bookingsSelectedAssetsAtom
   );
 
+  const [, setSelectedKits] = useAtom(bookingsSelectedKitsAtom);
+
   const groupedItems = groupBy(items ?? [], (item) => item?.kit?.id);
+
+  function handleKitAndAssetSelection({
+    isKitSelected,
+    assetIds,
+    kitId,
+  }: {
+    isKitSelected: boolean;
+    kitId: string;
+    assetIds: string[];
+  }) {
+    /** Handling selection of asset for booking */
+    setSelectedAssets((prevSelected) => {
+      if (isKitSelected) {
+        return prevSelected.filter((asset) => !assetIds.includes(asset));
+      }
+
+      return [...prevSelected, ...assetIds];
+    });
+
+    /** Handling selection of kit for booking (so that we can show the count asset and kits)  */
+    setSelectedKits((prevSelected) =>
+      prevSelected.includes(kitId)
+        ? prevSelected.filter((id) => id !== kitId)
+        : [...prevSelected, kitId]
+    );
+  }
 
   if (isLoading && !navigation?.formAction) {
     return (
@@ -83,14 +114,10 @@ export default function GroupedByKitAssets({
                         return;
                       }
 
-                      setSelectedAssets((prevSelected) => {
-                        if (isKitSelected) {
-                          return prevSelected.filter(
-                            (asset) => !assetIds.includes(asset)
-                          );
-                        }
-
-                        return [...prevSelected, ...assetIds];
+                      handleKitAndAssetSelection({
+                        isKitSelected,
+                        kitId: kit.id,
+                        assetIds,
                       });
                     }}
                   >

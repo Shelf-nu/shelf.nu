@@ -757,7 +757,12 @@ export async function getBooking(
       include: {
         ...commonInclude,
         assets: {
-          select: { id: true, availableToBook: true, status: true },
+          select: {
+            id: true,
+            availableToBook: true,
+            status: true,
+            kitId: true,
+          },
         },
       },
     });
