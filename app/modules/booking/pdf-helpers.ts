@@ -11,6 +11,7 @@ import type {
 import { OrganizationRoles } from "@prisma/client";
 import puppeteer from "puppeteer";
 import { db } from "~/database/db.server";
+import { CHROME_EXECUTABLE_PATH } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { getBooking } from "./service.server";
 import { getQrCodeMaps } from "../qr/service.server";
@@ -137,7 +138,9 @@ export async function generatePdfContent(
   headerTemplate?: string,
   styles?: Record<string, string>
 ) {
-  const browser = await puppeteer.launch();
+  const browser = await puppeteer.launch({
+    executablePath: CHROME_EXECUTABLE_PATH || "/usr/bin/google-chrome-stable",
+  });
   const newPage = await browser.newPage();
   await newPage.setContent(htmlContent, { waitUntil: "networkidle0" });
 

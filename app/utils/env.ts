@@ -13,6 +13,7 @@ declare global {
       CRISP_WEBSITE_ID: string;
       ENABLE_PREMIUM_FEATURES: string;
       MAINTENANCE_MODE: string;
+      CHROME_EXECUTABLE_PATH: string;
     };
   }
 }
@@ -45,6 +46,7 @@ declare global {
       ADMIN_EMAIL: string;
       ADMIN_PASSWORD: string;
       ADMIN_USERNAME: string;
+      CHROME_EXECUTABLE_PATH: string;
     }
   }
 }
@@ -180,6 +182,11 @@ export const SEND_ONBOARDING_EMAIL =
     isRequired: false,
   }) === "true" || false;
 
+export const CHROME_EXECUTABLE_PATH = getEnv("CHROME_EXECUTABLE_PATH", {
+  isSecret: false,
+  isRequired: true,
+});
+
 export function getBrowserEnv() {
   return {
     NODE_ENV,
@@ -190,5 +197,6 @@ export function getBrowserEnv() {
     MICROSOFT_CLARITY_ID,
     ENABLE_PREMIUM_FEATURES,
     MAINTENANCE_MODE,
+    CHROME_EXECUTABLE_PATH,
   };
 }
