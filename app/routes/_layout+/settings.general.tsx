@@ -1,4 +1,3 @@
-import type { $Enums } from "@prisma/client";
 import { OrganizationType, Currency } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -139,6 +138,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization.organization.owner.tier.tierLimit
         ),
         user,
+        curriences: Object.keys(Currency)
       })
     );
   } catch (cause) {
@@ -208,7 +208,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function GeneralPage() {
-  const { currentOrganization, user, canExportAssets } =
+  const { currentOrganization, user, canExportAssets, curriences} =
     useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", EditWorkspaceFormSchema);
@@ -336,10 +336,10 @@ export default function GeneralPage() {
                 align="start"
               >
                 <div className=" max-h-[320px] overflow-auto">
-                  {Object.keys(Currency).map((value) => (
+                  {curriences.map((value) => (
                     <SelectItem value={value} key={value}>
                       <span className="mr-4 text-[14px] text-gray-700">
-                        {Currency[value as $Enums.Currency]}
+                        {value}
                       </span>
                     </SelectItem>
                   ))}
