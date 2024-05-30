@@ -23,6 +23,7 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -349,16 +350,22 @@ export default function KitDetails() {
         <div className="w-full lg:ml-6">
           <TextualDivider text="Assets" className="mb-8 lg:hidden" />
           <div className="mb-3 flex gap-4 lg:hidden">
-            {canManageAssets ? (
-              <Button
-                as="button"
-                to="add-assets"
-                variant="primary"
-                icon="plus"
-                width="full"
-              >
-                Manage assets
-              </Button>
+            {!isSelfService ? (
+              <ControlledActionButton
+                canUseFeature={canManageAssets}
+                buttonContent={{
+                  title: "Manage assets",
+                  message:
+                    "You are not allowed to manage assets for this kit because its part of an ongoing booking.",
+                }}
+                buttonProps={{
+                  as: "button",
+                  to: "manage-assets",
+                  variant: "primary",
+                  icon: "plus",
+                  width: "full",
+                }}
+              />
             ) : null}
             <div className="w-full">
               <ActionsDropdown fullWidth />
@@ -367,18 +374,25 @@ export default function KitDetails() {
 
           <div className="flex flex-col md:gap-2">
             <Filters className="responsive-filters mb-2 lg:mb-0">
-              {canManageAssets ? (
+              {!isSelfService ? (
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
-                    <Button
-                      as="button"
-                      to="manage-assets"
-                      variant="primary"
-                      icon="plus"
-                      className="whitespace-nowrap"
-                    >
-                      Manage assets
-                    </Button>
+                    <ControlledActionButton
+                      canUseFeature={canManageAssets}
+                      buttonContent={{
+                        title: "Manage assets",
+                        message:
+                          "You are not allowed to manage assets for this kit because its part of an ongoing booking.",
+                      }}
+                      buttonProps={{
+                        as: "button",
+                        to: "manage-assets",
+                        variant: "primary",
+                        icon: "plus",
+                        width: "full",
+                        className: "whitespace-nowrap",
+                      }}
+                    />
                   </div>
                 </div>
               ) : null}

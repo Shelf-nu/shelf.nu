@@ -305,13 +305,17 @@ export default function AddAssetsToNewBooking() {
           <TabsTrigger className="flex-1 gap-x-2" value="assets">
             Assets{" "}
             {totalAssetsSelected > 0 ? (
-              <GrayBadge>{totalAssetsSelected}</GrayBadge>
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {totalAssetsSelected}
+              </GrayBadge>
             ) : null}
           </TabsTrigger>
           <TabsTrigger className="flex-1 gap-x-2" value="kits">
             Kits
             {totalKitsSelected ? (
-              <GrayBadge>{totalKitsSelected}</GrayBadge>
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {totalKitsSelected}
+              </GrayBadge>
             ) : null}
           </TabsTrigger>
         </TabsList>

@@ -182,7 +182,7 @@ export function BookingAssetsColumn() {
                     })}
                   </tbody>
                 </Table>
-                <Pagination />
+                <Pagination className="border-b" />
               </>
             )}
           </div>

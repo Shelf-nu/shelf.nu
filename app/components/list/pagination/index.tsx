@@ -9,7 +9,7 @@ import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import PerPageItemsSelect from "./per-page-items-select";
 
-export const Pagination = () => {
+export const Pagination = ({ className }: { className?: string }) => {
   const { modelName } = useLoaderData<IndexResponse>();
   const {
     page,
@@ -22,7 +22,12 @@ export const Pagination = () => {
   } = usePagination();
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-3 px-6 pb-4 pt-3">
+    <div
+      className={tw(
+        "flex flex-wrap items-center justify-center gap-3 px-6 pb-4 pt-3",
+        className
+      )}
+    >
       <div className="inline-flex items-center rounded border border-gray-300 shadow-[0px_1px_2px_0px_rgba(16,24,40,0.05)]">
         <Button
           variant="secondary"
