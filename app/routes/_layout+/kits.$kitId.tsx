@@ -73,6 +73,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const [kit, assets] = await Promise.all([
       getKit({
         id: kitId,
+        organizationId,
         extraInclude: {
           assets: {
             select: {
@@ -363,7 +364,7 @@ export default function KitDetails() {
 
           <div className="flex flex-col md:gap-2">
             <Filters className="responsive-filters mb-2 lg:mb-0">
-              {canManageAssets ? (
+              {canManageAssets && !isSelfService && (
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
                     <Button
@@ -377,15 +378,15 @@ export default function KitDetails() {
                     </Button>
                   </div>
                 </div>
-              ) : null}
+              )}
             </Filters>
             <List
               ItemComponent={ListContent}
               customEmptyStateContent={{
                 title: "Not assets in kit",
-                text: "Start by adding your first asset.",
-                newButtonContent: "Manage assets",
-                newButtonRoute: "manage-assets",
+                text: !isSelfService ? "Start by adding your first asset." : "",
+                newButtonContent: !isSelfService ? "Manage assets" : undefined,
+                newButtonRoute: !isSelfService ? "manage-assets" : undefined,
               }}
               headerChildren={
                 <>
@@ -416,6 +417,7 @@ function ListContent({
   const { id, mainImage, mainImageExpiration, title, location, category } =
     item;
 
+  const isSelfService = useUserIsSelfService();
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -483,10 +485,11 @@ function ListContent({
           </GrayBadge>
         ) : null}
       </Td>
-
-      <Td className="pr-4 text-right">
-        <AssetRowActionsDropdown asset={item} />
-      </Td>
+      {!isSelfService && (
+        <Td className="pr-4 text-right">
+          <AssetRowActionsDropdown asset={item} />
+        </Td>
+      )}
     </>
   );
 }

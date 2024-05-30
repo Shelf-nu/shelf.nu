@@ -9,8 +9,8 @@ export interface CustomEmptyState {
   customContent?: {
     title: string;
     text: string;
-    newButtonRoute: string;
-    newButtonContent: string;
+    newButtonRoute?: string;
+    newButtonContent?: string;
     buttonProps?: any;
   };
   modelName?: {
@@ -74,18 +74,22 @@ export const EmptyState = ({
             Clear Search
           </ClearSearch>
         )}
-        <Button
-          to={
-            customContent?.newButtonRoute ? customContent.newButtonRoute : "new"
-          }
-          aria-label={`new ${singular}`}
-          icon="plus"
-          {...(customContent?.buttonProps || undefined)}
-        >
-          {customContent?.newButtonContent
-            ? customContent.newButtonContent
-            : `New ${singular}`}
-        </Button>
+        {customContent?.newButtonRoute && (
+          <Button
+            to={
+              customContent?.newButtonRoute
+                ? customContent.newButtonRoute
+                : "new"
+            }
+            aria-label={`new ${singular}`}
+            icon="plus"
+            {...(customContent?.buttonProps || undefined)}
+          >
+            {customContent?.newButtonContent
+              ? customContent.newButtonContent
+              : `New ${singular}`}
+          </Button>
+        )}
       </div>
     </div>
   );
