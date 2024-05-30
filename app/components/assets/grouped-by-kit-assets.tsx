@@ -32,11 +32,9 @@ export default function GroupedByKitAssets({
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const [selectedAssets, setSelectedAssets] = useAtom(
-    bookingsSelectedAssetsAtom
-  );
+  const [, setSelectedAssets] = useAtom(bookingsSelectedAssetsAtom);
 
-  const [, setSelectedKits] = useAtom(bookingsSelectedKitsAtom);
+  const [selectedKits, setSelectedKits] = useAtom(bookingsSelectedKitsAtom);
 
   const groupedItems = groupBy(items ?? [], (item) => item?.kit?.id);
 
@@ -99,18 +97,28 @@ export default function GroupedByKitAssets({
             <tbody>
               {Object.values(groupedItems).map((assets) => {
                 const kit = assets[0].kit as Kit;
-                const assetIds = assets.map((a) => a.id);
+                if (!kit) {
+                  return null;
+                }
 
-                const isKitSelected =
-                  selectedAssets.length > 0 &&
-                  assetIds.every((asset) => selectedAssets.includes(asset));
+                const assetNotAvailable = assets.some(
+                  (a) => a.status !== "AVAILABLE"
+                );
+                const assetHasUnavailableBooking = assets.some((a) =>
+                  a.bookings.some((b: any) => b.status !== "DRAFT")
+                );
+                const isKitNotAvailable =
+                  assetNotAvailable || assetHasUnavailableBooking;
+
+                const assetIds = assets.map((a) => a.id);
+                const isKitSelected = selectedKits.includes(kit.id);
 
                 return (
                   <ListItem
                     item={kit}
                     key={kit.id}
                     navigate={() => {
-                      if (kit.status !== "AVAILABLE") {
+                      if (isKitNotAvailable) {
                         return;
                       }
 
@@ -148,7 +156,7 @@ export default function GroupedByKitAssets({
                     </Td>
 
                     <Td>
-                      {kit.status !== "AVAILABLE" ? (
+                      {isKitNotAvailable ? (
                         <AvailabilityBadge
                           badgeText="Includes unavailable assets"
                           tooltipTitle="Includes asset(s) that are unavailable for bookings"
@@ -161,7 +169,7 @@ export default function GroupedByKitAssets({
                       <FakeCheckbox
                         className={tw(
                           "text-white",
-                          kit.status !== "AVAILABLE" ? "text-gray-100" : "",
+                          isKitNotAvailable ? "text-gray-100" : "",
                           isKitSelected ? "text-primary" : ""
                         )}
                         checked={isKitSelected}

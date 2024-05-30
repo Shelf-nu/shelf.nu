@@ -303,8 +303,8 @@ async function getAssetsFromView(params: {
      * If user has selected the kits tab,
      * then we have to filter for assets which belongs to a kit
      */
-    if (tab === "kits" && where.asset) {
-      where.asset.kit = { isNot: null };
+    if (hideUnavailable === true && tab === "kits" && where.asset) {
+      where.asset.kit = { assets: { every: { status: "AVAILABLE" } } };
     } else if (hideUnavailable === true && tab === "assets" && where.asset) {
       where.asset.kit = null;
     }
@@ -530,9 +530,9 @@ async function getAssets(params: {
      * If user has selected the kits tab,
      * then we have to filter for assets which belongs to a kit
      */
-    if (tab === "kits") {
-      where.kit = { isNot: null };
-    } else if (tab === "assets") {
+    if ((hideUnavailable === true && tab) === "kits") {
+      where.kit = { assets: { every: { status: "AVAILABLE" } } };
+    } else if (hideUnavailable === true && tab === "assets") {
       where.kit = null;
     }
 
