@@ -56,6 +56,9 @@ export const getOrganizationBySsoDomain = async (domain: string) =>
       },
       type: "TEAM",
     },
+    include: {
+      ssoDetails: true,
+    },
   });
 
 export async function createOrganization({

@@ -71,6 +71,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
         },
+        include: {
+          ssoDetails: true,
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -173,7 +176,6 @@ export default function WorkspaceEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "Untitled workspace";
   const { organization } = useLoaderData<typeof loader>();
-
   return (
     <>
       <Header
@@ -186,6 +188,7 @@ export default function WorkspaceEditPage() {
           name={organization.name || name}
           currency={organization.currency}
         />
+        {organization.ssoDetails && <div>{organization.ssoDetails.domain}</div>}
       </div>
     </>
   );

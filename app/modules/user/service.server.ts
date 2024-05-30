@@ -174,11 +174,11 @@ export async function createUserFromSSO(
     const { email, userId } = authSession;
     const { firstName, lastName } = userData;
     const domain = email.split("@")[1];
-    /** Find the Org related to the domain that the user is logging in via
-     * @TODO what do we do if we can't find one. Do we refuse the process?
-     */
-    const org = await getOrganizationBySsoDomain(domain);
 
+    const org = await getOrganizationBySsoDomain(domain);
+    /**
+     * @TODO we should skip creating personal org for SSO users
+     */
     const user = await createUser({
       email,
       firstName,
@@ -186,9 +186,12 @@ export async function createUserFromSSO(
       userId,
       username: randomUsernameFromEmail(email),
       isSSO: true,
-      organizationId: org?.id || undefined,
+      ...(org && {
+        organizationId: org?.id,
+        roles: [OrganizationRoles.ADMIN],
+      }),
     });
-    return user;
+    return { user, org };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -259,6 +262,15 @@ export async function createUser(
             }),
           },
           include: {
+            userOrganizations: {
+              include: {
+                organization: {
+                  include: {
+                    ssoDetails: true,
+                  },
+                },
+              },
+            },
             organizations: true,
           },
         });

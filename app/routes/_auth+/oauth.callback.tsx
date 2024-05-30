@@ -6,16 +6,11 @@ import { useFetcher, useSearchParams } from "@remix-run/react";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import { db } from "~/database/db.server";
 import { supabaseClient } from "~/integrations/supabase/client";
-import {
-  getAuthUserById,
-  refreshAccessToken,
-} from "~/modules/auth/service.server";
+import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { createUserFromSSO } from "~/modules/user/service.server";
 import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
 import {
   data,
   error,
@@ -23,6 +18,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
 
 export async function action({ request, context }: ActionFunctionArgs) {
   try {
@@ -45,60 +41,30 @@ export async function action({ request, context }: ActionFunctionArgs) {
         const authSession = await refreshAccessToken(refreshToken);
 
         /**
-         * Cases to handle:
-         * - [x] Auth Account & User exists in our database - we just login the user
-         * - [x] Auth Account exists but User doesn't exist in our database - we create a new user connecting it to authUser and login the user
-         * - [x] Auth Account(SSO version) doesn't exist but User exists in our database - We show an error as we dont allow SSO users to have an email based identity
-         * - [x] Auth account exists but is not present in IDP - an employee gets removed from an app. This is handled by IDP
-         * - [x] Auth account DOESN'T exist and is not added to IDP - this is handled by IDP. They give an error if its not authenticated
-         * - [x] User tries to reset password for a user that is only SSO
-         * - [x] User tries to use normal login for a user that is only SSO - we Dont actually need to check that because SSO users will not habe a password they know. As long as we dont allow them to change pwd it should be fine.
+         * This resolves the correct org we should redirec the user to
+         * Also it handles:
+         * - Creating a new user if the user doesn't exist
+         * - Throwing an error if the user is already connected to an email account
+         * - Linking the user to the correct org
          */
-
-        /**
-         * Check if there is an existing user related to this auth session
-         */
-        let user = await db.user.findUnique({
-          where: {
-            email: authSession.email,
-          },
-          include: {
-            organizations: true,
-          },
+        const { org } = await resolveUserAndOrgForSsoCallback({
+          authSession,
+          firstName,
+          lastName,
         });
-
-        if (!user) {
-          user = await createUserFromSSO(authSession, {
-            firstName,
-            lastName,
-          });
-        } else {
-          /** We check if there is already a auth user with the same id of the user we found
-           * If the user is already connected to an email account, we should throw an error
-           * Because we dont allow SSO users to have an email based identity
-           * @TODO at this point we already have an SSO auth.user created. We need to delete them to keep the app clean.
-           */
-          const authUser = await getAuthUserById(user.id);
-          if (authUser?.app_metadata?.provider === "email") {
-            throw new ShelfError({
-              cause: null,
-              title: "User already exists",
-              message:
-                "It looks like the email you're using is linked to a personal account in Shelf. Please contact our support team to update your personal workspace to a different email account.",
-              label: "Auth",
-            });
-          }
-        }
         // Set the auth session and redirect to the assets page
         context.setSession(authSession);
 
-        return redirect(safeRedirect(redirectTo || "/assets"), {
-          headers: [
-            setCookie(
-              await setSelectedOrganizationIdCookie(user.organizations[0].id)
-            ),
-          ],
-        });
+        return redirect(
+          safeRedirect(redirectTo || "/assets"),
+          org?.id
+            ? {
+                headers: [
+                  setCookie(await setSelectedOrganizationIdCookie(org?.id)),
+                ],
+              }
+            : {}
+        );
       }
     }
 
