@@ -3,7 +3,7 @@ FROM node:20-bookworm-slim AS base
 
 # Set for base and all layer that inherit from it
 ENV PORT="8080"
-ENV NODE_ENV="devlopment"
+ENV NODE_ENV="production"
 ARG DEBIAN_FRONTEND="noninteractive"
 WORKDIR /src
 
@@ -52,7 +52,7 @@ RUN apt-get update \
     && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-khmeros fonts-kacst fonts-freefont-ttf libxss1 dbus dbus-x11 \
       --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
-    
+
 ENV CHROME_EXECUTABLE_PATH="/usr/bin/google-chrome-stable"
    
 # Install all node_modules, including dev dependencies
