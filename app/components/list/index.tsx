@@ -32,8 +32,8 @@ export const List = ({
   customEmptyStateContent?: {
     title: string;
     text: string;
-    newButtonRoute: string;
-    newButtonContent: string;
+    newButtonRoute?: string;
+    newButtonContent?: string;
     buttonProps?: any;
   };
   emptyStateClassName?: string;

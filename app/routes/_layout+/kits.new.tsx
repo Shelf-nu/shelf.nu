@@ -20,11 +20,17 @@ const header = {
   title: "Untitled kit",
 };
 
-export function loader({ context }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.create,
+    });
     return json(
       data({
         header,
@@ -54,7 +60,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
+      entity: PermissionEntity.kit,
       action: PermissionAction.create,
     });
 

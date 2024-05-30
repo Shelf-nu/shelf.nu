@@ -73,6 +73,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const [kit, assets] = await Promise.all([
       getKit({
         id: kitId,
+        organizationId,
         extraInclude: {
           assets: {
             select: {
@@ -263,6 +264,7 @@ export default function KitDetails() {
    *    ARCHIVED
    *    CANCELLED
    *    COMPLETE
+   * 3. User is not self service
    */
   const allowedBookingStatus: BookingStatus[] = [
     BookingStatus.DRAFT,
@@ -270,11 +272,13 @@ export default function KitDetails() {
     BookingStatus.CANCELLED,
     BookingStatus.COMPLETE,
   ];
-  const canManageAssets = _kit.assets.length
+  const kitIsAvailable = _kit.assets.length
     ? _kit.assets[0]?.bookings.every((b) =>
         allowedBookingStatus.includes(b.status)
       )
     : kit.status === "AVAILABLE";
+
+  const canManageAssets = kitIsAvailable && !isSelfService;
 
   return (
     <>
@@ -383,9 +387,9 @@ export default function KitDetails() {
               ItemComponent={ListContent}
               customEmptyStateContent={{
                 title: "Not assets in kit",
-                text: "Start by adding your first asset.",
-                newButtonContent: "Manage assets",
-                newButtonRoute: "manage-assets",
+                text: !isSelfService ? "Start by adding your first asset." : "",
+                newButtonContent: !isSelfService ? "Manage assets" : undefined,
+                newButtonRoute: !isSelfService ? "manage-assets" : undefined,
               }}
               headerChildren={
                 <>
@@ -416,6 +420,7 @@ function ListContent({
   const { id, mainImage, mainImageExpiration, title, location, category } =
     item;
 
+  const isSelfService = useUserIsSelfService();
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -483,10 +488,11 @@ function ListContent({
           </GrayBadge>
         ) : null}
       </Td>
-
-      <Td className="pr-4 text-right">
-        <AssetRowActionsDropdown asset={item} />
-      </Td>
+      {!isSelfService && (
+        <Td className="pr-4 text-right">
+          <AssetRowActionsDropdown asset={item} />
+        </Td>
+      )}
     </>
   );
 }
