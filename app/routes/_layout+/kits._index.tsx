@@ -16,6 +16,7 @@ import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { KITS_INCLUDE_FIELDS } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -112,13 +113,16 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function KitsIndexPage() {
   const navigate = useNavigate();
+  const isSelfService = useUserIsSelfService();
 
   return (
     <>
       <Header>
-        <Button to="new" role="link" aria-label="new kit" icon="kit">
-          New kit
-        </Button>
+        {!isSelfService && (
+          <Button to="new" role="link" aria-label="new kit" icon="kit">
+            New kit
+          </Button>
+        )}
       </Header>
 
       <ListContentWrapper>
@@ -134,19 +138,21 @@ export default function KitsIndexPage() {
             ),
           }}
         >
-          <DynamicDropdown
-            trigger={
-              <div className="flex cursor-pointer items-center gap-2">
-                Custodian{" "}
-                <ChevronRight className="hidden rotate-90 md:inline" />
-              </div>
-            }
-            model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
-            label="Filter by custodian"
-            placeholder="Search team members"
-            countKey="totalTeamMembers"
-            initialDataKey="teamMembers"
-          />
+          {!isSelfService && (
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Custodian{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              label="Filter by custodian"
+              placeholder="Search team members"
+              countKey="totalTeamMembers"
+              initialDataKey="teamMembers"
+            />
+          )}
         </Filters>
 
         <List
@@ -157,7 +163,9 @@ export default function KitsIndexPage() {
             <>
               <Th className="hidden md:table-cell">Description</Th>
               <Th className="hidden md:table-cell">Assets</Th>
-              <Th className="hidden md:table-cell">Custodian</Th>
+              {!isSelfService && (
+                <Th className="hidden md:table-cell">Custodian</Th>
+              )}
             </>
           }
         />
@@ -173,6 +181,8 @@ function ListContent({
     include: typeof KITS_INCLUDE_FIELDS;
   }>;
 }) {
+  const isSelfService = useUserIsSelfService();
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -210,26 +220,27 @@ function ListContent({
       </Td>
 
       <Td className="hidden md:table-cell">{item._count.assets}</Td>
-
-      <Td className="hidden md:table-cell">
-        {item.custody ? (
-          <GrayBadge>
-            <>
-              {item.custody.custodian?.user ? (
-                <img
-                  src={
-                    item.custody.custodian?.user?.profilePicture ||
-                    "/static/images/default_pfp.jpg"
-                  }
-                  className="mr-1 size-4 rounded-full"
-                  alt=""
-                />
-              ) : null}
-              <span className="mt-px">{item.custody.custodian.name}</span>
-            </>
-          </GrayBadge>
-        ) : null}
-      </Td>
+      {!isSelfService && (
+        <Td className="hidden md:table-cell">
+          {item.custody ? (
+            <GrayBadge>
+              <>
+                {item.custody.custodian?.user ? (
+                  <img
+                    src={
+                      item.custody.custodian?.user?.profilePicture ||
+                      "/static/images/default_pfp.jpg"
+                    }
+                    className="mr-1 size-4 rounded-full"
+                    alt=""
+                  />
+                ) : null}
+                <span className="mt-px">{item.custody.custodian.name}</span>
+              </>
+            </GrayBadge>
+          ) : null}
+        </Td>
+      )}
     </>
   );
 }

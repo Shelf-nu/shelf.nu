@@ -103,7 +103,7 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
     return json(
       data({
         header: {
-          title: "Import assets (beta)",
+          title: "Import assets",
         },
       })
     );
