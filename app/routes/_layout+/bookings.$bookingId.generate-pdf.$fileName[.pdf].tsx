@@ -61,7 +61,7 @@ export const loader = async ({
       status: 200,
       headers: {
         "content-type": "application/pdf",
-        'Cache-Control': 'no-store',
+        "Cache-Control": "no-store",
       },
     });
   } catch (cause) {

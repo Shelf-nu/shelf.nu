@@ -140,10 +140,7 @@ export async function generatePdfContent(
 ) {
   const browser = await puppeteer.launch({
     executablePath: CHROME_EXECUTABLE_PATH || "/usr/bin/google-chrome-stable",
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox'
-  ]
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   const newPage = await browser.newPage();
   await newPage.setContent(htmlContent, { waitUntil: "networkidle0" });
