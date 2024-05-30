@@ -101,7 +101,7 @@ const ConditionalActionsDropdown = () => {
             >
               {assetCanBeReleased ? (
                 <Button
-                  to="check-in"
+                  to="overview/check-in"
                   role="link"
                   variant="link"
                   className={tw(
@@ -120,7 +120,7 @@ const ConditionalActionsDropdown = () => {
                 </Button>
               ) : (
                 <Button
-                  to="check-out"
+                  to="overview/check-out"
                   role="link"
                   variant="link"
                   className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
@@ -138,7 +138,7 @@ const ConditionalActionsDropdown = () => {
               disabled={assetIsCheckedOut}
             >
               <Button
-                to="update-location"
+                to="overview/update-location"
                 role="link"
                 variant="link"
                 className={tw(
@@ -176,7 +176,7 @@ const ConditionalActionsDropdown = () => {
             </DropdownMenuItem>
             <DropdownMenuItem className="px-4 py-1 md:p-0">
               <Button
-                to="duplicate"
+                to="overview/duplicate"
                 role="link"
                 variant="link"
                 className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
