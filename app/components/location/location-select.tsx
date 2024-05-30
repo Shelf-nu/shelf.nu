@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
-import type { loader } from "~/routes/_layout+/assets.$assetId.update-location";
+import type { loader } from "~/routes/_layout+/assets.$assetId.overview.update-location";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import DynamicSelect from "../dynamic-select/dynamic-select";

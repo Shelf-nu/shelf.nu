@@ -1,5 +1,4 @@
 import Icon from "~/components/icons/icon";
-// eslint-disable-next-line import/no-cycle
 import { useUserIsSelfService } from "./user-user-is-self-service";
 
 export function useMainMenuItems() {
@@ -42,7 +41,7 @@ export function useMainMenuItems() {
     {
       icon: <Icon icon="bookings" />,
       to: "bookings",
-      label: "Bookings (beta)",
+      label: "Bookings",
     },
   ];
   const menuItemsBottom = [
