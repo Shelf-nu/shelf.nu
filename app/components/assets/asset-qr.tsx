@@ -146,26 +146,34 @@ interface QrLabelProps {
   title: string;
 }
 
-const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>((props, ref) => {
-  const { data, title } = props ?? {};
-  return (
-    <div
-      className="flex aspect-square w-[300px] flex-col justify-center gap-3 rounded border-[5px] border-[#E3E4E8] bg-white px-6 py-[17px]"
-      ref={ref}
-    >
-      <div className="max-w-full truncate text-center text-[12px] font-semibold text-black">
-        {title}
+const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
+  function QrLabel(props, ref) {
+    const { data, title } = props ?? {};
+    return (
+      <div
+        className="flex aspect-square w-[300px] flex-col justify-center gap-3 rounded border-[5px] border-[#E3E4E8] bg-white px-6 py-[17px]"
+        ref={ref}
+      >
+        <div className="max-w-full truncate text-center text-[12px] font-semibold text-black">
+          {title}
+        </div>
+        <figure className="qr-code z-[49] flex justify-center">
+          <img
+            src={data?.qr?.src}
+            alt={`${data?.qr?.size}-shelf-qr-code.png`}
+          />
+        </figure>
+        <div className="w-full text-center text-[12px]">
+          <span className="block  font-semibold text-black">
+            {data?.qr?.id}
+          </span>
+          <span className="block text-black">
+            Powered by{" "}
+            <span className="font-semibold text-black">shelf.nu</span>
+          </span>
+        </div>
       </div>
-      <figure className="qr-code z-[49] flex justify-center">
-        <img src={data?.qr?.src} alt={`${data?.qr?.size}-shelf-qr-code.png`} />
-      </figure>
-      <div className="w-full text-center text-[12px]">
-        <span className="block  font-semibold text-black">{data?.qr?.id}</span>
-        <span className="block text-black">
-          Powered by <span className="font-semibold text-black">shelf.nu</span>
-        </span>
-      </div>
-    </div>
-  );
-});
+    );
+  }
+);
 export default AssetQR;
