@@ -1,11 +1,5 @@
-import {
-  type Booking,
-  type Prisma,
-  type Organization,
-  type Asset,
-  BookingStatus,
-  AssetStatus,
-} from "@prisma/client";
+import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
+import type { Booking, Prisma, Organization, Asset } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -114,6 +108,28 @@ async function updateBookingAssetStates(
   }
 }
 
+async function updateBookingKitStates({
+  kitIds,
+  status,
+}: {
+  kitIds: string[];
+  status: KitStatus;
+}) {
+  try {
+    return await db.kit.updateMany({
+      where: { id: { in: kitIds } },
+      data: { status },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating the booking kit states.",
+      additionalData: { kitIds, status },
+      label,
+    });
+  }
+}
+
 const commonInclude: Prisma.BookingInclude = {
   custodianTeamMember: true,
   custodianUser: true,
@@ -148,6 +164,15 @@ export async function upsertBooking(
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
+    const assetWithKits = await db.asset.findMany({
+      where: { AND: [{ kit: { isNot: null } }, { id: { in: assetIds } }] },
+    });
+
+    const uniqueKitIds = new Set(
+      assetWithKits.map((a) => a.kitId) as unknown as string
+    );
+    const hasKits = uniqueKitIds.size > 0;
+
     if (assetIds?.length) {
       data.assets = {
         connect: assetIds.map((id) => ({
@@ -208,6 +233,7 @@ export async function upsertBooking(
     /** Editing */
     if (id) {
       let newAssetStatus;
+      let newKitStatus;
       const isTerminalState = [
         BookingStatus.ARCHIVED,
         BookingStatus.CANCELLED,
@@ -226,8 +252,13 @@ export async function upsertBooking(
             oldBooking.status as any
           ) // Check if the booking was ongoing or overdue
         ) {
-          //booking has ended, make asset available
+          // booking has ended, make asset available
           newAssetStatus = AssetStatus.AVAILABLE;
+
+          // if booking as some kits, make kits available
+          if (hasKits) {
+            newKitStatus = KitStatus.AVAILABLE;
+          }
         }
         //cancel any active schedulers
         await cancelScheduler(oldBooking);
@@ -261,12 +292,27 @@ export async function upsertBooking(
         //booking status is updated to ongoing or assets added to ongoing booking, make asset checked out
         //no need to worry about overdue as the previous state is always ongoing
         newAssetStatus = AssetStatus.CHECKED_OUT;
+
+        // If booking has some kits, then make them checked out
+        if (hasKits) {
+          newKitStatus = AssetStatus.CHECKED_OUT;
+        }
       }
 
       const promises = [];
       if (newAssetStatus) {
         promises.push(updateBookingAssetStates(res, newAssetStatus));
       }
+
+      if (newKitStatus) {
+        promises.push(
+          updateBookingKitStates({
+            kitIds: [...uniqueKitIds],
+            status: newKitStatus,
+          })
+        );
+      }
+
       if (res.from && booking.status === BookingStatus.RESERVED) {
         promises.push(cancelScheduler(res));
         const when = new Date(res.from);
@@ -674,10 +720,18 @@ export async function deleteBooking(
         assets: {
           select: {
             id: true,
+            kitId: true,
           },
         },
       },
     });
+
+    const assetWithKits = activeBooking?.assets.filter((a) => !!a.kitId) ?? [];
+    const uniqueKitIds = new Set(
+      assetWithKits.map((a) => a.kitId) as unknown as string
+    );
+    const hasKits = uniqueKitIds.size > 0;
+
     const b = await db.booking.delete({
       where: { id },
       include: {
@@ -725,6 +779,14 @@ export async function deleteBooking(
     /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
     if (activeBooking) {
       await updateBookingAssetStates(activeBooking, AssetStatus.AVAILABLE);
+
+      // If booking has some kits, then make them available too
+      if (hasKits) {
+        await updateBookingKitStates({
+          kitIds: [...uniqueKitIds],
+          status: KitStatus.AVAILABLE,
+        });
+      }
     }
     await cancelScheduler(b);
 
