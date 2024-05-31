@@ -370,7 +370,6 @@ export default function AssetOverview() {
                     )}
                   >
                     {asset.kit.name}
-                    Video Production Kit IV
                   </Button>
                 </div>
               </div>
