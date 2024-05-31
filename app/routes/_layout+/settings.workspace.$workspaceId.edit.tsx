@@ -14,6 +14,7 @@ import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import {
@@ -21,6 +22,7 @@ import {
   WorkspaceForm,
 } from "~/components/workspace/form";
 
+import { SSOFormFields } from "~/components/workspace/sso-form-fields";
 import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -187,8 +189,9 @@ export default function WorkspaceEditPage() {
         <WorkspaceForm
           name={organization.name || name}
           currency={organization.currency}
-        />
-        {organization.ssoDetails && <div>{organization.ssoDetails.domain}</div>}
+        >
+          <SSOFormFields />
+        </WorkspaceForm>
       </div>
     </>
   );

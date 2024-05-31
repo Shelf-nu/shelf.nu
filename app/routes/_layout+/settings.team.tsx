@@ -32,7 +32,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 
 export type UserFriendlyRoles = "Administrator" | "Owner" | "Self service";
-const organizationRolesMap: Record<string, UserFriendlyRoles> = {
+export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
   [OrganizationRoles.ADMIN]: "Administrator",
   [OrganizationRoles.OWNER]: "Owner",
   [OrganizationRoles.SELF_SERVICE]: "Self service",

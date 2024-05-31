@@ -30,9 +30,10 @@ export const NewWorkspaceFormSchema = z.object({
 interface Props {
   name?: Organization["name"];
   currency?: Organization["currency"];
+  children?: string | React.ReactNode;
 }
 
-export const WorkspaceForm = ({ name, currency }: Props) => {
+export const WorkspaceForm = ({ name, currency, children }: Props) => {
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewWorkspaceFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -93,7 +94,10 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
 
         <div>
           <label className="lg:hidden">Currency</label>
-          <FormRow rowLabel={"Currency"}>
+          <FormRow
+            rowLabel={"Currency"}
+            className={children ? "border-b-0" : ""}
+          >
             <Select
               defaultValue={currency || "USD"}
               disabled={disabled}
@@ -120,6 +124,7 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
             </Select>
           </FormRow>
         </div>
+        {children}
 
         <div className="text-right">
           <Button type="submit" disabled={disabled}>
