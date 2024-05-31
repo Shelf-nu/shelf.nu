@@ -227,7 +227,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       BookingStatus.OVERDUE,
       BookingStatus.RESERVED,
     ];
-    const kitBookings = kit.assets.length ? kit.assets[0].bookings : null;
+    const kitBookings =
+      kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
 
     if (
       kitBookings &&
@@ -329,11 +330,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * If user is adding/removing an asset to a kit which is a part of DRAFT or COMPLETE booking,
      * then we have to add or remove these assets to booking also
      */
-    const bookingsToUpdate = kit.assets.length
-      ? kit.assets[0].bookings.filter(
-          (b) => b.status === "DRAFT" || b.status === "COMPLETE"
-        )
-      : null;
+    const bookingsToUpdate = kitBookings.filter(
+      (b) => b.status === "DRAFT" || b.status === "COMPLETE"
+    );
 
     if (bookingsToUpdate?.length) {
       await Promise.all(

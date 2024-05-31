@@ -110,11 +110,14 @@ export default function GroupedByKitAssets({
                   BookingStatus.OVERDUE,
                   BookingStatus.RESERVED,
                 ];
-                const hasDisallowedBookings = assets[0].bookings.some(
+                const kitBookings =
+                  assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
+
+                const hasDisallowedBookings = kitBookings.some(
                   (b: { status: BookingStatus }) =>
                     disallowedBookingStatus.includes(b.status)
                 );
-                const currentBooking = assets[0].bookings.find(
+                const currentBooking = kitBookings.find(
                   (b: { id: string }) => b.id === bookingId
                 );
 

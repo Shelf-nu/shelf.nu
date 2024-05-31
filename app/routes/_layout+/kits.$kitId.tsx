@@ -319,7 +319,7 @@ export default function KitDetails() {
           ) : null}
 
           {/* Kit Custody */}
-          {!isSelfService && !canManageAssets && kit?.custody?.createdAt ? (
+          {!isSelfService && !kitIsAvailable && kit?.custody?.createdAt ? (
             <Card className="my-3">
               <div className="flex items-center gap-3">
                 <img
