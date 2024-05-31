@@ -11,7 +11,7 @@ import type {
 import { OrganizationRoles } from "@prisma/client";
 import puppeteer from "puppeteer";
 import { db } from "~/database/db.server";
-import { CHROME_EXECUTABLE_PATH, SERVER_URL } from "~/utils/env";
+import { CHROME_EXECUTABLE_PATH, NODE_ENV, SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { getBooking } from "./service.server";
 import { getQrCodeMaps } from "../qr/service.server";
@@ -42,6 +42,7 @@ async function getImageAsBase64(url: string) {
 
     // Convert the image data to a Base64-encoded string
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error("Error fetching image:", error);
     return null;
   }
@@ -163,7 +164,10 @@ export async function generatePdfContent(
   styles?: Record<string, string>
 ) {
   const browser = await puppeteer.launch({
-    executablePath: CHROME_EXECUTABLE_PATH || "/usr/bin/google-chrome-stable",
+    executablePath:
+      NODE_ENV !== "development"
+        ? CHROME_EXECUTABLE_PATH || "/usr/bin/google-chrome-stable"
+        : undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   const fullHtmlContent = `
