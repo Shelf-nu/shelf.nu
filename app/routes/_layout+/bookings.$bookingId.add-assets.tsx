@@ -116,6 +116,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
       organizationId,
       bookingTab: paramsValues.tab ? paramsValues.tab : "assets",
+      currentBookingId: id,
     });
 
     const modelName = {

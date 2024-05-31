@@ -1,5 +1,5 @@
-import type { Kit } from "@prisma/client";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { BookingStatus, type Kit } from "@prisma/client";
+import { useLoaderData, useNavigation, useParams } from "@remix-run/react";
 import { useAtom } from "jotai";
 import {
   bookingsSelectedAssetsAtom,
@@ -26,6 +26,7 @@ export default function GroupedByKitAssets({
   className,
   style,
 }: GroupedByKitAssetsProps) {
+  const { bookingId } = useParams<{ bookingId: string }>();
   const { items } = useLoaderData<IndexResponse>();
   const hasItems = items.length > 0;
 
@@ -97,16 +98,28 @@ export default function GroupedByKitAssets({
             <tbody>
               {Object.values(groupedItems).map((assets) => {
                 const kit = assets[0].kit as Kit;
-                if (!kit) {
+                if (!kit || !assets.length) {
                   return null;
                 }
 
                 const assetNotAvailable = assets.some(
                   (a) => a.status !== "AVAILABLE"
                 );
-                const assetHasUnavailableBooking = assets.some((a) =>
-                  a.bookings.some((b: any) => b.status !== "DRAFT")
+                const disallowedBookingStatus: BookingStatus[] = [
+                  BookingStatus.ONGOING,
+                  BookingStatus.OVERDUE,
+                  BookingStatus.RESERVED,
+                ];
+                const hasDisallowedBookings = assets[0].bookings.some(
+                  (b: { status: BookingStatus }) =>
+                    disallowedBookingStatus.includes(b.status)
                 );
+                const currentBooking = assets[0].bookings.find(
+                  (b: { id: string }) => b.id === bookingId
+                );
+
+                const assetHasUnavailableBooking =
+                  hasDisallowedBookings && !currentBooking;
                 const isKitNotAvailable =
                   assetNotAvailable || assetHasUnavailableBooking;
 
