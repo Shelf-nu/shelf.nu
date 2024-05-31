@@ -321,7 +321,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           /** WE are updating the whole booking */
           const payload = parseData(
             formData,
-            NewBookingFormSchema(), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
+            NewBookingFormSchema(false, false, getHints(request)), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
             {
               additionalData: { userId, id, organizationId, role },
             }
@@ -330,15 +330,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           const { name, custodian } = payload;
 
           const hints = getHints(request);
-          const startDate = formData.get("startDate")!.toString();
-          const endDate = formData.get("endDate")!.toString();
           const fmt = "yyyy-MM-dd'T'HH:mm";
-          const from = DateTime.fromFormat(startDate, fmt, {
-            zone: hints.timeZone,
-          }).toJSDate();
-          const to = DateTime.fromFormat(endDate, fmt, {
-            zone: hints.timeZone,
-          }).toJSDate();
+
+          const from = DateTime.fromFormat(
+            formData.get("startDate")!.toString()!,
+            fmt,
+            {
+              zone: hints.timeZone,
+            }
+          ).toJSDate();
+
+          const to = DateTime.fromFormat(
+            formData.get("endDate")!.toString()!,
+            fmt,
+            {
+              zone: hints.timeZone,
+            }
+          ).toJSDate();
 
           Object.assign(upsertBookingData, {
             custodianUserId: custodian,

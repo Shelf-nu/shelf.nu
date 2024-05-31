@@ -365,27 +365,29 @@ export default function AssetIndexPage() {
                   </div>
                 )}
               />
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Custodian{" "}
-                    <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{
-                  name: "teamMember",
-                  queryKey: "name",
-                  deletedAt: null,
-                }}
-                transformItem={(item) => ({
-                  ...item,
-                  id: item.metadata?.userId ? item.metadata.userId : item.id,
-                })}
-                label="Filter by custodian"
-                placeholder="Search team members"
-                initialDataKey="teamMembers"
-                countKey="totalTeamMembers"
-              />
+              {!isSelfService && (
+                <DynamicDropdown
+                  trigger={
+                    <div className="flex cursor-pointer items-center gap-2">
+                      Custodian{" "}
+                      <ChevronRight className="hidden rotate-90 md:inline" />
+                    </div>
+                  }
+                  model={{
+                    name: "teamMember",
+                    queryKey: "name",
+                    deletedAt: null,
+                  }}
+                  transformItem={(item) => ({
+                    ...item,
+                    id: item.metadata?.userId ? item.metadata.userId : item.id,
+                  })}
+                  label="Filter by custodian"
+                  placeholder="Search team members"
+                  initialDataKey="teamMembers"
+                  countKey="totalTeamMembers"
+                />
+              )}
             </div>
           </div>
         </Filters>
