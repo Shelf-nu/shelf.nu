@@ -21,6 +21,7 @@ import { ErrorContent } from "./components/errors";
 import { HomeIcon } from "./components/icons/library";
 import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
+import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
 import nProgressCustomStyles from "./styles/nprogress.css?url";
@@ -30,7 +31,6 @@ import { getBrowserEnv } from "./utils/env";
 import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { splashScreenLinks } from "./utils/splash-screen-links";
-import { useNprogress } from "./hooks/use-nprogress";
 
 export interface RootData {
   env: typeof getBrowserEnv;
