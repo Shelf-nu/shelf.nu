@@ -468,12 +468,14 @@ export async function getQrCodeMaps({
         }
       } catch (error) {
         // Handle the error if needed
+        // eslint-disable-next-line no-console
         console.error(`Error processing asset with id ${asset.id}:`, error);
       }
     });
 
     await Promise.all(qrCodePromises);
   } catch (err) {
+    // eslint-disable-next-line no-console
     console.error("Error generating QR code maps:", err);
   }
   return finalMap;

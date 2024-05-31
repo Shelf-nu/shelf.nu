@@ -107,7 +107,10 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
             <DeleteBooking booking={booking} />
           ) : null}
           <Divider className="my-2" />
-          <GenerateBookingPdf booking={booking} timeStamp={new Date().getTime()}/>
+          <GenerateBookingPdf
+            booking={booking}
+            timeStamp={new Date().getTime()}
+          />
         </DropdownMenuContent>
       </DropdownMenuPortal>
     </DropdownMenu>

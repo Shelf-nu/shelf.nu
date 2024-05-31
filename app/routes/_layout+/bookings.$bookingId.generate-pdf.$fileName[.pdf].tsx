@@ -77,8 +77,8 @@ const styles = {
     maxWidth: "210mm", // A4 width
     margin: "0 auto",
     boxSizing: "border-box",
-    fontFamily: "Inter"
-    },
+    fontFamily: "Inter",
+  },
   headerText: {
     marginBottom: "20px",
   },
