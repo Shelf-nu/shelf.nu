@@ -69,6 +69,16 @@ export async function resolveUserAndOrgForSsoCallback({
       (org) => org?.ssoDetails?.domain === authSession.email.split("@")[1]
     ); // Find the org that has sso for that user
 
+    if (!org) {
+      throw new ShelfError({
+        cause: null,
+        title: "Organization not found",
+        message:
+          "It looks like the organization you're trying to log in to is not found. Please contact our support team to get access to your organization.",
+        additionalData: { org, user, domain: authSession.email.split("@")[1] },
+        label: "Auth",
+      });
+    }
     /** We check if there is already a auth user with the same id of the user we found
      * If the user is already connected to an email account, we should throw an error
      * Because we dont allow SSO users to have an email based identity

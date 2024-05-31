@@ -46,20 +46,31 @@ export const getOrganizationByUserId = async ({
 };
 
 export const getOrganizationBySsoDomain = async (domain: string) =>
-  db.organization.findFirst({
-    // We dont throw as we need to handle the case where no organization is found for the domain in the app logic
-    where: {
-      ssoDetails: {
-        is: {
-          domain: domain,
+  db.organization
+    .findFirstOrThrow({
+      // We dont throw as we need to handle the case where no organization is found for the domain in the app logic
+      where: {
+        ssoDetails: {
+          is: {
+            domain: domain,
+          },
         },
+        type: "TEAM",
       },
-      type: "TEAM",
-    },
-    include: {
-      ssoDetails: true,
-    },
-  });
+      include: {
+        ssoDetails: true,
+      },
+    })
+    .catch((cause) => {
+      throw new ShelfError({
+        cause,
+        title: "Organization not found",
+        message:
+          "It looks like the organization you're trying to log in to is not found. Please contact our support team to get access to your organization.",
+        additionalData: { domain },
+        label,
+      });
+    });
 
 export async function createOrganization({
   name,

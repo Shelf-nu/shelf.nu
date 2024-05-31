@@ -176,9 +176,7 @@ export async function createUserFromSSO(
     const domain = email.split("@")[1];
 
     const org = await getOrganizationBySsoDomain(domain);
-    /**
-     * @TODO we should skip creating personal org for SSO users
-     */
+
     const user = await createUser({
       email,
       firstName,
@@ -288,11 +286,12 @@ export async function createUser(
          * 2. For the org that the user is being attached to
          */
         await Promise.all([
-          createUserOrgAssociation(tx, {
-            userId: user.id,
-            organizationIds: [user.organizations[0].id],
-            roles: [OrganizationRoles.OWNER],
-          }),
+          !isSSO && // We only create a personal org for non-SSO users
+            createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [user.organizations[0].id],
+              roles: [OrganizationRoles.OWNER],
+            }),
           organizationId &&
             roles?.length &&
             createUserOrgAssociation(tx, {
