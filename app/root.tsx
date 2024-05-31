@@ -1,5 +1,4 @@
 import type { PropsWithChildren } from "react";
-import { useEffect, useMemo } from "react";
 import type { User } from "@prisma/client";
 import type {
   LinksFunction,
@@ -14,13 +13,9 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
-  useFetchers,
   useLoaderData,
-  useNavigation,
 } from "@remix-run/react";
 import { withSentry } from "@sentry/remix";
-
-import NProgress from "nprogress";
 import nProgressStyles from "nprogress/nprogress.css?url";
 import { ErrorContent } from "./components/errors";
 import { HomeIcon } from "./components/icons/library";
@@ -35,6 +30,7 @@ import { getBrowserEnv } from "./utils/env";
 import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
 import { splashScreenLinks } from "./utils/splash-screen-links";
+import { useNprogress } from "./hooks/use-nprogress";
 
 export interface RootData {
   env: typeof getBrowserEnv;
@@ -110,29 +106,7 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
 }
 
 function App() {
-  let transition = useNavigation();
-
-  let fetchers = useFetchers();
-
-  let state = useMemo<"idle" | "loading">(
-    function getGlobalState() {
-      let states = [
-        transition.state,
-        ...fetchers.map((fetcher) => fetcher.state),
-      ];
-      if (states.every((state) => state === "idle")) return "idle";
-      return "loading";
-    },
-    [transition.state, fetchers]
-  );
-
-  useEffect(() => {
-    // waiting for the loaders of the next location so we start it
-    if (state === "loading") NProgress.start();
-    // when the state is idle then we can to complete the progress bar
-    if (state === "idle") NProgress.done();
-  }, [transition.state]);
-
+  useNprogress();
   const { maintenanceMode } = useLoaderData<typeof loader>();
 
   return (
