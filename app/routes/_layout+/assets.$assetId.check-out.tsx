@@ -41,6 +41,35 @@ import { requirePermission } from "~/utils/roles.server";
 import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
+const DiscriminatorSchema = z.object({
+  addTemplateEnabled: z
+    .string()
+    .transform((value) => (value === "true" ? true : false)),
+});
+
+const CustodianOnlySchema = z.object({
+  custodian: stringToJSONSchema.pipe(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string(),
+      userId: z.string(),
+    })
+  ),
+});
+
+const CustodianWithTemplateSchema = z.object({
+  ...CustodianOnlySchema.shape,
+  template: stringToJSONSchema.pipe(
+    z.object({
+      id: z.string(),
+    })
+  ),
+});
+
+const getSchema = (addTemplateEnabled: boolean) =>
+  addTemplateEnabled ? CustodianWithTemplateSchema : CustodianOnlySchema;
+
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -165,41 +194,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const BaseSchema = z.object({
-      custodian: stringToJSONSchema.pipe(
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          email: z.string(),
-          userId: z.string(),
-        })
-      ),
-    });
-
-    const EnhancedSchema = z.discriminatedUnion("addTemplateEnabled", [
-      z.object({
-        addTemplateEnabled: z.literal("false"),
-        ...BaseSchema.shape,
-      }),
-      z.object({
-        addTemplateEnabled: z.literal("true"),
-        ...BaseSchema.shape,
-        template: stringToJSONSchema.pipe(
-          z.object({
-            id: z.string(),
-          })
-        ),
-      }),
-    ]);
-
     const formData = await request.formData();
 
-    const parsedData = parseData(formData, EnhancedSchema, {
+    const { addTemplateEnabled } = parseData(formData, DiscriminatorSchema, {
       additionalData: { userId, assetId },
-      message: "Please select a custodian",
+      message: "Internal error. Please try again or contact support.",
     });
 
-    const { custodian, addTemplateEnabled } = parsedData;
+    const parsedData = parseData(formData, getSchema(addTemplateEnabled), {
+      additionalData: { userId, assetId },
+      message: "Error while parsing data.",
+    });
+
+    const { custodian } = parsedData;
 
     const user = await getUserByID(userId);
 
@@ -217,8 +224,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     let templateId = null,
       templateObj = null;
 
-    if (addTemplateEnabled === "true") {
-      const template = parsedData.template;
+    if (addTemplateEnabled) {
+      const template = (parsedData as any).template;
       templateId = template.id;
 
       templateObj = await db.template
@@ -245,7 +252,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
     let asset = null;
 
-    if (addTemplateEnabled === "true") {
+    if (addTemplateEnabled) {
       /**
        * In this case, we do the following:
        * 1. We check if the signature is required by the template
@@ -324,7 +331,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     // If the template was specified, and signature was required
-    if (addTemplateEnabled === "true" && templateObj!.signatureRequired) {
+    if (addTemplateEnabled && templateObj!.signatureRequired) {
       /** We create the note */
       await createNote({
         content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateObj!.name?.trim()}** template before receiving custody.`,
