@@ -1,3 +1,4 @@
+import { Currency } from "@prisma/client";
 import {
   json,
   redirect,
@@ -93,6 +94,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         organization,
         header,
+        curriences: Object.keys(Currency)
       })
     );
   } catch (cause) {
