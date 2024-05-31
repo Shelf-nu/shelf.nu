@@ -213,6 +213,8 @@ async function getAssetsFromView(params: {
       BookingStatus.ONGOING,
     ];
     const availableBookingStatuses = [
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
       BookingStatus.ARCHIVED,
       BookingStatus.CANCELLED,
       BookingStatus.COMPLETE,
@@ -321,7 +323,11 @@ async function getAssetsFromView(params: {
               every: {
                 OR: [
                   { id: currentBookingId },
-                  { status: { in: availableBookingStatuses } },
+                  {
+                    status: {
+                      in: availableBookingStatuses,
+                    },
+                  },
                 ],
               },
             },
@@ -493,6 +499,8 @@ async function getAssets(params: {
       BookingStatus.ONGOING,
     ];
     const availableBookingStatuses = [
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
       BookingStatus.ARCHIVED,
       BookingStatus.CANCELLED,
       BookingStatus.COMPLETE,
