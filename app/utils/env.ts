@@ -184,7 +184,7 @@ export const SEND_ONBOARDING_EMAIL =
 
 export const CHROME_EXECUTABLE_PATH = getEnv("CHROME_EXECUTABLE_PATH", {
   isSecret: false,
-  isRequired: true,
+  isRequired: false,
 });
 
 export function getBrowserEnv() {
