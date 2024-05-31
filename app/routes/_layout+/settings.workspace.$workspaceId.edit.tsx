@@ -94,7 +94,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         organization,
         header,
-        curriences: Object.keys(Currency)
+        curriences: Object.keys(Currency),
       })
     );
   } catch (cause) {

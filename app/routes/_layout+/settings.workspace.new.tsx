@@ -43,9 +43,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: `New workspace`,
     };
 
-    return json(data({ header, currentOrganizationId: organizationId,
-      curriences: Object.keys(Currency)
-    }));
+    return json(
+      data({
+        header,
+        currentOrganizationId: organizationId,
+        curriences: Object.keys(Currency),
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
