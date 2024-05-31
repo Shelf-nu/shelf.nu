@@ -16,12 +16,14 @@ import { Spinner } from "../shared/spinner";
 
 export const GenerateBookingPdf = ({
   booking,
+  timeStamp
 }: {
   booking: {
     id: Booking["id"];
     name: Booking["name"];
     assets: Partial<Asset>[];
   };
+  timeStamp: number;
 }) => {
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const totalAssets = booking.assets.length;
@@ -29,8 +31,7 @@ export const GenerateBookingPdf = ({
     booking.name
   }-${new Date()
     .toISOString()
-    .slice(0, 10)}.pdf?timeStamp=${new Date().getTime()}`;
-
+    .slice(0, 10)}.pdf?timeStamp=${timeStamp}`;    
   const handleIframeLoad = () => {
     setIframeLoaded(true);
   };

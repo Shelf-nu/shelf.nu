@@ -11,7 +11,7 @@ import type {
 import { OrganizationRoles } from "@prisma/client";
 import puppeteer from "puppeteer";
 import { db } from "~/database/db.server";
-import { CHROME_EXECUTABLE_PATH } from "~/utils/env";
+import { CHROME_EXECUTABLE_PATH, SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { getBooking } from "./service.server";
 import { getQrCodeMaps } from "../qr/service.server";
@@ -25,6 +25,26 @@ export interface PdfDbResult {
   })[];
   organization: (Partial<Organization> & { image: Image | null }) | null;
   assetIdToQrCodeMap: Map<string, string>;
+  defaultOrgImg: string | null;
+}
+
+async function getImageAsBase64(url: string) {
+  try {
+    // Fetch the image data
+    const response = await fetch(url);
+
+    const arrayBuffer = await response.arrayBuffer();
+
+    // Convert the image data to a Base64-encoded string
+    const base64Image = Buffer.from(arrayBuffer).toString("base64");
+
+    return base64Image;
+
+    // Convert the image data to a Base64-encoded string
+  } catch (error) {
+    console.error("Error fetching image:", error);
+    return null;
+  }
 }
 
 export async function fetchAllPdfRelatedData(
@@ -48,7 +68,7 @@ export async function fetchAllPdfRelatedData(
     });
   }
 
-  const [assets, organization] = await Promise.all([
+  const [assets, organization, defaultOrgImg] = await Promise.all([
     db.asset.findMany({
       where: {
         id: { in: booking?.assets.map((a) => a.id) || [] },
@@ -77,6 +97,7 @@ export async function fetchAllPdfRelatedData(
       where: { id: organizationId },
       select: { imageId: true, name: true, id: true, image: true },
     }),
+    getImageAsBase64(`${SERVER_URL}/static/images/asset-placeholder.jpg`),
   ]);
 
   const assetIdToQrCodeMap = await getQrCodeMaps({
@@ -90,17 +111,19 @@ export async function fetchAllPdfRelatedData(
     assets,
     organization,
     assetIdToQrCodeMap,
+    defaultOrgImg,
   };
 }
 
 export const getBookingAssetsCustomHeader = ({
   organization,
   booking,
+  defaultOrgImg,
 }: PdfDbResult) => {
   const orgImageBlob = organization?.image?.blob;
-  const base64Image = orgImageBlob
-    ? `data:image/png;base64,${orgImageBlob.toString("base64")}`
-    : "";
+  const base64Image = `data:image/png;base64,${
+    orgImageBlob?.toString("base64") || defaultOrgImg
+  }`;
   return `
         <style>
             .header {
@@ -112,7 +135,8 @@ export const getBookingAssetsCustomHeader = ({
                 justify-content: space-between;
                 align-items: center;
                 box-sizing: border-box;
-                margin-bottom:30px;
+                margin-bottom:30px;,
+                font-family: Inter, sans-serif;
             }
             .header img {
                 height: 40px;
@@ -142,8 +166,23 @@ export async function generatePdfContent(
     executablePath: CHROME_EXECUTABLE_PATH || "/usr/bin/google-chrome-stable",
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
+  const fullHtmlContent = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+      </head>
+    <body class="bg-white">
+      ${htmlContent}
+    </body>
+    </html>
+  `;
   const newPage = await browser.newPage();
-  await newPage.setContent(htmlContent, { waitUntil: "networkidle0" });
+  await newPage.setContent(fullHtmlContent, { waitUntil: "networkidle0" });
 
   const pdfBuffer = await newPage.pdf({
     format: "A4",
