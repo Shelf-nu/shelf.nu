@@ -1,0 +1,9 @@
+/* styles/nprogress-custom.css */
+#nprogress .bar {
+    background: linear-gradient(to right, #EF6820, #EF6820); /* Single color #EF6820 */
+  }
+  
+  #nprogress .peg {
+    box-shadow: 0 0 10px #EF6820, 0 0 5px #EF6820;
+  }
+  
