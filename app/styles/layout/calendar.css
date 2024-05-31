@@ -50,5 +50,11 @@
 }
 
 .fc-daygrid-day-frame {
-  @apply min-h-[200px] !important;
+  @apply min-h-[130px] !important;
+}
+
+/** Make sure that the background doesn't become gray on focus */
+.fc-event-selected::after,
+.fc-event:focus::after {
+  @apply bg-transparent !important;
 }
