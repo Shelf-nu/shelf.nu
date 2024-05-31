@@ -41,6 +41,35 @@ import { requirePermission } from "~/utils/roles.server";
 import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
+const DiscriminatorSchema = z.object({
+  addTemplateEnabled: z
+    .string()
+    .transform((value) => (value === "true" ? true : false)),
+});
+
+const CustodianOnlySchema = z.object({
+  custodian: stringToJSONSchema.pipe(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      email: z.string(),
+      userId: z.string(),
+    })
+  ),
+});
+
+const CustodianWithTemplateSchema = z.object({
+  ...CustodianOnlySchema.shape,
+  template: stringToJSONSchema.pipe(
+    z.object({
+      id: z.string(),
+    })
+  ),
+});
+
+const getSchema = (addTemplateEnabled: boolean) =>
+  addTemplateEnabled ? CustodianWithTemplateSchema : CustodianOnlySchema;
+
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -128,15 +157,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (templates.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        message: "Something went wrong while deleting the note",
-        additionalData: { organizationId },
-        label: "Assets",
-      });
-    }
-
     const totalTeamMembers = await db.teamMember.count({
       where: {
         deletedAt: null,
@@ -174,39 +194,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const BaseSchema = z.object({
-      custodian: stringToJSONSchema.pipe(
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          email: z.string(),
-          userId: z.string(),
-        })
-      ),
-    });
+    const formData = await request.formData();
 
-    const EnhancedSchema = z.discriminatedUnion("addTemplateEnabled", [
-      z.object({
-        addTemplateEnabled: z.literal(false),
-        ...BaseSchema.shape,
-      }),
-      z.object({
-        addTemplateEnabled: z.literal(true),
-        ...BaseSchema.shape,
-        template: stringToJSONSchema.pipe(
-          z.object({
-            id: z.string(),
-          })
-        ),
-      }),
-    ]);
-
-    const parsedData = parseData(await request.formData(), EnhancedSchema, {
+    const { addTemplateEnabled } = parseData(formData, DiscriminatorSchema, {
       additionalData: { userId, assetId },
-      message: "Please select a custodian",
+      message: "Internal error. Please try again or contact support.",
     });
 
-    const { custodian, addTemplateEnabled } = parsedData;
+    const parsedData = parseData(formData, getSchema(addTemplateEnabled), {
+      additionalData: { userId, assetId },
+      message: "Error while parsing data.",
+    });
+
+    const { custodian } = parsedData;
 
     const user = await getUserByID(userId);
 
@@ -225,7 +225,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       templateObj = null;
 
     if (addTemplateEnabled) {
-      const template = parsedData.template;
+      const template = (parsedData as any).template;
       templateId = template.id;
 
       templateObj = await db.template
@@ -401,8 +401,9 @@ export function links() {
 }
 
 export default function Custody() {
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, templates } = useLoaderData<typeof loader>();
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
+  const hasTemplates = templates.length > 0;
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const [selectedCustodyUser, setSelectedCustodyUser] = useState<{
@@ -459,6 +460,7 @@ export default function Custody() {
                   id: item.id,
                   name: item.name,
                   userId: item?.userId,
+                  email: item?.user?.email,
                 }),
               })}
               onChange={(value) => {
@@ -496,18 +498,22 @@ export default function Custody() {
               >
                 <Switch required={false} disabled={true} />
               </CustomTooltip>
-              <PdfSwitchLabel />
+              <PdfSwitchLabel hasTemplates={hasTemplates} />
             </div>
           ) : (
             <div className="mb-5 flex gap-x-2">
               <Switch
-                name="addTemplateEnabled"
                 onClick={() => setAddTemplateEnabled((prev) => !prev)}
                 defaultChecked={addTemplateEnabled}
                 required={false}
                 disabled={disabled}
               />
-              <PdfSwitchLabel />
+              <input
+                type="hidden"
+                name="addTemplateEnabled"
+                value={addTemplateEnabled.toString()}
+              />
+              <PdfSwitchLabel hasTemplates={hasTemplates} />
             </div>
           )}
 
@@ -583,14 +589,22 @@ function TooltipContent({
   );
 }
 
-const PdfSwitchLabel = () => (
+const PdfSwitchLabel = ({ hasTemplates }: { hasTemplates: boolean }) => (
   <div className="flex flex-col gap-y-1">
     <div className="text-md font-semibold text-gray-600">Add PDF Template</div>
     <p className="text-sm text-gray-500">
-      Custodian needs to read (and sign) a document before receiving custody.{" "}
-      <Link className="text-gray-700 underline" to="#">
-        Learn more
-      </Link>
+      {hasTemplates
+        ? "Custodian needs to read (and sign) a document before receiving custody."
+        : "You need to create templates before you can add them here."}
+      {hasTemplates ? (
+        <Link className="text-gray-700 underline" to="#">
+          Learn more
+        </Link>
+      ) : (
+        <Link className="text-gray-700 underline" to="/settings/template/new">
+          Create a template
+        </Link>
+      )}
     </p>
   </div>
 );
