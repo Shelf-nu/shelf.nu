@@ -7,10 +7,7 @@ ENV NODE_ENV="production"
 ARG DEBIAN_FRONTEND="noninteractive"
 WORKDIR /src
 
-# Install openssl for Prisma,
-#     apt-get install -y openssl && \
-#     rm -rf /var/lib/apt/lists/*
-# Install dependencies for Puppeteer and Google Chrome
+# Install dependencies for Puppeteer and Google Chrome & Prisma
 RUN apt-get update && \
     apt-get install -y \
     ca-certificates \
