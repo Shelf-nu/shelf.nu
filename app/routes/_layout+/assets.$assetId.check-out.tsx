@@ -128,15 +128,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    if (templates.length === 0) {
-      throw new ShelfError({
-        cause: null,
-        message: "Something went wrong while deleting the note",
-        additionalData: { organizationId },
-        label: "Assets",
-      });
-    }
-
     const totalTeamMembers = await db.teamMember.count({
       where: {
         deletedAt: null,
@@ -187,11 +178,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const EnhancedSchema = z.discriminatedUnion("addTemplateEnabled", [
       z.object({
-        addTemplateEnabled: z.literal(false),
+        addTemplateEnabled: z.literal("false"),
         ...BaseSchema.shape,
       }),
       z.object({
-        addTemplateEnabled: z.literal(true),
+        addTemplateEnabled: z.literal("true"),
         ...BaseSchema.shape,
         template: stringToJSONSchema.pipe(
           z.object({
@@ -201,7 +192,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }),
     ]);
 
-    const parsedData = parseData(await request.formData(), EnhancedSchema, {
+    const formData = await request.formData();
+
+    const parsedData = parseData(formData, EnhancedSchema, {
       additionalData: { userId, assetId },
       message: "Please select a custodian",
     });
@@ -224,7 +217,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     let templateId = null,
       templateObj = null;
 
-    if (addTemplateEnabled) {
+    if (addTemplateEnabled === "true") {
       const template = parsedData.template;
       templateId = template.id;
 
@@ -252,7 +245,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
     let asset = null;
 
-    if (addTemplateEnabled) {
+    if (addTemplateEnabled === "true") {
       /**
        * In this case, we do the following:
        * 1. We check if the signature is required by the template
@@ -331,7 +324,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     // If the template was specified, and signature was required
-    if (addTemplateEnabled && templateObj!.signatureRequired) {
+    if (addTemplateEnabled === "true" && templateObj!.signatureRequired) {
       /** We create the note */
       await createNote({
         content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName?.trim()}** custody over **${asset.title?.trim()}**. **${custodianName?.trim()}** needs to sign the **${templateObj!.name?.trim()}** template before receiving custody.`,
@@ -401,8 +394,9 @@ export function links() {
 }
 
 export default function Custody() {
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, templates } = useLoaderData<typeof loader>();
   const hasBookings = (asset?.bookings?.length ?? 0) > 0 || false;
+  const hasTemplates = templates.length > 0;
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
   const [selectedCustodyUser, setSelectedCustodyUser] = useState<{
@@ -459,6 +453,7 @@ export default function Custody() {
                   id: item.id,
                   name: item.name,
                   userId: item?.userId,
+                  email: item?.user?.email,
                 }),
               })}
               onChange={(value) => {
@@ -496,18 +491,22 @@ export default function Custody() {
               >
                 <Switch required={false} disabled={true} />
               </CustomTooltip>
-              <PdfSwitchLabel />
+              <PdfSwitchLabel hasTemplates={hasTemplates} />
             </div>
           ) : (
             <div className="mb-5 flex gap-x-2">
               <Switch
-                name="addTemplateEnabled"
                 onClick={() => setAddTemplateEnabled((prev) => !prev)}
                 defaultChecked={addTemplateEnabled}
                 required={false}
                 disabled={disabled}
               />
-              <PdfSwitchLabel />
+              <input
+                type="hidden"
+                name="addTemplateEnabled"
+                value={addTemplateEnabled.toString()}
+              />
+              <PdfSwitchLabel hasTemplates={hasTemplates} />
             </div>
           )}
 
@@ -583,14 +582,22 @@ function TooltipContent({
   );
 }
 
-const PdfSwitchLabel = () => (
+const PdfSwitchLabel = ({ hasTemplates }: { hasTemplates: boolean }) => (
   <div className="flex flex-col gap-y-1">
     <div className="text-md font-semibold text-gray-600">Add PDF Template</div>
     <p className="text-sm text-gray-500">
-      Custodian needs to read (and sign) a document before receiving custody.{" "}
-      <Link className="text-gray-700 underline" to="#">
-        Learn more
-      </Link>
+      {hasTemplates
+        ? "Custodian needs to read (and sign) a document before receiving custody."
+        : "You need to create templates before you can add them here."}
+      {hasTemplates ? (
+        <Link className="text-gray-700 underline" to="#">
+          Learn more
+        </Link>
+      ) : (
+        <Link className="text-gray-700 underline" to="/settings/template/new">
+          Create a template
+        </Link>
+      )}
     </p>
   </div>
 );
