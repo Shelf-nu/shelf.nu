@@ -14,17 +14,13 @@ import { json, redirect } from "@remix-run/node";
 import {
   Form,
   useLoaderData,
+  useNavigate,
   useNavigation,
-  useSearchParams,
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
-import {
-  bookingsSelectedAssetsAtom,
-  bookingsSelectedKitsAtom,
-} from "~/atoms/selected-assets-atoms";
+import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
-import GroupedByKitAssets from "~/components/assets/grouped-by-kit-assets";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
@@ -38,7 +34,6 @@ import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 
-import { Spinner } from "~/components/shared/spinner";
 import {
   Tabs,
   TabsContent,
@@ -53,6 +48,7 @@ import {
 } from "~/modules/asset/service.server";
 import {
   getBooking,
+  getKitIdsByAssets,
   removeAssets,
   upsertBooking,
 } from "~/modules/booking/service.server";
@@ -60,14 +56,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import {
-  data,
-  error,
-  getCurrentSearchParams,
-  getParams,
-  parseData,
-} from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -96,9 +85,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const searchParams = getCurrentSearchParams(request);
-    const paramsValues = getParamsValues(searchParams);
-
     const {
       search,
       totalAssets,
@@ -115,8 +101,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } = await getPaginatedAndFilterableAssets({
       request,
       organizationId,
-      bookingTab: paramsValues.tab ? paramsValues.tab : "assets",
-      currentBookingId: id,
     });
 
     const modelName = {
@@ -125,6 +109,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     const booking = await getBooking({ id, organizationId });
+    const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     return json(
       data({
@@ -153,6 +138,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalTags,
         locations,
         totalLocations,
+        bookingKitIds,
       })
     );
   } catch (cause) {
@@ -232,12 +218,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToNewBooking() {
-  const { booking, header, items } = useLoaderData<typeof loader>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { booking, header, items, bookingKitIds } =
+    useLoaderData<typeof loader>();
+  const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
-
-  const selectedTab = searchParams.get("tab") ?? "assets";
 
   const bookingAssetsIds = useMemo(
     () => booking?.assets.map((a) => a.id) || [],
@@ -248,8 +233,6 @@ export default function AddAssetsToNewBooking() {
     bookingsSelectedAssetsAtom
   );
 
-  const [selectedKits, setSelectedKits] = useAtom(bookingsSelectedKitsAtom);
-
   const removedAssetIds = useMemo(
     () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
     [bookingAssetsIds, selectedAssets]
@@ -259,11 +242,20 @@ export default function AddAssetsToNewBooking() {
     selectedAssets.includes(item.id)
   );
 
-  const totalAssetsSelected =
-    selectedTab === "assets"
-      ? selectedItems.filter((i) => !i.kitId).length
-      : booking.assets.filter((a) => !a.kitId).length;
-  const totalKitsSelected = selectedKits.length;
+  const totalAssetsSelected = selectedItems.filter((i) => !i.kitId).length;
+
+  const manageKitsUrl = useMemo(
+    () =>
+      `/bookings/${booking.id}/add-kits?${new URLSearchParams({
+        // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
+        // This button wouldnt be available at all if there is no booking.from and booking.to
+        bookingFrom: new Date(booking.from as string).toISOString(),
+        bookingTo: new Date(booking.to as string).toISOString(),
+        hideUnavailable: "true",
+        unhideAssetsBookigIds: booking.id,
+      })}`,
+    [booking]
+  );
 
   /**
    * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per booking
@@ -273,26 +265,15 @@ export default function AddAssetsToNewBooking() {
    */
   useEffect(() => {
     setSelectedAssets(bookingAssetsIds);
-
-    // selected kits in booking
-    const kitIds = booking.assets
-      .filter((a) => !!a.kitId)
-      .map((a) => a.kitId) as unknown as string[];
-    const uniqKitIds = new Set(kitIds);
-
-    setSelectedKits([...uniqKitIds]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking.id]);
 
   return (
     <Tabs
       className="-mx-6 flex h-full max-h-full flex-col"
-      value={selectedTab}
-      onValueChange={(value) => {
-        setSearchParams((prev) => {
-          prev.set("tab", value);
-          return prev;
-        });
+      value="assets"
+      onValueChange={() => {
+        navigate(manageKitsUrl);
       }}
     >
       <Header
@@ -313,9 +294,9 @@ export default function AddAssetsToNewBooking() {
           </TabsTrigger>
           <TabsTrigger className="flex-1 gap-x-2" value="kits">
             Kits
-            {totalKitsSelected ? (
+            {bookingKitIds.length > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {totalKitsSelected}
+                {bookingKitIds.length}
               </GrayBadge>
             ) : null}
           </TabsTrigger>
@@ -377,49 +358,37 @@ export default function AddAssetsToNewBooking() {
         />
       </div>
 
-      {/* Body of the modal*/}
       <TabsContent value="assets" asChild>
-        {isSearching && !navigation.formAction ? (
-          <div className="flex h-[400px] flex-1 flex-col items-center justify-center">
-            <Spinner />
-            <p>Fetching assets...</p>
-          </div>
-        ) : (
-          <List
-            className="mt-0 h-full border-0"
-            ItemComponent={RowComponent}
-            /** Clicking on the row will add the current asset to the atom of selected assets */
-            navigate={(assetId, asset) => {
-              /** Only allow user to select if the asset is available */
-              if (!asset.availableToBook || !!asset.kitId) {
-                return;
-              }
+        <List
+          className="mt-0 h-full border-0"
+          ItemComponent={RowComponent}
+          /** Clicking on the row will add the current asset to the atom of selected assets */
+          navigate={(assetId, asset) => {
+            /** Only allow user to select if the asset is available */
+            if (!asset.availableToBook || !!asset.kitId) {
+              return;
+            }
 
-              setSelectedAssets((selectedAssets) =>
-                selectedAssets.includes(assetId)
-                  ? selectedAssets.filter((id) => id !== assetId)
-                  : [...selectedAssets, assetId]
-              );
-            }}
-            emptyStateClassName="py-10"
-            customEmptyStateContent={{
-              title: "You haven't added any assets yet.",
-              text: "What are you waiting for? Create your first asset now!",
-              newButtonRoute: "/assets/new",
-              newButtonContent: "New asset",
-            }}
-          />
-        )}
-      </TabsContent>
-
-      <TabsContent value="kits" asChild>
-        <GroupedByKitAssets className="mt-0 h-full border-0" />
+            setSelectedAssets((selectedAssets) =>
+              selectedAssets.includes(assetId)
+                ? selectedAssets.filter((id) => id !== assetId)
+                : [...selectedAssets, assetId]
+            );
+          }}
+          emptyStateClassName="py-10"
+          customEmptyStateContent={{
+            title: "You haven't added any assets yet.",
+            text: "What are you waiting for? Create your first asset now!",
+            newButtonRoute: "/assets/new",
+            newButtonContent: "New asset",
+          }}
+        />
       </TabsContent>
 
       {/* Footer of the modal */}
       <footer className="item-center flex justify-between border-t px-6 pt-3">
         <div className="flex items-center">
-          {selectedAssets.length} assets selected
+          {totalAssetsSelected} assets selected
         </div>
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>

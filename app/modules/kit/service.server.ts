@@ -1,5 +1,5 @@
-import type { Kit, Organization, Prisma } from "@prisma/client";
-import { AssetStatus, KitStatus } from "@prisma/client";
+import type { Booking, Kit, Organization, Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -115,9 +115,13 @@ export async function updateKitImage({
 export async function getPaginatedAndFilterableKits({
   request,
   organizationId,
+  extraInclude,
+  currentBookingId,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
+  extraInclude?: Prisma.KitInclude;
+  currentBookingId?: Booking["id"];
 }) {
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
@@ -128,7 +132,14 @@ export async function getPaginatedAndFilterableKits({
       : (searchParams.get("status") as KitStatus | null);
   const teamMember = searchParams.get("teamMember"); // custodian
 
-  const { page, perPageParam, search } = paramsValues;
+  const {
+    page,
+    perPageParam,
+    search,
+    hideUnavailable,
+    bookingFrom,
+    bookingTo,
+  } = paramsValues;
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
@@ -156,12 +167,85 @@ export async function getPaginatedAndFilterableKits({
       });
     }
 
+    const unavailableBookingStatuses = [
+      BookingStatus.DRAFT,
+      BookingStatus.RESERVED,
+      BookingStatus.ONGOING,
+    ];
+
+    /**
+     * In case if this function is used for getting kits for bookings
+     * Every asset of kit must be availableToBook, should not have any custody
+     * None of the booking of asset should have unavailable status
+     */
+    if (currentBookingId && hideUnavailable) {
+      where.assets = {
+        every: {
+          organizationId,
+          availableToBook: true,
+          custody: null,
+          bookings: {
+            every: {
+              OR: [
+                { status: { notIn: unavailableBookingStatuses } },
+                { id: currentBookingId },
+              ],
+            },
+          },
+        },
+      };
+
+      if (bookingFrom && bookingTo) {
+        where.assets = {
+          every: {
+            ...where.assets.every,
+            bookings: {
+              every: {
+                OR: [
+                  { status: { notIn: unavailableBookingStatuses } },
+                  { id: currentBookingId },
+                  {
+                    OR: [
+                      {
+                        from: { gte: bookingTo },
+                        to: { lte: bookingFrom },
+                      },
+                      {
+                        from: { lte: bookingFrom },
+                        to: { gte: bookingTo },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
+        };
+      }
+    }
+
+    if (
+      currentBookingId &&
+      hideUnavailable === true &&
+      (!bookingFrom || !bookingTo)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Booking dates are needed to hide unavailable kit.",
+        additionalData: { hideUnavailable, bookingFrom, bookingTo },
+        label,
+      });
+    }
+
     const [kits, totalKits] = await Promise.all([
       db.kit.findMany({
         skip,
         take,
         where,
-        include: KITS_INCLUDE_FIELDS,
+        include: {
+          ...extraInclude,
+          ...KITS_INCLUDE_FIELDS,
+        },
         orderBy: { createdAt: "desc" },
       }),
       db.kit.count({

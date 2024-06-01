@@ -1,5 +1,5 @@
 import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
-import type { Booking, Prisma, Organization, Asset } from "@prisma/client";
+import type { Booking, Prisma, Organization, Asset, Kit } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -151,7 +151,8 @@ export async function upsertBooking(
     > & { assetIds: Asset["id"][] }
   >,
   hints: ClientHint,
-  isSelfService: boolean = false
+  isSelfService: boolean = false,
+  kitIds: Kit["id"][] = []
 ) {
   try {
     const {
@@ -164,14 +165,8 @@ export async function upsertBooking(
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
-    const assetWithKits = await db.asset.findMany({
-      where: { AND: [{ kit: { isNot: null } }, { id: { in: assetIds } }] },
-    });
 
-    const uniqueKitIds = new Set(
-      assetWithKits.map((a) => a.kitId) as unknown as string
-    );
-    const hasKits = uniqueKitIds.size > 0;
+    const hasKits = kitIds.length > 0;
 
     if (assetIds?.length) {
       data.assets = {
@@ -307,7 +302,7 @@ export async function upsertBooking(
       if (newKitStatus) {
         promises.push(
           updateBookingKitStates({
-            kitIds: [...uniqueKitIds],
+            kitIds,
             status: newKitStatus,
           })
         );
@@ -645,6 +640,7 @@ export async function removeAssets({
   firstName,
   lastName,
   userId,
+  kitIds = [],
 }: {
   booking: Pick<Booking, "id"> & {
     assetIds: Asset["id"][];
@@ -652,6 +648,7 @@ export async function removeAssets({
   firstName: string;
   lastName: string;
   userId: string;
+  kitIds?: Kit["id"][];
 }) {
   try {
     const { assetIds, id } = booking;
@@ -673,6 +670,8 @@ export async function removeAssets({
      *
      * Because prisma doesnt support transactional execution of nested queries, we need to do them in 2 steps, because if the disconnect runs first,
      * the updateMany will not find the assets in the booking anymore and wont update them
+     *
+     * If there was some kit removed from the booking, then we have to update the status of that kit to available
      */
     if (
       b.status === BookingStatus.ONGOING ||
@@ -682,6 +681,13 @@ export async function removeAssets({
         where: { id: { in: assetIds } },
         data: { status: AssetStatus.AVAILABLE },
       });
+
+      if (kitIds.length > 0) {
+        await db.kit.updateMany({
+          where: { id: { in: kitIds } },
+          data: { status: KitStatus.AVAILABLE },
+        });
+      }
     }
 
     await createNotes({
@@ -985,4 +991,16 @@ export function sendBookingUpdateNotification(
     default:
       break;
   }
+}
+
+export function getKitIdsByAssets(assets: Pick<Asset, "id" | "kitId">[]) {
+  const assetsWithKit = assets.filter((a) => !!a.kitId) as Array<{
+    id: string;
+    kitId: string;
+  }>;
+
+  const allKitIds = assetsWithKit.map((a) => a.kitId);
+  const uniqueKitIds = new Set(allKitIds);
+
+  return [...uniqueKitIds];
 }
