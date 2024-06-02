@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import type { Prisma } from "@prisma/client";
+import type { Booking, Prisma } from "@prisma/client";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -16,6 +16,10 @@ import {
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { bookingsSelectedKitsAtom } from "~/atoms/selected-assets-atoms";
+import {
+  isKitUnavailableForBooking,
+  KitAvailabilityLabel,
+} from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
@@ -33,7 +37,6 @@ import {
 } from "~/components/shared/tabs";
 import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
-import type { KITS_INCLUDE_FIELDS } from "~/modules/asset/fields";
 import { createNotes } from "~/modules/asset/service.server";
 import {
   getBooking,
@@ -55,6 +58,21 @@ import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
+
+export type KitForBooking = Prisma.KitGetPayload<{
+  include: {
+    _count: { select: { assets: true } };
+    assets: {
+      select: {
+        id: true;
+        status: true;
+        availableToBook: true;
+        custody: true;
+        bookings: { select: { id: true; status: true } };
+      };
+    };
+  };
+}>;
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -83,7 +101,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         currentBookingId: bookingId,
         extraInclude: {
           assets: {
-            select: { id: true, bookings: { select: { status: true } } },
+            select: {
+              id: true,
+              status: true,
+              availableToBook: true,
+              custody: true,
+              bookings: { select: { id: true, status: true } },
+            },
           },
         },
       });
@@ -286,7 +310,11 @@ export default function AddKitsToBooking() {
         <List
           className="mt-0 h-full border-0"
           ItemComponent={Row}
-          navigate={(kitId) => {
+          navigate={(kitId, kit) => {
+            if (isKitUnavailableForBooking(kit as KitForBooking, booking.id)) {
+              return;
+            }
+
             setSelectedKits((prevSelected) =>
               prevSelected.includes(kitId)
                 ? prevSelected.filter((id) => id !== kitId)
@@ -347,13 +375,12 @@ export default function AddKitsToBooking() {
   );
 }
 
-function Row({
-  item: kit,
-}: {
-  item: Prisma.KitGetPayload<{ include: typeof KITS_INCLUDE_FIELDS }>;
-}) {
+function Row({ item: kit }: { item: KitForBooking }) {
+  const { booking } = useLoaderData<{ booking: Booking }>();
   const selectedKits = useAtomValue(bookingsSelectedKitsAtom);
   const checked = selectedKits.includes(kit.id);
+
+  const isKitUnavailable = isKitUnavailableForBooking(kit, booking.id);
 
   return (
     <>
@@ -384,21 +411,14 @@ function Row({
       </Td>
 
       <Td className="text-right">
-        ok
-        {/* {isKitNotAvailable ? (
-          <AvailabilityBadge
-            badgeText="Includes unavailable assets"
-            tooltipTitle="Includes asset(s) that are unavailable for bookings"
-            tooltipContent="One or more assets in this kit are marked as unavailable for bookings. Make them available for bookings or remove the asset(s) from the kit."
-          />
-        ) : null} */}
+        <KitAvailabilityLabel kit={kit} />
       </Td>
 
       <Td>
         <FakeCheckbox
           className={tw(
             "text-white",
-            // isKitNotAvailable ? "text-gray-100" : "",
+            isKitUnavailable ? "text-gray-100" : "",
             checked ? "text-primary" : ""
           )}
           checked={checked}
