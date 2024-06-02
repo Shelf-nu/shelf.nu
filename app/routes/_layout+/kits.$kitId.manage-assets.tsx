@@ -327,11 +327,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
 
     /**
-     * If user is adding/removing an asset to a kit which is a part of DRAFT or COMPLETE booking,
+     * If user is adding/removing an asset to a kit which is a part of DRAFT or RESERVED booking,
      * then we have to add or remove these assets to booking also
      */
     const bookingsToUpdate = kitBookings.filter(
-      (b) => b.status === "DRAFT" || b.status === "COMPLETE"
+      (b) => b.status === "DRAFT" || b.status === "RESERVED"
     );
 
     if (bookingsToUpdate?.length) {
