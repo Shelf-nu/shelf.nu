@@ -507,6 +507,7 @@ enum Currency {
   CAD // Canadian Dollar
   CHF // Swiss Franc
   CNY // Chinese Yuan
+  DKK // Danish Krone
   INR // Indian Rupee
   ZAR // South African Rand
   BRL // Brazilian Real
