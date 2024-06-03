@@ -197,6 +197,7 @@ export function AvailabilityBadge({
  * 4. Some of the assets are marked as unavailable
  * 5. Some of the assets are in custody
  * 6. Some of the assets are already booked for that period (for that booking)
+ * 7. If kit has no assets
  */
 export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   const { booking } = useLoaderData<{ booking: Booking }>();
@@ -258,6 +259,17 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
     );
   }
 
+  /** Kit has not assets */
+  if (!kit.assets.length) {
+    return (
+      <AvailabilityBadge
+        badgeText="No assets"
+        tooltipTitle="No assets in kit"
+        tooltipContent="There are no assets added to this kit yet."
+      />
+    );
+  }
+
   return null;
 }
 
@@ -282,7 +294,13 @@ export function isKitUnavailableForBooking(
   const bookedForPeriod =
     kitBookings.length && kitBookings.some((b) => b.id !== currentBookingId);
 
-  return [isCheckedOut, assetNotAvailable, isInCustody, bookedForPeriod].some(
-    Boolean
-  );
+  const isKitWithoutAssets = kit.assets.length === 0;
+
+  return [
+    isCheckedOut,
+    assetNotAvailable,
+    isInCustody,
+    bookedForPeriod,
+    isKitWithoutAssets,
+  ].some(Boolean);
 }
