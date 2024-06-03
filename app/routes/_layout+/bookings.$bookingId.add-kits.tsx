@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Booking, Prisma } from "@prisma/client";
 import type {
   LinksFunction,
@@ -12,6 +12,7 @@ import {
   useLoaderData,
   useNavigate,
   useNavigation,
+  useSubmit,
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
@@ -22,6 +23,7 @@ import {
 } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
+import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import KitImage from "~/components/kits/kit-image";
 import Header from "~/components/layout/header";
@@ -160,11 +162,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { kitIds, removedKitIds } = parseData(
+    const { kitIds, removedKitIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         kitIds: z.array(z.string()).optional().default([]),
         removedKitIds: z.array(z.string()).optional().default([]),
+        redirectTo: z.string().optional().nullable(),
       }),
       { additionalData: { userId, bookingId } }
     );
@@ -221,6 +224,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
+    /**
+     * If redirectTo is in form that means user has submitted the form through alert dialog,
+     * so we have to redirect to add-assets url
+     */
+    if (redirectTo) {
+      return redirect(redirectTo);
+    }
+
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -229,10 +240,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddKitsToBooking() {
+  const [isAlertOpen, setIsAlertOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
   const { booking, header, bookingKitIds } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
+  const submit = useSubmit();
 
   const [selectedKits, setSelectedKits] = useAtom(bookingsSelectedKitsAtom);
 
@@ -254,6 +269,7 @@ export default function AddKitsToBooking() {
   );
 
   const totalAssetsSelected = booking.assets.filter((a) => !a.kitId).length;
+  const hasUnsavedChanges = selectedKits.length !== bookingKitIds.length;
 
   /**
    * Initially here we were using useHydrateAtoms, but we found that it was causing the selected assets to stay the same as it hydrates only once per store and we dont have different stores per booking
@@ -271,6 +287,11 @@ export default function AddKitsToBooking() {
       className="-mx-6 flex h-full max-h-full flex-col"
       value="kits"
       onValueChange={() => {
+        if (hasUnsavedChanges) {
+          setIsAlertOpen(true);
+          return;
+        }
+
         navigate(manageAssetsUrl);
       }}
     >
@@ -340,7 +361,7 @@ export default function AddKitsToBooking() {
           <Button variant="secondary" to={".."}>
             Close
           </Button>
-          <Form method="post">
+          <Form method="post" ref={formRef}>
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
             {/* These are the kit ids, coming from the server */}
             {removedKitIds.map((kitId, i) => (
@@ -360,6 +381,9 @@ export default function AddKitsToBooking() {
                 value={kitId}
               />
             ))}
+            {hasUnsavedChanges ? (
+              <input name="redirectTo" value={manageAssetsUrl} type="hidden" />
+            ) : null}
             <Button
               type="submit"
               name="intent"
@@ -371,6 +395,18 @@ export default function AddKitsToBooking() {
           </Form>
         </div>
       </footer>
+
+      <UnsavedChangesAlert
+        type="kits"
+        open={isAlertOpen}
+        onOpenChange={setIsAlertOpen}
+        onCancel={() => {
+          navigate(manageAssetsUrl);
+        }}
+        onYes={() => {
+          submit(formRef.current);
+        }}
+      />
     </Tabs>
   );
 }

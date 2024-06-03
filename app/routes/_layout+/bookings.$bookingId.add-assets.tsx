@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type Asset,
   type Booking,
@@ -16,6 +16,7 @@ import {
   useLoaderData,
   useNavigate,
   useNavigation,
+  useSubmit,
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
@@ -24,6 +25,7 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
+import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
@@ -165,11 +167,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // assetIds: z.array(z.string()).optional().default([]),
     // removedAssetIds: z.array(z.string()).optional().default([]),
 
-    const { assetIds, removedAssetIds } = parseData(
+    const { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
         removedAssetIds: z.array(z.string()).optional().default([]),
+        redirectTo: z.string().optional().nullable(),
       }),
       {
         additionalData: { userId, bookingId },
@@ -210,6 +213,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
+    /**
+     * If redirectTo is in form that means user has submitted the form through alert,
+     * so we have to redirect to add-kits url
+     */
+    if (redirectTo) {
+      return redirect(redirectTo);
+    }
+
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -218,11 +229,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToNewBooking() {
+  const [isAlertOpen, setIsAlertOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
   const { booking, header, items, bookingKitIds } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
+  const submit = useSubmit();
 
   const bookingAssetsIds = useMemo(
     () => booking?.assets.map((a) => a.id) || [],
@@ -243,6 +258,7 @@ export default function AddAssetsToNewBooking() {
   );
 
   const totalAssetsSelected = selectedItems.filter((i) => !i.kitId).length;
+  const hasUnsavedChanges = selectedAssets.length !== bookingAssetsIds.length;
 
   const manageKitsUrl = useMemo(
     () =>
@@ -273,6 +289,11 @@ export default function AddAssetsToNewBooking() {
       className="-mx-6 flex h-full max-h-full flex-col"
       value="assets"
       onValueChange={() => {
+        if (hasUnsavedChanges) {
+          setIsAlertOpen(true);
+          return;
+        }
+
         navigate(manageKitsUrl);
       }}
     >
@@ -394,7 +415,7 @@ export default function AddAssetsToNewBooking() {
           <Button variant="secondary" to={".."}>
             Close
           </Button>
-          <Form method="post">
+          <Form method="post" ref={formRef}>
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
             {/* These are the asset ids, coming from the server */}
             {removedAssetIds.map((assetId, i) => (
@@ -414,6 +435,9 @@ export default function AddAssetsToNewBooking() {
                 value={assetId}
               />
             ))}
+            {hasUnsavedChanges ? (
+              <input name="redirectTo" value={manageKitsUrl} type="hidden" />
+            ) : null}
             <Button
               type="submit"
               name="intent"
@@ -425,6 +449,18 @@ export default function AddAssetsToNewBooking() {
           </Form>
         </div>
       </footer>
+
+      <UnsavedChangesAlert
+        type="assets"
+        open={isAlertOpen}
+        onOpenChange={setIsAlertOpen}
+        onCancel={() => {
+          navigate(manageKitsUrl);
+        }}
+        onYes={() => {
+          submit(formRef.current);
+        }}
+      />
     </Tabs>
   );
 }
