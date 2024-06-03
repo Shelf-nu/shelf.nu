@@ -12,6 +12,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { tw } from "~/utils/tw";
+import { DownloadIcon } from "../icons/library";
 import { Spinner } from "../shared/spinner";
 
 export const GenerateBookingPdf = ({
@@ -27,9 +28,9 @@ export const GenerateBookingPdf = ({
 }) => {
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const totalAssets = booking.assets.length;
-  const url = `/bookings/${booking.id.toString()}/generate-pdf/${
-    booking.name
-  }-${new Date().toISOString().slice(0, 10)}.pdf?timeStamp=${timeStamp}`;
+  const url = `/bookings/${booking.id.toString()}/generate-pdf/booking-checklist-${new Date()
+    .toISOString()
+    .slice(0, 10)}.pdf?timeStamp=${timeStamp}`;
   const handleIframeLoad = () => {
     setIframeLoaded(true);
   };
@@ -88,6 +89,19 @@ export const GenerateBookingPdf = ({
             <AlertDialogCancel asChild>
               <Button variant="secondary">Cancel</Button>
             </AlertDialogCancel>
+            <Button
+              to={url}
+              variant="secondary"
+              role="link"
+              download={true}
+              reloadDocument={true}
+              disabled={!iframeLoaded}
+            >
+              <div className="flex items-center gap-4">
+                <DownloadIcon />
+                <div>Download</div>
+              </div>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
