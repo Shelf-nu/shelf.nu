@@ -12,7 +12,6 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { tw } from "~/utils/tw";
-import { DownloadIcon } from "../icons/library";
 import { Spinner } from "../shared/spinner";
 
 export const GenerateBookingPdf = ({

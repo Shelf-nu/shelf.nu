@@ -11,7 +11,6 @@ import {
 } from "~/modules/booking/pdf-helpers";
 import { SERVER_URL } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
-
 import { error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -133,7 +132,6 @@ const styles = {
     fontSize: "14px",
     color: "rgba(0, 0, 0, 0.6)",
     wordWrap: "break-word",
-    // maxWidth: "300px", /* Adjust this value as needed *
   },
   qrcodeInfo: {
     display: "flex",
