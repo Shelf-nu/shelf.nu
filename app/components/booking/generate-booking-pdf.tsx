@@ -96,11 +96,9 @@ export const GenerateBookingPdf = ({
               download={true}
               reloadDocument={true}
               disabled={!iframeLoaded}
+              icon="download"
             >
-              <div className="flex items-center gap-4">
-                <DownloadIcon />
-                <div>Download</div>
-              </div>
+              Download
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
