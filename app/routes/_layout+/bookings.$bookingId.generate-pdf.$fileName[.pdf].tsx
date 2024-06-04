@@ -94,17 +94,17 @@ const styles = {
     marginTop: "10px",
     marginBottom: "20px",
     border: "1px solid #bfbfbf",
-    borderBottom: "unset",
+    borderRadius: "4px",
   },
   infoRow: {
     display: "flex",
-    marginBottom: "5px",
     padding: "8px",
     borderBottom: "1px solid #bfbfbf",
   },
   infoLabel: {
-    fontWeight: "bold",
+    fontWeight: "medium",
     minWidth: "150px",
+    fontSize: "14px",
   },
   infoValue: {
     flexGrow: "1",
@@ -112,15 +112,16 @@ const styles = {
   },
   bookingTable: {
     width: "100%",
-    borderCollapse: "collapse",
     border: "1px solid #bfbfbf",
-    borderBottom: "unset",
+    borderRadius: "4px !important", // Added !important flag
+    borderCollapse: "collapse",
   },
   tableHeader: {
     borderBottom: "1px solid #bfbfbf",
     padding: "10px",
     textAlign: "left",
     fontSize: "14px",
+    fontWeight: "normal",
   },
   tableRow: {
     verticalAlign: "top",
@@ -170,19 +171,19 @@ const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
       </div>
       <section style={styles.bookingInfo}>
         <div style={styles.infoRow}>
-          <span style={styles.infoLabel}>Booking:</span>
+          <span style={styles.infoLabel}>Booking</span>
           <span style={styles.infoValue}>{booking?.name || ""}</span>
         </div>
         <div style={styles.infoRow}>
-          <span style={styles.infoLabel}>Custodian:</span>
+          <span style={styles.infoLabel}>Custodian</span>
           <span style={styles.infoValue}>{`${
             booking?.custodianUser?.firstName ?? ""
           } ${booking?.custodianUser?.lastName ?? ""} <${
             booking?.custodianUser?.email ?? ""
           }>`}</span>
         </div>
-        <div style={styles.infoRow}>
-          <span style={styles.infoLabel}>Booking period:</span>
+        <div style={{ ...styles.infoRow, borderBottom: "unset" }}>
+          <span style={styles.infoLabel}>Booking period</span>
           <span style={styles.infoValue}>
             {booking?.from && booking?.to
               ? `${new Date(booking.from).toLocaleString()} - ${new Date(

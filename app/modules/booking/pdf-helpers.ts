@@ -145,10 +145,6 @@ export const getBookingAssetsCustomHeader = ({
               height: 40px;
               width: 40px;
               object-fit: cover;
-              border-width: 1px;
-              border-radius: 4px;
-              padding: 1px;
-              border: 1px solid #bfbfbf;
             }
             .text {
               max-width: 400px; /* Adjust this value as needed */
@@ -162,6 +158,7 @@ export const getBookingAssetsCustomHeader = ({
               align-items: center;
               padding-left: 20px;
               overflow: hidden;
+              gap:2px;
             } 
             .header-main .header-content {
             color:  rgba(0, 0, 0, 0.6);
