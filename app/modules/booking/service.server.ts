@@ -197,11 +197,6 @@ export async function upsertBooking(
         data.custodianUser = {
           connect: { id: custodianUser.user.id },
         };
-      } else {
-        //disconnect any stake userId
-        data.custodianUser = {
-          disconnect: true,
-        };
       }
     }
 

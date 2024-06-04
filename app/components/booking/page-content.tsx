@@ -10,6 +10,12 @@ export function BookingPageContent() {
 
   const bookingStatus = useBookingStatus(booking);
 
+  const custodianUser = teamMembers.find((member) =>
+    booking.custodianUserId
+      ? booking.custodianUserId === member?.user?.id
+      : booking.custodianTeamMemberId === member.id
+  );
+
   return (
     <div
       id="bookingFormWrapper"
@@ -29,12 +35,11 @@ export function BookingPageContent() {
               ? dateForDateTimeInputValue(new Date(booking.to))
               : undefined
           }
-          custodianUserId={
-            booking.custodianUserId ||
-            teamMembers.find(
-              (member) => member.user?.id === booking.custodianUserId
-            )?.id
-          }
+          custodianUserId={JSON.stringify({
+            id: custodianUser?.id,
+            name: custodianUser?.name,
+            userId: custodianUser?.userId,
+          })}
           bookingStatus={bookingStatus}
         />
       </div>
