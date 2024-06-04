@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import ReactDOM from "react-dom";
 import { tw } from "~/utils/tw";
 import { XIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -42,3 +43,6 @@ export const Dialog = ({
       </dialog>
     </div>
   ) : null;
+
+export const DialogPortal = ({ children }: { children: React.ReactNode }) =>
+  ReactDOM.createPortal(children, document.body);

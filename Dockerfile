@@ -7,11 +7,51 @@ ENV NODE_ENV="production"
 ARG DEBIAN_FRONTEND="noninteractive"
 WORKDIR /src
 
-# Install openssl for Prisma
+# Install dependencies for Puppeteer and Google Chrome & Prisma
 RUN apt-get update && \
-    apt-get install -y openssl && \
+    apt-get install -y \
+    ca-certificates \
+    fonts-liberation \
+    libappindicator3-1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    wget \
+    xdg-utils \
+    libgbm-dev \
+    gconf-service \
+    libxss1 \
+    libxtst6 \
+    lsb-release \
+    unzip \
+    xvfb \
+    openssl || { cat /var/log/apt/*log; exit 1; } && \
     rm -rf /var/lib/apt/lists/*
 
+
+# Add Google Chrome repository and install Chrome
+RUN apt-get update \
+    && apt-get install -y wget gnupg \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg \
+    && sh -c 'echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] https://dl-ssl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-khmeros fonts-kacst fonts-freefont-ttf libxss1 dbus dbus-x11 \
+      --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CHROME_EXECUTABLE_PATH="/usr/bin/google-chrome-stable"
+   
 # Install all node_modules, including dev dependencies
 FROM base AS deps
 
@@ -37,6 +77,7 @@ COPY --from=build /src/app/database /src/app/database
 COPY --from=build /src/build /src/build
 COPY --from=build /src/package.json /src/package.json
 COPY --from=build /src/start.sh /src/start.sh
+
 RUN chmod +x /src/start.sh
 
 ENTRYPOINT [ "/src/start.sh" ]

@@ -138,7 +138,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization.organization.owner.tier.tierLimit
         ),
         user,
-        curriences: Object.keys(Currency)
+        curriences: Object.keys(Currency),
       })
     );
   } catch (cause) {
@@ -208,7 +208,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function GeneralPage() {
-  const { currentOrganization, user, canExportAssets, curriences} =
+  const { currentOrganization, user, canExportAssets, curriences } =
     useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", EditWorkspaceFormSchema);
