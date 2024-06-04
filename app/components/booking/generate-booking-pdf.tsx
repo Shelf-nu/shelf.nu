@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
 import { Button } from "~/components/shared/button";
 import {
@@ -26,6 +26,7 @@ export const GenerateBookingPdf = ({
   timeStamp: number;
 }) => {
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null); // Add ref for the iframe
   const totalAssets = booking.assets.length;
   const url = `/bookings/${booking.id.toString()}/generate-pdf/booking-checklist-${new Date()
     .toISOString()
@@ -36,6 +37,27 @@ export const GenerateBookingPdf = ({
 
   const handleMobileView = () => {
     window.location.href = url;
+  };
+
+  const handleDownload = (e: React.MouseEvent<HTMLButtonElement>) => {
+    try {
+      e.preventDefault();
+      const iframe = iframeRef.current;
+      if (iframe && iframe?.contentDocument) {
+        const pdfData = iframe?.contentDocument?.body?.innerHTML; // Adjust if necessary to access PDF data
+        const blob = new Blob([pdfData], { type: "application/pdf" });
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = `booking-checklist-${new Date()
+          .toISOString()
+          .slice(0, 10)}.pdf`;
+        a.click();
+        URL.revokeObjectURL(downloadUrl);
+      }
+    } catch (err) {
+      //do nothing for now.
+    }
   };
 
   return (
@@ -73,6 +95,7 @@ export const GenerateBookingPdf = ({
               <div className={tw(iframeLoaded ? "block" : "hidden", "h-full")}>
                 <iframe
                   id="pdfPreview"
+                  ref={iframeRef}
                   width="100%"
                   height="100%"
                   onLoad={handleIframeLoad}
@@ -91,11 +114,9 @@ export const GenerateBookingPdf = ({
             <Button
               to={url}
               variant="secondary"
-              role="link"
-              download={true}
-              reloadDocument={true}
               disabled={!iframeLoaded}
               icon="download"
+              onClick={handleDownload}
             >
               Download
             </Button>
