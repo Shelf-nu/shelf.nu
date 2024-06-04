@@ -102,7 +102,7 @@ const styles = {
     borderBottom: "1px solid #bfbfbf",
   },
   infoLabel: {
-    fontWeight: "medium",
+    fontWeight: "500",
     minWidth: "150px",
     fontSize: "14px",
   },
@@ -120,8 +120,8 @@ const styles = {
     borderBottom: "1px solid #bfbfbf",
     padding: "10px",
     textAlign: "left",
-    fontSize: "14px",
-    fontWeight: "normal",
+    fontSize: "10px",
+    fontWeight: "500",
   },
   tableRow: {
     verticalAlign: "top",
@@ -144,12 +144,6 @@ const styles = {
     width: "55px",
     height: "55px",
     objectFit: "cover",
-  },
-  assetImg: {
-    borderWidth: "1px",
-    borderRadius: "4px",
-    padding: "1px",
-    border: "1px solid #bfbfbf",
   },
   checkbox: {
     display: "block",
@@ -221,7 +215,7 @@ const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
                       `${SERVER_URL}/static/images/asset-placeholder.jpg`
                     }
                     alt="Asset"
-                    style={{ ...styles.img, ...styles.assetImg }}
+                    style={{ ...styles.img }}
                   />
                 </div>
               </td>

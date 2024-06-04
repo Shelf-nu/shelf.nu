@@ -138,8 +138,6 @@ export const getBookingAssetsCustomHeader = ({
               display: flex;
               justify-content: space-between;
               align-items: center;
-              padding-bottom:20px;
-              border-bottom: 2px solid #bfbfbf;
             }
             .header-main img {
               height: 40px;
@@ -161,7 +159,7 @@ export const getBookingAssetsCustomHeader = ({
               gap:2px;
             } 
             .header-main .header-content {
-            color:  rgba(0, 0, 0, 0.6);
+              color:  rgba(0, 0, 0, 0.6);
             }
         </style>
         <div class="header">
@@ -169,7 +167,7 @@ export const getBookingAssetsCustomHeader = ({
             <img src="${base64Image}" alt="logo">
             <div class="header-content">
             <div class="text">${
-              booking?.name || ""
+              booking.name
             }</div><span> | ${new Date().toLocaleDateString()} | Page <span class="pageNumber"></span>/<span class="totalPages"></span></span>
             </div>
             </div>
