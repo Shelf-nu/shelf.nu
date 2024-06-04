@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
 import { Button } from "~/components/shared/button";
+
 import { tw } from "~/utils/tw";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Spinner } from "../shared/spinner";
@@ -17,7 +18,6 @@ export const GenerateBookingPdf = ({
   timeStamp: number;
 }) => {
   const [iframeLoaded, setIframeLoaded] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null); // Add ref for the iframe
   const totalAssets = booking.assets.length;
   const url = `/bookings/${booking.id.toString()}/generate-pdf/booking-checklist-${new Date()
     .toISOString()
@@ -28,27 +28,6 @@ export const GenerateBookingPdf = ({
 
   const handleMobileView = () => {
     window.location.href = url;
-  };
-
-  const handleDownload = (e: React.MouseEvent<HTMLButtonElement>) => {
-    try {
-      e.preventDefault();
-      const iframe = iframeRef.current;
-      if (iframe && iframe?.contentDocument) {
-        const pdfData = iframe?.contentDocument?.body?.innerHTML; // Adjust if necessary to access PDF data
-        const blob = new Blob([pdfData], { type: "application/pdf" });
-        const downloadUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = downloadUrl;
-        a.download = `booking-checklist-${new Date()
-          .toISOString()
-          .slice(0, 10)}.pdf`;
-        a.click();
-        URL.revokeObjectURL(downloadUrl);
-      }
-    } catch (err) {
-      //do nothing for now.
-    }
   };
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -103,7 +82,6 @@ export const GenerateBookingPdf = ({
                     width="100%"
                     height="100%"
                     onLoad={handleIframeLoad}
-                    ref={iframeRef}
                     src={url}
                     title="Booking PDF"
                     allowFullScreen={true}
@@ -114,15 +92,6 @@ export const GenerateBookingPdf = ({
             <div className="flex justify-end gap-3 py-4">
               <Button variant="secondary" onClick={handleCloseDialog}>
                 Cancel
-              </Button>
-              <Button
-                variant="secondary"
-                role="link"
-                disabled={!iframeLoaded}
-                icon="download"
-                onClick={handleDownload}
-              >
-                Download
               </Button>
             </div>
           </div>

@@ -94,7 +94,6 @@ const styles = {
     marginTop: "10px",
     marginBottom: "20px",
     border: "1px solid #bfbfbf",
-    borderRadius: "4px",
   },
   infoRow: {
     display: "flex",
