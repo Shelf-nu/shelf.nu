@@ -49,7 +49,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
   try {
     if (!ENABLE_PREMIUM_FEATURES) {
-      return redirect("/settings/account");
+      return redirect("/account-details/general");
     }
 
     await requirePermission({
@@ -192,7 +192,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => <Link to="/settings/subscription">Subscription</Link>,
+  breadcrumb: () => (
+    <Link to="/account-details/subscription">Subscription</Link>
+  ),
 };
 
 export default function UserPage() {

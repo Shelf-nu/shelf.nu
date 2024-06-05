@@ -74,7 +74,7 @@ export default function SidebarBottom({ user }: Props) {
         >
           <DropdownMenuItem className="border-b border-gray-200 p-0">
             <Button
-              to={`settings/account`}
+              to={`/account-details`}
               icon="profile"
               role="link"
               variant="link"

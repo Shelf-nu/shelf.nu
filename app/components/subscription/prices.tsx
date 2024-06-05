@@ -1,6 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import type Stripe from "stripe";
-import type { loader } from "~/routes/_layout+/settings.subscription";
+import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { FREE_PLAN } from "./helpers";
 import { PriceBox } from "./price-box";
 import { PriceCta } from "./price-cta";

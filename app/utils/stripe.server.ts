@@ -107,10 +107,10 @@ export async function createStripeCheckoutSession({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: lineItems,
-      success_url: `${domainUrl}/settings/subscription?success=true${
+      success_url: `${domainUrl}/account-details/subscription?success=true${
         shelfTier === "tier_2" ? "&team=true" : ""
       }`,
-      cancel_url: `${domainUrl}/settings/subscription?canceled=true`,
+      cancel_url: `${domainUrl}/account-details/subscription?canceled=true`,
       client_reference_id: userId,
       customer: customerId,
       ...(intent === "trial" && {
@@ -252,7 +252,7 @@ export async function createBillingPortalSession({
   try {
     const { url } = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${process.env.SERVER_URL}/settings/subscription`,
+      return_url: `${process.env.SERVER_URL}/account-details/subscription`,
     });
 
     return { url };

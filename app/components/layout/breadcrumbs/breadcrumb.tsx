@@ -13,30 +13,35 @@ export function Breadcrumb({
    * If the value is "single" that means we have to
    * take the page title and render it.
    * This takes care of showing the correct title in asset show page*/
-  if (typeof breadcrumb === "string" && breadcrumb === "single") {
-    if (match?.data?.location) {
-      breadcrumb =
-        <span className="single-crumb">{match?.data?.location?.name}</span> ||
-        "Not found";
-    } else if (match?.data?.organization) {
-      breadcrumb =
-        (
-          <span className="single-crumb">
-            {match?.data?.organization?.name}
-          </span>
-        ) || "Not found";
-    } else if (match?.data?.booking) {
-      breadcrumb =
-        <span className="single-crumb">{match?.data?.booking?.name}</span> ||
-        "Not found";
-    } else if (match?.data?.kit) {
-      breadcrumb =
-        <span className="single-crumb">{match?.data?.kit?.name}</span> ||
-        "Not found";
+  if (typeof breadcrumb === "string") {
+    if (breadcrumb === "single") {
+      if (match?.data?.location) {
+        breadcrumb =
+          <span className="single-crumb">{match?.data?.location?.name}</span> ||
+          "Not found";
+      } else if (match?.data?.organization) {
+        breadcrumb =
+          (
+            <span className="single-crumb">
+              {match?.data?.organization?.name}
+            </span>
+          ) || "Not found";
+      } else if (match?.data?.booking) {
+        breadcrumb =
+          <span className="single-crumb">{match?.data?.booking?.name}</span> ||
+          "Not found";
+      } else if (match?.data?.kit) {
+        breadcrumb =
+          <span className="single-crumb">{match?.data?.kit?.name}</span> ||
+          "Not found";
+      } else {
+        breadcrumb =
+          <span className="single-crumb">{match?.data?.asset?.title}</span> ||
+          "Not found";
+      }
     } else {
       breadcrumb =
-        <span className="single-crumb">{match?.data?.asset?.title}</span> ||
-        "Not found";
+        <span className="single-crumb">{breadcrumb}</span> || "Not found";
     }
   }
 
