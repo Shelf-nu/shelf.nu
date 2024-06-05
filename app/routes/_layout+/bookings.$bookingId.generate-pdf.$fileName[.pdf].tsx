@@ -154,6 +154,11 @@ const styles = {
 
 const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
   const { booking, organization, assets, assetIdToQrCodeMap } = pdfMeta;
+
+  const custodianName = booking.custodianUser
+    ? `${booking.custodianUser.firstName} ${booking.custodianUser.lastName} <${booking.custodianUser.email}>`
+    : `${booking.custodianTeamMember?.name}`;
+
   return (
     <div style={styles.container}>
       <div style={styles.headerText}>
@@ -169,11 +174,7 @@ const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
         </div>
         <div style={styles.infoRow}>
           <span style={styles.infoLabel}>Custodian</span>
-          <span style={styles.infoValue}>{`${
-            booking?.custodianUser?.firstName ?? ""
-          } ${booking?.custodianUser?.lastName ?? ""} <${
-            booking?.custodianUser?.email ?? ""
-          }>`}</span>
+          <span style={styles.infoValue}>{custodianName}</span>
         </div>
         <div style={{ ...styles.infoRow, borderBottom: "unset" }}>
           <span style={styles.infoLabel}>Booking period</span>
