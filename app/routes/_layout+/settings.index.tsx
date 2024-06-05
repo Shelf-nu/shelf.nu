@@ -4,7 +4,7 @@ import { redirect } from "@remix-run/node";
  * We just redirect to default subroute which is user
  */
 export function loader() {
-  return redirect("account");
+  return redirect("general");
 }
 
 export const shouldRevalidate = () => false;

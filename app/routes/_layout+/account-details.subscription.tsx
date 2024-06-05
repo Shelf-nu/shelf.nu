@@ -49,7 +49,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
   try {
     if (!ENABLE_PREMIUM_FEATURES) {
-      return redirect("/settings/account");
+      return redirect("/account-details/general");
     }
 
     await requirePermission({

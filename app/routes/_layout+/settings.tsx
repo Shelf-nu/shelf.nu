@@ -32,7 +32,7 @@ export const shouldRevalidate = () => false;
 
 export default function SettingsPage() {
   let items = [
-    { to: "account", content: "Account" },
+    { to: "general", content: "General" },
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },
   ];
@@ -41,7 +41,7 @@ export default function SettingsPage() {
   /** If user is self service, remove the extra items */
   if (userIsSelfService) {
     items = items.filter(
-      (item) => !["custom-fields", "team"].includes(item.to)
+      (item) => !["custom-fields", "team", "general"].includes(item.to)
     );
   }
 
