@@ -104,7 +104,7 @@ export default function AssetCustomFields({
                 error={zo.errors[`cf-${field.id}`]()?.message}
                 variant="secondary"
                 className={tw(
-                  "w-full min-w-[300px] pl-1 text-left font-normal",
+                  "w-full pl-1 text-left font-normal md:min-w-[300px]",
                   !dateObj[field.id] && "text-muted-foreground"
                 )}
               >
