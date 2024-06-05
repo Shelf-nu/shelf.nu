@@ -183,7 +183,7 @@ export async function generatePdfContent(
   const browser = await puppeteer.launch({
     executablePath:
       NODE_ENV !== "development"
-        ? CHROME_EXECUTABLE_PATH || "/usr/bin/google-chrome-stable"
+        ? CHROME_EXECUTABLE_PATH || "/usr/bin/chromium"
         : undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
