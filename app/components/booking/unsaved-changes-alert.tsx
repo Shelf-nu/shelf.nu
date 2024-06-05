@@ -34,7 +34,7 @@ export default function UnsavedChangesAlert({
         <AlertDialogHeader>
           <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
           <AlertDialogDescription>
-            You have added some {type} to the booking but haven’t save it yet.
+            You have added some {type} to the booking but haven’t saved it yet.
             Do you want to confirm adding those {type}?
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -43,11 +43,11 @@ export default function UnsavedChangesAlert({
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
               <Button variant="secondary" onClick={onCancel}>
-                Cancel
+                No, discard changes
               </Button>
             </AlertDialogCancel>
 
-            <Button onClick={onYes}>Yes</Button>
+            <Button onClick={onYes}>Yes, confirm change</Button>
           </div>
         </AlertDialogFooter>
       </AlertDialogContent>
