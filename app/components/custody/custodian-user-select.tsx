@@ -35,8 +35,9 @@ export default function CustodianUserSelect(
 
   return (
     <div className="relative w-full">
-      <Select name="custodian" defaultValue={defaultUserId} disabled={disabled}>
+      <Select name="custodian" defaultValue={defaultUserId}>
         <SelectTrigger
+          disabled={disabled}
           className={tw(
             disabled ? "cursor-not-allowed" : "",
             "custodian-selector min-h-[38px] text-left",

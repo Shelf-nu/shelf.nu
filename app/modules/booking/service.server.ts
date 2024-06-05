@@ -197,6 +197,17 @@ export async function upsertBooking(
         data.custodianUser = {
           connect: { id: custodianUser.user.id },
         };
+      } else if (id) {
+        const b = await db.booking.findFirst({
+          where: { id },
+          select: { custodianUserId: true },
+        });
+
+        if (b?.custodianUserId) {
+          data.custodianUser = {
+            disconnect: true,
+          };
+        }
       }
     }
 
