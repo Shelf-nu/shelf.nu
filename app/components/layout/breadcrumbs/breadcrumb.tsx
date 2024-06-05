@@ -41,7 +41,7 @@ export function Breadcrumb({
   }
 
   return breadcrumb ? (
-    <div className="breadcrumb">
+    <div className={`breadcrumb ${isLastItem?"mt-[3px]":""}`}>
       {breadcrumb}{" "}
       {!isLastItem && (
         <span className="mx-2.5 md:mx-4">
