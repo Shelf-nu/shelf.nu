@@ -53,7 +53,7 @@ export default function AssetCustomFields({
           res[cur.customFieldId] = new Date(cur.value.valueDate!);
           return res;
         },
-        {} as Record<string, Date>
+        {} as Record<string, Date | null>
       )
   );
 
@@ -98,25 +98,38 @@ export default function AssetCustomFields({
           hidden
         />
         <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              error={zo.errors[`cf-${field.id}`]()?.message}
-              variant="secondary"
-              className={tw(
-                "w-full min-w-[300px] pl-1 text-left font-normal",
-                !dateObj[field.id] && "text-muted-foreground"
-              )}
-            >
-              <div className="flex justify-between">
-                {dateObj[field.id] ? (
-                  <span>{format(new Date(dateObj[field.id]), "PPP")}</span>
-                ) : (
-                  <span>Pick a date</span>
+          <div className="flex w-full items-center gap-x-2">
+            <PopoverTrigger asChild>
+              <Button
+                error={zo.errors[`cf-${field.id}`]()?.message}
+                variant="secondary"
+                className={tw(
+                  "w-full min-w-[300px] pl-1 text-left font-normal",
+                  !dateObj[field.id] && "text-muted-foreground"
                 )}
-                <CalendarIcon className="ml-3 size-5" />
-              </div>
-            </Button>
-          </PopoverTrigger>
+              >
+                <div className="flex justify-between">
+                  {dateObj[field.id] ? (
+                    <span>{format(new Date(dateObj[field.id]!), "PPP")}</span>
+                  ) : (
+                    <span>Pick a date</span>
+                  )}
+                  <CalendarIcon className="ml-3 size-5" />
+                </div>
+              </Button>
+            </PopoverTrigger>
+
+            {dateObj[field.id] ? (
+              <Button
+                icon="x"
+                variant="secondary"
+                type="button"
+                onClick={() => {
+                  setDateObj({ ...dateObj, [field.id]: null });
+                }}
+              />
+            ) : null}
+          </div>
           <PopoverContent side="top" className="z-[100] w-auto p-0" align="end">
             <Calendar
               name={`cf-${field.id}`}
