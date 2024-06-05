@@ -103,7 +103,7 @@ export default function CustodianUserSelect(
             ) : (
               <div>
                 No team members found.{" "}
-                <Button to={"/settings/workspace"} variant="link">
+                <Button to={"/account-details/workspace"} variant="link">
                   Create team members
                 </Button>
               </div>

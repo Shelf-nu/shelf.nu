@@ -200,7 +200,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect("/settings/account-details");
+    return redirect("/account-details/general");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });

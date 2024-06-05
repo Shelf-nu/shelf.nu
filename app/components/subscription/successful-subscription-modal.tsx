@@ -46,7 +46,7 @@ export default function SuccessfulSubscriptionModal() {
               {isTeam ? (
                 <Button
                   width="full"
-                  to="/settings/workspace/new"
+                  to="/account-details/workspace/new"
                   variant="primary"
                 >
                   Create your Team workspace

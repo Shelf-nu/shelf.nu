@@ -149,7 +149,7 @@ export default function SelectPlan() {
         </CrispButton>
         .
       </p>
-      <Form method="post" className="w-full" action="/settings/subscription">
+      <Form method="post" className="w-full" action="/account-details/subscription">
         <input type="hidden" name="priceId" value={activePrice?.id || ""} />
         <input
           type="hidden"
