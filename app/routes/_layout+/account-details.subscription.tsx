@@ -192,7 +192,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => <Link to="/account-details/subscription">Subscription</Link>,
+  breadcrumb: () => (
+    <Link to="/account-details/subscription">Subscription</Link>
+  ),
 };
 
 export default function UserPage() {

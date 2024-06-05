@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
-import type { loader } from "~/routes/_layout+/settings.subscription";
+import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { Button } from "../shared/button";
 
 export default function SuccessfulSubscriptionModal() {

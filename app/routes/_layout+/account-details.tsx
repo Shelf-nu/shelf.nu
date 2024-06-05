@@ -33,15 +33,13 @@ export const shouldRevalidate = () => false;
 export default function AccountDetailsPage() {
   let items = [
     { to: "general", content: "General" },
-    { to: "workspace", content: "Workspaces" }
+    { to: "workspace", content: "Workspaces" },
   ];
 
   const userIsSelfService = useUserIsSelfService();
   /** If user is self service, remove the extra items */
   if (userIsSelfService) {
-    items = items.filter(
-      (item) => !["general"].includes(item.to)
-    );
+    items = items.filter((item) => !["general"].includes(item.to));
   }
 
   const enablePremium = useRouteLoaderData<typeof layoutLoader>(
