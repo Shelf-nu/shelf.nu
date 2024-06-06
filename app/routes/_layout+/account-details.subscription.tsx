@@ -27,11 +27,6 @@ import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
-import { requirePermission } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getDomainUrl,
@@ -112,13 +107,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
-    await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.subscription,
-      action: PermissionAction.update,
-    });
-
     const { priceId, intent, shelfTier } = parseData(
       await request.formData(),
       z.object({

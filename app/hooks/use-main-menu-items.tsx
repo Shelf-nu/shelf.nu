@@ -44,7 +44,7 @@ export function useMainMenuItems() {
       label: "Bookings",
     },
   ];
-  const menuItemsBottom = [
+  let menuItemsBottom = [
     {
       icon: <Icon icon="scanQR" />,
       to: "scanner",
@@ -69,6 +69,9 @@ export function useMainMenuItems() {
       "settings",
     ];
     menuItemsTop = menuItemsTop.filter(
+      (item) => !itemsToRemove.includes(item.to)
+    );
+    menuItemsBottom = menuItemsBottom.filter(
       (item) => !itemsToRemove.includes(item.to)
     );
   }
