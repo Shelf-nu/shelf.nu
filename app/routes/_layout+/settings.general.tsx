@@ -45,7 +45,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { canExportAssets } from "~/utils/subscription";
 import { zodFieldIsRequired } from "~/utils/zod";
-import { MAX_SIZE } from "./settings.workspace.new";
+import { MAX_SIZE } from "./account-details.workspace.new";
 
 const EditWorkspaceFormSchema = z.object({
   logo: z.any().optional(),
@@ -385,7 +385,7 @@ function TooltipContent() {
         features. Check out{" "}
         <Link
           className="font-bold text-primary-400"
-          to="/settings/subscription"
+          to="/account-details/subscription"
         >
           Subscriptions
         </Link>{" "}
