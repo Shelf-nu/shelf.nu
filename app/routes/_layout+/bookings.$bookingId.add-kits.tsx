@@ -189,9 +189,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id: bookingId,
           assetIds: allSelectedAssetIds,
         },
-        getClientHint(request),
-        false,
-        kitIds
+        getClientHint(request)
       );
 
       /** We create notes for the assets that were added */
