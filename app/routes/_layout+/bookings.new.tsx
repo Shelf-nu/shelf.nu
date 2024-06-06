@@ -52,9 +52,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         where: {
           deletedAt: null,
           organizationId,
-          userId: {
-            not: null,
-          },
         },
         include: {
           user: true,
@@ -151,7 +148,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const booking = await upsertBooking(
       {
-        custodianUserId: custodian,
+        custodianUserId: custodian?.userId,
+        custodianTeamMemberId: custodian?.id,
         organizationId,
         name,
         from,

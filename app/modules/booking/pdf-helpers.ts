@@ -1,12 +1,11 @@
 import type {
   Asset,
-  Booking,
   Location,
   Category,
   Image,
   Organization,
   Custody,
-  User,
+  Prisma,
 } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import puppeteer from "puppeteer";
@@ -17,7 +16,9 @@ import { getBooking } from "./service.server";
 import { getQrCodeMaps } from "../qr/service.server";
 
 export interface PdfDbResult {
-  booking: Booking & { custodianUser: User | null };
+  booking: Prisma.BookingGetPayload<{
+    include: { custodianTeamMember: true; custodianUser: true };
+  }>;
   assets: (Asset & {
     category: Category | null;
     location: Location | null;
