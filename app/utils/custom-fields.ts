@@ -132,13 +132,15 @@ export const buildCustomFieldValue = (
 ): ShelfAssetCustomFieldValueType["value"] | undefined => {
   const { raw } = value;
 
+  if (!raw) {
+    return undefined;
+  }
+
   switch (def.type) {
     case "BOOLEAN":
       return { raw, valueBoolean: Boolean(raw) };
     case "DATE":
-      return raw
-        ? { raw, valueDate: new Date(raw as string).toISOString() }
-        : undefined;
+      return { raw, valueDate: new Date(raw as string).toISOString() };
     case "OPTION":
       return { raw, valueOption: String(raw) };
     case "MULTILINE_TEXT":
