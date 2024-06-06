@@ -107,9 +107,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         where: {
           deletedAt: null,
           organizationId,
-          userId: {
-            not: null,
-          },
         },
         include: {
           user: true,
@@ -349,7 +346,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ).toJSDate();
 
           Object.assign(upsertBookingData, {
-            custodianUserId: custodian,
+            custodianUserId: custodian?.userId,
+            custodianTeamMemberId: custodian?.id,
             name,
             from,
             to,
