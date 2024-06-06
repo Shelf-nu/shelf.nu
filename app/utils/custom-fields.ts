@@ -129,7 +129,7 @@ export const extractCustomFieldValuesFromPayload = ({
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomField
-): ShelfAssetCustomFieldValueType["value"] | null => {
+): ShelfAssetCustomFieldValueType["value"] | undefined => {
   const { raw } = value;
 
   switch (def.type) {
@@ -138,7 +138,7 @@ export const buildCustomFieldValue = (
     case "DATE":
       return raw
         ? { raw, valueDate: new Date(raw as string).toISOString() }
-        : null;
+        : undefined;
     case "OPTION":
       return { raw, valueOption: String(raw) };
     case "MULTILINE_TEXT":
