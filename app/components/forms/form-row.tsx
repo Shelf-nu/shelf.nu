@@ -34,7 +34,7 @@ export default function FormRow({
         <SubHeading className="text-xs text-gray-600">{subHeading}</SubHeading>
       </div>
 
-      <div className="flex w-[512px] max-w-full flex-wrap">{children}</div>
+      <div className="flex w-[512px] flex-wrap">{children}</div>
     </div>
   );
 }
