@@ -121,6 +121,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         disabledTeamOrg: await disabledTeamOrg({
           currentOrganization,
           organizations,
+          url: request.url,
         }),
       }),
       {
