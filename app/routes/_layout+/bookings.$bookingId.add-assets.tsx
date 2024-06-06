@@ -435,7 +435,7 @@ export default function AddAssetsToNewBooking() {
                 value={assetId}
               />
             ))}
-            {hasUnsavedChanges ? (
+            {hasUnsavedChanges && isAlertOpen ? (
               <input name="redirectTo" value={manageKitsUrl} type="hidden" />
             ) : null}
             <Button

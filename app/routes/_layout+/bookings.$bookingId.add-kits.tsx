@@ -332,7 +332,11 @@ export default function AddKitsToBooking() {
           className="mt-0 h-full border-0"
           ItemComponent={Row}
           navigate={(kitId, kit) => {
-            if (getKitAvailabilityStatus(kit as KitForBooking, booking.id)) {
+            const { isKitUnavailable } = getKitAvailabilityStatus(
+              kit as KitForBooking,
+              booking.id
+            );
+            if (isKitUnavailable) {
               return;
             }
 
@@ -381,7 +385,7 @@ export default function AddKitsToBooking() {
                 value={kitId}
               />
             ))}
-            {hasUnsavedChanges ? (
+            {hasUnsavedChanges && isAlertOpen ? (
               <input name="redirectTo" value={manageAssetsUrl} type="hidden" />
             ) : null}
             <Button

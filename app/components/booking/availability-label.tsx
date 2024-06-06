@@ -215,7 +215,8 @@ export function getKitAvailabilityStatus(
     kit.status === "IN_CUSTODY" || kit.assets.some((a) => Boolean(a.custody));
 
   const bookedForPeriod =
-    kitBookings.length && kitBookings.some((b) => b.id !== currentBookingId);
+    kitBookings.length > 0 &&
+    kitBookings.some((b) => b.id !== currentBookingId);
 
   const isKitWithoutAssets = kit.assets.length === 0;
 
@@ -225,9 +226,13 @@ export function getKitAvailabilityStatus(
     BookingStatus.ONGOING,
   ] as BookingStatus[];
 
-  const someAssetHasUnavailableBooking = kitBookings.some((b) =>
-    unavailableBookingStatuses.includes(b.status)
-  );
+  const someAssetHasUnavailableBooking =
+    kitBookings.length > 0 &&
+    kitBookings.some(
+      (b) =>
+        unavailableBookingStatuses.includes(b.status) &&
+        b.id !== currentBookingId
+    );
 
   const someAssetMarkedUnavailable = kit.assets.some((a) => !a.availableToBook);
 
@@ -259,16 +264,6 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
     isKitWithoutAssets,
     someAssetHasUnavailableBooking,
   } = getKitAvailabilityStatus(kit, booking.id);
-
-  if (someAssetMarkedUnavailable) {
-    return (
-      <AvailabilityBadge
-        badgeText="Unavailable"
-        tooltipTitle="Kit is unavailable for booking"
-        tooltipContent="Some of the assets of this kits are marked as unavailable for booking by an administrator."
-      />
-    );
-  }
 
   if (isInCustody) {
     return (
@@ -306,6 +301,16 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
         badgeText="No assets"
         tooltipTitle="No assets in kit"
         tooltipContent="There are no assets added to this kit yet."
+      />
+    );
+  }
+
+  if (someAssetMarkedUnavailable) {
+    return (
+      <AvailabilityBadge
+        badgeText="Unavailable"
+        tooltipTitle="Kit is unavailable for booking"
+        tooltipContent="Some of the assets of this kits are marked as unavailable for booking by an administrator."
       />
     );
   }
