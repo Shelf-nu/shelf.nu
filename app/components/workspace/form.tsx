@@ -125,8 +125,6 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
             </Select>
           </FormRow>
         </div>
-        {children}
-
         <div className="text-right">
           <Button type="submit" disabled={disabled}>
             {disabled ? <Spinner /> : "Save"}

@@ -211,12 +211,14 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
             userId: true,
             updatedAt: true,
             currency: true,
+            enabledSso: true,
             owner: {
               select: {
                 id: true,
                 email: true,
               },
             },
+            ssoDetails: true,
           },
         },
       },

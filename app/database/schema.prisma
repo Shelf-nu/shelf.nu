@@ -427,28 +427,13 @@ model SsoDetails {
 
   organizations Organization[]
 
-  SSOGroupToRoles SSOGroupsToRoles[] 
+  selfServiceGroupId String? // The group id for self service users
+  adminGroupId       String? // The group id for admin users
 
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
-
-model SSOGroupsToRoles {
-  id OrganizationRoles @id
-
-  // The role in the organization
-  role OrganizationRoles
-
-  // Relationships
-  ssoDetailsId String?
-  ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
-
-  // Datetime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 
 
 // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.
