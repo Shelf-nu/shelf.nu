@@ -170,12 +170,14 @@ async function getAssetsFromView(params: {
     /** If the search string exists, add it to the where object */
     if (search) {
       const words = search
+        .replace(/([()&|!'<>])/g, "\\$1") // escape special characters
         .trim()
         .replace(/ +/g, " ") //replace multiple spaces into 1
         .split(" ")
-        .map((w) => w.replace(/[^a-zA-Z0-9\-_]/g, "") + ":*") //remove uncommon special character
+        .map((w) => w.trim() + ":*") //remove leading and trailing spaces
         .filter(Boolean)
         .join(" & ");
+      console.log(words);
       where.searchVector = {
         search: words,
       };
