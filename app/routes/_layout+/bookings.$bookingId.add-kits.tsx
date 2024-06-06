@@ -18,7 +18,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { bookingsSelectedKitsAtom } from "~/atoms/selected-assets-atoms";
 import {
-  isKitUnavailableForBooking,
+  getKitAvailabilityStatus,
   KitAvailabilityLabel,
 } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
@@ -323,7 +323,7 @@ export default function AddKitsToBooking() {
       </div>
 
       <Filters
-        slots={{ "right-of-search": <AvailabilitySelect /> }}
+        slots={{ "right-of-search": <AvailabilitySelect label="kits" /> }}
         innerWrapperClassName="justify-between"
       />
 
@@ -332,7 +332,7 @@ export default function AddKitsToBooking() {
           className="mt-0 h-full border-0"
           ItemComponent={Row}
           navigate={(kitId, kit) => {
-            if (isKitUnavailableForBooking(kit as KitForBooking, booking.id)) {
+            if (getKitAvailabilityStatus(kit as KitForBooking, booking.id)) {
               return;
             }
 
@@ -416,7 +416,7 @@ function Row({ item: kit }: { item: KitForBooking }) {
   const selectedKits = useAtomValue(bookingsSelectedKitsAtom);
   const checked = selectedKits.includes(kit.id);
 
-  const isKitUnavailable = isKitUnavailableForBooking(kit, booking.id);
+  const isKitUnavailable = getKitAvailabilityStatus(kit, booking.id);
 
   return (
     <>

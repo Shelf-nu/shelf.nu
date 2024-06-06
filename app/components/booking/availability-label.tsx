@@ -194,86 +194,11 @@ export function AvailabilityBadge({
  * 1. Kit has unavailable status
  * 2. Kit or some asset is in custody
  * 3. Kit is checked out
- * 4. Some of the assets are marked as unavailable
- * 5. Some of the assets are in custody
- * 6. Some of the assets are already booked for that period (for that booking)
- * 7. If kit has no assets
+ * 4. Some of the assets are in custody
+ * 5. Some of the assets are already booked for that period (for that booking)
+ * 6. If kit has no assets
  */
-export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
-  const { booking } = useLoaderData<{ booking: Booking }>();
-
-  const kitBookings = kit.assets.length ? kit.assets[0].bookings : [];
-
-  /** A kit is checked out if any asset of it is part or other CHECKED_OUT booking */
-  const isCheckedOut = kit.assets.some(
-    (a) =>
-      (a.status === "CHECKED_OUT" &&
-        !a.bookings.some((b) => b.id === booking.id)) ??
-      false
-  );
-
-  /** Assets are marked as unavailable */
-  if (kit.assets.some((a) => !a.availableToBook)) {
-    return (
-      <AvailabilityBadge
-        badgeText="Unavailable"
-        tooltipTitle="Kit is unavailable for booking"
-        tooltipContent="Some of the assets of this kits are marked as unavailable for booking by an administrator."
-      />
-    );
-  }
-
-  /** In custody */
-  if (
-    kit.status === "IN_CUSTODY" ||
-    kit.assets.some((a) => Boolean(a.custody))
-  ) {
-    return (
-      <AvailabilityBadge
-        badgeText="In custody"
-        tooltipTitle="Kit is in custody"
-        tooltipContent="This kit is in custody or it contains some assets that are in custody make it currently unavailable for bookings."
-      />
-    );
-  }
-
-  /** Checked out */
-  if (isCheckedOut) {
-    return (
-      <AvailabilityBadge
-        badgeText="Checked out"
-        tooltipTitle="Kit is checked out"
-        tooltipContent="This kit is currently checked out as part of another booking."
-      />
-    );
-  }
-
-  /** Kit is booked for the period */
-  if (kitBookings.length && kitBookings.some((b) => b.id !== booking.id)) {
-    return (
-      <AvailabilityBadge
-        badgeText="Already booked"
-        tooltipTitle="Kit is already part of a booking"
-        tooltipContent="This kit is added to a booking that is overlapping the selected time period."
-      />
-    );
-  }
-
-  /** Kit has not assets */
-  if (!kit.assets.length) {
-    return (
-      <AvailabilityBadge
-        badgeText="No assets"
-        tooltipTitle="No assets in kit"
-        tooltipContent="There are no assets added to this kit yet."
-      />
-    );
-  }
-
-  return null;
-}
-
-export function isKitUnavailableForBooking(
+export function getKitAvailabilityStatus(
   kit: KitForBooking,
   currentBookingId: string
 ) {
@@ -286,8 +211,6 @@ export function isKitUnavailableForBooking(
       false
   );
 
-  const assetNotAvailable = kit.assets.some((a) => !a.availableToBook);
-
   const isInCustody =
     kit.status === "IN_CUSTODY" || kit.assets.some((a) => Boolean(a.custody));
 
@@ -296,11 +219,96 @@ export function isKitUnavailableForBooking(
 
   const isKitWithoutAssets = kit.assets.length === 0;
 
-  return [
+  const unavailableBookingStatuses = [
+    BookingStatus.DRAFT,
+    BookingStatus.RESERVED,
+    BookingStatus.ONGOING,
+  ] as BookingStatus[];
+
+  const someAssetHasUnavailableBooking = kitBookings.some((b) =>
+    unavailableBookingStatuses.includes(b.status)
+  );
+
+  const someAssetMarkedUnavailable = kit.assets.some((a) => !a.availableToBook);
+
+  return {
     isCheckedOut,
-    assetNotAvailable,
     isInCustody,
     bookedForPeriod,
     isKitWithoutAssets,
-  ].some(Boolean);
+    someAssetHasUnavailableBooking,
+    someAssetMarkedUnavailable,
+    isKitUnavailable: [
+      isCheckedOut,
+      isInCustody,
+      bookedForPeriod,
+      isKitWithoutAssets,
+      someAssetHasUnavailableBooking,
+    ].some(Boolean),
+  };
+}
+
+export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
+  const { booking } = useLoaderData<{ booking: Booking }>();
+
+  const {
+    isCheckedOut,
+    someAssetMarkedUnavailable,
+    isInCustody,
+    bookedForPeriod,
+    isKitWithoutAssets,
+    someAssetHasUnavailableBooking,
+  } = getKitAvailabilityStatus(kit, booking.id);
+
+  if (someAssetMarkedUnavailable) {
+    return (
+      <AvailabilityBadge
+        badgeText="Unavailable"
+        tooltipTitle="Kit is unavailable for booking"
+        tooltipContent="Some of the assets of this kits are marked as unavailable for booking by an administrator."
+      />
+    );
+  }
+
+  if (isInCustody) {
+    return (
+      <AvailabilityBadge
+        badgeText="In custody"
+        tooltipTitle="Kit is in custody"
+        tooltipContent="This kit is in custody or it contains some assets that are in custody make it currently unavailable for bookings."
+      />
+    );
+  }
+
+  if (isCheckedOut) {
+    return (
+      <AvailabilityBadge
+        badgeText="Checked out"
+        tooltipTitle="Kit is checked out"
+        tooltipContent="This kit is currently checked out as part of another booking."
+      />
+    );
+  }
+
+  if (bookedForPeriod || someAssetHasUnavailableBooking) {
+    return (
+      <AvailabilityBadge
+        badgeText="Already booked"
+        tooltipTitle="Kit is already part of a booking"
+        tooltipContent="This kit is added to a booking that is overlapping the selected time period."
+      />
+    );
+  }
+
+  if (isKitWithoutAssets) {
+    return (
+      <AvailabilityBadge
+        badgeText="No assets"
+        tooltipTitle="No assets in kit"
+        tooltipContent="There are no assets added to this kit yet."
+      />
+    );
+  }
+
+  return null;
 }

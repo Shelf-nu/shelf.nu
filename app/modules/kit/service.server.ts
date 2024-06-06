@@ -182,7 +182,6 @@ export async function getPaginatedAndFilterableKits({
       where.assets = {
         every: {
           organizationId,
-          availableToBook: true,
           custody: null,
           bookings: {
             every: {
