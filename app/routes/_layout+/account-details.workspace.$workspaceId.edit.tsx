@@ -1,3 +1,4 @@
+import { Currency } from "@prisma/client";
 import {
   json,
   redirect,
@@ -41,7 +42,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { MAX_SIZE } from "./settings.workspace.new";
+import { MAX_SIZE } from "./account-details.workspace.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -98,6 +99,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         organization,
         header,
+        curriences: Object.keys(Currency),
       })
     );
   } catch (cause) {
@@ -167,7 +169,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect("/settings/workspace");
+    return redirect("/account-details/workspace");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return json(error(reason), { status: reason.status });

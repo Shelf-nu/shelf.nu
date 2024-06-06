@@ -32,11 +32,19 @@ RUN npm prune --omit=dev
 # Finally, build the production image with minimal footprint
 FROM base AS release
 
+# Install packages needed for pupeteer
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y chromium chromium-sandbox && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives
+
+ENV CHROME_EXECUTABLE_PATH="/usr/bin/chromium"
+
 COPY --from=build /src/node_modules /src/node_modules
 COPY --from=build /src/app/database /src/app/database
 COPY --from=build /src/build /src/build
 COPY --from=build /src/package.json /src/package.json
 COPY --from=build /src/start.sh /src/start.sh
+
 RUN chmod +x /src/start.sh
 
 ENTRYPOINT [ "/src/start.sh" ]

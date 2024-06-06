@@ -124,7 +124,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => "Account Details",
+  breadcrumb: () => "General",
 };
 
 export default function UserPage() {

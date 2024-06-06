@@ -27,11 +27,6 @@ import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
-import { requirePermission } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
   getDomainUrl,
@@ -43,21 +38,18 @@ import {
   getCustomerActiveSubscription,
 } from "~/utils/stripe.server";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
+export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
     if (!ENABLE_PREMIUM_FEATURES) {
-      return redirect("/settings/account");
+      return redirect("/account-details/general");
     }
-
-    await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.subscription,
-      action: PermissionAction.read,
-    });
+    /**
+     * NOTE: all users should be able to access the subscription route no matter which role they have
+     * as its their own account settings.
+     */
 
     const user = await getUserByID(userId);
 
@@ -115,13 +107,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId, email } = authSession;
 
   try {
-    await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.subscription,
-      action: PermissionAction.update,
-    });
-
     const { priceId, intent, shelfTier } = parseData(
       await request.formData(),
       z.object({
@@ -192,7 +177,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export const handle = {
-  breadcrumb: () => <Link to="/settings/subscription">Subscription</Link>,
+  breadcrumb: () => (
+    <Link to="/account-details/subscription">Subscription</Link>
+  ),
 };
 
 export default function UserPage() {

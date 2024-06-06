@@ -1,7 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
+import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { organizationRolesMap } from "~/routes/_layout+/settings.team";
-import type { loader } from "~/routes/_layout+/settings.workspace.$workspaceId.edit";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 

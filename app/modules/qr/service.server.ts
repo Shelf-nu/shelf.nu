@@ -1,4 +1,5 @@
 import type {
+  Asset,
   Organization,
   PrintBatch,
   Prisma,
@@ -435,4 +436,47 @@ export async function claimQrCode({
       label,
     });
   }
+}
+
+interface QRCodeMapParams {
+  assets: Asset[];
+  organizationId: string;
+  userId: string;
+  size: "small" | "medium" | "large" | "cable";
+}
+
+export async function getQrCodeMaps({
+  assets,
+  size,
+}: QRCodeMapParams): Promise<Map<string, string>> {
+  const finalMap = new Map<string, string>();
+
+  try {
+    const qrCodePromises = assets.map(async (asset) => {
+      try {
+        let qr = await getQrByAssetId({ assetId: asset.id });
+        const qrCode = qr
+          ? await generateCode({
+              version: qr.version as TypeNumber,
+              errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
+              size,
+              qr,
+            })
+          : null;
+        if (qrCode?.code) {
+          finalMap.set(asset.id, qrCode?.code?.src || "");
+        }
+      } catch (error) {
+        // Handle the error if needed
+        // eslint-disable-next-line no-console
+        console.error(`Error processing asset with id ${asset.id}:`, error);
+      }
+    });
+
+    await Promise.all(qrCodePromises);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("Error generating QR code maps:", err);
+  }
+  return finalMap;
 }

@@ -1,3 +1,4 @@
+import { Currency } from "@prisma/client";
 import {
   json,
   redirect,
@@ -42,7 +43,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       title: `New workspace`,
     };
 
-    return json(data({ header, currentOrganizationId: organizationId }));
+    return json(
+      data({
+        header,
+        currentOrganizationId: organizationId,
+        curriences: Object.keys(Currency),
+      })
+    );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
@@ -100,7 +107,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect(`/settings/workspace/`, {
+    return redirect(`/account-details/workspace/`, {
       headers: [setCookie(await setSelectedOrganizationIdCookie(newOrg.id))],
     });
   } catch (cause) {
