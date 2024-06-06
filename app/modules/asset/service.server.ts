@@ -177,7 +177,6 @@ async function getAssetsFromView(params: {
         .map((w) => w.trim() + ":*") //remove leading and trailing spaces
         .filter(Boolean)
         .join(" & ");
-      console.log(words);
       where.searchVector = {
         search: words,
       };

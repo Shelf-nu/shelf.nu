@@ -61,7 +61,13 @@ export function useMainMenuItems() {
 
   if (useUserIsSelfService()) {
     /** Deleting the Dashboard menu item as its not needed for self_service users. */
-    const itemsToRemove = ["dashboard", "categories", "tags", "locations"];
+    const itemsToRemove = [
+      "dashboard",
+      "categories",
+      "tags",
+      "locations",
+      "settings",
+    ];
     menuItemsTop = menuItemsTop.filter(
       (item) => !itemsToRemove.includes(item.to)
     );

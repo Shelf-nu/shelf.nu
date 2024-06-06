@@ -43,7 +43,7 @@ import {
   getCustomerActiveSubscription,
 } from "~/utils/stripe.server";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
+export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -51,13 +51,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     if (!ENABLE_PREMIUM_FEATURES) {
       return redirect("/account-details/general");
     }
-
-    await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.subscription,
-      action: PermissionAction.read,
-    });
+    /**
+     * NOTE: all users should be able to access the subscription route no matter which role they have
+     * as its their own account settings.
+     */
 
     const user = await getUserByID(userId);
 
