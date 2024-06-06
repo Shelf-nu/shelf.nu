@@ -140,6 +140,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           },
           label: "Custom fields",
           status: 403,
+          shouldBeCaptured: false,
         });
       }
     }
