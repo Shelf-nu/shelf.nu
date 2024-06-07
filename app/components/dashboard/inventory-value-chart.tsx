@@ -64,7 +64,6 @@ export default function InventoryValueChart() {
                   Inventory value
                 </Text>
                 <Text className="mb-3 !text-[30px] font-semibold text-gray-900">
-                  {currency}{" "}
                   {(totalValuation || 0).toLocaleString(locale, {
                     style: "currency",
                     currency: currency,
