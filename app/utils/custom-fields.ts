@@ -112,8 +112,8 @@ export const extractCustomFieldValuesFromPayload = ({
   customFieldDef: CustomField[];
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
-  const customFieldsKeys = Object.keys(payload).filter(
-    (key) => key.startsWith("cf-") && payload[key] != ""
+  const customFieldsKeys = Object.keys(payload).filter((key) =>
+    key.startsWith("cf-")
   );
 
   return customFieldsKeys.map((key) => {
@@ -129,8 +129,12 @@ export const extractCustomFieldValuesFromPayload = ({
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomField
-): ShelfAssetCustomFieldValueType["value"] => {
+): ShelfAssetCustomFieldValueType["value"] | undefined => {
   const { raw } = value;
+
+  if (!raw) {
+    return undefined;
+  }
 
   switch (def.type) {
     case "BOOLEAN":
