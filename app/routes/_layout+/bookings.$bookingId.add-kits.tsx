@@ -418,7 +418,7 @@ function Row({ item: kit }: { item: KitForBooking }) {
   const selectedKits = useAtomValue(bookingsSelectedKitsAtom);
   const checked = selectedKits.includes(kit.id);
 
-  const isKitUnavailable = getKitAvailabilityStatus(kit, booking.id);
+  const { isKitUnavailable } = getKitAvailabilityStatus(kit, booking.id);
 
   return (
     <>
