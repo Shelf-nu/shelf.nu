@@ -1,12 +1,11 @@
 import type {
   Asset,
-  Booking,
   Location,
   Category,
   Image,
   Organization,
   Custody,
-  User,
+  Prisma,
 } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import puppeteer from "puppeteer";
@@ -17,7 +16,9 @@ import { getBooking } from "./service.server";
 import { getQrCodeMaps } from "../qr/service.server";
 
 export interface PdfDbResult {
-  booking: Booking & { custodianUser: User | null };
+  booking: Prisma.BookingGetPayload<{
+    include: { custodianTeamMember: true; custodianUser: true };
+  }>;
   assets: (Asset & {
     category: Category | null;
     location: Location | null;
@@ -183,7 +184,7 @@ export async function generatePdfContent(
   const browser = await puppeteer.launch({
     executablePath:
       NODE_ENV !== "development"
-        ? CHROME_EXECUTABLE_PATH || "/usr/bin/google-chrome-stable"
+        ? CHROME_EXECUTABLE_PATH || "/usr/bin/chromium"
         : undefined,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });

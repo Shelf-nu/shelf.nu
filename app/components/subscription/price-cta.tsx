@@ -1,5 +1,5 @@
 import { Form, useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/settings.subscription";
+import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { CustomerPortalForm } from "./customer-portal-form";
 import type { Price } from "./prices";
 import { Button } from "../shared/button";

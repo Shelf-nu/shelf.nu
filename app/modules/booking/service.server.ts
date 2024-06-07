@@ -222,11 +222,17 @@ export async function upsertBooking(
         data.custodianUser = {
           connect: { id: custodianUser.user.id },
         };
-      } else {
-        //disconnect any stake userId
-        data.custodianUser = {
-          disconnect: true,
-        };
+      } else if (id) {
+        const b = await db.booking.findFirst({
+          where: { id },
+          select: { custodianUserId: true },
+        });
+
+        if (b?.custodianUserId) {
+          data.custodianUser = {
+            disconnect: true,
+          };
+        }
       }
     }
 

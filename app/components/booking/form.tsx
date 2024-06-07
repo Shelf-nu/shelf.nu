@@ -63,18 +63,25 @@ export const NewBookingFormSchema = (
       endDate: inputFieldIsDisabled
         ? z.coerce.date().optional()
         : z.coerce.date(),
-      custodian: inputFieldIsDisabled
-        ? z.string().optional()
-        : z.string().transform((val, ctx) => {
-            if (!val && val === "") {
-              ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Please select a custodian",
-              });
-              return z.NEVER;
-            }
-            return JSON.parse(val).userId;
-          }),
+      custodian: z
+        .string()
+        .transform((val, ctx) => {
+          if (!val && val === "") {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Please select a custodian",
+            });
+            return z.NEVER;
+          }
+          return JSON.parse(val);
+        })
+        .pipe(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            userId: z.string().optional().nullable(),
+          })
+        ),
     })
     .refine(
       (data) =>
@@ -91,7 +98,7 @@ type BookingFormData = {
   name?: string;
   startDate?: string;
   endDate?: string;
-  custodianUserId?: string; // This holds the ID of the user attached to custodian
+  custodianUserId?: string; // This is a stringified value for custodianUser
   bookingStatus?: ReturnType<typeof useBookingStatus>;
 };
 

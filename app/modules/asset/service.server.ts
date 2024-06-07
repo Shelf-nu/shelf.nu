@@ -170,10 +170,11 @@ async function getAssetsFromView(params: {
     /** If the search string exists, add it to the where object */
     if (search) {
       const words = search
+        .replace(/([()&|!'<>])/g, "\\$1") // escape special characters
         .trim()
         .replace(/ +/g, " ") //replace multiple spaces into 1
         .split(" ")
-        .map((w) => w.replace(/[^a-zA-Z0-9\-_]/g, "") + ":*") //remove uncommon special character
+        .map((w) => w.trim() + ":*") //remove leading and trailing spaces
         .filter(Boolean)
         .join(" & ");
       where.searchVector = {
@@ -783,7 +784,7 @@ export async function updateAsset({
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
-    const data: Prisma.AssetUpdateInput = {
+    const data = {
       title,
       description,
       valuation,
@@ -853,17 +854,9 @@ export async function updateAsset({
         }
       );
 
-      const customFieldValuesToAdd = customFieldsValuesFromForm.filter(
-        (cf) => !!cf.value
-      );
-
-      const customFieldValuesToRemove = customFieldsValuesFromForm.filter(
-        (cf) => !cf.value
-      );
-
       Object.assign(data, {
         customFields: {
-          upsert: customFieldValuesToAdd?.map(({ id, value }) => ({
+          upsert: customFieldsValuesFromForm?.map(({ id, value }) => ({
             where: {
               id:
                 currentCustomFieldsValues.find(
@@ -875,9 +868,6 @@ export async function updateAsset({
               value,
               customFieldId: id,
             },
-          })),
-          deleteMany: customFieldValuesToRemove.map((cf) => ({
-            customFieldId: cf.id,
           })),
         },
       });

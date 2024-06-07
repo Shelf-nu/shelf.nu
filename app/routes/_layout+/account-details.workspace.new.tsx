@@ -107,7 +107,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect(`/settings/workspace/`, {
+    return redirect(`/account-details/workspace/`, {
       headers: [setCookie(await setSelectedOrganizationIdCookie(newOrg.id))],
     });
   } catch (cause) {

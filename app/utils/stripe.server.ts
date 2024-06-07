@@ -107,10 +107,10 @@ export async function createStripeCheckoutSession({
       mode: "subscription",
       payment_method_types: ["card"],
       line_items: lineItems,
-      success_url: `${domainUrl}/settings/subscription?success=true${
+      success_url: `${domainUrl}/account-details/subscription?success=true${
         shelfTier === "tier_2" ? "&team=true" : ""
       }`,
-      cancel_url: `${domainUrl}/settings/subscription?canceled=true`,
+      cancel_url: `${domainUrl}/account-details/subscription?canceled=true`,
       client_reference_id: userId,
       customer: customerId,
       ...(intent === "trial" && {
@@ -252,7 +252,7 @@ export async function createBillingPortalSession({
   try {
     const { url } = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url: `${process.env.SERVER_URL}/settings/subscription`,
+      return_url: `${process.env.SERVER_URL}/account-details/subscription`,
     });
 
     return { url };
@@ -378,12 +378,14 @@ export async function getDataFromStripeEvent(event: Stripe.Event) {
 export const disabledTeamOrg = async ({
   currentOrganization,
   organizations,
+  url,
 }: {
   organizations: Pick<
     Organization,
     "id" | "type" | "name" | "imageId" | "userId"
   >[];
   currentOrganization: Pick<Organization, "id" | "type">;
+  url: string;
 }) => {
   if (!premiumIsEnabled) return false;
   /**
@@ -391,7 +393,11 @@ export const disabledTeamOrg = async ({
    *
    * 1. The current organization is a team
    * 2. The current tier has to be tier_2. Anything else is not allowed
+   * 3. We need to check the url as the user should be allowed to access certain urls, even if the current org is a team org and they are Self service
    */
+
+  /** All account details routes should be accessible always */
+  if (url.includes("account-details")) return false;
 
   const tierLimit = await getOrganizationTierLimit({
     organizationId: currentOrganization.id,

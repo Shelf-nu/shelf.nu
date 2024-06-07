@@ -112,8 +112,8 @@ export const extractCustomFieldValuesFromPayload = ({
   customFieldDef: CustomField[];
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
-  const customFieldsKeys = Object.keys(payload).filter((key) =>
-    key.startsWith("cf-")
+  const customFieldsKeys = Object.keys(payload).filter(
+    (key) => key.startsWith("cf-") && payload[key] != ""
   );
 
   return customFieldsKeys.map((key) => {
@@ -129,16 +129,14 @@ export const extractCustomFieldValuesFromPayload = ({
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomField
-): ShelfAssetCustomFieldValueType["value"] | null => {
+): ShelfAssetCustomFieldValueType["value"] => {
   const { raw } = value;
 
   switch (def.type) {
     case "BOOLEAN":
       return { raw, valueBoolean: Boolean(raw) };
     case "DATE":
-      return raw
-        ? { raw, valueDate: new Date(raw as string).toISOString() }
-        : null;
+      return { raw, valueDate: new Date(raw as string).toISOString() };
     case "OPTION":
       return { raw, valueOption: String(raw) };
     case "MULTILINE_TEXT":
