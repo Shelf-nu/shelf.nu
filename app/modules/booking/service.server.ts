@@ -165,12 +165,14 @@ export async function upsertBooking(
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
 
-    const assetsWithKits = await db.asset.findMany({
-      where: { AND: [{ id: { in: assetIds } }, { kit: { isNot: null } }] },
-      select: { id: true, kitId: true },
-    });
+    const assetsWithKits = id
+      ? await db.asset.findMany({
+          where: { bookings: { some: { id } } },
+          select: { id: true, kitId: true },
+        })
+      : null;
 
-    const kitIds = getKitIdsByAssets(assetsWithKits);
+    const kitIds = getKitIdsByAssets(assetsWithKits ?? []);
     const hasKits = kitIds.length > 0;
 
     if (assetIds?.length) {
