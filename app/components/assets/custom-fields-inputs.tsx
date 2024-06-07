@@ -20,16 +20,10 @@ import { zodFieldIsRequired } from "~/utils/zod";
 import { Calendar } from "../forms/calendar-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
-import {
-  Select,
-  SelectContent,
-  SelectTrigger,
-  SelectValue,
-  SelectItem,
-} from "../forms/select";
 import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
 import { Button } from "../shared/button";
+import Select from "../shared/select";
 
 export default function AssetCustomFields({
   zo,
@@ -151,30 +145,18 @@ export default function AssetCustomFields({
               {field.name}
             </span>
           </label>
+
           <Select
             name={`cf-${field.id}`}
             defaultValue={val ? val : field.required ? field.options[0] : ""}
             disabled={disabled}
-          >
-            <SelectTrigger className="px-3.5 py-3">
-              <SelectValue placeholder={`Choose ${field.name}`} />
-            </SelectTrigger>
-            <SelectContent
-              position="popper"
-              className="w-full min-w-[300px]"
-              align="start"
-            >
-              <div className=" max-h-[320px] overflow-auto">
-                {field.options.map((value, index) => (
-                  <SelectItem value={value} key={value + index}>
-                    <span className="mr-4 text-[14px] text-gray-700">
-                      {value.toLowerCase()}
-                    </span>
-                  </SelectItem>
-                ))}
-              </div>
-            </SelectContent>
-          </Select>
+            placeholder={`Choose ${field.name}`}
+            closeOnSelect
+            items={field.options.map((option) => ({
+              id: option,
+              label: option?.toLowerCase(),
+            }))}
+          />
         </>
       );
     },
