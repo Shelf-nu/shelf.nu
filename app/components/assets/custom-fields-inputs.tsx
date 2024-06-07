@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { CustomField, CustomFieldType } from "@prisma/client";
 import { CalendarIcon } from "@radix-ui/react-icons";
 import {
@@ -20,10 +20,16 @@ import { zodFieldIsRequired } from "~/utils/zod";
 import { Calendar } from "../forms/calendar-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../forms/select";
 import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
 import { Button } from "../shared/button";
-import Select from "../shared/select";
 
 export default function AssetCustomFields({
   zo,
@@ -32,6 +38,8 @@ export default function AssetCustomFields({
   zo: Zorm<z.ZodObject<any, any, any>>;
   schema: z.ZodObject<any, any, any>;
 }) {
+  const optionTriggerRef = useRef<HTMLButtonElement>(null);
+
   /** Get the custom fields from the loader */
 
   const { customFields, asset } = useLoaderData<typeof loader>();
@@ -145,18 +153,36 @@ export default function AssetCustomFields({
               {field.name}
             </span>
           </label>
-
           <Select
             name={`cf-${field.id}`}
             defaultValue={val ? val : field.required ? field.options[0] : ""}
             disabled={disabled}
-            placeholder={`Choose ${field.name}`}
-            closeOnSelect
-            items={field.options.map((option) => ({
-              id: option,
-              label: option?.toLowerCase(),
-            }))}
-          />
+          >
+            <SelectTrigger className="px-3.5 py-3" ref={optionTriggerRef}>
+              <SelectValue placeholder={`Choose ${field.name}`} />
+            </SelectTrigger>
+            <SelectContent
+              position="popper"
+              className="w-full min-w-[300px] p-0"
+              align="center"
+              sideOffset={5}
+              style={{ width: optionTriggerRef.current?.clientWidth }}
+            >
+              <div className="max-h-[320px] w-full overflow-auto">
+                {field.options.map((value, index) => (
+                  <SelectItem
+                    value={value}
+                    key={value + index}
+                    className="w-full px-6 py-4"
+                  >
+                    <span className="mr-4 text-[14px] text-gray-700">
+                      {value.toLowerCase()}
+                    </span>
+                  </SelectItem>
+                ))}
+              </div>
+            </SelectContent>
+          </Select>
         </>
       );
     },
