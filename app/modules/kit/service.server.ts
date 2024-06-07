@@ -168,9 +168,9 @@ export async function getPaginatedAndFilterableKits({
     }
 
     const unavailableBookingStatuses = [
-      BookingStatus.DRAFT,
       BookingStatus.RESERVED,
       BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
     ];
 
     /**

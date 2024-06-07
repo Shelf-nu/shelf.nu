@@ -221,9 +221,9 @@ export function getKitAvailabilityStatus(
   const isKitWithoutAssets = kit.assets.length === 0;
 
   const unavailableBookingStatuses = [
-    BookingStatus.DRAFT,
     BookingStatus.RESERVED,
     BookingStatus.ONGOING,
+    BookingStatus.OVERDUE,
   ] as BookingStatus[];
 
   const someAssetHasUnavailableBooking =
