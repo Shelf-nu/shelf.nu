@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { CustomField, CustomFieldType } from "@prisma/client";
 import { CalendarIcon } from "@radix-ui/react-icons";
 import {
@@ -23,9 +23,9 @@ import Input from "../forms/input";
 import {
   Select,
   SelectContent,
+  SelectItem,
   SelectTrigger,
   SelectValue,
-  SelectItem,
 } from "../forms/select";
 import { Switch } from "../forms/switch";
 import { SearchIcon } from "../icons/library";
@@ -38,6 +38,8 @@ export default function AssetCustomFields({
   zo: Zorm<z.ZodObject<any, any, any>>;
   schema: z.ZodObject<any, any, any>;
 }) {
+  const optionTriggerRef = useRef<HTMLButtonElement>(null);
+
   /** Get the custom fields from the loader */
 
   const { customFields, asset } = useLoaderData<typeof loader>();
@@ -101,7 +103,6 @@ export default function AssetCustomFields({
           <div className="flex w-full items-center gap-x-2">
             <PopoverTrigger asChild>
               <Button
-                error={zo.errors[`cf-${field.id}`]()?.message}
                 variant="secondary"
                 className={tw(
                   "w-full pl-1 text-left font-normal md:min-w-[300px]",
@@ -130,6 +131,12 @@ export default function AssetCustomFields({
               />
             ) : null}
           </div>
+          {zo.errors[`cf-${field.id}`]()?.message ? (
+            <p className="text-sm text-error-500">
+              {zo.errors[`cf-${field.id}`]()?.message}
+            </p>
+          ) : null}
+
           <PopoverContent side="top" className="z-[100] w-auto p-0" align="end">
             <Calendar
               name={`cf-${field.id}`}
@@ -144,6 +151,7 @@ export default function AssetCustomFields({
     ),
     OPTION: (field) => {
       const val = getCustomFieldVal(field.id);
+
       return (
         <>
           <label className="mb-1.5 font-medium text-gray-700 lg:hidden">
@@ -153,20 +161,32 @@ export default function AssetCustomFields({
           </label>
           <Select
             name={`cf-${field.id}`}
-            defaultValue={val ? val : field.required ? field.options[0] : ""}
+            defaultValue={val ? val : undefined}
             disabled={disabled}
           >
-            <SelectTrigger className="px-3.5 py-3">
+            <SelectTrigger className="px-3.5 py-3" ref={optionTriggerRef}>
               <SelectValue placeholder={`Choose ${field.name}`} />
             </SelectTrigger>
+            {zo.errors[`cf-${field.id}`]()?.message ? (
+              <p className="text-sm text-error-500">
+                {zo.errors[`cf-${field.id}`]()?.message}
+              </p>
+            ) : null}
+
             <SelectContent
               position="popper"
-              className="w-full min-w-[300px]"
-              align="start"
+              className="w-full min-w-[300px] p-0"
+              align="center"
+              sideOffset={5}
+              style={{ width: optionTriggerRef.current?.clientWidth }}
             >
-              <div className=" max-h-[320px] overflow-auto">
+              <div className="max-h-[320px] w-full overflow-auto">
                 {field.options.map((value, index) => (
-                  <SelectItem value={value} key={value + index}>
+                  <SelectItem
+                    value={value}
+                    key={value + index}
+                    className="w-full px-6 py-4"
+                  >
                     <span className="mr-4 text-[14px] text-gray-700">
                       {value.toLowerCase()}
                     </span>

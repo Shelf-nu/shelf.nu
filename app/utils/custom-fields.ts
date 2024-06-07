@@ -9,11 +9,13 @@ import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
  * This was greatly inspired and done with the help of @rphlmr (https://github.com/rphlmr)
  */
 const getSchema = ({
+  id,
   params,
   field_name,
   required = false,
   options,
 }: {
+  id: string;
   params: {
     invalid_type_error?: string | undefined;
     required_error?: string | undefined;
@@ -32,7 +34,11 @@ const getSchema = ({
       })
     : z.string(params).optional();
 
-  const option = required ? z.string(params) : z.string(params).optional();
+  const option = required
+    ? z
+        .string(params)
+        .min(1, `${field_name ? field_name : "This field"} is required`)
+    : z.string(params).optional();
 
   return {
     text,
@@ -47,7 +53,7 @@ const getSchema = ({
       if (v && !options?.includes(v)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["option"],
+          path: [`cf-${id}`],
           message: `${v} is not a valid option`,
         });
       }
@@ -71,6 +77,7 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
   fields.forEach((field) => {
     let fieldSchema = z.object({
       [`cf-${field.id}`]: getSchema({
+        id: field.id,
         params: {
           description: field.helpText,
           required_error: field.name
@@ -129,16 +136,18 @@ export const extractCustomFieldValuesFromPayload = ({
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomField
-): ShelfAssetCustomFieldValueType["value"] | null => {
+): ShelfAssetCustomFieldValueType["value"] | undefined => {
   const { raw } = value;
+
+  if (!raw) {
+    return undefined;
+  }
 
   switch (def.type) {
     case "BOOLEAN":
       return { raw, valueBoolean: Boolean(raw) };
     case "DATE":
-      return raw
-        ? { raw, valueDate: new Date(raw as string).toISOString() }
-        : null;
+      return { raw, valueDate: new Date(raw as string).toISOString() };
     case "OPTION":
       return { raw, valueOption: String(raw) };
     case "MULTILINE_TEXT":

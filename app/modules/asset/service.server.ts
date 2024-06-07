@@ -722,10 +722,14 @@ export async function createAsset({
 
     /** If custom fields are passed, create them */
     if (customFieldsValues && customFieldsValues.length > 0) {
+      const customFieldValuesToAdd = customFieldsValues.filter(
+        (cf) => !!cf.value
+      );
+
       Object.assign(data, {
         /** Custom fields here refers to the values, check the Schema for more info */
         customFields: {
-          create: customFieldsValues?.map(
+          create: customFieldValuesToAdd?.map(
             ({ id, value }) =>
               id &&
               value && {
