@@ -154,11 +154,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formData = await clonedRequest.formData();
 
     const { enabledSso } = currentOrganization;
-    const payload = parseData(formData, EditWorkspaceFormSchema(enabledSso), {
+    const schema = EditWorkspaceFormSchema(enabledSso);
+
+    const payload = parseData(formData, schema, {
       additionalData: { userId, organizationId },
     });
 
-    const { name, currency, id } = payload;
+    const { name, currency, id, selfServiceGroupId, adminGroupId } = payload;
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
@@ -173,6 +175,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
       image: file || null,
       userId: authSession.userId,
       currency,
+      ...(enabledSso && {
+        ssoDetails: {
+          selfServiceGroupId: selfServiceGroupId as string,
+          adminGroupId: adminGroupId as string,
+        },
+      }),
     });
 
     sendNotification({

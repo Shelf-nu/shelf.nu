@@ -145,14 +145,24 @@ export async function updateOrganization({
   image,
   userId,
   currency,
+  ssoDetails,
 }: Pick<Organization, "name" | "id" | "currency"> & {
   userId: User["id"];
   image: File | null;
+  ssoDetails?: {
+    selfServiceGroupId: string;
+    adminGroupId: string;
+  };
 }) {
   try {
     const data = {
       name,
       currency,
+      ...(ssoDetails && {
+        ssoDetails: {
+          update: ssoDetails,
+        },
+      }),
     };
 
     if (image?.size && image?.size > 0) {

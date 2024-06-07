@@ -18,14 +18,8 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 
-import type {
-  SchemaTypeWithoutSSO,
-  SchemaTypeWithSSO,
-} from "~/components/workspace/edit-form";
 import {
   EditWorkspaceFormSchema,
-  EditWorkspaceFormSchemaWithoutSSO,
-  EditWorkspaceFormSchemaWithSSO,
   WorkspaceEditForm,
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
@@ -177,19 +171,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formData = await clonedRequest.formData();
 
-    type SchemaType = typeof enabledSso extends true
-      ? SchemaTypeWithSSO
-      : SchemaTypeWithoutSSO;
-
-    const schema: SchemaType = enabledSso
-      ? EditWorkspaceFormSchemaWithSSO()
-      : EditWorkspaceFormSchemaWithoutSSO();
+    const schema = EditWorkspaceFormSchema(enabledSso);
 
     const payload = parseData(formData, schema, {
       additionalData: { userId, id },
     });
 
-    const { name, currency } = payload;
+    const { name, currency, selfServiceGroupId, adminGroupId } = payload;
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
@@ -205,6 +193,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       image: file || null,
       userId: authSession.userId,
       currency,
+      ...(enabledSso && {
+        ssoDetails: {
+          selfServiceGroupId: selfServiceGroupId as string, // We can safely assume this is a string because when ssoDetails are enabled, we require the user to provide a value
+          adminGroupId: adminGroupId as string,
+        },
+      }),
     });
 
     sendNotification({

@@ -30,32 +30,19 @@ interface Props {
   className?: string;
 }
 
-const EditWorkspaceFormSchemaWithSSO = () =>
+export const EditWorkspaceFormSchema = (sso: boolean = false) =>
   z.object({
     id: z.string(),
     name: z.string().min(2, "Name is required"),
     logo: z.any().optional(),
     currency: z.custom<Currency>(),
-    selfServiceGroupId: z.string().min(1, "Self service group id is required"),
-    adminGroupId: z.string().min(1, "Administrator group id is required"),
+    selfServiceGroupId: sso
+      ? z.string().min(1, "Self service group id is required")
+      : z.string().optional(),
+    adminGroupId: sso
+      ? z.string().min(1, "Administrator group id is required")
+      : z.string().optional(),
   });
-
-const EditWorkspaceFormSchemaWithoutSSO = () =>
-  z.object({
-    id: z.string(),
-    name: z.string().min(2, "Name is required"),
-    logo: z.any().optional(),
-    currency: z.custom<Currency>(),
-  });
-type SchemaType =
-  | ReturnType<typeof EditWorkspaceFormSchemaWithSSO>
-  | ReturnType<typeof EditWorkspaceFormSchemaWithoutSSO>;
-
-function getSchema(enabledSso: boolean): SchemaType {
-  return enabledSso
-    ? EditWorkspaceFormSchemaWithSSO()
-    : EditWorkspaceFormSchemaWithoutSSO();
-}
 
 export const WorkspaceEditForm = ({
   name,
@@ -65,8 +52,8 @@ export const WorkspaceEditForm = ({
 }: Props) => {
   const { curriences, organization } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
-  const schema = getSchema(organization.enabledSso);
 
+  let schema = EditWorkspaceFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = isFormProcessing(navigation.state);
   const fileError = useAtomValue(fileErrorAtom);
@@ -183,47 +170,48 @@ export const WorkspaceEditForm = ({
                 defaultValue={organization.ssoDetails.domain}
               />
             </FormRow>
-            {"adminGroupId" in zo.fields && "adminGroupId" in zo.errors && (
-              <FormRow
-                rowLabel={`Administrator role group id`}
-                subHeading={
-                  <div>
-                    Place the Id of the group that should be mapped to the{" "}
-                    <b>Administrator</b> role.
-                  </div>
+
+            <FormRow
+              rowLabel={`Administrator role group id`}
+              subHeading={
+                <div>
+                  Place the Id of the group that should be mapped to the{" "}
+                  <b>Administrator</b> role.
+                </div>
+              }
+              className="border-b-0 pb-[10px]"
+            >
+              <Input
+                label={"SSO Domain"}
+                hideLabel
+                className="w-full"
+                name={zo.fields.adminGroupId()}
+                error={zo.errors.adminGroupId()?.message}
+                defaultValue={organization.ssoDetails.adminGroupId || undefined}
+              />
+            </FormRow>
+
+            <FormRow
+              rowLabel={`Self service role group id`}
+              subHeading={
+                <div>
+                  Place the Id of the group that should be mapped to the{" "}
+                  <b>Self service</b> role.
+                </div>
+              }
+              className="border-b-0 pb-[10px]"
+            >
+              <Input
+                label={"SSO Domain"}
+                hideLabel
+                name={zo.fields.selfServiceGroupId()}
+                error={zo.errors.selfServiceGroupId()?.message}
+                defaultValue={
+                  organization.ssoDetails.selfServiceGroupId || undefined
                 }
-                className="border-b-0 pb-[10px]"
-              >
-                <Input
-                  label={"SSO Domain"}
-                  hideLabel
-                  className="w-full"
-                  name={zo.fields.adminGroupId()}
-                  error={zo.errors.adminGroupId()?.message}
-                />
-              </FormRow>
-            )}
-            {"selfServiceGroupId" in zo.fields &&
-              "selfServiceGroupId" in zo.errors && (
-                <FormRow
-                  rowLabel={`Self service role group id`}
-                  subHeading={
-                    <div>
-                      Place the Id of the group that should be mapped to the{" "}
-                      <b>Self service</b> role.
-                    </div>
-                  }
-                  className="border-b-0 pb-[10px]"
-                >
-                  <Input
-                    label={"SSO Domain"}
-                    hideLabel
-                    name={zo.fields.selfServiceGroupId()}
-                    error={zo.errors.selfServiceGroupId()?.message}
-                    className="w-full"
-                  />
-                </FormRow>
-              )}
+                className="w-full"
+              />
+            </FormRow>
           </div>
         ) : null}
 
