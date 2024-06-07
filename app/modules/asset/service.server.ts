@@ -738,10 +738,14 @@ export async function createAsset({
 
     /** If custom fields are passed, create them */
     if (customFieldsValues && customFieldsValues.length > 0) {
+      const customFieldValuesToAdd = customFieldsValues.filter(
+        (cf) => !!cf.value
+      );
+
       Object.assign(data, {
         /** Custom fields here refers to the values, check the Schema for more info */
         customFields: {
-          create: customFieldsValues?.map(
+          create: customFieldValuesToAdd?.map(
             ({ id, value }) =>
               id &&
               value && {
@@ -784,7 +788,7 @@ export async function updateAsset({
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
-    const data = {
+    const data: Prisma.AssetUpdateInput = {
       title,
       description,
       valuation,
@@ -854,9 +858,17 @@ export async function updateAsset({
         }
       );
 
+      const customFieldValuesToAdd = customFieldsValuesFromForm.filter(
+        (cf) => !!cf.value
+      );
+
+      const customFieldValuesToRemove = customFieldsValuesFromForm.filter(
+        (cf) => !cf.value
+      );
+
       Object.assign(data, {
         customFields: {
-          upsert: customFieldsValuesFromForm?.map(({ id, value }) => ({
+          upsert: customFieldValuesToAdd?.map(({ id, value }) => ({
             where: {
               id:
                 currentCustomFieldsValues.find(
@@ -868,6 +880,9 @@ export async function updateAsset({
               value,
               customFieldId: id,
             },
+          })),
+          deleteMany: customFieldValuesToRemove.map((cf) => ({
+            customFieldId: cf.id,
           })),
         },
       });

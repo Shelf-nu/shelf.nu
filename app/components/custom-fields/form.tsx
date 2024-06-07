@@ -161,7 +161,7 @@ export const CustomFieldForm = ({
                 </div>
               </SelectContent>
             </Select>
-            <div className="mt-2 flex-1 grow rounded-xl border px-6 py-5 text-[14px] text-gray-600 ">
+            <div className="mt-2 flex-1 grow rounded border px-6 py-4 text-[14px] text-gray-600 ">
               <p>{FIELD_TYPE_DESCRIPTION[selectedType]}</p>
             </div>
           </FormRow>
