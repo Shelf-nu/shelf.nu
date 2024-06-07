@@ -214,10 +214,6 @@ export function getKitAvailabilityStatus(
   const isInCustody =
     kit.status === "IN_CUSTODY" || kit.assets.some((a) => Boolean(a.custody));
 
-  const bookedForPeriod =
-    kitBookings.length > 0 &&
-    kitBookings.some((b) => b.id !== currentBookingId);
-
   const isKitWithoutAssets = kit.assets.length === 0;
 
   const unavailableBookingStatuses = [
@@ -239,14 +235,12 @@ export function getKitAvailabilityStatus(
   return {
     isCheckedOut,
     isInCustody,
-    bookedForPeriod,
     isKitWithoutAssets,
     someAssetHasUnavailableBooking,
     someAssetMarkedUnavailable,
     isKitUnavailable: [
       isCheckedOut,
       isInCustody,
-      bookedForPeriod,
       isKitWithoutAssets,
       someAssetHasUnavailableBooking,
     ].some(Boolean),
@@ -260,7 +254,6 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
     isCheckedOut,
     someAssetMarkedUnavailable,
     isInCustody,
-    bookedForPeriod,
     isKitWithoutAssets,
     someAssetHasUnavailableBooking,
   } = getKitAvailabilityStatus(kit, booking.id);
@@ -285,7 +278,7 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
     );
   }
 
-  if (bookedForPeriod || someAssetHasUnavailableBooking) {
+  if (someAssetHasUnavailableBooking) {
     return (
       <AvailabilityBadge
         badgeText="Already booked"
