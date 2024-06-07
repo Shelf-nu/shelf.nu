@@ -151,6 +151,7 @@ export default function AssetCustomFields({
     ),
     OPTION: (field) => {
       const val = getCustomFieldVal(field.id);
+
       return (
         <>
           <label className="mb-1.5 font-medium text-gray-700 lg:hidden">
@@ -160,12 +161,18 @@ export default function AssetCustomFields({
           </label>
           <Select
             name={`cf-${field.id}`}
-            defaultValue={val}
+            defaultValue={val ? val : undefined}
             disabled={disabled}
           >
             <SelectTrigger className="px-3.5 py-3" ref={optionTriggerRef}>
               <SelectValue placeholder={`Choose ${field.name}`} />
             </SelectTrigger>
+            {zo.errors[`cf-${field.id}`]()?.message ? (
+              <p className="text-sm text-error-500">
+                {zo.errors[`cf-${field.id}`]()?.message}
+              </p>
+            ) : null}
+
             <SelectContent
               position="popper"
               className="w-full min-w-[300px] p-0"
