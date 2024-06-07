@@ -112,8 +112,8 @@ export const extractCustomFieldValuesFromPayload = ({
   customFieldDef: CustomField[];
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
-  const customFieldsKeys = Object.keys(payload).filter(
-    (key) => key.startsWith("cf-") && payload[key] != ""
+  const customFieldsKeys = Object.keys(payload).filter((key) =>
+    key.startsWith("cf-")
   );
 
   return customFieldsKeys.map((key) => {
