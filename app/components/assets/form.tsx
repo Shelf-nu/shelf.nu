@@ -16,6 +16,7 @@ import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
+import { scrollToError } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
 
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -36,7 +37,6 @@ import {
   TooltipTrigger,
 } from "../shared/tooltip";
 import { TagsAutocomplete } from "../tag/tags-autocomplete";
-import { scrollToError } from "~/utils/scroll-to-error";
 
 export const NewAssetFormSchema = z.object({
   title: z
