@@ -102,7 +102,6 @@ export const AssetForm = ({
   });
 
   const zo = useZorm("NewQuestionWizardScreen", FormSchema);
-
   const disabled = isFormProcessing(navigation.state);
 
   const fileError = useAtomValue(fileErrorAtom);
@@ -116,7 +115,41 @@ export const AssetForm = ({
         message: string;
       };
     };
-  }>();
+  }>(); 
+
+  const handleSubmit = () => {
+    const scrollToFirstError = () => {
+      const errorElements = document.querySelectorAll(".text-error-500");
+      if (errorElements.length > 0) {
+          let firstError = errorElements[0];
+          const elementToScrollTo = firstError.previousElementSibling || firstError;
+          elementToScrollTo.scrollIntoView({ behavior: "smooth" });
+      }
+    };
+
+    scrollToFirstError();
+
+    const observer = new IntersectionObserver(
+    (entries, observer) => {
+        const notIntersecting = entries.filter(entry => !entry.isIntersecting);
+
+        if (notIntersecting.length > 0) {
+        notIntersecting.forEach(entry => {
+            const elementToScrollTo = entry.target.previousElementSibling || entry.target;
+            elementToScrollTo.scrollIntoView({ behavior: "smooth" });
+            observer.unobserve(entry.target);
+        });
+        }
+    },
+    { threshold: 0.1 }
+    );
+
+    const target = document.body;
+
+    return () => {
+    observer.disconnect();
+    };
+  }
 
   return (
     <Card className="w-full md:w-min">
@@ -125,6 +158,7 @@ export const AssetForm = ({
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
+        onSubmit={handleSubmit}
       >
         <AbsolutePositionedHeaderActions className="hidden md:flex">
           <Actions disabled={disabled} />
