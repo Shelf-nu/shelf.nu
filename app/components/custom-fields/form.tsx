@@ -28,6 +28,7 @@ import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
+import { scrollToError } from "~/utils/scroll-to-error";
 
 export const NewCustomFieldFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -108,6 +109,7 @@ export const CustomFieldForm = ({
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
+        onSubmit={scrollToError}
       >
         <FormRow
           rowLabel={"Name"}

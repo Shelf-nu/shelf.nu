@@ -22,6 +22,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../shared/tooltip";
+import { scrollToError } from "~/utils/scroll-to-error";
 
 export const NewLocationFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -59,6 +60,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
+        onSubmit={scrollToError}
       >
         <AbsolutePositionedHeaderActions className="hidden md:flex">
           <Actions disabled={disabled} />

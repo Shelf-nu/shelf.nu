@@ -22,6 +22,7 @@ import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-posit
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { ControlledActionButton } from "../shared/controlled-action-button";
+import { scrollToError } from "~/utils/scroll-to-error";
 
 /**
  * Important note is that the fields are only valudated when they are not disabled
@@ -137,7 +138,7 @@ export function BookingForm({
 
   return (
     <div>
-      <Form ref={zo.ref} method="post">
+      <Form ref={zo.ref} method="post" onSubmit={scrollToError}>
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>

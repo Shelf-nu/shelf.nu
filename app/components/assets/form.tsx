@@ -118,10 +118,6 @@ export const AssetForm = ({
     };
   }>();
 
-  const handleSubmit = () => {
-    scrollToError();
-  };
-
   return (
     <Card className="w-full md:w-min">
       <Form
@@ -129,7 +125,7 @@ export const AssetForm = ({
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
-        onSubmit={handleSubmit}
+        onSubmit={scrollToError}
       >
         <AbsolutePositionedHeaderActions className="hidden md:flex">
           <Actions disabled={disabled} />
