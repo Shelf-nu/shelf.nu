@@ -13,6 +13,7 @@ import type { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
+import { scrollToError } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
 import { ActionsDropdown } from "./actions-dropdown";
 import CustodianUserSelect from "../custody/custodian-user-select";
@@ -22,7 +23,6 @@ import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-posit
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { ControlledActionButton } from "../shared/controlled-action-button";
-import { scrollToError } from "~/utils/scroll-to-error";
 
 /**
  * Important note is that the fields are only valudated when they are not disabled

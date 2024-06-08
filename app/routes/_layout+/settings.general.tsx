@@ -43,10 +43,10 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { scrollToError } from "~/utils/scroll-to-error";
 import { canExportAssets } from "~/utils/subscription";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { MAX_SIZE } from "./account-details.workspace.new";
-import { scrollToError } from "~/utils/scroll-to-error";
 
 const EditWorkspaceFormSchema = z.object({
   logo: z.any().optional(),

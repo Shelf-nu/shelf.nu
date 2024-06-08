@@ -8,6 +8,7 @@ import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
 import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
 import { isFormProcessing } from "~/utils/form";
+import { scrollToError } from "~/utils/scroll-to-error";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -22,7 +23,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../shared/tooltip";
-import { scrollToError } from "~/utils/scroll-to-error";
 
 export const NewLocationFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
