@@ -44,10 +44,10 @@ export const NewAssetFormSchema = z.object({
     .min(2, "Title is required")
     .transform((val) => val.trim()), // We trim to avoid white spaces at start and end
 
-  description:z
-  .string()
-  .min(10, "Description is required")
-  .transform((val) => val.trim()),
+  description: z
+    .string()
+    .min(10, "Description is required")
+    .transform((val) => val.trim()),
   category: z.string(),
   newLocationId: z.string(),
   /** This holds the value of the current location. We need it for comparison reasons on the server.

@@ -102,7 +102,7 @@ type BookingFormData = {
   custodianUserId?: string; // This is a stringified value for custodianUser
   bookingStatus?: ReturnType<typeof useBookingStatus>;
 };
-const FORM_TYPE= 'booking';
+const FORM_TYPE = "booking";
 
 export function BookingForm({
   id,
@@ -129,23 +129,20 @@ export function BookingForm({
     bookingStatus?.isCompleted ||
     bookingStatus?.isOverdue ||
     bookingStatus?.isCancelled;
-  
-  const bookingFormSchema = NewBookingFormSchema(inputFieldIsDisabled, isNewBooking);
 
-  const zo = useZorm(
-    "NewQuestionWizardScreen",
-    bookingFormSchema
+  const bookingFormSchema = NewBookingFormSchema(
+    inputFieldIsDisabled,
+    isNewBooking
   );
+
+  const zo = useZorm("NewQuestionWizardScreen", bookingFormSchema);
 
   const isSelfService = useUserIsSelfService();
   const handleSubmit = useHandleSubmit(bookingFormSchema, FORM_TYPE);
 
   return (
     <div>
-      <Form ref={zo.ref} 
-      method="post" 
-      onSubmit={handleSubmit}
-      >
+      <Form ref={zo.ref} method="post" onSubmit={handleSubmit}>
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>

@@ -1,5 +1,5 @@
-import { useSubmit } from '@remix-run/react';
-import type { z } from 'zod';
+import { useSubmit } from "@remix-run/react";
+import type { z } from "zod";
 
 /**
  * Custom hook to handle form submission with error scrolling.
@@ -14,7 +14,7 @@ const useHandleSubmit = <T extends z.ZodTypeAny>(
   const submit = useSubmit();
 
   if (!formType) {
-    throw new Error('useHandleSubmit: formType is required');
+    throw new Error("useHandleSubmit: formType is required");
   }
 
   /**
@@ -23,7 +23,6 @@ const useHandleSubmit = <T extends z.ZodTypeAny>(
    * @param event - The form submission event.
    */
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>): void => {
-
     const formData = new FormData(event.currentTarget);
 
     const formValues = Object.fromEntries(formData.entries());
@@ -34,16 +33,19 @@ const useHandleSubmit = <T extends z.ZodTypeAny>(
       const errorMap = result.error.flatten();
       // Find the first field with an error
       const firstErrorInput = Object.keys(errorMap.fieldErrors).find(
-        field => errorMap.fieldErrors[field] && errorMap.fieldErrors[field]!.length > 0
+        (field) =>
+          errorMap.fieldErrors[field] && errorMap.fieldErrors[field]!.length > 0
       );
 
       if (firstErrorInput) {
         event.preventDefault();
-        const firstErrorInputElement = document.getElementById(`${formType}_${String(firstErrorInput)}`) as HTMLInputElement | null;
+        const firstErrorInputElement = document.getElementById(
+          `${formType}_${String(firstErrorInput)}`
+        ) as HTMLInputElement | null;
         if (firstErrorInputElement) {
           firstErrorInputElement.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center',
+            behavior: "smooth",
+            block: "center",
           });
           firstErrorInputElement.focus();
           return;

@@ -41,9 +41,9 @@ type Props = ModelFilterProps & {
    * Allow item to unselect on clicking again
    */
   allowClear?: boolean;
-  autoIdCreation?:boolean;
-  formType?:string;
-  id?:string;
+  autoIdCreation?: boolean;
+  formType?: string;
+  id?: string;
 };
 
 export default function DynamicSelect({
@@ -117,7 +117,7 @@ export default function DynamicSelect({
     [defaultValue]
   );
 
-  const id = hookProps.id  || autoIdCreation ?  `${formType}_${fieldName}`: ''
+  const id = hookProps.id || autoIdCreation ? `${formType}_${fieldName}` : "";
 
   return (
     <>

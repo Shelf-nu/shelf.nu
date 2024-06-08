@@ -49,8 +49,7 @@ export interface InputProps
 
   autoIdCreation?: boolean; // if id is already given we are not creating it
 
-  formType?: string;//example: assets, users,bookings etc...
-
+  formType?: string; //example: assets, users,bookings etc...
 }
 
 const Input = forwardRef(function Input(
@@ -104,8 +103,10 @@ const Input = forwardRef(function Input(
     ...rest,
   };
 
-  if(autoIdCreation){
-    inputProps.id = inputProps.id || (autoIdCreation ? `${formType || ''}_${inputProps.name}`: '');
+  if (autoIdCreation) {
+    inputProps.id =
+      inputProps.id ||
+      (autoIdCreation ? `${formType || ""}_${inputProps.name}` : "");
   }
 
   let input = (

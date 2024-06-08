@@ -5,7 +5,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
-import useHandleSubmit from '~/hooks/use-handle-submit';
+import useHandleSubmit from "~/hooks/use-handle-submit";
 import type { loader } from "~/routes/_layout+/account-details.workspace.new";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -27,7 +27,7 @@ export const NewWorkspaceFormSchema = z.object({
   currency: z.custom<Currency>(),
 });
 
-const FORM_TYPE='workspace';
+const FORM_TYPE = "workspace";
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
   name?: Organization["name"];

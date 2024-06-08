@@ -55,7 +55,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
     typeof newLocationAction | typeof editLocationAction
   >();
 
-  const handleSubmit = useHandleSubmit(NewLocationFormSchema, FORM_TYPE)
+  const handleSubmit = useHandleSubmit(NewLocationFormSchema, FORM_TYPE);
   return (
     <Card className="w-full md:w-min">
       <Form
