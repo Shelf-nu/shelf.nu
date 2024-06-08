@@ -46,10 +46,10 @@ export const NewAssetFormSchema = z.object({
 
   description: z
     .string()
-    .min(10, "Description is required")
+    .min(10, "Minumun 10 characters are required")
     .transform((val) => val.trim()),
   category: z.string(),
-  newLocationId: z.string(),
+  newLocationId: z.string().optional(),
   /** This holds the value of the current location. We need it for comparison reasons on the server.
    * We send it as part of the form data and compare it with the current location of the asset and prevent querying the database if it's the same.
    */
