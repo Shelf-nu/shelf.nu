@@ -5,6 +5,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import useHandleSubmit from '~/hooks/use-handle-submit';
 import type { loader } from "~/routes/_layout+/account-details.workspace.new";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -26,6 +27,7 @@ export const NewWorkspaceFormSchema = z.object({
   currency: z.custom<Currency>(),
 });
 
+const FORM_TYPE='workspace';
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
   name?: Organization["name"];
@@ -40,6 +42,7 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
+  const hanldeSubmit = useHandleSubmit(NewWorkspaceFormSchema, FORM_TYPE);
 
   return (
     <Card className="w-full md:w-min">
@@ -48,6 +51,7 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
+        onSubmit={hanldeSubmit}
       >
         <FormRow
           rowLabel={"Name"}
@@ -66,6 +70,8 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
             defaultValue={name || undefined}
             placeholder=""
             required={zodFieldIsRequired(NewWorkspaceFormSchema.shape.name)}
+            formType={FORM_TYPE}
+            autoIdCreation={true}
           />
         </FormRow>
 
@@ -85,6 +91,8 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
               error={fileError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
+              formType={FORM_TYPE}
+              autoIdCreation={true}
             />
             <p className="mt-2 lg:hidden">
               Accepts PNG, JPG or JPEG (max.4 MB)

@@ -46,6 +46,11 @@ export interface InputProps
   hasAttachedButton?: boolean;
 
   required?: boolean;
+
+  autoIdCreation?: boolean; // if id is already given we are not creating it
+
+  formType?: string;//example: assets, users,bookings etc...
+
 }
 
 const Input = forwardRef(function Input(
@@ -62,6 +67,8 @@ const Input = forwardRef(function Input(
     onChange,
     icon,
     required = false,
+    autoIdCreation,
+    formType,
     ...rest
   }: InputProps,
   ref
@@ -96,6 +103,10 @@ const Input = forwardRef(function Input(
     ref,
     ...rest,
   };
+
+  if(autoIdCreation){
+    inputProps.id = inputProps.id || (autoIdCreation ? `${formType || ''}_${inputProps.name}`: '');
+  }
 
   let input = (
     <input

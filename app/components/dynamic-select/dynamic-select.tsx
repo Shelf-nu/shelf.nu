@@ -41,6 +41,9 @@ type Props = ModelFilterProps & {
    * Allow item to unselect on clicking again
    */
   allowClear?: boolean;
+  autoIdCreation?:boolean;
+  formType?:string;
+  id?:string;
 };
 
 export default function DynamicSelect({
@@ -61,6 +64,8 @@ export default function DynamicSelect({
   onChange = null,
   allowClear,
   selectionMode = "none",
+  autoIdCreation,
+  formType,
   ...hookProps
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -112,6 +117,8 @@ export default function DynamicSelect({
     [defaultValue]
   );
 
+  const id = hookProps.id  || autoIdCreation ?  `${formType}_${fieldName}`: ''
+
   return (
     <>
       <div className="relative w-full">
@@ -120,6 +127,7 @@ export default function DynamicSelect({
           type="hidden"
           value={selectedValue}
           name={fieldName ?? model.name}
+          id={id}
         />
         <MobileStyles open={isPopoverOpen} />
 

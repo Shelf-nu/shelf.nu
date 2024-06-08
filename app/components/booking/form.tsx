@@ -10,6 +10,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import type { useBookingStatus } from "~/hooks/use-booking-status";
+import useHandleSubmit from "~/hooks/use-handle-submit";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
@@ -101,6 +102,7 @@ type BookingFormData = {
   custodianUserId?: string; // This is a stringified value for custodianUser
   bookingStatus?: ReturnType<typeof useBookingStatus>;
 };
+const FORM_TYPE= 'booking';
 
 export function BookingForm({
   id,
@@ -127,17 +129,23 @@ export function BookingForm({
     bookingStatus?.isCompleted ||
     bookingStatus?.isOverdue ||
     bookingStatus?.isCancelled;
+  
+  const bookingFormSchema = NewBookingFormSchema(inputFieldIsDisabled, isNewBooking);
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
-    NewBookingFormSchema(inputFieldIsDisabled, isNewBooking)
+    bookingFormSchema
   );
 
   const isSelfService = useUserIsSelfService();
+  const handleSubmit = useHandleSubmit(bookingFormSchema, FORM_TYPE);
 
   return (
     <div>
-      <Form ref={zo.ref} method="post">
+      <Form ref={zo.ref} 
+      method="post" 
+      onSubmit={handleSubmit}
+      >
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
@@ -274,6 +282,8 @@ export function BookingForm({
                     defaultValue={name || undefined}
                     placeholder="Booking"
                     required
+                    autoIdCreation={true}
+                    formType={FORM_TYPE}
                   />
                 </FormRow>
               </Card>
@@ -294,6 +304,8 @@ export function BookingForm({
                     defaultValue={startDate}
                     placeholder="Booking"
                     required
+                    autoIdCreation={true}
+                    formType={FORM_TYPE}
                   />
                 </FormRow>
                 <FormRow
@@ -312,6 +324,8 @@ export function BookingForm({
                     defaultValue={endDate}
                     placeholder="Booking"
                     required
+                    autoIdCreation={true}
+                    formType={FORM_TYPE}
                   />
                 </FormRow>
                 <p className="text-[14px] text-gray-600">

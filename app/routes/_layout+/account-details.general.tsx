@@ -11,6 +11,7 @@ import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import PasswordResetForm from "~/components/user/password-reset-form";
 import ProfilePicture from "~/components/user/profile-picture";
+import useHandleSubmit from "~/hooks/use-handle-submit";
 
 import { useUserData } from "~/hooks/use-user-data";
 import { sendResetPasswordLink } from "~/modules/auth/service.server";
@@ -38,7 +39,7 @@ export const UpdateFormSchema = z.object({
   username: z
     .string()
     .min(4, { message: "Must be at least 4 characters long" }),
-  firstName: z.string().optional(),
+  firstName: z.string().min(2, "First name must be at least 2 characters long"),
   lastName: z.string().optional(),
 });
 
@@ -127,6 +128,7 @@ export const handle = {
   breadcrumb: () => "General",
 };
 
+const FORM_TYPE = "updateUser";
 export default function UserPage() {
   const zo = useZorm("NewQuestionWizardScreen", UpdateFormSchema);
   const transition = useNavigation();
@@ -138,6 +140,7 @@ export default function UserPage() {
       ?.message || zo.errors.username()?.message;
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
+  const handleSubmit = useHandleSubmit(UpdateFormSchema, FORM_TYPE);
   return (
     <div className="mb-2.5 flex flex-col justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
       <div className=" mb-6">
@@ -152,6 +155,7 @@ export default function UserPage() {
         className=""
         replace
         encType="multipart/form-data"
+        onSubmit={handleSubmit}
       >
         <FormRow
           rowLabel={"Full name"}
@@ -166,6 +170,8 @@ export default function UserPage() {
               defaultValue={user?.firstName || undefined}
               error={zo.errors.firstName()?.message}
               required={zodFieldIsRequired(UpdateFormSchema.shape.firstName)}
+              autoIdCreation={true}
+              formType={FORM_TYPE}
             />
             <Input
               label="Last name"
@@ -174,6 +180,8 @@ export default function UserPage() {
               defaultValue={user?.lastName || undefined}
               error={zo.errors.lastName()?.message}
               required={zodFieldIsRequired(UpdateFormSchema.shape.lastName)}
+              autoIdCreation={true}
+              formType={FORM_TYPE}
             />
           </div>
         </FormRow>
@@ -205,6 +213,8 @@ export default function UserPage() {
             required={zodFieldIsRequired(
               UpdateFormSchema.shape.email._def.schema
             )}
+            autoIdCreation={true}
+            formType={FORM_TYPE}
           />
         </FormRow>
 
@@ -223,6 +233,8 @@ export default function UserPage() {
             className="w-full"
             inputClassName="flex-1"
             required={zodFieldIsRequired(UpdateFormSchema.shape.username)}
+            autoIdCreation={true}
+            formType={FORM_TYPE}
           />
         </FormRow>
 
@@ -246,6 +258,8 @@ export default function UserPage() {
                 error={fileError}
                 className="mt-2"
                 inputClassName="border-0 shadow-none p-0 rounded-none"
+                autoIdCreation={true}
+                formType={FORM_TYPE}
               />
             </div>
           </div>

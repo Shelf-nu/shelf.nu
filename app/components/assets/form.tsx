@@ -12,6 +12,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import useHandleSubmit from "~/hooks/use-handle-submit";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
@@ -43,9 +44,12 @@ export const NewAssetFormSchema = z.object({
     .min(2, "Title is required")
     .transform((val) => val.trim()), // We trim to avoid white spaces at start and end
 
-  description: z.string().transform((val) => val.trim()),
+  description:z
+  .string()
+  .min(10, "Description is required")
+  .transform((val) => val.trim()),
   category: z.string(),
-  newLocationId: z.string().optional(),
+  newLocationId: z.string(),
   /** This holds the value of the current location. We need it for comparison reasons on the server.
    * We send it as part of the form data and compare it with the current location of the asset and prevent querying the database if it's the same.
    */
@@ -54,7 +58,7 @@ export const NewAssetFormSchema = z.object({
   tags: z.string().optional(),
   valuation: z
     .string()
-    .optional()
+    .min(2, "should be greater than or equal to 10")
     .transform((val) => (val ? +val : null)),
   addAnother: z
     .string()
@@ -72,6 +76,8 @@ interface Props {
   qrId?: Qr["id"] | null;
   tags?: Tag[];
 }
+
+const FORM_TYPE = "asset";
 
 export const AssetForm = ({
   title,
@@ -118,6 +124,8 @@ export const AssetForm = ({
     };
   }>();
 
+  const handleSubmit = useHandleSubmit(FormSchema, FORM_TYPE);
+
   return (
     <Card className="w-full md:w-min">
       <Form
@@ -125,6 +133,7 @@ export const AssetForm = ({
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
+        onSubmit={handleSubmit}
       >
         <AbsolutePositionedHeaderActions className="hidden md:flex">
           <Actions disabled={disabled} />
@@ -161,6 +170,8 @@ export const AssetForm = ({
             className="w-full"
             defaultValue={title || ""}
             required={zodFieldIsRequired(FormSchema.shape.title)}
+            autoIdCreation={true}
+            formType={FORM_TYPE}
           />
         </FormRow>
 
@@ -180,6 +191,8 @@ export const AssetForm = ({
               error={fileError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
+              autoIdCreation={true}
+              formType={FORM_TYPE}
             />
             <p className="mt-2 lg:hidden">
               Accepts PNG, JPG or JPEG (max.4 MB)
@@ -211,7 +224,10 @@ export const AssetForm = ({
               disabled={disabled}
               data-test-id="assetDescription"
               className="w-full"
+              error={zo.errors.description()?.message}
               required={zodFieldIsRequired(FormSchema.shape.description)}
+              autoIdCreation={true}
+              formType={FORM_TYPE}
             />
           </FormRow>
         </div>
@@ -247,6 +263,8 @@ export const AssetForm = ({
                 Create new category
               </Button>
             }
+            autoIdCreation={true}
+            formType={FORM_TYPE}
           />
         </FormRow>
 
@@ -305,6 +323,8 @@ export const AssetForm = ({
                 Create new location
               </Button>
             }
+            autoIdCreation={true}
+            formType={FORM_TYPE}
             renderItem={({ name, metadata }) => (
               <div className="flex items-center gap-2">
                 <Image
@@ -346,6 +366,8 @@ export const AssetForm = ({
               className="w-full"
               defaultValue={valuation || ""}
               required={zodFieldIsRequired(FormSchema.shape.valuation)}
+              autoIdCreation={true}
+              formType={FORM_TYPE}
             />
             <span className="absolute bottom-0 border-r px-3 py-2.5 text-[16px] text-gray-600 lg:bottom-[11px]">
               {currency}

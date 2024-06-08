@@ -5,6 +5,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import useHandleSubmit from "~/hooks/use-handle-submit";
 import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
 import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
 import { isFormProcessing } from "~/utils/form";
@@ -33,6 +34,8 @@ export const NewLocationFormSchema = z.object({
     .transform((val) => val === "true"),
 });
 
+const FORM_TYPE = "location";
+
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
   name?: Location["name"];
@@ -52,6 +55,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
     typeof newLocationAction | typeof editLocationAction
   >();
 
+  const handleSubmit = useHandleSubmit(NewLocationFormSchema, FORM_TYPE)
   return (
     <Card className="w-full md:w-min">
       <Form
@@ -59,6 +63,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
+        onSubmit={handleSubmit}
       >
         <AbsolutePositionedHeaderActions className="hidden md:flex">
           <Actions disabled={disabled} />
@@ -80,6 +85,8 @@ export const LocationForm = ({ name, address, description }: Props) => {
             defaultValue={name || undefined}
             placeholder="Storage room"
             required={zodFieldIsRequired(NewLocationFormSchema.shape.name)}
+            autoIdCreation={true}
+            formType={FORM_TYPE}
           />
         </FormRow>
 
@@ -99,6 +106,8 @@ export const LocationForm = ({ name, address, description }: Props) => {
               error={fileError}
               className="mt-2"
               inputClassName="border-0 shadow-none p-0 rounded-none"
+              autoIdCreation={true}
+              formType={FORM_TYPE}
             />
             <p className="mt-2 lg:hidden">
               Accepts PNG, JPG or JPEG (max.4 MB)
@@ -127,6 +136,8 @@ export const LocationForm = ({ name, address, description }: Props) => {
             className="w-full"
             defaultValue={address || undefined}
             required={zodFieldIsRequired(NewLocationFormSchema.shape.address)}
+            autoIdCreation={true}
+            formType={FORM_TYPE}
           />
         </FormRow>
 
@@ -155,6 +166,8 @@ export const LocationForm = ({ name, address, description }: Props) => {
               required={zodFieldIsRequired(
                 NewLocationFormSchema.shape.description
               )}
+              autoIdCreation={true}
+              formType={FORM_TYPE}
             />
           </FormRow>
         </div>
