@@ -48,7 +48,7 @@ export const NewAssetFormSchema = z.object({
     .string()
     .min(10, "Minumun 10 characters are required")
     .transform((val) => val.trim()),
-  category: z.string(),
+  category: z.string().min(1, "Category is required"),
   newLocationId: z.string().optional(),
   /** This holds the value of the current location. We need it for comparison reasons on the server.
    * We send it as part of the form data and compare it with the current location of the asset and prevent querying the database if it's the same.
@@ -246,7 +246,11 @@ export const AssetForm = ({
           <DynamicSelect
             disabled={disabled}
             defaultValue={category ?? undefined}
-            model={{ name: "category", queryKey: "name" }}
+            model={{
+              name: zo.fields.category() as "category",
+              queryKey: "name",
+            }}
+            fieldName={zo.fields.category()}
             label="Categories"
             initialDataKey="categories"
             countKey="totalCategories"
@@ -266,6 +270,11 @@ export const AssetForm = ({
             autoIdCreation={true}
             formType={FORM_TYPE}
           />
+          {zo.errors.category()?.message && (
+            <div className="text-sm text-error-500">
+              {zo.errors.category()?.message}
+            </div>
+          )}
         </FormRow>
 
         <FormRow
@@ -375,7 +384,12 @@ export const AssetForm = ({
           </div>
         </FormRow>
 
-        <AssetCustomFields zo={zo} schema={FormSchema} />
+        <AssetCustomFields
+          zo={zo}
+          schema={FormSchema}
+          autoIdCreation={true}
+          formType={FORM_TYPE}
+        />
 
         <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
           <div className="ml-auto">

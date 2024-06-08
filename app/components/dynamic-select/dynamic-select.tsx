@@ -117,17 +117,19 @@ export default function DynamicSelect({
     [defaultValue]
   );
 
-  const id = hookProps.id || autoIdCreation ? `${formType}_${fieldName}` : "";
+  const id =
+    hookProps.id || autoIdCreation
+      ? `${formType}_${fieldName ?? model.name}`
+      : "";
 
   return (
     <>
-      <div className="relative w-full">
+      <div className="relative w-full" id={id}>
         <input
           key={`${selectedValue}-${defaultValue}`}
           type="hidden"
           value={selectedValue}
           name={fieldName ?? model.name}
-          id={id}
         />
         <MobileStyles open={isPopoverOpen} />
 

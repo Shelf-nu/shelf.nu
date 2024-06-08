@@ -36,6 +36,9 @@ type Props = ModelFilterProps & {
   searchIcon?: IconType;
   showSearch?: boolean;
   renderItem?: (item: ModelFilterItem) => React.ReactNode;
+  autoIdCreation?: boolean;
+  formType?: string;
+  id?: string;
 };
 
 export default function DynamicDropdown({
@@ -67,8 +70,13 @@ export default function DynamicDropdown({
     getAllEntries,
   } = useModelFilters({ model, ...hookProps });
 
+  const id =
+    hookProps.id || hookProps.autoIdCreation
+      ? `${hookProps.formType}_${model.name}`
+      : "";
+
   return (
-    <div className="relative w-full text-center">
+    <div className="relative w-full text-center" id={id}>
       <MobileStyles open={isPopoverOpen} />
 
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>

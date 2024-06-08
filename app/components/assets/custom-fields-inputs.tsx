@@ -34,9 +34,13 @@ import { Button } from "../shared/button";
 export default function AssetCustomFields({
   zo,
   schema,
+  autoIdCreation,
+  formType,
 }: {
   zo: Zorm<z.ZodObject<any, any, any>>;
   schema: z.ZodObject<any, any, any>;
+  autoIdCreation?: boolean;
+  formType?: string;
 }) {
   const optionTriggerRef = useRef<HTMLButtonElement>(null);
 
@@ -242,6 +246,8 @@ export default function AssetCustomFields({
                   defaultValue={displayVal}
                   className="w-full"
                   required={zodFieldIsRequired(schema.shape[`cf-${field.id}`])}
+                  autoIdCreation={!!autoIdCreation}
+                  formType={formType}
                 />
               )}
             </FormRow>
