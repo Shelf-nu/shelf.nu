@@ -287,7 +287,7 @@ export default function KitDetails() {
         subHeading={
           <KitStatusBadge
             status={kit.status}
-            availableToBook={!kit.assets.some((a) => !a.availableToBook)}
+            availableToBook={kit.assets.some((a) => !a.availableToBook)}
           />
         }
       >
