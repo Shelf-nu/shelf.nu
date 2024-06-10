@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { CustomField } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
+import { Link, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -12,7 +12,6 @@ import type { action as newCustomFieldsAction } from "~/routes/_layout+/settings
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
-import { scrollToError } from "~/utils/scroll-to-error";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CategoriesInput from "../forms/categories-input";
 import FormRow from "../forms/form-row";
@@ -29,6 +28,7 @@ import { Switch } from "../forms/switch";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
+import { CustomForm as Form } from "../CustomForm";
 
 export const NewCustomFieldFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -109,7 +109,6 @@ export const CustomFieldForm = ({
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
-        onSubmit={scrollToError}
       >
         <FormRow
           rowLabel={"Name"}

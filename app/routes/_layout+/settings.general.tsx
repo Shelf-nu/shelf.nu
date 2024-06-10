@@ -10,7 +10,8 @@ import {
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
-import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
+import { Link, useLoaderData, useNavigation } from "@remix-run/react";
+import { CustomForm as Form } from "~/components/CustomForm";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -43,7 +44,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { scrollToError } from "~/utils/scroll-to-error";
 import { canExportAssets } from "~/utils/subscription";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { MAX_SIZE } from "./account-details.workspace.new";
@@ -234,7 +234,6 @@ export default function GeneralPage() {
         replace
         encType="multipart/form-data"
         className="border-t"
-        onSubmit={scrollToError}
       >
         <FormRow
           rowLabel={"Workspace Name"}

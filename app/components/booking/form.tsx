@@ -1,4 +1,4 @@
-import { Form, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -9,11 +9,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
+import { CustomForm as Form } from "../CustomForm";
 import type { useBookingStatus } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
-import { scrollToError } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
 import { ActionsDropdown } from "./actions-dropdown";
 import CustodianUserSelect from "../custody/custodian-user-select";
@@ -138,7 +138,7 @@ export function BookingForm({
 
   return (
     <div>
-      <Form ref={zo.ref} method="post" onSubmit={scrollToError}>
+      <Form ref={zo.ref} method="post">
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>

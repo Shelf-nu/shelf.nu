@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -19,7 +19,7 @@ import {
   updateUser,
 } from "~/modules/user/service.server";
 import type { UpdateUserPayload } from "~/modules/user/types";
-
+import { CustomForm as Form } from "~/components/CustomForm";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { delay } from "~/utils/delay";
@@ -28,7 +28,6 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { data, error, parseData } from "~/utils/http.server";
-import { scrollToError } from "~/utils/scroll-to-error";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const UpdateFormSchema = z.object({
@@ -153,7 +152,6 @@ export default function UserPage() {
         className=""
         replace
         encType="multipart/form-data"
-        onSubmit={scrollToError}
       >
         <FormRow
           rowLabel={"Full name"}

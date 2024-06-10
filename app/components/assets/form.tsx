@@ -1,6 +1,5 @@
 import type { Asset, Qr } from "@prisma/client";
 import {
-  Form,
   Link,
   useActionData,
   useLoaderData,
@@ -16,7 +15,6 @@ import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
-import { scrollToError } from "~/utils/scroll-to-error";
 import { tw } from "~/utils/tw";
 
 import { zodFieldIsRequired } from "~/utils/zod";
@@ -29,7 +27,7 @@ import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { Image } from "../shared/image";
-
+import { CustomForm as Form } from "../CustomForm";
 import {
   Tooltip,
   TooltipContent,
@@ -125,7 +123,6 @@ export const AssetForm = ({
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
-        onSubmit={scrollToError}
       >
         <AbsolutePositionedHeaderActions className="hidden md:flex">
           <Actions disabled={disabled} />
