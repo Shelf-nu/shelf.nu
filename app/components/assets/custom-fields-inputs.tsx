@@ -99,54 +99,7 @@ export default function AssetCustomFields({
           value={dateObj[field.id]?.toISOString() || ""}
           hidden
         />
-        <Popover>
-          <div className="flex w-full items-center gap-x-2">
-            <PopoverTrigger asChild>
-              <Button
-                variant="secondary"
-                className={tw(
-                  "w-full pl-1 text-left font-normal md:min-w-[300px]",
-                  !dateObj[field.id] && "text-muted-foreground"
-                )}
-              >
-                <div className="flex justify-between">
-                  {dateObj[field.id] ? (
-                    <span>{format(new Date(dateObj[field.id]!), "PPP")}</span>
-                  ) : (
-                    <span>Pick a date</span>
-                  )}
-                  <CalendarIcon className="ml-3 size-5" />
-                </div>
-              </Button>
-            </PopoverTrigger>
-
-            {dateObj[field.id] ? (
-              <Button
-                icon="x"
-                variant="secondary"
-                type="button"
-                onClick={() => {
-                  setDateObj({ ...dateObj, [field.id]: null });
-                }}
-              />
-            ) : null}
-          </div>
-          {zo.errors[`cf-${field.id}`]()?.message ? (
-            <p className="text-sm text-error-500">
-              {zo.errors[`cf-${field.id}`]()?.message}
-            </p>
-          ) : null}
-
-          <PopoverContent side="top" className="z-[100] w-auto p-0" align="end">
-            <Calendar
-              name={`cf-${field.id}`}
-              mode="single"
-              selected={dateObj[field.id]}
-              onSelect={(d: Date) => setDateObj({ ...dateObj, [field.id]: d })}
-              initialFocus
-            />
-          </PopoverContent>
-        </Popover>
+        <input type="date" className="text-center w-full max-w-full border border-gray-300 px-4 py-2 text-md text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0] disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500 rounded-md cursor-pointer"/>
       </>
     ),
     OPTION: (field) => {
