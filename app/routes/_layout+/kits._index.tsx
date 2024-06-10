@@ -17,7 +17,6 @@ import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import type { KITS_INCLUDE_FIELDS } from "~/modules/asset/fields";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -50,6 +49,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        extraInclude: {
+          assets: {
+            select: { id: true, availableToBook: true },
+          },
+        },
       }),
       db.teamMember
         .findMany({
@@ -178,7 +182,29 @@ function ListContent({
   item,
 }: {
   item: Prisma.KitGetPayload<{
-    include: typeof KITS_INCLUDE_FIELDS;
+    include: {
+      _count: { select: { assets: true } };
+      custody: {
+        select: {
+          custodian: {
+            select: {
+              name: true;
+              user: {
+                select: {
+                  profilePicture: true;
+                };
+              };
+            };
+          };
+        };
+      };
+      assets: {
+        select: {
+          id: true;
+          availableToBook: true;
+        };
+      };
+    };
   }>;
 }) {
   const isSelfService = useUserIsSelfService();
@@ -206,7 +232,7 @@ function ListContent({
               <div>
                 <KitStatusBadge
                   status={item.status}
-                  availableToBook={item.status === "AVAILABLE"}
+                  availableToBook={!item.assets.some((a) => !a.availableToBook)}
                 />
               </div>
             </div>

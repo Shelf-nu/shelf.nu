@@ -30,6 +30,7 @@ export function BookingAssetsColumn() {
   }>();
   const hasItems = items?.length > 0;
   const isSelfService = useUserIsSelfService();
+  const { isDraft, isCompleted, isArchived } = useBookingStatus(booking);
 
   const manageAssetsUrl = useMemo(
     () =>
@@ -42,15 +43,6 @@ export function BookingAssetsColumn() {
         unhideAssetsBookigIds: booking.id,
       })}`,
     [booking]
-  );
-
-  const isCompleted = useMemo(
-    () => booking.status === BookingStatus.COMPLETE,
-    [booking.status]
-  );
-  const isArchived = useMemo(
-    () => booking.status === BookingStatus.ARCHIVED,
-    [booking.status]
   );
 
   // Self service can only manage assets for bookings that are DRAFT
@@ -166,7 +158,9 @@ export function BookingAssetsColumn() {
                             <Td> </Td>
 
                             <Td className="pr-4 text-right">
-                              <KitRowActionsDropdown kit={kit} />
+                              {isSelfService && isDraft ? (
+                                <KitRowActionsDropdown kit={kit} />
+                              ) : null}
                             </Td>
                           </ListItem>
 
@@ -196,7 +190,7 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { category } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const isSelfService = useUserIsSelfService();
-  const { isOngoing, isCompleted, isArchived, isOverdue } =
+  const { isOngoing, isCompleted, isArchived, isOverdue, isReserved } =
     useBookingStatus(booking);
 
   /** Weather the asset is checked out in a booking different than the current one */
@@ -263,7 +257,8 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
       </Td>
       <Td className="pr-4 text-right">
         {/* Self Service can only remove assets if the booking is not started already */}
-        {(isSelfService && (isOngoing || isOverdue)) || isPartOfKit ? null : (
+        {(isSelfService && (isOngoing || isOverdue || isReserved)) ||
+        isPartOfKit ? null : (
           <AssetRowActionsDropdown asset={item} />
         )}
       </Td>
