@@ -99,7 +99,10 @@ export default function AssetCustomFields({
           value={dateObj[field.id]?.toISOString() || ""}
           hidden
         />
-        <input type="date" className="text-center w-full max-w-full border border-gray-300 px-4 py-2 text-md text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0] disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500 rounded-md cursor-pointer"/>
+        <input
+          type="date"
+          className="text-md w-full max-w-full cursor-pointer rounded-md border border-gray-300 px-4 py-2 text-center text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0] disabled:cursor-not-allowed disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500"
+        />
       </>
     ),
     OPTION: (field) => {
