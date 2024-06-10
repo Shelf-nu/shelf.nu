@@ -155,10 +155,12 @@ export function AvailabilityBadge({
   badgeText,
   tooltipTitle,
   tooltipContent,
+  className,
 }: {
   badgeText: string;
   tooltipTitle: string;
   tooltipContent: string | JSX.Element;
+  className?: string;
 }) {
   return (
     <TooltipProvider delayDuration={100}>
@@ -168,7 +170,8 @@ export function AvailabilityBadge({
             className={tw(
               "inline-block bg-warning-50 px-[6px] py-[2px]",
               "rounded-md border border-warning-200",
-              "text-xs text-warning-700"
+              "text-xs text-warning-700",
+              className
             )}
           >
             {badgeText}
@@ -304,6 +307,7 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
         badgeText="Unavailable"
         tooltipTitle="Kit is unavailable for booking"
         tooltipContent="Some of the assets of this kits are marked as unavailable for booking by an administrator."
+        className="border-gray-200 bg-gray-100 text-gray-500"
       />
     );
   }

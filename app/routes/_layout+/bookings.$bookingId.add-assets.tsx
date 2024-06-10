@@ -314,7 +314,7 @@ export default function AddAssetsToNewBooking() {
             ) : null}
           </TabsTrigger>
           <TabsTrigger className="flex-1 gap-x-2" value="kits">
-            Kits
+            Kits (beta)
             {bookingKitIds.length > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
                 {bookingKitIds.length}
