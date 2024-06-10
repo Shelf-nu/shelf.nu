@@ -87,11 +87,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    const selfServiceUser = isSelfService
+      ? teamMembers.find((member) => member.userId === authSession.userId)
+      : undefined;
+
     return json(
       data({
         showModal: true,
         isSelfService,
-        selfServiceId: authSession.userId,
+        selfServiceUser,
         teamMembers,
       }),
       {
@@ -192,8 +196,9 @@ export const handle = {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
-  const { isSelfService, selfServiceId } = useLoaderData<typeof loader>();
+  const { isSelfService, selfServiceUser } = useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
+
   return (
     <div className="booking-inner-wrapper">
       <header className="mb-5">
@@ -208,7 +213,15 @@ export default function NewBooking() {
         <BookingForm
           startDate={startDate}
           endDate={endDate}
-          custodianUserId={isSelfService ? selfServiceId : undefined}
+          custodianUserId={
+            isSelfService
+              ? JSON.stringify({
+                  id: selfServiceUser?.id,
+                  name: selfServiceUser?.name,
+                  userId: selfServiceUser?.userId,
+                })
+              : undefined
+          }
         />
       </div>
     </div>
