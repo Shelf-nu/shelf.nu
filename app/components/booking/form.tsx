@@ -190,6 +190,7 @@ export function BookingForm({
                     : "You need to add assets to your booking before you can reserve it",
                 }}
                 buttonProps={{
+                  disabled: disabled,
                   type: "submit",
                   role: "link",
                   name: "intent",
@@ -217,6 +218,7 @@ export function BookingForm({
                     : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
                 }}
                 buttonProps={{
+                  disabled: disabled,
                   type: "submit",
                   name: "intent",
                   value: "checkOut",
@@ -230,6 +232,7 @@ export function BookingForm({
             {(bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
             !isSelfService ? (
               <Button
+                disabled={disabled}
                 type="submit"
                 name="intent"
                 value="checkIn"
