@@ -175,6 +175,7 @@ export async function createUserFromSSO(
     const { firstName, lastName } = userData;
     const domain = email.split("@")[1];
 
+    // @TODO this needs to find them all, there could be multiple orgs with the same domain
     const org = await getOrganizationBySsoDomain(domain);
 
     const user = await createUser({
