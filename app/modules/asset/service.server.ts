@@ -977,6 +977,7 @@ export async function updateAssetMainImage({
       return;
     }
 
+    await deleteOtherImages({ userId, assetId, data: { path: image } });
     const signedUrl = await createSignedUrl({ filename: image });
 
     await updateAsset({
@@ -1085,6 +1086,63 @@ export async function deleteNote({
   }
 }
 
+function extractMainImageName(path: string): string | null {
+  const match = path.match(/main-image-[\w-]+\.\w+/);
+  return match ? match[0] : null;
+}
+
+async function deleteOtherImages({
+  userId,
+  assetId,
+  data,
+}: {
+  userId: string;
+  assetId: string;
+  data: { path: string };
+}): Promise<void> {
+  try {
+    if (!data?.path) {
+      // asset image stroage failure. do nothing
+      return;
+    }
+    const currentImage = extractMainImageName(data.path);
+    if (!currentImage) {
+      //do nothing
+      return;
+    }
+    const { data: deletedImagesData, error: deletedImagesError } =
+      await getSupabaseAdmin()
+        .storage.from("assets")
+        .list(`${userId}/${assetId}`);
+
+    if (deletedImagesError) {
+      throw new Error(`Error fetching images: ${deletedImagesError.message}`);
+    }
+
+    // Extract the image names and filter out the one to keep
+    const imagesToDelete = (
+      deletedImagesData?.map((image) => image.name) || []
+    ).filter((image) => image !== currentImage);
+
+    // Delete the images
+    await Promise.all(
+      imagesToDelete.map((image) =>
+        getSupabaseAdmin()
+          .storage.from("assets")
+          .remove([`${userId}/${assetId}/${image}`])
+      )
+    );
+  } catch (error) {
+    if (error instanceof Error) {
+      // eslint-disable-next-line no-console
+      console.error("Error deleting images:", error.message);
+    } else {
+      // eslint-disable-next-line no-console
+      console.error("Unexpected error:", error);
+    }
+  }
+}
+
 async function uploadDuplicateAssetMainImage(
   mainImageUrl: string,
   assetId: string,
@@ -1110,8 +1168,8 @@ async function uploadDuplicateAssetMainImage(
     if (error) {
       throw error;
     }
-
     /** Getting the signed url from supabase to we can view image  */
+    await deleteOtherImages({ userId, assetId, data });
     return await createSignedUrl({ filename: data.path });
   } catch (cause) {
     throw new ShelfError({
