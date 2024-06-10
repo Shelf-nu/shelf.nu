@@ -362,10 +362,11 @@ export async function updateUser(updateUserPayload: UpdateUserPayload) {
   } catch (cause) {
     const validationErrors: ValidationError<any> = {};
 
-    if (
+    const isUniqueViolation =
       cause instanceof Prisma.PrismaClientKnownRequestError &&
-      cause.code === "P2002"
-    ) {
+      cause.code === "P2002";
+
+    if (isUniqueViolation) {
       // The .code property can be accessed in a type-safe manner
       validationErrors[cause.meta?.target as string] = {
         message: `${cause.meta?.target} is already taken.`,
@@ -378,6 +379,7 @@ export async function updateUser(updateUserPayload: UpdateUserPayload) {
         "Something went wrong while updating your profile. Please try again or contact support.",
       additionalData: { ...cleanClone, validationErrors },
       label,
+      shouldBeCaptured: !isUniqueViolation,
     });
   }
 }
