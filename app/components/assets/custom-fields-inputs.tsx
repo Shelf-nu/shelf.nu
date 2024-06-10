@@ -97,12 +97,12 @@ export default function AssetCustomFields({
         <input
           type="date"
           name={`cf-${field.id}`}
-          value={dateObj[field.id]?.toISOString().split('T')[0] || ""}
+          value={dateObj[field.id]?.toISOString().split("T")[0] || ""}
           onChange={(e) => {
             const selectedDate = new Date(e.target.value);
             setDateObj({ ...dateObj, [field.id]: selectedDate });
           }}
-          className="w-full max-w-full border border-gray-300 px-4 py-2 text-[16px] text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0] disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500 rounded-[4px] cursor-pointer"
+          className="w-full max-w-full cursor-pointer rounded-[4px] border border-gray-300 px-4 py-2 text-[16px] text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0] disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500"
           disabled={disabled}
         />
         {zo.errors[`cf-${field.id}`]()?.message ? (
