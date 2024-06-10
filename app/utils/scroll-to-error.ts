@@ -5,7 +5,6 @@ export const scrollToError = () => {
   const observer = new IntersectionObserver(
     (entries, observer) => {
       entries.forEach((entry) => {
-                
         // If the element is not intersecting (not visible), scroll to it
         if (!entry.isIntersecting) {
           const elementToScrollTo =
