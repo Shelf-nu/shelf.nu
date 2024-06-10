@@ -6,6 +6,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import { CustomForm as Form } from "~/components/CustomForm";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
@@ -19,7 +20,6 @@ import {
   updateUser,
 } from "~/modules/user/service.server";
 import type { UpdateUserPayload } from "~/modules/user/types";
-import { CustomForm as Form } from "~/components/CustomForm";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { delay } from "~/utils/delay";
