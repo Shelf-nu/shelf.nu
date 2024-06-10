@@ -277,3 +277,28 @@ export async function getOrganizationAdminsEmails({
     });
   }
 }
+
+export async function toggleOrganizationSso({
+  organizationId,
+  enabledSso,
+}: {
+  organizationId: string;
+  enabledSso: boolean;
+}) {
+  try {
+    return await db.organization.update({
+      where: { id: organizationId },
+      data: {
+        enabledSso,
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while toggling organization SSO. Please try again or contact support.",
+      additionalData: { organizationId, enabledSso },
+      label,
+    });
+  }
+}

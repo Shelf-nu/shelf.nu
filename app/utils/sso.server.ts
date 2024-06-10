@@ -64,10 +64,8 @@ export async function resolveUserAndOrgForSsoCallback({
     org = response.org; // This is the org that the user got linked to
   } else {
     const domain = authSession.email.split("@")[1];
-    console.log(domain);
     /** If the user already exists, we find the org that belongs to that domain so we can directly set it as the active org */
     const organizations = user.userOrganizations.map((uo) => uo.organization);
-    console.log(organizations);
     org = organizations.find((org) => org?.ssoDetails?.domain === domain); // Find the org that has sso for that user
 
     if (!org) {

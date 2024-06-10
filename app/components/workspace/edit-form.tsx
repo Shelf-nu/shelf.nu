@@ -161,6 +161,7 @@ export const WorkspaceEditForm = ({
               subHeading={
                 "The domain that this workspace is linked to. If you want it changed, please contact support."
               }
+              required
             >
               <Input
                 label="SSO Domain"
@@ -168,6 +169,7 @@ export const WorkspaceEditForm = ({
                 disabled={true}
                 className="disabled w-full"
                 defaultValue={organization.ssoDetails.domain}
+                required
               />
             </FormRow>
 
@@ -180,14 +182,16 @@ export const WorkspaceEditForm = ({
                 </div>
               }
               className="border-b-0 pb-[10px]"
+              required
             >
               <Input
-                label={"SSO Domain"}
+                label={"Administrator role group id"}
                 hideLabel
                 className="w-full"
                 name={zo.fields.adminGroupId()}
                 error={zo.errors.adminGroupId()?.message}
                 defaultValue={organization.ssoDetails.adminGroupId || undefined}
+                required
               />
             </FormRow>
 
@@ -200,9 +204,10 @@ export const WorkspaceEditForm = ({
                 </div>
               }
               className="border-b-0 pb-[10px]"
+              required
             >
               <Input
-                label={"SSO Domain"}
+                label={"Self service role group id"}
                 hideLabel
                 name={zo.fields.selfServiceGroupId()}
                 error={zo.errors.selfServiceGroupId()?.message}
@@ -210,6 +215,7 @@ export const WorkspaceEditForm = ({
                   organization.ssoDetails.selfServiceGroupId || undefined
                 }
                 className="w-full"
+                required
               />
             </FormRow>
           </div>
