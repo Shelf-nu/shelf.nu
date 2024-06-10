@@ -110,7 +110,6 @@ export const action = async ({
 
         return json(data({ message: "Generated Orphaned QR codes" }));
       case "toggleSso":
-        // TODO: Implement SSO toggle
         const { enabledSso } = parseData(
           await request.formData(),
           z.object({
@@ -232,7 +231,7 @@ export default function OrgPage() {
             </div>
           </fetcher.Form>
         </div>
-        {organization.enabledSso && organization.ssoDetails ? (
+        {organization.enabledSso ? (
           <div className="w-[400px] bg-gray-200 p-4">
             <Form method="post">
               <div>
@@ -258,7 +257,7 @@ export default function OrgPage() {
                       name="domain"
                       hideLabel
                       className="disabled w-full"
-                      defaultValue={organization.ssoDetails.domain}
+                      defaultValue={organization?.ssoDetails?.domain}
                       required
                     />
                   </FormRow>
@@ -280,7 +279,7 @@ export default function OrgPage() {
                       className="w-full"
                       name={"adminGroupId"}
                       defaultValue={
-                        organization.ssoDetails.adminGroupId || undefined
+                        organization?.ssoDetails?.adminGroupId || undefined
                       }
                       required
                     />
@@ -303,7 +302,8 @@ export default function OrgPage() {
                       name={"selfServiceGroupId"}
                       required
                       defaultValue={
-                        organization.ssoDetails.selfServiceGroupId || undefined
+                        organization?.ssoDetails?.selfServiceGroupId ||
+                        undefined
                       }
                       className="w-full"
                     />

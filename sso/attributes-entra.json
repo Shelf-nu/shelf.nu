@@ -8,6 +8,9 @@
     },
     "lastName": {
       "name": "lastname"
+    },
+    "groupId": {
+      "name": "permissionsGroup"
     }
   }
 }

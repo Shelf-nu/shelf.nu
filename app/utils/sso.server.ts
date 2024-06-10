@@ -15,10 +15,12 @@ export async function resolveUserAndOrgForSsoCallback({
   authSession,
   firstName,
   lastName,
+  groupId,
 }: {
   authSession: AuthSession;
   firstName: string;
   lastName: string;
+  groupId: string;
 }) {
   /**
    * Cases to handle:
@@ -32,6 +34,7 @@ export async function resolveUserAndOrgForSsoCallback({
    */
 
   let org;
+  console.log("groupId", groupId);
 
   /** Look if the user already exists
    * Also get the userOrgs as if we need them for setting the correct cookie

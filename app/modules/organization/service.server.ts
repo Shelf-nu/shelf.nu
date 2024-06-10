@@ -287,7 +287,7 @@ export async function toggleOrganizationSso({
 }) {
   try {
     return await db.organization.update({
-      where: { id: organizationId },
+      where: { id: organizationId, type: OrganizationType.TEAM },
       data: {
         enabledSso,
       },

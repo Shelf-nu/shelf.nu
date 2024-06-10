@@ -153,6 +153,7 @@ export async function signInWithSSO(domain: string) {
       "Something went wrong. Please try again later or contact support.";
     let shouldBeCaptured = true;
 
+    // @ts-expect-error
     if (cause?.code === "sso_provider_not_found") {
       message = "No SSO provider assigned for your organization's domain";
     }

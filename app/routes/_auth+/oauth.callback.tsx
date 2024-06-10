@@ -26,15 +26,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const { refreshToken, redirectTo, firstName, lastName } = parseData(
-          await request.formData(),
-          z.object({
-            firstName: z.string(),
-            lastName: z.string(),
-            refreshToken: z.string(),
-            redirectTo: z.string().optional(),
-          })
-        );
+        const { refreshToken, redirectTo, firstName, lastName, groupId } =
+          parseData(
+            await request.formData(),
+            z.object({
+              firstName: z.string().min(1),
+              lastName: z.string().min(1),
+              groupId: z.string().min(1),
+              refreshToken: z.string().min(1),
+              redirectTo: z.string().optional(),
+            })
+          );
 
         // We should not trust what is sent from the client
         // https://github.com/rphlmr/supa-fly-stack/issues/45
@@ -51,20 +53,22 @@ export async function action({ request, context }: ActionFunctionArgs) {
           authSession,
           firstName,
           lastName,
+          groupId,
         });
+        return null;
         // Set the auth session and redirect to the assets page
-        context.setSession(authSession);
+        // context.setSession(authSession);
 
-        return redirect(
-          safeRedirect(redirectTo || "/assets"),
-          org?.id
-            ? {
-                headers: [
-                  setCookie(await setSelectedOrganizationIdCookie(org?.id)),
-                ],
-              }
-            : {}
-        );
+        // return redirect(
+        //   safeRedirect(redirectTo || "/assets"),
+        //   org?.id
+        //     ? {
+        //         headers: [
+        //           setCookie(await setSelectedOrganizationIdCookie(org?.id)),
+        //         ],
+        //       }
+        //     : {}
+        // );
       }
     }
 
@@ -119,6 +123,10 @@ export default function LoginCallback() {
         formData.append(
           "lastName",
           user?.user_metadata?.custom_claims.lastName || ""
+        );
+        formData.append(
+          "groupId",
+          user?.user_metadata?.custom_claims?.groupId || ""
         );
 
         fetcher.submit(formData, { method: "post" });
