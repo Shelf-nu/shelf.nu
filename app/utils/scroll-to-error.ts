@@ -1,9 +1,12 @@
 export const scrollToError = () => {
   const errorElements = document.querySelectorAll(".text-error-500");
 
+  // Create an IntersectionObserver to observe visibility changes
   const observer = new IntersectionObserver(
     (entries, observer) => {
       entries.forEach((entry) => {
+                
+        // If the element is not intersecting (not visible), scroll to it
         if (!entry.isIntersecting) {
           const elementToScrollTo =
             entry.target.previousElementSibling || entry.target;
@@ -15,6 +18,7 @@ export const scrollToError = () => {
     { threshold: 0.1 }
   );
 
+  // Iterate through each error element and observe if it's not already visible
   errorElements.forEach((errorElement) => {
     const elementToScrollTo =
       errorElement.previousElementSibling || errorElement;
