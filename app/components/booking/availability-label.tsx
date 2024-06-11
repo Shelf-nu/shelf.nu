@@ -260,7 +260,7 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
       <AvailabilityBadge
         badgeText="In custody"
         tooltipTitle="Kit is in custody"
-        tooltipContent="This kit is in custody or it contains some assets that are in custody make it currently unavailable for bookings."
+        tooltipContent="This kit is in custody or it contains some assets that are in custody."
       />
     );
   }

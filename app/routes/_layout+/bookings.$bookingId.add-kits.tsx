@@ -323,11 +323,12 @@ export default function AddKitsToBooking() {
       <Filters
         slots={{ "right-of-search": <AvailabilitySelect label="kits" /> }}
         innerWrapperClassName="justify-between"
+        className="justify-between !border-t-0 border-b px-6 md:flex"
       />
 
       <TabsContent value="kits" asChild>
         <List
-          className="mt-0 h-full border-0"
+          className="mx-0 mt-0 h-full border-0"
           ItemComponent={Row}
           navigate={(kitId, kit) => {
             const { isKitUnavailable } = getKitAvailabilityStatus(
@@ -448,7 +449,7 @@ function Row({ item: kit }: { item: KitForBooking }) {
         </div>
       </Td>
 
-      <Td className="text-right">
+      <Td className="whitespace-break-spaces text-right md:whitespace-nowrap">
         <KitAvailabilityLabel kit={kit} />
       </Td>
 

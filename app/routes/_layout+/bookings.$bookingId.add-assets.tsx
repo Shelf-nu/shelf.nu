@@ -381,7 +381,7 @@ export default function AddAssetsToNewBooking() {
 
       <TabsContent value="assets" asChild>
         <List
-          className="mt-0 h-full border-0"
+          className="mx-0 mt-0 h-full border-0 "
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
           navigate={(assetId, asset) => {
