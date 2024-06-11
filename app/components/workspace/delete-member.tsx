@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Prisma, TeamMember } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
+import { Form } from "../custom-form";
 import { Button } from "~/components/shared/button";
 
 import {

@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { z } from "zod";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";

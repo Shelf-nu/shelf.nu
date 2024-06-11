@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { User } from "@prisma/client";
-import { Form } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import { ChevronRight, QuestionsIcon } from "~/components/icons/library";

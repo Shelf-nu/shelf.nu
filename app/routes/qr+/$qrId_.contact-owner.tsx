@@ -1,6 +1,7 @@
 import type { Asset } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";

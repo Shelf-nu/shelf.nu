@@ -1,5 +1,6 @@
 import type { Tag } from "@prisma/client";
-import { Form, useFetcher } from "@remix-run/react";
+import { useFetcher } from "@remix-run/react";
+import { Form } from "../custom-form";
 import { Button } from "~/components/shared/button";
 
 import {

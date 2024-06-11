@@ -1,7 +1,8 @@
 import { AssetStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { z } from "zod";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";

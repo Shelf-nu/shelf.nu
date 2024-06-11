@@ -12,11 +12,11 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
-  Form,
   useLoaderData,
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";

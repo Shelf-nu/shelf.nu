@@ -4,7 +4,8 @@ import type {
   ActionFunctionArgs,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { z } from "zod";
 import Icon from "~/components/icons/icon";
 import { UnlinkIcon } from "~/components/icons/library";

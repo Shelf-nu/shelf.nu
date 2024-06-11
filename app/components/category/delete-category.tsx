@@ -1,6 +1,7 @@
 import type { Category } from "@prisma/client";
-import { Form, useFetcher } from "@remix-run/react";
+import { useFetcher } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
+import { Form } from "../custom-form";
 
 import {
   AlertDialog,

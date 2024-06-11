@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { z } from "zod";
 import { LocationMarkerIcon } from "~/components/icons/library";
 import { LocationSelect } from "~/components/location/location-select";

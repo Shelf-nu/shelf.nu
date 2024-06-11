@@ -1,11 +1,11 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
-  Form,
   useActionData,
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { ColorInput } from "~/components/forms/color-input";

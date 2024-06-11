@@ -1,5 +1,6 @@
 import type { Asset } from "@prisma/client";
-import { Form, useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
+import { Form } from "../custom-form";
 import { Button } from "~/components/shared/button";
 
 import {
