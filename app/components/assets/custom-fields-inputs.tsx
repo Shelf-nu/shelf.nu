@@ -1,23 +1,14 @@
 import type { ReactElement } from "react";
 import { useRef, useState } from "react";
 import type { CustomField, CustomFieldType } from "@prisma/client";
-import { CalendarIcon } from "@radix-ui/react-icons";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@radix-ui/react-popover";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
-import { format } from "date-fns";
 import type { Zorm } from "react-zorm";
 import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
-import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
-import { Calendar } from "../forms/calendar-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import {
