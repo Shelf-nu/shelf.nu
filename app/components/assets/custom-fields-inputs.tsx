@@ -58,7 +58,7 @@ export default function AssetCustomFields({
       ?.value;
     return value ? getCustomFieldDisplayValue(value) : "";
   };
- 
+
   const fieldTypeToCompMap: {
     [key in CustomFieldType]?: (field: CustomField) => ReactElement;
   } = {
@@ -79,7 +79,7 @@ export default function AssetCustomFields({
       </div>
     ),
     DATE: (field) => (
-      <div className="w-full flex items-end">
+      <div className="flex w-full items-end">
         <Input
           className="w-full"
           label={field.name}
@@ -95,16 +95,16 @@ export default function AssetCustomFields({
           disabled={disabled}
         />
         {dateObj[field.id] ? (
-            <Button
-              className="ml-2 h-[42px] sm:h-[100%]"
-              icon="x"
-              variant="secondary"
-              type="button"
-              onClick={() => {
-                setDateObj({ ...dateObj, [field.id]: null });
-              }}
-            />
-          ) : null}
+          <Button
+            className="ml-2 h-[42px] sm:h-full"
+            icon="x"
+            variant="secondary"
+            type="button"
+            onClick={() => {
+              setDateObj({ ...dateObj, [field.id]: null });
+            }}
+          />
+        ) : null}
       </div>
     ),
     OPTION: (field) => {
