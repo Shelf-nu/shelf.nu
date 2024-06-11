@@ -1,27 +1,23 @@
 import React from "react";
 import {
   Form as RemixForm,
-  FormProps as RemixFormProps,
+  type FormProps as RemixFormProps,
 } from "@remix-run/react";
 import { scrollToError } from "~/utils/scroll-to-error";
 
-type HTMLFormMethod = "post" | "get" | undefined;
-type HTMLFormEncType =
-  | "application/x-www-form-urlencoded"
-  | "multipart/form-data"
-  | "text/plain"
-  | undefined;
-
-interface CustomFormProps
-  extends Omit<React.ComponentPropsWithoutRef<"form">, "method" | "onSubmit"> {
-  method?: HTMLFormMethod;
-  encType?: HTMLFormEncType;
-  onSubmit?: React.FormEventHandler<HTMLFormElement>;
-  replace?: boolean;
-}
-
-export const CustomForm = React.forwardRef<HTMLFormElement, CustomFormProps>(
-  (props, ref) => <RemixForm ref={ref} {...props} onSubmit={scrollToError} />
+export const CustomForm = React.forwardRef<HTMLFormElement, RemixFormProps>(
+  (props, ref) => (
+    <RemixForm
+      ref={ref}
+      {...props}
+      onSubmit={(event) => {
+        /** Scroll to the error if there are any */
+        scrollToError(event);
+        /** Invoke the onSubmit function coming from props */
+        props?.onSubmit?.(event);
+      }}
+    />
+  )
 );
 
 CustomForm.displayName = "CustomForm";

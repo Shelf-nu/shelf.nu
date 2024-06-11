@@ -1,10 +1,11 @@
-export const scrollToError = () => {
-  const errorElements = document.querySelectorAll(".text-error-500");
+export const scrollToError = (event: React.FormEvent<HTMLFormElement>) => {
+  const form = event.currentTarget;
+  const errorElements = form.querySelectorAll(".text-error-500");
 
   // Create an IntersectionObserver to observe visibility changes
   const observer = new IntersectionObserver(
     (entries, observer) => {
-      entries.forEach((entry) => {
+      for (const entry of entries) {
         // If the element is not intersecting (not visible), scroll to it
         if (!entry.isIntersecting) {
           const elementToScrollTo =
@@ -12,7 +13,7 @@ export const scrollToError = () => {
           elementToScrollTo.scrollIntoView({ behavior: "smooth" });
           observer.unobserve(entry.target);
         }
-      });
+      }
     },
     { threshold: 0.1 }
   );
