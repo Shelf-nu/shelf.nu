@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { CustomField } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
+import { Link, useActionData, useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -13,6 +13,7 @@ import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { Form } from "../custom-form";
 import CategoriesInput from "../forms/categories-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";

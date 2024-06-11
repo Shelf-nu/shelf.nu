@@ -5,7 +5,6 @@ import type {
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
 import {
-  Form,
   useActionData,
   useLoaderData,
   useNavigation,
@@ -13,6 +12,7 @@ import {
 } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";

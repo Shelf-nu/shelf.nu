@@ -1,5 +1,5 @@
 import type { Asset } from "@prisma/client";
-import { Form, useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -15,6 +15,7 @@ import {
 import { useBookingStatus } from "~/hooks/use-booking-status";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import { tw } from "~/utils/tw";
+import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
 export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
