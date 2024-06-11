@@ -1,6 +1,5 @@
 import type { Asset, Qr } from "@prisma/client";
 import {
-  Form,
   Link,
   useActionData,
   useLoaderData,
@@ -20,6 +19,7 @@ import { tw } from "~/utils/tw";
 
 import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
+import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -28,7 +28,6 @@ import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { Image } from "../shared/image";
-
 import {
   Tooltip,
   TooltipContent,
@@ -40,7 +39,7 @@ import { TagsAutocomplete } from "../tag/tags-autocomplete";
 export const NewAssetFormSchema = z.object({
   title: z
     .string()
-    .min(2, "Title is required")
+    .min(2, "Name is required")
     .transform((val) => val.trim()), // We trim to avoid white spaces at start and end
 
   description: z.string().transform((val) => val.trim()),
@@ -102,7 +101,6 @@ export const AssetForm = ({
   });
 
   const zo = useZorm("NewQuestionWizardScreen", FormSchema);
-
   const disabled = isFormProcessing(navigation.state);
 
   const fileError = useAtomValue(fileErrorAtom);
@@ -146,7 +144,7 @@ export const AssetForm = ({
         <FormRow
           rowLabel={"Name"}
           className="border-b-0 pb-[10px]"
-          required={zodFieldIsRequired(FormSchema.shape.title)}
+          required={true}
         >
           <Input
             label="Name"
@@ -160,7 +158,7 @@ export const AssetForm = ({
             onChange={updateDynamicTitle}
             className="w-full"
             defaultValue={title || ""}
-            required={zodFieldIsRequired(FormSchema.shape.title)}
+            required={true}
           />
         </FormRow>
 
