@@ -67,7 +67,7 @@ export default function AssetCustomFields({
       ?.value;
     return value ? getCustomFieldDisplayValue(value) : "";
   };
-
+ 
   const fieldTypeToCompMap: {
     [key in CustomFieldType]?: (field: CustomField) => ReactElement;
   } = {
@@ -88,13 +88,11 @@ export default function AssetCustomFields({
       </div>
     ),
     DATE: (field) => (
-      <>
-        <label className="mb-1.5 font-medium text-gray-700 lg:hidden">
-          <span className={field.required ? "required-input-label" : ""}>
-            {field.name}
-          </span>
-        </label>
-        <input
+      <div className="w-full flex items-end">
+        <Input
+          className="w-full"
+          label={field.name}
+          hideLabel
           type="date"
           name={`cf-${field.id}`}
           value={dateObj[field.id]?.toISOString().split("T")[0] || ""}
@@ -102,15 +100,21 @@ export default function AssetCustomFields({
             const selectedDate = new Date(e.target.value);
             setDateObj({ ...dateObj, [field.id]: selectedDate });
           }}
-          className="w-full max-w-full cursor-pointer rounded-[4px] border border-gray-300 px-4 py-2 text-[16px] text-gray-900 shadow outline-none placeholder:text-gray-500 focus:border-primary-300 focus:ring-[0] disabled:border-gray-300 disabled:bg-gray-50 disabled:text-gray-500"
+          error={zo.errors[`cf-${field.id}`]()?.message}
           disabled={disabled}
         />
-        {zo.errors[`cf-${field.id}`]()?.message ? (
-          <p className="text-sm text-error-500">
-            {zo.errors[`cf-${field.id}`]()?.message}
-          </p>
-        ) : null}
-      </>
+        {dateObj[field.id] ? (
+            <Button
+              className="ml-2 h-[42px] sm:h-[100%]"
+              icon="x"
+              variant="secondary"
+              type="button"
+              onClick={() => {
+                setDateObj({ ...dateObj, [field.id]: null });
+              }}
+            />
+          ) : null}
+      </div>
     ),
     OPTION: (field) => {
       const val = getCustomFieldVal(field.id);
