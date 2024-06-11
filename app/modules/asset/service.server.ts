@@ -463,7 +463,6 @@ async function getAssets(params: {
       }
     }
 
-
     if (hideUnavailable) {
       //not disabled for booking
       where.availableToBook = true;

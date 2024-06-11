@@ -224,7 +224,7 @@ export async function getPaginatedAndFilterableKits({
       });
     }
 
-    let [kits, totalKits] = await Promise.all([
+    let [kits, totalKits, totalKitsWithoutAssets] = await Promise.all([
       db.kit.findMany({
         skip,
         take,
@@ -236,6 +236,7 @@ export async function getPaginatedAndFilterableKits({
         orderBy: { createdAt: "desc" },
       }),
       db.kit.count({ where }),
+      db.kit.count({ where: { organizationId, assets: { none: {} } } }),
     ]);
 
     /** Filter our the kits with 0 assets. WE do it like this because prisma doesnt allow us to do it in the query */
@@ -245,7 +246,16 @@ export async function getPaginatedAndFilterableKits({
 
     const totalPages = Math.ceil(totalKits / perPage);
 
-    return { page, perPage, kits, totalKits, totalPages, search };
+    return {
+      page,
+      perPage,
+      kits,
+      totalKits: hideUnavailable
+        ? totalKits - totalKitsWithoutAssets
+        : totalKits,
+      totalPages,
+      search,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,

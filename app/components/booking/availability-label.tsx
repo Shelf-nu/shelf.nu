@@ -204,6 +204,8 @@ export function getKitAvailabilityStatus(
   kit: KitForBooking,
   currentBookingId: string
 ) {
+  const kitBookings = kit.assets.length ? kit.assets[0].bookings : [];
+
   const isCheckedOut = kit.assets.some(
     (a) =>
       (a.status === "CHECKED_OUT" &&
@@ -218,11 +220,26 @@ export function getKitAvailabilityStatus(
 
   const someAssetMarkedUnavailable = kit.assets.some((a) => !a.availableToBook);
 
+  const unavailableBookingStatuses = [
+    BookingStatus.RESERVED,
+    BookingStatus.ONGOING,
+    BookingStatus.OVERDUE,
+  ] as BookingStatus[];
+
+  const someAssetHasUnavailableBooking =
+    kitBookings.length > 0 &&
+    kitBookings.some(
+      (b) =>
+        unavailableBookingStatuses.includes(b.status) &&
+        b.id !== currentBookingId
+    );
+
   return {
     isCheckedOut,
     isInCustody,
     isKitWithoutAssets,
     someAssetMarkedUnavailable,
+    someAssetHasUnavailableBooking,
     isKitUnavailable: [isInCustody, isKitWithoutAssets].some(Boolean),
   };
 }
@@ -235,6 +252,7 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
     someAssetMarkedUnavailable,
     isInCustody,
     isKitWithoutAssets,
+    someAssetHasUnavailableBooking,
   } = getKitAvailabilityStatus(kit, booking.id);
 
   if (isInCustody) {
@@ -274,6 +292,16 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
         tooltipTitle="Kit is unavailable for booking"
         tooltipContent="Some of the assets of this kits are marked as unavailable for booking by an administrator."
         className="border-gray-200 bg-gray-100 text-gray-500"
+      />
+    );
+  }
+
+  if (someAssetHasUnavailableBooking) {
+    return (
+      <AvailabilityBadge
+        badgeText="Already booked"
+        tooltipTitle="Kit is already part of a booking"
+        tooltipContent="This kit is already added to another booking."
       />
     );
   }
