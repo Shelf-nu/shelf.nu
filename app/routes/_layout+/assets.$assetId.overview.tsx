@@ -32,6 +32,7 @@ import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
     .string()
@@ -389,7 +390,7 @@ export default function AssetOverview() {
                   <p className="">
                     In custody of{" "}
                     <span className="font-semibold">
-                      {asset.custody?.custodian.name}
+                      {resolveTeamMemberName(asset.custody.custodian)}
                     </span>
                   </p>
                   <span>Since {asset.custody.dateDisplay}</span>

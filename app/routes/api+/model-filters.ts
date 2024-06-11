@@ -68,22 +68,45 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const { name, queryKey, queryValue, selectedValues, ...filters } =
       parseData(searchParams, ModelFiltersSchema);
 
+    const where: Record<string, any> = {
+      organizationId,
+      OR: [{ id: { in: (selectedValues ?? "").split(",") } }],
+    };
+
+    /**
+     * When searching for teamMember, we have to search for
+     * - teamMember's name
+     * - teamMember's user firstName, lastName and email
+     */
+    if (name === "teamMember") {
+      where.OR.push(
+        { name: { contains: queryValue, mode: "insensitive" } },
+        { user: { firstName: { contains: queryValue, mode: "insensitive" } } },
+        { user: { firstName: { contains: queryValue, mode: "insensitive" } } },
+        { user: { email: { contains: queryValue, mode: "insensitive" } } }
+      );
+    } else {
+      where.OR.push({
+        [queryKey]: { contains: queryValue, mode: "insensitive" },
+      });
+    }
+
     const queryData = (await db[name].dynamicFindMany({
-      where: {
-        organizationId,
-        OR: [
-          {
-            [queryKey]: {
-              contains: queryValue,
-              mode: "insensitive",
-            },
-          },
-          {
-            id: { in: (selectedValues ?? "").split(",") },
-          },
-        ],
-        ...filters,
-      },
+      where: { ...where, ...filters },
+      include:
+        /** We need user's information to resolve teamMember's name */
+        name === "teamMember"
+          ? {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  email: true,
+                },
+              },
+            }
+          : undefined,
     })) as Array<Record<string, string>>;
 
     return json(
@@ -93,6 +116,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           name: item[queryKey],
           color: item?.color,
           metadata: item,
+          user: item?.user as any,
         })),
       })
     );

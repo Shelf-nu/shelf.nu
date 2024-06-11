@@ -82,7 +82,11 @@ export async function getAsset({
         custody: {
           select: {
             createdAt: true,
-            custodian: true,
+            custodian: {
+              include: {
+                user: true,
+              },
+            },
           },
         },
         organization: {
@@ -328,6 +332,8 @@ async function getAssetsFromView(params: {
                       name: true,
                       user: {
                         select: {
+                          firstName: true,
+                          lastName: true,
                           profilePicture: true,
                         },
                       },
@@ -552,6 +558,8 @@ async function getAssets(params: {
                   name: true,
                   user: {
                     select: {
+                      firstName: true,
+                      lastName: true,
                       profilePicture: true,
                     },
                   },
@@ -2074,6 +2082,8 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
                       custodian?.lastName || ""
                     }`, // Concatenate firstName and lastName to form the name property with default values
                     user: {
+                      firstName: custodian?.firstName || "",
+                      lastName: custodian?.lastName || "",
                       profilePicture: custodian?.profilePicture || null,
                     },
                   },
