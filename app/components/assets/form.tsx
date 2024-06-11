@@ -39,7 +39,7 @@ import { TagsAutocomplete } from "../tag/tags-autocomplete";
 export const NewAssetFormSchema = z.object({
   title: z
     .string()
-    .min(2, "Title is required")
+    .min(2, "Name is required")
     .transform((val) => val.trim()), // We trim to avoid white spaces at start and end
 
   description: z.string().transform((val) => val.trim()),
@@ -144,7 +144,7 @@ export const AssetForm = ({
         <FormRow
           rowLabel={"Name"}
           className="border-b-0 pb-[10px]"
-          required={zodFieldIsRequired(FormSchema.shape.title)}
+          required={true}
         >
           <Input
             label="Name"
@@ -158,7 +158,7 @@ export const AssetForm = ({
             onChange={updateDynamicTitle}
             className="w-full"
             defaultValue={title || ""}
-            required={zodFieldIsRequired(FormSchema.shape.title)}
+            required={true}
           />
         </FormRow>
 
