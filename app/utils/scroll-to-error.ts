@@ -1,28 +1,10 @@
 export const scrollToError = (event: React.FormEvent<HTMLFormElement>) => {
   const form = event.currentTarget;
   const errorElements = form.querySelectorAll(".text-error-500");
+  const yOffset = -100; // negative value will move the scroll up
 
-  // Create an IntersectionObserver to observe visibility changes
-  const observer = new IntersectionObserver(
-    (entries, observer) => {
-      for (const entry of entries) {
-        // If the element is not intersecting (not visible), scroll to it
-        if (!entry.isIntersecting) {
-          const elementToScrollTo =
-            entry.target.previousElementSibling || entry.target;
-          elementToScrollTo.scrollIntoView({ behavior: "auto" });
-          setTimeout(() => {
-            window.scrollBy(0, -50);
-          }, 10);
-          observer.unobserve(entry.target);
-        }
-      }
-    },
-    { threshold: 0.1 }
-  );
-
-  // Iterate through each error element and observe if it's not already visible
-  errorElements.forEach((errorElement) => {
+  // Iterate through each error element and scroll to the first one not visible
+  for (const errorElement of errorElements) {
     const elementToScrollTo =
       errorElement.previousElementSibling || errorElement;
 
@@ -35,13 +17,11 @@ export const scrollToError = (event: React.FormEvent<HTMLFormElement>) => {
         (window.innerHeight || document.documentElement.clientHeight) &&
       rect.right <= (window.innerWidth || document.documentElement.clientWidth);
 
-    // If the element is not visible, observe it
+    // If the element is not visible, scroll to it
     if (!isVisible) {
-      observer.observe(errorElement);
+      const y = rect.top + window.scrollY + yOffset;
+      window.scrollTo({ top: y, behavior: "smooth" });
+      break;
     }
-  });
-
-  return () => {
-    observer.disconnect();
-  };
+  }
 };
