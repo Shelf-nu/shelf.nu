@@ -81,6 +81,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               status: true,
               custody: { select: { id: true } },
               bookings: { select: { status: true } },
+              availableToBook: true,
             },
           },
           custody: { select: { custodian: true } },
