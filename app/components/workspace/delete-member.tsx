@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Prisma, TeamMember } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -16,6 +16,7 @@ import {
 
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
+import { Form } from "../custom-form";
 import { TrashIcon, XIcon } from "../icons/library";
 
 export const DeleteMember = ({
