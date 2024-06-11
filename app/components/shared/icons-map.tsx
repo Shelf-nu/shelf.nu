@@ -37,10 +37,12 @@ import {
   BookingsIcon,
   CheckOutIcon,
   CheckInIcon,
+  CheckIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
 export type IconType =
+  | "check"
   | "plus"
   | "trash"
   | "archive"
@@ -84,6 +86,7 @@ type IconsMap = {
 };
 
 export const iconsMap: IconsMap = {
+  check: <CheckIcon />,
   plus: <PlusIcon />,
   trash: <TrashIcon />,
   archive: <ArchiveIcon />,

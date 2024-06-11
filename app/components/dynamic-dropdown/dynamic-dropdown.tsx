@@ -144,17 +144,19 @@ export default function DynamicDropdown({
               )}
               {items.map((item) => {
                 const checked = selectedItems.includes(item.id);
-                if (typeof renderItem === "function") {
-                  return (
-                    <label
-                      key={item.id}
-                      htmlFor={item.id}
-                      className={tw(
-                        "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                        checked && "bg-gray-50"
-                      )}
-                    >
-                      {renderItem({ ...item, metadata: item })}
+                return (
+                  <label
+                    key={item.id}
+                    htmlFor={item.id}
+                    className={tw(
+                      "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                      checked && "bg-gray-50"
+                    )}
+                  >
+                    <span className="pr-2">
+                      {typeof renderItem === "function"
+                        ? renderItem({ ...item, metadata: item })
+                        : item.name}
                       <input
                         id={item.id}
                         type="checkbox"
@@ -165,33 +167,8 @@ export default function DynamicDropdown({
                           handleSelectItemChange(e.currentTarget.value);
                         }}
                       />
-                      <When truthy={checked}>
-                        <CheckIcon className="text-primary" />
-                      </When>
-                    </label>
-                  );
-                }
+                    </span>
 
-                return (
-                  <label
-                    key={item.id}
-                    htmlFor={item.id}
-                    className={tw(
-                      "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                      checked && "bg-gray-50"
-                    )}
-                  >
-                    {item.name}
-                    <input
-                      id={item.id}
-                      type="checkbox"
-                      value={item.id}
-                      className="hidden"
-                      checked={checked}
-                      onChange={(e) => {
-                        handleSelectItemChange(e.currentTarget.value);
-                      }}
-                    />
                     <When truthy={checked}>
                       <CheckIcon className="text-primary" />
                     </When>

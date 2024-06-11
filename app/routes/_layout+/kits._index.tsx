@@ -152,6 +152,11 @@ export default function KitsIndexPage() {
               placeholder="Search team members"
               countKey="totalTeamMembers"
               initialDataKey="teamMembers"
+              transformItem={(item) => ({
+                ...item,
+                id: item.metadata?.userId ? item.metadata.userId : item.id,
+              })}
+              renderItem={(item) => resolveTeamMemberName(item)}
             />
           )}
         </Filters>

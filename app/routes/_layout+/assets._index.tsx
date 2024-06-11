@@ -383,6 +383,7 @@ export default function AssetIndexPage() {
                     ...item,
                     id: item.metadata?.userId ? item.metadata.userId : item.id,
                   })}
+                  renderItem={(item) => resolveTeamMemberName(item)}
                   label="Filter by custodian"
                   placeholder="Search team members"
                   initialDataKey="teamMembers"
