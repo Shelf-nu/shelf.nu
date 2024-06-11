@@ -10,10 +10,10 @@ export const scrollToError = (event: React.FormEvent<HTMLFormElement>) => {
         if (!entry.isIntersecting) {
           const elementToScrollTo =
             entry.target.previousElementSibling || entry.target;
-          elementToScrollTo.scrollIntoView({ behavior: "smooth" });
+          elementToScrollTo.scrollIntoView({ behavior: "auto" });
           setTimeout(() => {
             window.scrollBy(0, -50);
-          }, 600);
+          }, 10);
           observer.unobserve(entry.target);
         }
       }
