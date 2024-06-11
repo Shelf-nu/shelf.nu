@@ -232,8 +232,7 @@ export default function AddAssetsToNewBooking() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const { booking, header, items, bookingKitIds } =
-    useLoaderData<typeof loader>();
+  const { booking, header, bookingKitIds } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
@@ -253,11 +252,6 @@ export default function AddAssetsToNewBooking() {
     [bookingAssetsIds, selectedAssets]
   );
 
-  const selectedItems = items.filter((item) =>
-    selectedAssets.includes(item.id)
-  );
-
-  const totalAssetsSelected = selectedItems.filter((i) => !i.kitId).length;
   const hasUnsavedChanges = selectedAssets.length !== bookingAssetsIds.length;
 
   const manageKitsUrl = useMemo(
@@ -307,9 +301,9 @@ export default function AddAssetsToNewBooking() {
         <TabsList className="w-full">
           <TabsTrigger className="flex-1 gap-x-2" value="assets">
             Assets{" "}
-            {totalAssetsSelected > 0 ? (
+            {selectedAssets.length > 0 ? (
               <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
-                {totalAssetsSelected}
+                {selectedAssets.length}
               </GrayBadge>
             ) : null}
           </TabsTrigger>
@@ -409,7 +403,7 @@ export default function AddAssetsToNewBooking() {
       {/* Footer of the modal */}
       <footer className="item-center flex justify-between border-t px-6 pt-3">
         <div className="flex items-center">
-          {totalAssetsSelected} assets selected
+          {selectedAssets.length} assets selected
         </div>
         <div className="flex gap-3">
           <Button variant="secondary" to={".."}>

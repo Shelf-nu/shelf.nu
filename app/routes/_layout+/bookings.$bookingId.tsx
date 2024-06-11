@@ -60,6 +60,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     additionalData: { userId },
   });
 
+  const searchParams = getCurrentSearchParams(request);
+  const paramsValues = getParamsValues(searchParams);
+  const { page, perPageParam } = paramsValues;
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+  /** Needed for getting the assets */
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
+
   try {
     const { organizationId, role } = await requirePermission({
       userId: authSession?.userId,
@@ -67,8 +76,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
-
-    const searchParams = getCurrentSearchParams(request);
 
     /**
      * If the org id in the params is different than the current organization id,
@@ -99,7 +106,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const [teamMembers, org, assets] = await Promise.all([
+    const [teamMembers, org, assets, totalAssets] = await Promise.all([
       /**
        * We need to fetch the team members to be able to display them in the custodian dropdown.
        */
@@ -137,6 +144,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             in: booking?.assets.map((a) => a.id) || [],
           },
         },
+        skip,
+        take,
         include: {
           category: true,
           custody: true,
@@ -163,6 +172,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
         },
       }),
+      /** Count assets them */
+      db.asset.count({
+        where: {
+          id: {
+            in: booking?.assets.map((a) => a.id) || [],
+          },
+        },
+      }),
     ]);
 
     if (org?.owner) {
@@ -182,9 +199,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * This is useful for more consistent data in the front-end */
     booking.assets = assets;
 
-    const { page, perPageParam } = getParamsValues(searchParams);
-    const cookie = await updateCookieWithPerPage(request, perPageParam);
-    const { perPage } = cookie;
     const modelName = {
       singular: "asset",
       plural: "assets",
@@ -199,11 +213,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         booking,
         modelName,
-        items: assets,
+        items: booking.assets,
         page,
-        totalItems: booking.assets.length,
+        totalItems: totalAssets,
         perPage,
-        totalPages: booking.assets.length / perPage,
+        totalPages: totalAssets / perPage,
         teamMembers,
       }),
       {
