@@ -1,6 +1,5 @@
 import type { Tag } from "@prisma/client";
 import { useFetcher } from "@remix-run/react";
-import { Form } from "../custom-form";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -14,6 +13,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { isFormProcessing } from "~/utils/form";
+import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
 export const DeleteTag = ({ tag }: { tag: Pick<Tag, "name" | "id"> }) => {

@@ -1,7 +1,7 @@
 import { useLoaderData, useNavigation } from "@remix-run/react";
-import { Form } from "../custom-form";
 import type { loader } from "~/routes/_layout+/admin-dashboard+/qrs";
 import { isFormProcessing } from "~/utils/form";
+import { Form } from "../custom-form";
 import {
   Select,
   SelectContent,

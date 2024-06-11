@@ -16,7 +16,6 @@ import {
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
-import { Form } from "~/components/custom-form";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { bookingsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
@@ -24,6 +23,7 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
+import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";

@@ -1,7 +1,6 @@
 import type { Category } from "@prisma/client";
 import { useFetcher } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
-import { Form } from "../custom-form";
 
 import {
   AlertDialog,
@@ -14,6 +13,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { isFormProcessing } from "~/utils/form";
+import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
 export const DeleteCategory = ({
