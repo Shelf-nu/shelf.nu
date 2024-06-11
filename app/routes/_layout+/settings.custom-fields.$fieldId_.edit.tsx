@@ -106,7 +106,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const { name, helpText, active, required, options, categories } = payload;
 
     const field = await getCustomField({ organizationId, id });
-    console.log(field);
 
     /** If they are activating a field, we have to make sure that they are not already at the limit */
     const isActivatingField = !field.active && active !== field.active;

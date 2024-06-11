@@ -1,5 +1,4 @@
 import type { User } from "@prisma/client";
-import { Form } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -12,6 +11,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
 export const DeleteUser = ({
