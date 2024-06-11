@@ -183,14 +183,6 @@ export async function getPaginatedAndFilterableKits({
         every: {
           organizationId,
           custody: null,
-          bookings: {
-            every: {
-              OR: [
-                { status: { notIn: unavailableBookingStatuses } },
-                { id: currentBookingId },
-              ],
-            },
-          },
         },
       };
 
@@ -199,21 +191,17 @@ export async function getPaginatedAndFilterableKits({
           every: {
             ...where.assets.every,
             bookings: {
-              every: {
+              none: {
+                id: { not: currentBookingId },
+                status: { in: unavailableBookingStatuses },
                 OR: [
-                  { status: { notIn: unavailableBookingStatuses } },
-                  { id: currentBookingId },
                   {
-                    OR: [
-                      {
-                        from: { gte: bookingTo },
-                        to: { lte: bookingFrom },
-                      },
-                      {
-                        from: { lte: bookingFrom },
-                        to: { gte: bookingTo },
-                      },
-                    ],
+                    from: { lte: bookingTo },
+                    to: { gte: bookingFrom },
+                  },
+                  {
+                    from: { gte: bookingFrom },
+                    to: { lte: bookingTo },
                   },
                 ],
               },
@@ -247,11 +235,7 @@ export async function getPaginatedAndFilterableKits({
         },
         orderBy: { createdAt: "desc" },
       }),
-      db.kit.count({
-        where: {
-          organizationId,
-        },
-      }),
+      db.kit.count({ where }),
     ]);
 
     /** Filter our the kits with 0 assets. WE do it like this because prisma doesnt allow us to do it in the query */

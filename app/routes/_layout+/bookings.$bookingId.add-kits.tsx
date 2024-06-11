@@ -92,8 +92,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const modelName = {
-      singular: "Kit",
-      plural: "Kits",
+      singular: "kit",
+      plural: "kits",
     };
 
     const { page, perPage, kits, search, totalKits, totalPages } =

@@ -196,17 +196,14 @@ export function AvailabilityBadge({
  * A kit is not available for the following reasons
  * 1. Kit has unavailable status
  * 2. Kit or some asset is in custody
- * 3. Kit is checked out
- * 4. Some of the assets are in custody
- * 5. Some of the assets are already booked for that period (for that booking)
- * 6. If kit has no assets
+ * 3. Some of the assets are in custody
+ * 4. Some of the assets are already booked for that period (for that booking)
+ * 5. If kit has no assets
  */
 export function getKitAvailabilityStatus(
   kit: KitForBooking,
   currentBookingId: string
 ) {
-  const kitBookings = kit.assets.length ? kit.assets[0].bookings : [];
-
   const isCheckedOut = kit.assets.some(
     (a) =>
       (a.status === "CHECKED_OUT" &&
@@ -219,34 +216,14 @@ export function getKitAvailabilityStatus(
 
   const isKitWithoutAssets = kit.assets.length === 0;
 
-  const unavailableBookingStatuses = [
-    BookingStatus.RESERVED,
-    BookingStatus.ONGOING,
-    BookingStatus.OVERDUE,
-  ] as BookingStatus[];
-
-  const someAssetHasUnavailableBooking =
-    kitBookings.length > 0 &&
-    kitBookings.some(
-      (b) =>
-        unavailableBookingStatuses.includes(b.status) &&
-        b.id !== currentBookingId
-    );
-
   const someAssetMarkedUnavailable = kit.assets.some((a) => !a.availableToBook);
 
   return {
     isCheckedOut,
     isInCustody,
     isKitWithoutAssets,
-    someAssetHasUnavailableBooking,
     someAssetMarkedUnavailable,
-    isKitUnavailable: [
-      isCheckedOut,
-      isInCustody,
-      isKitWithoutAssets,
-      someAssetHasUnavailableBooking,
-    ].some(Boolean),
+    isKitUnavailable: [isInCustody, isKitWithoutAssets].some(Boolean),
   };
 }
 
@@ -258,7 +235,6 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
     someAssetMarkedUnavailable,
     isInCustody,
     isKitWithoutAssets,
-    someAssetHasUnavailableBooking,
   } = getKitAvailabilityStatus(kit, booking.id);
 
   if (isInCustody) {
@@ -277,16 +253,6 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
         badgeText="Checked out"
         tooltipTitle="Kit is checked out"
         tooltipContent="This kit is currently checked out as part of another booking."
-      />
-    );
-  }
-
-  if (someAssetHasUnavailableBooking) {
-    return (
-      <AvailabilityBadge
-        badgeText="Already booked"
-        tooltipTitle="Kit is already part of a booking"
-        tooltipContent="This kit is added to a booking that is overlapping the selected time period."
       />
     );
   }
