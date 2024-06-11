@@ -41,6 +41,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
@@ -977,7 +978,6 @@ export async function updateAssetMainImage({
       return;
     }
 
-    await deleteOtherImages({ userId, assetId, data: { path: image } });
     const signedUrl = await createSignedUrl({ filename: image });
 
     await updateAsset({
@@ -986,6 +986,7 @@ export async function updateAssetMainImage({
       mainImageExpiration: oneDayFromNow(),
       userId,
     });
+    await deleteOtherImages({ userId, assetId, data: { path: image } });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1132,14 +1133,24 @@ async function deleteOtherImages({
           .remove([`${userId}/${assetId}/${image}`])
       )
     );
-  } catch (error) {
-    if (error instanceof Error) {
+    throw new Error("testing the error");
+  } catch (cause) {
+    if (cause instanceof Error) {
       // eslint-disable-next-line no-console
-      console.error("Error deleting images:", error.message);
+      console.error("Error deleting images:", cause.message);
     } else {
       // eslint-disable-next-line no-console
-      console.error("Unexpected error:", error);
+      console.error("Unexpected error:", cause);
     }
+    Logger.error(
+      new ShelfError({
+        cause,
+        title: "Oops, deletion of other asset images failed",
+        message: "Something went wrong while deleting other asset images",
+        additionalData: { assetId, userId },
+        label,
+      })
+    );
   }
 }
 
