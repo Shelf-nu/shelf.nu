@@ -1135,7 +1135,6 @@ async function deleteOtherImages({
           .remove([`${userId}/${assetId}/${image}`])
       )
     );
-    throw new Error("testing the error");
   } catch (cause) {
     Logger.error(
       new ShelfError({
