@@ -288,9 +288,9 @@ export function KitAvailabilityLabel({ kit }: { kit: KitForBooking }) {
   if (someAssetMarkedUnavailable) {
     return (
       <AvailabilityBadge
-        badgeText="Unavailable"
-        tooltipTitle="Kit is unavailable for booking"
-        tooltipContent="Some of the assets of this kits are marked as unavailable for booking by an administrator."
+        badgeText="Contains non-bookable assets"
+        tooltipTitle="Kit is unavailable for check-out"
+        tooltipContent="Some assets in this kit are marked as non-bookable. You can still add the kit to your booking, but you must remove the non-bookable assets to proceed with check-out."
         className="border-gray-200 bg-gray-100 text-gray-500"
       />
     );

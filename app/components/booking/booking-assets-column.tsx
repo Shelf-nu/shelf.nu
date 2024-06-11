@@ -30,7 +30,8 @@ export function BookingAssetsColumn() {
   }>();
   const hasItems = items?.length > 0;
   const isSelfService = useUserIsSelfService();
-  const { isDraft, isCompleted, isArchived } = useBookingStatus(booking);
+  const { isDraft, isReserved, isCompleted, isArchived } =
+    useBookingStatus(booking);
 
   const manageAssetsUrl = useMemo(
     () =>
@@ -158,7 +159,7 @@ export function BookingAssetsColumn() {
                             <Td> </Td>
 
                             <Td className="pr-4 text-right">
-                              {isSelfService && isDraft ? (
+                              {(!isSelfService && isDraft) || isReserved ? (
                                 <KitRowActionsDropdown kit={kit} />
                               ) : null}
                             </Td>
