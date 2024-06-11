@@ -123,6 +123,15 @@ export async function getAsset({
   }
 }
 
+/** This is used by both  getAssetsFromView & getAssets
+ * Those are the statuses that are considered unavailable for booking assets
+ */
+const unavailableBookingStatuses = [
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
 /**
  * Fetches assets from AssetSearchView
  * This is used to have a more advanced search however its less performant
@@ -204,11 +213,7 @@ async function getAssetsFromView(params: {
         };
       }
     }
-    const unavailableBookingStatuses = [
-      BookingStatus.DRAFT,
-      BookingStatus.RESERVED,
-      BookingStatus.ONGOING,
-    ];
+
     if (hideUnavailable && where.asset) {
       //not disabled for booking
       where.asset.availableToBook = true;
@@ -450,10 +455,7 @@ async function getAssets(params: {
         };
       }
     }
-    const unavailableBookingStatuses = [
-      BookingStatus.RESERVED,
-      BookingStatus.ONGOING,
-    ];
+
     if (hideUnavailable) {
       //not disabled for booking
       where.availableToBook = true;
