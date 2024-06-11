@@ -27,6 +27,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -235,7 +236,20 @@ function ListContent({
                     alt=""
                   />
                 ) : null}
-                <span className="mt-px">{item.custody.custodian.name}</span>
+                <span className="mt-px">
+                  {resolveTeamMemberName({
+                    name: item?.custody?.custodian.name,
+                    user: {
+                      firstName:
+                        item?.custody?.custodian?.user?.firstName || null,
+                      lastName:
+                        item?.custody?.custodian?.user?.lastName || null,
+                      profilePicture:
+                        item?.custody?.custodian?.user?.profilePicture || null,
+                      email: item?.custody?.custodian?.user?.email || "",
+                    },
+                  })}
+                </span>
               </>
             </GrayBadge>
           ) : null}

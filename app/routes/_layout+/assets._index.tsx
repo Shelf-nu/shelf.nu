@@ -57,6 +57,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */
@@ -422,7 +423,10 @@ const ListAssetContent = ({
       custodian: {
         name: string;
         user?: {
+          firstName: string | null;
+          lastName: string | null;
           profilePicture: string | null;
+          email: string | null;
         };
       };
     };
@@ -519,7 +523,18 @@ const ListAssetContent = ({
                     alt=""
                   />
                 ) : null}
-                <span className="mt-px">{custody.custodian.name}</span>
+                <span className="mt-px">
+                  {resolveTeamMemberName({
+                    name: custody.custodian.name,
+                    user: {
+                      firstName: custody.custodian?.user?.firstName || null,
+                      lastName: custody.custodian?.user?.lastName || null,
+                      profilePicture:
+                        custody.custodian?.user?.profilePicture || null,
+                      email: custody.custodian?.user?.email || "",
+                    },
+                  })}
+                </span>
               </>
             </GrayBadge>
           ) : null}
