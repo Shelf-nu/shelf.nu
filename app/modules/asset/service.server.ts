@@ -1135,13 +1135,6 @@ async function deleteOtherImages({
     );
     throw new Error("testing the error");
   } catch (cause) {
-    if (cause instanceof Error) {
-      // eslint-disable-next-line no-console
-      console.error("Error deleting images:", cause.message);
-    } else {
-      // eslint-disable-next-line no-console
-      console.error("Unexpected error:", cause);
-    }
     Logger.error(
       new ShelfError({
         cause,
