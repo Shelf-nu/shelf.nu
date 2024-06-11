@@ -13,7 +13,7 @@ import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { zodFieldIsRequired } from "~/utils/zod";
-import { CustomForm as Form } from "../CustomForm";
+import { Form } from "../custom-form";
 import CategoriesInput from "../forms/categories-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";

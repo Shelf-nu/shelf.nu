@@ -5,7 +5,7 @@ import {
 } from "@remix-run/react";
 import { scrollToError } from "~/utils/scroll-to-error";
 
-export const CustomForm = React.forwardRef<HTMLFormElement, RemixFormProps>(
+export const Form = React.forwardRef<HTMLFormElement, RemixFormProps>(
   (props, ref) => (
     <RemixForm
       ref={ref}
@@ -20,4 +20,4 @@ export const CustomForm = React.forwardRef<HTMLFormElement, RemixFormProps>(
   )
 );
 
-CustomForm.displayName = "CustomForm";
+Form.displayName = "Form";

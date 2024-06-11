@@ -19,7 +19,7 @@ import { tw } from "~/utils/tw";
 
 import { zodFieldIsRequired } from "~/utils/zod";
 import AssetCustomFields from "./custom-fields-inputs";
-import { CustomForm as Form } from "../CustomForm";
+import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";

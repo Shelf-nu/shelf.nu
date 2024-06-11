@@ -16,7 +16,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
 import { ExportButton } from "~/components/assets/export-button";
-import { CustomForm as Form } from "~/components/CustomForm";
+import { Form } from "~/components/custom-form";
 import { ErrorContent } from "~/components/errors";
 
 import FormRow from "~/components/forms/form-row";

@@ -6,7 +6,7 @@ import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
-import { CustomForm as Form } from "~/components/CustomForm";
+import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";

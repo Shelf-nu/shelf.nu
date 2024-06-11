@@ -9,7 +9,7 @@ import type { action as editLocationAction } from "~/routes/_layout+/locations.$
 import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
-import { CustomForm as Form } from "../CustomForm";
+import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
