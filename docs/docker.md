@@ -32,6 +32,7 @@ This will make sure you have a DATABASE that you are ready to connect to.
      -e 'SMTP_USER=some-email@example.com' \
      -e 'SMTP_FROM="Carlos from shelf.nu" <carlos@shelf.nu>' \
      -e 'SMTP_PWD=super-safe-passw0rd' \
+     -e 'INVITE_TOKEN_SECRET=another-super-duper-s3cret' \
      -p 3000:8080 \
      --restart unless-stopped \
      ghcr.io/shelf-nu/shelf.nu:latest
