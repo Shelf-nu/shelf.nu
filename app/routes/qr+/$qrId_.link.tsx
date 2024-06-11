@@ -4,8 +4,9 @@ import type {
   ActionFunctionArgs,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import Icon from "~/components/icons/icon";
 import { UnlinkIcon } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";

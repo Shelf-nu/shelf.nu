@@ -2,13 +2,13 @@ import { AssetStatus, BookingStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
-  Form,
   Link,
   useActionData,
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";

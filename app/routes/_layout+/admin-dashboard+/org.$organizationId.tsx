@@ -3,9 +3,10 @@ import {
   type LoaderFunctionArgs,
   type ActionFunctionArgs,
 } from "@remix-run/node";
-import { Form, Link, useLoaderData } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
+import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database/db.server";
