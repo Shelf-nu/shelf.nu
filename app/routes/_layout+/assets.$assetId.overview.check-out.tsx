@@ -163,6 +163,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       {
         additionalData: { userId, assetId },
         message: "Please select a custodian",
+        shouldBeCaptured: false,
       }
     );
 

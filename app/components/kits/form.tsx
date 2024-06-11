@@ -130,6 +130,14 @@ export default function KitsForm({
             </p>
           </div>
         </FormRow>
+
+        <FormRow className="border-y-0 pb-0 pt-5" rowLabel="">
+          <div className="ml-auto">
+            <Button type="submit" disabled={disabled}>
+              Save
+            </Button>
+          </div>
+        </FormRow>
       </Form>
     </Card>
   );
