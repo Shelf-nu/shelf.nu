@@ -1017,3 +1017,61 @@ export function getKitIdsByAssets(assets: Pick<Asset, "id" | "kitId">[]) {
 
   return [...uniqueKitIds];
 }
+
+export async function getBookingStatus(
+  booking: Pick<Booking, "id" | "from" | "to"> & {
+    assetIds: Asset["id"][];
+  }
+) {
+  const assets = await db.asset.findMany({
+    where: { id: { in: booking.assetIds } },
+    include: {
+      category: true,
+      custody: true,
+      kit: true,
+      bookings: {
+        where: {
+          ...(booking.from && booking.to
+            ? {
+                status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                OR: [
+                  {
+                    from: { lte: booking.to },
+                    to: { gte: booking.from },
+                  },
+                  {
+                    from: { gte: booking.from },
+                    to: { lte: booking.to },
+                  },
+                ],
+              }
+            : {}),
+        },
+      },
+    },
+  });
+
+  const hasAssets = assets.length > 0;
+
+  const hasUnavailableAssets = assets.some((asset) => !asset.availableToBook);
+
+  const hasCheckedOutAssets = assets.some(
+    (asset) => asset.status === AssetStatus.CHECKED_OUT
+  );
+
+  const hasAlreadyBookedAssets = assets.some(
+    (asset) => asset.bookings && asset.bookings.length > 0
+  );
+
+  const hasAssetsInCustody = assets.some(
+    (asset) => asset.status === AssetStatus.IN_CUSTODY
+  );
+
+  return {
+    hasAssets,
+    hasUnavailableAssets,
+    hasCheckedOutAssets,
+    hasAlreadyBookedAssets,
+    hasAssetsInCustody,
+  };
+}

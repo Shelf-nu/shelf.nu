@@ -23,7 +23,7 @@ interface Props {
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
   const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
-    useBookingStatus(booking);
+    useBookingStatus();
 
   const submit = useSubmit();
   const isSelfService = useUserIsSelfService();

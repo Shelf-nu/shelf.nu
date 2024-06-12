@@ -30,8 +30,7 @@ export function BookingAssetsColumn() {
   }>();
   const hasItems = items?.length > 0;
   const isSelfService = useUserIsSelfService();
-  const { isDraft, isReserved, isCompleted, isArchived } =
-    useBookingStatus(booking);
+  const { isDraft, isReserved, isCompleted, isArchived } = useBookingStatus();
 
   const manageAssetsUrl = useMemo(
     () =>
@@ -192,7 +191,7 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const isSelfService = useUserIsSelfService();
   const { isOngoing, isCompleted, isArchived, isOverdue, isReserved } =
-    useBookingStatus(booking);
+    useBookingStatus();
 
   /** Weather the asset is checked out in a booking different than the current one */
   const isCheckedOut = useMemo(

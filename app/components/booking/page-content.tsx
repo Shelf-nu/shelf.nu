@@ -8,7 +8,7 @@ import { BookingForm } from "./form";
 export function BookingPageContent() {
   const { booking, teamMembers } = useLoaderData<typeof loader>();
 
-  const bookingStatus = useBookingStatus(booking);
+  const bookingStatus = useBookingStatus();
 
   const custodianUser = teamMembers.find((member) =>
     booking.custodianUserId
