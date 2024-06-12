@@ -51,6 +51,7 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -84,7 +85,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               availableToBook: true,
             },
           },
-          custody: { select: { custodian: true } },
+          custody: {
+            select: {
+              custodian: {
+                include: {
+                  user: { select: { firstName: true, lastName: true } },
+                },
+              },
+            },
+          },
         },
       }),
       getAssetsForKits({
@@ -332,7 +341,7 @@ export default function KitDetails() {
                   <p className="">
                     In custody of{" "}
                     <span className="font-semibold">
-                      {kit.custody?.custodian.name}
+                      {resolveTeamMemberName(kit.custody.custodian)}
                     </span>
                   </p>
                   <span>Since {kit.custody.dateDisplay}</span>

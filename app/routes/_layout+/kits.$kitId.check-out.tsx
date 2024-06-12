@@ -27,6 +27,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -241,8 +242,12 @@ export default function GiveKitCustody() {
             closeOnSelect
             transformItem={(item) => ({
               ...item,
-              id: JSON.stringify({ id: item.id, name: item.name }),
+              id: JSON.stringify({
+                id: item.id,
+                name: resolveTeamMemberName(item),
+              }),
             })}
+            renderItem={(item) => resolveTeamMemberName(item, true)}
           />
         </div>
         {actionData?.error ? (
