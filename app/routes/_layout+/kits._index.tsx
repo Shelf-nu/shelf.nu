@@ -17,7 +17,10 @@ import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import {
+  getPaginatedAndFilterableKits,
+  updateKitsWithBookingCustodians,
+} from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
@@ -41,7 +44,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const searchParams = getCurrentSearchParams(request);
 
-    const [
+    let [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
       totalTeamMembers,
@@ -77,6 +80,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     if (totalPages !== 0 && page > totalPages) {
       return redirect("/kits");
     }
+
+    kits = await updateKitsWithBookingCustodians(kits);
 
     const header = {
       title: "Kits",

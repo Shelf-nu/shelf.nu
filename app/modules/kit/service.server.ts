@@ -503,3 +503,97 @@ export async function releaseCustody({
     });
   }
 }
+
+export async function updateKitsWithBookingCustodians<T extends Kit>(
+  kits: T[]
+): Promise<T[]> {
+  try {
+    /** When kits are checked out, we have to display the custodian from that booking */
+    const checkedOutKits = kits
+      .filter((kit) => kit.status === "CHECKED_OUT")
+      .map((k) => k.id);
+
+    if (checkedOutKits.length === 0) {
+      return kits;
+    }
+
+    const resolvedKits: T[] = [];
+
+    for (const kit of kits) {
+      if (!checkedOutKits.includes(kit.id)) {
+        resolvedKits.push(kit);
+        continue;
+      }
+
+      /** A kit is not directly associated with booking so have to make an extra query to get the booking for kit  */
+      const kitAsset = await db.asset.findFirst({
+        where: { kitId: kit.id },
+        select: {
+          id: true,
+          bookings: {
+            where: { status: { in: ["ONGOING", "OVERDUE"] } },
+            select: {
+              id: true,
+              custodianTeamMember: true,
+              custodianUser: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                  profilePicture: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const booking = kitAsset?.bookings[0];
+      const custodianUser = booking?.custodianUser;
+      const custodianTeamMember = booking?.custodianTeamMember;
+
+      if (custodianUser) {
+        resolvedKits.push({
+          ...kit,
+          custody: {
+            custodian: {
+              name: `${custodianUser?.firstName || ""} ${
+                custodianUser?.lastName || ""
+              }`, // Concatenate firstName and lastName to form the name property with default values
+              user: {
+                firstName: custodianUser?.firstName || "",
+                lastName: custodianUser?.lastName || "",
+                profilePicture: custodianUser?.profilePicture || null,
+              },
+            },
+          },
+        });
+      } else if (custodianTeamMember) {
+        resolvedKits.push({
+          ...kit,
+          custody: {
+            custodian: { name: custodianTeamMember.name },
+          },
+        });
+      } else {
+        /** This case should never happen because there must be a custodianUser or custodianTeamMember assigned to a booking */
+        Logger.error(
+          new ShelfError({
+            cause: null,
+            message: "Could not find custodian for kit",
+            additionalData: { kit },
+            label,
+          })
+        );
+      }
+    }
+
+    return resolvedKits;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to update kits with booking custodian",
+      additionalData: { kits },
+      label,
+    });
+  }
+}
