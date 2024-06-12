@@ -1,4 +1,4 @@
-import type { TeamMember, User } from "@prisma/client";
+import type { User } from "@prisma/client";
 
 /** Generates a random username based on the email and 3 random numbers
  * @param email string
@@ -9,8 +9,11 @@ export const randomUsernameFromEmail = (email: string): string =>
 
 /** Resolves the team member name and inlcudes an email if needed */
 export const resolveTeamMemberName = (
-  teamMember: Pick<TeamMember, "name"> & {
-    user?: Pick<User, "firstName" | "lastName" | "profilePicture" | "email">;
+  teamMember: {
+    name: string;
+    user?: Partial<
+      Pick<User, "firstName" | "lastName" | "profilePicture" | "email">
+    > | null;
   },
   includeEmail?: boolean
 ): string => {

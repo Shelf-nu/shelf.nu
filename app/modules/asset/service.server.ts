@@ -2035,7 +2035,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
     if (checkedOutAssetsIds.length > 0) {
       /** We query again the assets that are checked-out so we can get the user via the booking*/
 
-      const assetsWithUsers = await db.asset.findMany({
+      const assetsWithCustodians = await db.asset.findMany({
         where: {
           id: {
             in: checkedOutAssetsIds,
@@ -2051,6 +2051,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
             },
             select: {
               id: true,
+              custodianTeamMember: true,
               custodianUser: {
                 select: {
                   firstName: true,
@@ -2066,36 +2067,60 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
       /**
        * We take the first booking of the array and extract the user from it and add it to the asset
        */
-
       assets = assets.map((a) => {
-        const assetWithUser = assetsWithUsers.find((awu) => awu.id === a.id);
+        const assetWithUser = assetsWithCustodians.find(
+          (awu) => awu.id === a.id
+        );
         const booking = assetWithUser?.bookings[0];
-        const custodian = booking?.custodianUser;
+        const custodianUser = booking?.custodianUser;
+        const custodianTeamMember = booking?.custodianTeamMember;
 
         if (checkedOutAssetsIds.includes(a.id)) {
-          return {
-            ...a,
-            custody: custodian
-              ? {
-                  custodian: {
-                    name: `${custodian?.firstName || ""} ${
-                      custodian?.lastName || ""
-                    }`, // Concatenate firstName and lastName to form the name property with default values
-                    user: {
-                      firstName: custodian?.firstName || "",
-                      lastName: custodian?.lastName || "",
-                      profilePicture: custodian?.profilePicture || null,
-                    },
+          /** If there is a custodian user, use its data to display the name */
+          if (custodianUser) {
+            return {
+              ...a,
+              custody: {
+                custodian: {
+                  name: `${custodianUser?.firstName || ""} ${
+                    custodianUser?.lastName || ""
+                  }`, // Concatenate firstName and lastName to form the name property with default values
+                  user: {
+                    firstName: custodianUser?.firstName || "",
+                    lastName: custodianUser?.lastName || "",
+                    profilePicture: custodianUser?.profilePicture || null,
                   },
-                }
-              : null,
-          };
+                },
+              },
+            };
+          }
+
+          /** If there is a custodian teamMember, use its name */
+          if (custodianTeamMember) {
+            return {
+              ...a,
+              custody: {
+                custodian: {
+                  name: custodianTeamMember.name,
+                },
+              },
+            };
+          }
+
+          /** This should not happen as there shouldn't be a case when asset is CHECKED_OUT but has no custodian */
+          Logger.error(
+            new ShelfError({
+              cause: null,
+              message: "Couldn't find custodian for asset",
+              additionalData: { asset: a },
+              label,
+            })
+          );
         }
 
         return a;
       });
     }
-
     return assets;
   } catch (cause) {
     throw new ShelfError({

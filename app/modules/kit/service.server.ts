@@ -197,7 +197,24 @@ export async function getKit({
       include: {
         ...extraInclude,
         custody: {
-          select: { id: true, createdAt: true, custodian: true },
+          select: {
+            id: true,
+            createdAt: true,
+            custodian: {
+              select: {
+                id: true,
+                name: true,
+                user: {
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    profilePicture: true,
+                    email: true,
+                  },
+                },
+              },
+            },
+          },
         },
         organization: {
           select: { currency: true },

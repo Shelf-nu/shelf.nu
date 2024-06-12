@@ -224,6 +224,9 @@ export default function AssetEditPage() {
       <Header title={hasTitle ? title : asset.title} />
       <div className=" items-top flex justify-between">
         <AssetForm
+          id={asset.id}
+          mainImage={asset.mainImage}
+          mainImageExpiration={String(asset.mainImageExpiration)}
           title={asset.title}
           category={asset.categoryId}
           location={asset.locationId}
