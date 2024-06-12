@@ -202,6 +202,9 @@ function ListContent({
               name: true;
               user: {
                 select: {
+                  firstName: true;
+                  lastName: true;
+                  email: true;
                   profilePicture: true;
                 };
               };
@@ -278,15 +281,18 @@ function ListContent({
                 <span className="mt-px">
                   {resolveTeamMemberName({
                     name: item?.custody?.custodian.name,
-                    user: {
-                      firstName:
-                        item?.custody?.custodian?.user?.firstName || null,
-                      lastName:
-                        item?.custody?.custodian?.user?.lastName || null,
-                      profilePicture:
-                        item?.custody?.custodian?.user?.profilePicture || null,
-                      email: item?.custody?.custodian?.user?.email || "",
-                    },
+                    user: item?.custody?.custodian?.user
+                      ? {
+                          firstName:
+                            item?.custody?.custodian?.user?.firstName || null,
+                          lastName:
+                            item?.custody?.custodian?.user?.lastName || null,
+                          profilePicture:
+                            item?.custody?.custodian?.user?.profilePicture ||
+                            null,
+                          email: item?.custody?.custodian?.user?.email || "",
+                        }
+                      : undefined,
                   })}
                 </span>
               </>
