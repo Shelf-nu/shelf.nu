@@ -18,6 +18,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   deleteAsset,
+  deleteOtherImages,
   getAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
@@ -48,7 +49,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { deleteAssetImage } from "~/utils/storage.server";
 import { tw } from "~/utils/tw";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
@@ -212,9 +212,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         await deleteAsset({ organizationId, id });
 
         if (mainImageUrl) {
-          await deleteAssetImage({
-            url: mainImageUrl,
-            bucketName: "assets",
+          // as it is deletion operation giving hardcoded path(to make sure all the images were deleted)
+          await deleteOtherImages({
+            userId,
+            assetId: id,
+            data: { path: `main-image-${id}.jpg` },
           });
         }
 
