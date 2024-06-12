@@ -19,6 +19,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -43,6 +44,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             select: {
               id: true,
               name: true,
+              user: {
+                select: {
+                  firstName: true,
+                  lastName: true,
+                  profilePicture: true,
+                  email: true,
+                },
+              },
             },
           },
         },
@@ -168,7 +177,9 @@ export default function Custody() {
           <h4>Check in asset</h4>
           <p>
             Are you sure you want to release{" "}
-            <span className="font-medium">{custody?.custodian.name}’s</span>{" "}
+            <span className="font-medium">
+              {resolveTeamMemberName(custody?.custodian)}’s
+            </span>{" "}
             custody over <span className="font-medium">{asset.title}</span>?
           </p>
         </div>
@@ -177,7 +188,7 @@ export default function Custody() {
             <input
               type="hidden"
               name="custodianName"
-              value={custody?.custodian.name}
+              value={resolveTeamMemberName(custody?.custodian)}
             />
             <Button
               to=".."

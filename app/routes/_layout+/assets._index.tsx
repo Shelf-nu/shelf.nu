@@ -527,13 +527,16 @@ const ListAssetContent = ({
                 <span className="mt-px">
                   {resolveTeamMemberName({
                     name: custody.custodian.name,
-                    user: {
-                      firstName: custody.custodian?.user?.firstName || null,
-                      lastName: custody.custodian?.user?.lastName || null,
-                      profilePicture:
-                        custody.custodian?.user?.profilePicture || null,
-                      email: custody.custodian?.user?.email || "",
-                    },
+
+                    user: custody.custodian?.user
+                      ? {
+                          firstName: custody.custodian?.user?.firstName || null,
+                          lastName: custody.custodian?.user?.lastName || null,
+                          profilePicture:
+                            custody.custodian?.user?.profilePicture || null,
+                          email: custody.custodian?.user?.email || "",
+                        }
+                      : undefined,
                   })}
                 </span>
               </>
