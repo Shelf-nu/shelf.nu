@@ -23,3 +23,8 @@ export function groupBy<T>(
     {} as Record<string, T[]>
   );
 }
+
+/**
+ * Merges two types and includes all the keys from both types.
+ */
+export type MergeInclude<T, U> = T & Omit<U, keyof T>;

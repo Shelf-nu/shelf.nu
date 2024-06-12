@@ -1,12 +1,18 @@
-import { AssetStatus, KitStatus } from "@prisma/client";
+import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { useActionData, useNavigation } from "@remix-run/react";
+import {
+  Link,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+} from "@remix-run/react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { getKit } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -52,7 +58,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id: kitId,
       organizationId,
       extraInclude: {
-        assets: { select: { status: true } },
+        assets: {
+          select: {
+            status: true,
+            bookings: {
+              where: {
+                status: {
+                  in: [BookingStatus.RESERVED],
+                },
+                from: { gt: new Date() },
+              },
+              select: { id: true },
+            },
+          },
+        },
       },
     });
 
@@ -110,7 +129,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
-    return json(error(reason), { status: reason.status });
+    throw json(error(reason), { status: reason.status });
   }
 }
 
@@ -207,8 +226,10 @@ export function links() {
 export default function GiveKitCustody() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
-
   const actionData = useActionData<typeof action>();
+  const { kit } = useLoaderData<typeof loader>();
+
+  const hasBookings = kit.assets.some((asset) => asset.bookings.length > 0);
 
   return (
     <Form method="post">
@@ -254,6 +275,23 @@ export default function GiveKitCustody() {
           <div className="-mt-8 mb-8 text-sm text-error-500">
             {actionData.error.message}
           </div>
+        ) : null}
+
+        {hasBookings ? (
+          <WarningBox className="-mt-4 mb-8">
+            <>
+              Kit is part of an{" "}
+              <Link
+                to={`/bookings/${kit.assets[0].bookings[0].id}`}
+                className="underline"
+                target="_blank"
+              >
+                upcoming booking
+              </Link>
+              . You will not be able to check-out your booking if this kit has
+              custody.
+            </>
+          </WarningBox>
         ) : null}
 
         <div className="flex gap-3">

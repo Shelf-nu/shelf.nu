@@ -13,8 +13,9 @@ import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
+import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
-import { KITS_INCLUDE_FIELDS } from "../asset/fields";
+import { GET_KIT_STATIC_INCLUDES, KITS_INCLUDE_FIELDS } from "./types";
 import { createNote } from "../asset/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -112,7 +113,9 @@ export async function updateKitImage({
   }
 }
 
-export async function getPaginatedAndFilterableKits({
+export async function getPaginatedAndFilterableKits<
+  T extends Prisma.KitInclude,
+>({
   request,
   organizationId,
   extraInclude,
@@ -120,9 +123,15 @@ export async function getPaginatedAndFilterableKits({
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
-  extraInclude?: Prisma.KitInclude;
+  extraInclude?: T;
   currentBookingId?: Booking["id"];
 }) {
+  function hasAssetsIncluded(
+    extraInclude?: Prisma.KitInclude
+  ): extraInclude is Prisma.KitInclude & { assets: boolean } {
+    return !!extraInclude?.assets;
+  }
+
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
 
@@ -173,11 +182,6 @@ export async function getPaginatedAndFilterableKits({
       BookingStatus.OVERDUE,
     ];
 
-    /**
-     * In case if this function is used for getting kits for bookings
-     * Every asset of kit must be availableToBook, should not have any custody
-     * None of the booking of asset should have unavailable status
-     */
     if (currentBookingId && hideUnavailable) {
       where.assets = {
         every: {
@@ -224,24 +228,28 @@ export async function getPaginatedAndFilterableKits({
       });
     }
 
+    const include = {
+      ...extraInclude,
+      ...KITS_INCLUDE_FIELDS,
+    } as MergeInclude<typeof KITS_INCLUDE_FIELDS, T>;
+
     let [kits, totalKits, totalKitsWithoutAssets] = await Promise.all([
       db.kit.findMany({
         skip,
         take,
         where,
-        include: {
-          ...extraInclude,
-          ...KITS_INCLUDE_FIELDS,
-        },
+        include,
         orderBy: { createdAt: "desc" },
       }),
       db.kit.count({ where }),
       db.kit.count({ where: { organizationId, assets: { none: {} } } }),
     ]);
 
-    /** Filter our the kits with 0 assets. WE do it like this because prisma doesnt allow us to do it in the query */
-    if (hideUnavailable) {
-      kits = kits.filter(({ assets }) => assets.length);
+    if (hideUnavailable && hasAssetsIncluded(extraInclude)) {
+      kits = kits.filter(
+        // @ts-ignore
+        (kit) => Array.isArray(kit.assets) && kits.assets.length > 0
+      );
     }
 
     const totalPages = Math.ceil(totalKits / perPage);
@@ -266,53 +274,30 @@ export async function getPaginatedAndFilterableKits({
   }
 }
 
-export async function getKit({
+export async function getKit<T extends Prisma.KitInclude>({
   id,
   organizationId,
   extraInclude,
-}: Pick<Kit, "id" | "organizationId"> & {
-  extraInclude?: Prisma.KitInclude;
-}) {
+}: Pick<Kit, "id" | "organizationId"> & { extraInclude?: T }) {
   try {
-    const kit = await db.kit.findFirstOrThrow({
-      where: { id, organizationId },
-      include: {
-        ...extraInclude,
-        custody: {
-          select: {
-            id: true,
-            createdAt: true,
-            custodian: {
-              select: {
-                id: true,
-                name: true,
-                user: {
-                  select: {
-                    firstName: true,
-                    lastName: true,
-                    profilePicture: true,
-                    email: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-        organization: {
-          select: { currency: true },
-        },
-      },
-    });
+    // Merge static includes with dynamic includes
+    const includes = {
+      ...GET_KIT_STATIC_INCLUDES,
+      ...extraInclude,
+    } as MergeInclude<typeof GET_KIT_STATIC_INCLUDES, T>;
 
-    return kit;
+    return (await db.kit.findUniqueOrThrow({
+      where: { id, organizationId },
+      include: includes,
+    })) as Prisma.KitGetPayload<{ include: typeof includes }>;
   } catch (cause) {
     throw new ShelfError({
       cause,
-      title: "Kit not found!",
+      title: "Kit not found",
       message:
-        "The kit you are trying to access does not exists or you do not have permission to access it.",
+        "The kit you are trying to access does not exist or you do not have permission to access it.",
       additionalData: { id },
-      label,
+      label, // Adjust the label as needed
     });
   }
 }
