@@ -41,6 +41,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
@@ -81,7 +82,11 @@ export async function getAsset({
         custody: {
           select: {
             createdAt: true,
-            custodian: true,
+            custodian: {
+              include: {
+                user: true,
+              },
+            },
           },
         },
         organization: {
@@ -334,6 +339,8 @@ async function getAssetsFromView(params: {
                       name: true,
                       user: {
                         select: {
+                          firstName: true,
+                          lastName: true,
                           profilePicture: true,
                         },
                       },
@@ -565,6 +572,8 @@ async function getAssets(params: {
                   name: true,
                   user: {
                     select: {
+                      firstName: true,
+                      lastName: true,
                       profilePicture: true,
                     },
                   },
@@ -1001,6 +1010,7 @@ export async function updateAssetMainImage({
       mainImageExpiration: oneDayFromNow(),
       userId,
     });
+    await deleteOtherImages({ userId, assetId, data: { path: image } });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1101,6 +1111,65 @@ export async function deleteNote({
   }
 }
 
+function extractMainImageName(path: string): string | null {
+  const match = path.match(/main-image-[\w-]+\.\w+/);
+  return match ? match[0] : null;
+}
+
+async function deleteOtherImages({
+  userId,
+  assetId,
+  data,
+}: {
+  userId: string;
+  assetId: string;
+  data: { path: string };
+}): Promise<void> {
+  try {
+    if (!data?.path) {
+      // asset image stroage failure. do nothing
+      return;
+    }
+    const currentImage = extractMainImageName(data.path);
+    if (!currentImage) {
+      //do nothing
+      return;
+    }
+    const { data: deletedImagesData, error: deletedImagesError } =
+      await getSupabaseAdmin()
+        .storage.from("assets")
+        .list(`${userId}/${assetId}`);
+
+    if (deletedImagesError) {
+      throw new Error(`Error fetching images: ${deletedImagesError.message}`);
+    }
+
+    // Extract the image names and filter out the one to keep
+    const imagesToDelete = (
+      deletedImagesData?.map((image) => image.name) || []
+    ).filter((image) => image !== currentImage);
+
+    // Delete the images
+    await Promise.all(
+      imagesToDelete.map((image) =>
+        getSupabaseAdmin()
+          .storage.from("assets")
+          .remove([`${userId}/${assetId}/${image}`])
+      )
+    );
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        title: "Oops, deletion of other asset images failed",
+        message: "Something went wrong while deleting other asset images",
+        additionalData: { assetId, userId },
+        label,
+      })
+    );
+  }
+}
+
 async function uploadDuplicateAssetMainImage(
   mainImageUrl: string,
   assetId: string,
@@ -1126,8 +1195,8 @@ async function uploadDuplicateAssetMainImage(
     if (error) {
       throw error;
     }
-
     /** Getting the signed url from supabase to we can view image  */
+    await deleteOtherImages({ userId, assetId, data });
     return await createSignedUrl({ filename: data.path });
   } catch (cause) {
     throw new ShelfError({
@@ -1980,7 +2049,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
     if (checkedOutAssetsIds.length > 0) {
       /** We query again the assets that are checked-out so we can get the user via the booking*/
 
-      const assetsWithUsers = await db.asset.findMany({
+      const assetsWithCustodians = await db.asset.findMany({
         where: {
           id: {
             in: checkedOutAssetsIds,
@@ -1996,6 +2065,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
             },
             select: {
               id: true,
+              custodianTeamMember: true,
               custodianUser: {
                 select: {
                   firstName: true,
@@ -2011,34 +2081,60 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
       /**
        * We take the first booking of the array and extract the user from it and add it to the asset
        */
-
       assets = assets.map((a) => {
-        const assetWithUser = assetsWithUsers.find((awu) => awu.id === a.id);
+        const assetWithUser = assetsWithCustodians.find(
+          (awu) => awu.id === a.id
+        );
         const booking = assetWithUser?.bookings[0];
-        const custodian = booking?.custodianUser;
+        const custodianUser = booking?.custodianUser;
+        const custodianTeamMember = booking?.custodianTeamMember;
 
         if (checkedOutAssetsIds.includes(a.id)) {
-          return {
-            ...a,
-            custody: custodian
-              ? {
-                  custodian: {
-                    name: `${custodian?.firstName || ""} ${
-                      custodian?.lastName || ""
-                    }`, // Concatenate firstName and lastName to form the name property with default values
-                    user: {
-                      profilePicture: custodian?.profilePicture || null,
-                    },
+          /** If there is a custodian user, use its data to display the name */
+          if (custodianUser) {
+            return {
+              ...a,
+              custody: {
+                custodian: {
+                  name: `${custodianUser?.firstName || ""} ${
+                    custodianUser?.lastName || ""
+                  }`, // Concatenate firstName and lastName to form the name property with default values
+                  user: {
+                    firstName: custodianUser?.firstName || "",
+                    lastName: custodianUser?.lastName || "",
+                    profilePicture: custodianUser?.profilePicture || null,
                   },
-                }
-              : null,
-          };
+                },
+              },
+            };
+          }
+
+          /** If there is a custodian teamMember, use its name */
+          if (custodianTeamMember) {
+            return {
+              ...a,
+              custody: {
+                custodian: {
+                  name: custodianTeamMember.name,
+                },
+              },
+            };
+          }
+
+          /** This should not happen as there shouldn't be a case when asset is CHECKED_OUT but has no custodian */
+          Logger.error(
+            new ShelfError({
+              cause: null,
+              message: "Couldn't find custodian for asset",
+              additionalData: { asset: a },
+              label,
+            })
+          );
         }
 
         return a;
       });
     }
-
     return assets;
   } catch (cause) {
     throw new ShelfError({

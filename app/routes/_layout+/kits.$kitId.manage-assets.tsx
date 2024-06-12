@@ -39,6 +39,7 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -176,7 +177,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             },
           },
           custody: {
-            select: { custodian: { select: { id: true, name: true } } },
+            select: {
+              custodian: {
+                select: {
+                  id: true,
+                  name: true,
+                  user: {
+                    select: {
+                      email: true,
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       })
@@ -294,7 +310,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         ),
         db.note.createMany({
           data: assetsToInheritStatus.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${kit.custody?.custodian.name.trim()}** custody over **${asset.title.trim()}**`,
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${resolveTeamMemberName(
+              (kit.custody as NonNullable<typeof kit.custody>).custodian
+            )}** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -318,7 +336,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }),
         db.note.createMany({
           data: removedAssets.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${kit.custody?.custodian.name.trim()}'s** custody over **${asset.title.trim()}**`,
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
+              (kit.custody as NonNullable<typeof kit.custody>).custodian
+            )}'s** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,

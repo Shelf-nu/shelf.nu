@@ -18,6 +18,7 @@ import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 
 import { zodFieldIsRequired } from "~/utils/zod";
+import { AssetImage } from "./asset-image";
 import AssetCustomFields from "./custom-fields-inputs";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
@@ -63,7 +64,10 @@ export const NewAssetFormSchema = z.object({
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
+  id?: Asset["id"];
   title?: Asset["title"];
+  mainImage?: Asset["mainImage"];
+  mainImageExpiration?: string;
   category?: Asset["categoryId"];
   location?: Asset["locationId"];
   description?: Asset["description"];
@@ -73,7 +77,10 @@ interface Props {
 }
 
 export const AssetForm = ({
+  id,
   title,
+  mainImage,
+  mainImageExpiration,
   category,
   location,
   description,
@@ -163,25 +170,38 @@ export const AssetForm = ({
         </FormRow>
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG or JPEG (max.4 MB)
-            </p>
-            <Input
-              disabled={disabled}
-              accept="image/png,.png,image/jpeg,.jpg,.jpeg"
-              name="mainImage"
-              type="file"
-              onChange={validateFile}
-              label={"Main image"}
-              hideLabel
-              error={fileError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
-            </p>
+          <div className="flex items-center gap-2">
+            {id && mainImage && mainImageExpiration ? (
+              <AssetImage
+                className="size-16"
+                asset={{
+                  assetId: id,
+                  mainImage: mainImage,
+                  mainImageExpiration: new Date(mainImageExpiration),
+                  alt: "",
+                }}
+              />
+            ) : null}
+            <div>
+              <p className="hidden lg:block">
+                Accepts PNG, JPG or JPEG (max.4 MB)
+              </p>
+              <Input
+                disabled={disabled}
+                accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+                name="mainImage"
+                type="file"
+                onChange={validateFile}
+                label={"Main image"}
+                hideLabel
+                error={fileError}
+                className="mt-2"
+                inputClassName="border-0 shadow-none p-0 rounded-none"
+              />
+              <p className="mt-2 lg:hidden">
+                Accepts PNG, JPG or JPEG (max.4 MB)
+              </p>
+            </div>
           </div>
         </FormRow>
 

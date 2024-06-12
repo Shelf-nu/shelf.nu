@@ -32,6 +32,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
@@ -274,8 +275,13 @@ export default function Custody() {
               closeOnSelect
               transformItem={(item) => ({
                 ...item,
-                id: JSON.stringify({ id: item.id, name: item.name }),
+                id: JSON.stringify({
+                  id: item.id,
+                  //If there is a user, we use its name, otherwise we use the name of the team member
+                  name: resolveTeamMemberName(item),
+                }),
               })}
+              renderItem={(item) => resolveTeamMemberName(item, true)}
             />
           </div>
           {actionData?.error ? (

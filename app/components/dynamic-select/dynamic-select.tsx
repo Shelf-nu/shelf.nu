@@ -112,6 +112,14 @@ export default function DynamicSelect({
     [defaultValue]
   );
 
+  /** This is needed so we know what to show on the trigger */
+  const selectedItem = items.find((i) => i.id === selectedValue);
+  const triggerValue = selectedItem
+    ? typeof renderItem === "function"
+      ? renderItem({ ...selectedItem, metadata: selectedItem })
+      : selectedItem.name
+    : placeholder;
+
   return (
     <>
       <div className="relative w-full">
@@ -127,9 +135,11 @@ export default function DynamicSelect({
           <PopoverTrigger disabled={disabled} asChild>
             <div
               ref={triggerRef}
-              className="flex items-center justify-between rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
+              className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
             >
-              {items.find((i) => i.id === selectedValue)?.name ?? placeholder}
+              <span className="truncate whitespace-nowrap pr-2">
+                {triggerValue}
+              </span>
               <ChevronDownIcon />
             </div>
           </PopoverTrigger>

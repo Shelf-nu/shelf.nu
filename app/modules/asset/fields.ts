@@ -9,7 +9,10 @@ export const KITS_INCLUDE_FIELDS = {
           name: true,
           user: {
             select: {
+              firstName: true,
+              lastName: true,
               profilePicture: true,
+              email: true,
             },
           },
         },

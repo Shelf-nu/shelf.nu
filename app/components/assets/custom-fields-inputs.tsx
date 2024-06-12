@@ -1,23 +1,14 @@
 import type { ReactElement } from "react";
 import { useRef, useState } from "react";
 import type { CustomField, CustomFieldType } from "@prisma/client";
-import { CalendarIcon } from "@radix-ui/react-icons";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@radix-ui/react-popover";
 import { Link, useLoaderData, useNavigation } from "@remix-run/react";
-import { format } from "date-fns";
 import type { Zorm } from "react-zorm";
 import type { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
-import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
-import { Calendar } from "../forms/calendar-input";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import {
@@ -88,66 +79,33 @@ export default function AssetCustomFields({
       </div>
     ),
     DATE: (field) => (
-      <>
-        <label className="mb-1.5 font-medium text-gray-700 lg:hidden">
-          <span className={field.required ? "required-input-label" : ""}>
-            {field.name}
-          </span>
-        </label>
-        <input
+      <div className="flex w-full items-end">
+        <Input
+          className="w-full"
+          label={field.name}
+          hideLabel
+          type="date"
           name={`cf-${field.id}`}
-          value={dateObj[field.id]?.toISOString() || ""}
-          hidden
+          value={dateObj[field.id]?.toISOString().split("T")[0] || ""}
+          onChange={(e) => {
+            const selectedDate = new Date(e.target.value);
+            setDateObj({ ...dateObj, [field.id]: selectedDate });
+          }}
+          error={zo.errors[`cf-${field.id}`]()?.message}
+          disabled={disabled}
         />
-        <Popover>
-          <div className="flex w-full items-center gap-x-2">
-            <PopoverTrigger asChild>
-              <Button
-                variant="secondary"
-                className={tw(
-                  "w-full pl-1 text-left font-normal md:min-w-[300px]",
-                  !dateObj[field.id] && "text-muted-foreground"
-                )}
-              >
-                <div className="flex justify-between">
-                  {dateObj[field.id] ? (
-                    <span>{format(new Date(dateObj[field.id]!), "PPP")}</span>
-                  ) : (
-                    <span>Pick a date</span>
-                  )}
-                  <CalendarIcon className="ml-3 size-5" />
-                </div>
-              </Button>
-            </PopoverTrigger>
-
-            {dateObj[field.id] ? (
-              <Button
-                icon="x"
-                variant="secondary"
-                type="button"
-                onClick={() => {
-                  setDateObj({ ...dateObj, [field.id]: null });
-                }}
-              />
-            ) : null}
-          </div>
-          {zo.errors[`cf-${field.id}`]()?.message ? (
-            <p className="text-sm text-error-500">
-              {zo.errors[`cf-${field.id}`]()?.message}
-            </p>
-          ) : null}
-
-          <PopoverContent side="top" className="z-[100] w-auto p-0" align="end">
-            <Calendar
-              name={`cf-${field.id}`}
-              mode="single"
-              selected={dateObj[field.id]}
-              onSelect={(d: Date) => setDateObj({ ...dateObj, [field.id]: d })}
-              initialFocus
-            />
-          </PopoverContent>
-        </Popover>
-      </>
+        {dateObj[field.id] ? (
+          <Button
+            className="ml-2 h-[42px] sm:h-full"
+            icon="x"
+            variant="secondary"
+            type="button"
+            onClick={() => {
+              setDateObj({ ...dateObj, [field.id]: null });
+            }}
+          />
+        ) : null}
+      </div>
     ),
     OPTION: (field) => {
       const val = getCustomFieldVal(field.id);
