@@ -1,5 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
+import { resolveTeamMemberName } from "~/utils/user";
 import { EmptyState } from "./empty-state";
 import { InfoTooltip } from "../shared/info-tooltip";
 import { Table, Td, Tr } from "../table";
@@ -61,6 +62,8 @@ function Row({
   custodian: {
     name: string;
     user?: {
+      firstName?: string | null;
+      lastName?: string | null;
       profilePicture?: string | null;
     } | null;
   };
@@ -79,10 +82,12 @@ function Row({
                     : "/static/images/default_pfp.jpg"
                 }
                 className={"size-10 rounded-[4px]"}
-                alt={`${custodian.name}'s profile`}
+                alt={`${resolveTeamMemberName(custodian)}'s profile`}
               />
               <div>
-                <span className="mt-px">{custodian.name}</span>
+                <span className="mt-px">
+                  {resolveTeamMemberName(custodian)}
+                </span>
                 <span className="block text-gray-600">{count} Assets</span>
               </div>
             </div>

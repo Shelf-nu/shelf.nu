@@ -2,13 +2,13 @@ import { AssetStatus, BookingStatus } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
-  Form,
   Link,
   useActionData,
   useLoaderData,
   useNavigation,
 } from "@remix-run/react";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -32,6 +32,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
@@ -274,8 +275,13 @@ export default function Custody() {
               closeOnSelect
               transformItem={(item) => ({
                 ...item,
-                id: JSON.stringify({ id: item.id, name: item.name }),
+                id: JSON.stringify({
+                  id: item.id,
+                  //If there is a user, we use its name, otherwise we use the name of the team member
+                  name: resolveTeamMemberName(item),
+                }),
               })}
+              renderItem={(item) => resolveTeamMemberName(item, true)}
             />
           </div>
           {actionData?.error ? (

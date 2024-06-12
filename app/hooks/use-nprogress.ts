@@ -24,5 +24,5 @@ export function useNprogress() {
     if (state === "loading") NProgress.start();
     // when the state is idle then we can to complete the progress bar
     if (state === "idle") NProgress.done();
-  }, [transition.state]);
+  }, [state]);
 }

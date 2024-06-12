@@ -215,6 +215,15 @@ export async function getTeamMemberForCustodianFilter({
           id: { notIn: selectedTeamMembers },
           deletedAt: null,
         },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
         take: getAll ? undefined : 12,
       }),
       db.teamMember.findMany({

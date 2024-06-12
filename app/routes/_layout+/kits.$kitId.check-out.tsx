@@ -1,8 +1,9 @@
 import { AssetStatus, KitStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
@@ -26,6 +27,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 import { stringToJSONSchema } from "~/utils/zod";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -240,8 +242,12 @@ export default function GiveKitCustody() {
             closeOnSelect
             transformItem={(item) => ({
               ...item,
-              id: JSON.stringify({ id: item.id, name: item.name }),
+              id: JSON.stringify({
+                id: item.id,
+                name: resolveTeamMemberName(item),
+              }),
             })}
+            renderItem={(item) => resolveTeamMemberName(item, true)}
           />
         </div>
         {actionData?.error ? (

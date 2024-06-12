@@ -1,5 +1,5 @@
 import type { Location } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -13,6 +13,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { isFormProcessing } from "~/utils/form";
+import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
 export const DeleteLocation = ({

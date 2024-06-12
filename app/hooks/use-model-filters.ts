@@ -1,5 +1,6 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { User } from "@prisma/client";
 import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { type loader, type ModelFilters } from "~/routes/api+/model-filters";
@@ -10,6 +11,7 @@ export type ModelFilterItem = {
   id: string;
   name: string;
   color?: string;
+  user?: User;
   metadata: Record<string, any>;
 };
 

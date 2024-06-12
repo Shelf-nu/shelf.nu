@@ -4,7 +4,6 @@ import {
   type ActionFunctionArgs,
 } from "@remix-run/node";
 import {
-  Form,
   Link,
   useActionData,
   useFetcher,
@@ -13,6 +12,7 @@ import {
 } from "@remix-run/react";
 import { z } from "zod";
 import { FileForm } from "~/components/assets/import-content";
+import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Switch } from "~/components/forms/switch";
