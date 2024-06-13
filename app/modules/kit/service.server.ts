@@ -248,7 +248,7 @@ export async function getPaginatedAndFilterableKits<
     if (hideUnavailable && hasAssetsIncluded(extraInclude)) {
       kits = kits.filter(
         // @ts-ignore
-        (kit) => Array.isArray(kit.assets) && kits.assets.length > 0
+        (kit) => Array.isArray(kit.assets) && kits?.assets?.length > 0
       );
     }
 
