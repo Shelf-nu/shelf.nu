@@ -47,7 +47,10 @@ export function AssetCustodyCard({
       <Card className="my-3">
         <div className="flex items-center gap-3">
           <img
-            src="/static/images/default_pfp.jpg"
+            src={
+              custody.custodian?.user?.profilePicture ||
+              "/static/images/default_pfp.jpg"
+            }
             alt="custodian"
             className="size-10 rounded"
           />
