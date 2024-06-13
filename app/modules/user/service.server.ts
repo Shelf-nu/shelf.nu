@@ -169,12 +169,12 @@ export async function createUserFromSSO(
   userData: {
     firstName: string;
     lastName: string;
-    groupId: string;
+    groups: string[];
   }
 ) {
   try {
     const { email, userId } = authSession;
-    const { firstName, lastName } = userData;
+    const { firstName, lastName, groups } = userData;
     const domain = email.split("@")[1];
 
     const user = await createUser({
@@ -188,8 +188,6 @@ export async function createUserFromSSO(
 
     const organizations = await getOrganizationsBySsoDomain(domain);
 
-    const orgIds = [];
-    const roles: OrganizationRoles[] = [];
     for (let org of organizations) {
       const { ssoDetails } = org;
       if (!ssoDetails) {
@@ -202,18 +200,16 @@ export async function createUserFromSSO(
           label,
         });
       }
-      orgIds.push(org.id);
-      roles.push(
-        getRoleFromGroupId(ssoDetails, userData.groupId) as OrganizationRoles
-      );
+      const role = getRoleFromGroupId(ssoDetails, groups);
+      if (role) {
+        // Attach the user to the org with the correct role
+        await createUserOrgAssociation(db, {
+          userId: user.id,
+          organizationIds: [org.id], // org.id instead of orgIds
+          roles: [role], // role instead of roles
+        });
+      }
     }
-
-    /** If the user already exists, we just attach the new org to it */
-    await createUserOrgAssociation(db, {
-      userId: user.id,
-      organizationIds: orgIds,
-      roles,
-    });
 
     return { user, org: organizations[0] };
   } catch (cause) {

@@ -93,11 +93,15 @@ export function getRoleFromGroupId(
     adminGroupId: string | null;
     selfServiceGroupId: string | null;
   },
-  groupId: string
-): string {
-  if (ssoDetails.adminGroupId === groupId) {
+  groupIds: string[]
+): OrganizationRoles {
+  // We prioritize the admin group. If for some reason the user is in both groups, they will be an admin
+  if (ssoDetails.adminGroupId && groupIds.includes(ssoDetails.adminGroupId)) {
     return OrganizationRoles.ADMIN;
-  } else if (ssoDetails.selfServiceGroupId === groupId) {
+  } else if (
+    ssoDetails.selfServiceGroupId &&
+    groupIds.includes(ssoDetails.selfServiceGroupId)
+  ) {
     return OrganizationRoles.SELF_SERVICE;
   } else {
     throw new ShelfError({

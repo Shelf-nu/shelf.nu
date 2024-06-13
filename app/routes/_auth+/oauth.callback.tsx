@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
@@ -19,6 +19,7 @@ import {
   safeRedirect,
 } from "~/utils/http.server";
 import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
+import { stringToJSONSchema } from "~/utils/zod";
 
 export async function action({ request, context }: ActionFunctionArgs) {
   try {
@@ -26,13 +27,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const { refreshToken, redirectTo, firstName, lastName, groupId } =
+        const { refreshToken, redirectTo, firstName, lastName, groups } =
           parseData(
             await request.formData(),
             z.object({
               firstName: z.string().min(1),
               lastName: z.string().min(1),
-              groupId: z.string().min(1),
+              groups: stringToJSONSchema.pipe(
+                z
+                  .array(z.string())
+                  .nonempty(
+                    "User doesn't belong to any group. Groups are required for assigning the correct workspaces and permissions."
+                  )
+              ),
               refreshToken: z.string().min(1),
               redirectTo: z.string().optional(),
             })
@@ -53,7 +60,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           authSession,
           firstName,
           lastName,
-          groupId,
+          groups,
         });
         // Set the auth session and redirect to the assets page
         context.setSession(authSession);
@@ -124,9 +131,10 @@ export default function LoginCallback() {
           user?.user_metadata?.custom_claims.lastName || ""
         );
 
-        console.log(user);
+        const groups = user?.user_metadata?.custom_claims.groups || [];
+        formData.append("groups", JSON.stringify(groups));
 
-        // fetcher.submit(formData, { method: "post" });
+        fetcher.submit(formData, { method: "post" });
       }
     });
 
@@ -136,11 +144,26 @@ export default function LoginCallback() {
     };
   }, [fetcher, redirectTo]);
 
+  const validationErrors = useMemo(
+    () => data?.error?.additionalData?.validationErrors,
+    [data?.error]
+  );
+
   return (
     <div className="flex justify-center text-center">
       {data?.error ? (
         <div>
-          <div className="text-sm text-error-500">{data.error.message}</div>
+          {/* If there are validation errors, we map over those and show them */}
+          {validationErrors ? (
+            Object.values(validationErrors).map((error) => (
+              <div className="text-sm text-error-500" key={error.message}>
+                {error.message}
+              </div>
+            ))
+          ) : (
+            // If there are no validation errors, we show the error message returned by the catch in the action
+            <div className="text-sm text-error-500">{data.error.message}</div>
+          )}
           <Button to="/" className="mt-4">
             Back to login
           </Button>

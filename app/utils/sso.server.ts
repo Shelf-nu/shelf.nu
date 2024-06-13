@@ -15,12 +15,12 @@ export async function resolveUserAndOrgForSsoCallback({
   authSession,
   firstName,
   lastName,
-  groupId,
+  groups,
 }: {
   authSession: AuthSession;
   firstName: string;
   lastName: string;
-  groupId: string;
+  groups: string[];
 }) {
   /**
    * Cases to handle:
@@ -60,7 +60,7 @@ export async function resolveUserAndOrgForSsoCallback({
     const response = await createUserFromSSO(authSession, {
       firstName,
       lastName,
-      groupId,
+      groups,
     });
     user = response.user;
     org = response.org; // This is the org that the user got linked to
