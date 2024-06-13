@@ -1,4 +1,11 @@
-import type { Asset, Custody, Kit, Note, Organization } from "@prisma/client";
+import type {
+  Asset,
+  Custody,
+  Kit,
+  Note,
+  Organization,
+  User,
+} from "@prisma/client";
 import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useFetcher, useRouteLoaderData } from "@remix-run/react";
@@ -89,6 +96,10 @@ export interface AssetType {
     custody: {
       custodian: {
         name: string;
+        user?: Pick<
+          User,
+          "firstName" | "lastName" | "email" | "profilePicture"
+        > | null;
       };
       dateDisplay: Date;
       createdAt: Custody["createdAt"];
@@ -382,7 +393,10 @@ export default function AssetOverview() {
             <Card className="my-3">
               <div className="flex items-center gap-3">
                 <img
-                  src="/static/images/default_pfp.jpg"
+                  src={
+                    asset.custody.custodian?.user?.profilePicture ||
+                    "/static/images/default_pfp.jpg"
+                  }
                   alt="custodian"
                   className="size-10 rounded"
                 />
