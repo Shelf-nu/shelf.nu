@@ -1,11 +1,4 @@
-import type {
-  Asset,
-  Custody,
-  Kit,
-  Note,
-  Organization,
-  User,
-} from "@prisma/client";
+import type { Custody, Prisma, User } from "@prisma/client";
 import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useFetcher, useRouteLoaderData } from "@remix-run/react";
@@ -351,13 +344,11 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-
           <AssetCustodyCard
             booking={booking}
             custody={asset?.custody || null}
             isSelfService={isSelfService}
           />
-
 
           {asset && <AssetQR qrObj={qrObj} asset={asset} />}
           {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
