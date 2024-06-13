@@ -1,7 +1,8 @@
-import type { Asset, Custody, Kit, Note, Organization } from "@prisma/client";
+import { useMemo } from "react";
+import type { Custody, Prisma } from "@prisma/client";
 import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useFetcher, useRouteLoaderData } from "@remix-run/react";
+import { Link, useFetcher, useRouteLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import AssetQR from "~/components/assets/asset-qr";
@@ -18,11 +19,9 @@ import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import type { ASSET_INCLUDE_FIELDS } from "~/modules/asset/fields";
 import { updateAssetBookingAvailability } from "~/modules/asset/service.server";
-import type {
-  AssetCustomFieldsValuesWithFields,
-  ShelfAssetCustomFieldValueType,
-} from "~/modules/asset/types";
+import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -56,48 +55,13 @@ export const handle = {
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export interface AssetType {
-  asset: {
-    id: string;
-    createdAt: Date;
-    notes: Note[];
-    kitId: Asset["kitId"];
-    category: {
-      id: string;
-      name: string;
-      description: string;
-      color: string;
-      createdAt: string;
-      updatedAt: string;
-      userId: string;
-    };
-    title: string;
-    status: string;
-    location: {
-      id: string;
-      name: string;
-    };
-    customFields: AssetCustomFieldsValuesWithFields[];
-    tags: {
-      id: string;
-      name: string;
-    }[];
-    description: string;
-    organization: {
-      name: Organization["name"];
-      currency?: Organization["currency"];
-    };
+  asset: Prisma.AssetGetPayload<{ include: typeof ASSET_INCLUDE_FIELDS }> & {
     custody: {
       custodian: {
         name: string;
       };
       dateDisplay: Date;
       createdAt: Custody["createdAt"];
-    };
-    valuation: Asset["valuation"];
-    availableToBook?: boolean;
-    kit: {
-      name: Kit["name"];
-      image: Kit["image"];
     };
   };
   locale: string;
@@ -153,6 +117,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function AssetOverview() {
   const data = useRouteLoaderData<AssetType>("routes/_layout+/assets.$assetId");
   const { asset, locale, qrObj, lastScan } = data ?? {};
+  const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
 
   const customFieldsValues =
     asset && asset.customFields?.length > 0
@@ -167,6 +132,56 @@ export default function AssetOverview() {
     AvailabilityForBookingFormSchema
   );
   const isSelfService = useUserIsSelfService();
+
+  const bookingCustody = useMemo(() => {
+    if (!booking || isSelfService) {
+      return null;
+    }
+
+    let teamMemberName = "";
+    if (booking.custodianUser) {
+      teamMemberName = resolveTeamMemberName({
+        name: `${booking.custodianUser?.firstName || ""} ${
+          booking.custodianUser?.lastName || ""
+        }`,
+        user: {
+          firstName: booking.custodianUser?.firstName || "",
+          lastName: booking.custodianUser?.lastName || "",
+          profilePicture: booking.custodianUser?.profilePicture || null,
+        },
+      });
+    } else if (booking.custodianTeamMember) {
+      teamMemberName = resolveTeamMemberName({
+        name: booking.custodianTeamMember.name,
+      });
+    }
+
+    return (
+      <Card className="my-3">
+        <div className="flex items-center gap-3">
+          <img
+            src={
+              booking.custodianUser?.profilePicture ??
+              "/static/images/default_pfp.jpg"
+            }
+            alt="custodian"
+            className="size-10 rounded"
+          />
+          <div>
+            <p className="">
+              In custody of{" "}
+              <span className="font-semibold">{teamMemberName} </span>
+              via
+            </p>
+            <Link to={`/bookings/${booking.id}`} className="underline">
+              {booking.name}
+            </Link>
+            <span> Since {booking.from}</span>
+          </div>
+        </div>
+      </Card>
+    );
+  }, [booking, isSelfService]);
 
   return (
     <div>
@@ -398,6 +413,9 @@ export default function AssetOverview() {
               </div>
             </Card>
           ) : null}
+
+          {bookingCustody}
+
           {asset && <AssetQR qrObj={qrObj} asset={asset} />}
           {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
         </div>
