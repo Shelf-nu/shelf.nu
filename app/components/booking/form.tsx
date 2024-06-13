@@ -189,7 +189,6 @@ export function BookingForm({
                 canUseFeature={
                   !disabled &&
                   !!bookingFlags?.hasAssets &&
-                  !bookingFlags?.hasUnavailableAssets &&
                   !bookingFlags?.hasAlreadyBookedAssets
                 }
                 buttonContent={{
