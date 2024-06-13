@@ -140,6 +140,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       showSidebar: true,
     };
 
+    const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
+    let currentBooking: any = null;
+
+    if (booking && booking.from) {
+      const bookingFrom = new Date(booking.from);
+      const bookingDateDisplay = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(bookingFrom);
+
+      currentBooking = { ...booking, from: bookingDateDisplay };
+
+      asset.bookings = [currentBooking];
+    }
+
     return json(
       data({
         asset: {
