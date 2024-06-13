@@ -1,4 +1,4 @@
-import type { Custody, Prisma } from "@prisma/client";
+import type { Custody, Prisma, User } from "@prisma/client";
 import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useFetcher, useRouteLoaderData } from "@remix-run/react";
@@ -58,6 +58,10 @@ export interface AssetType {
     custody: {
       custodian: {
         name: string;
+        user?: Pick<
+          User,
+          "firstName" | "lastName" | "email" | "profilePicture"
+        > | null;
       };
       dateDisplay: Date;
       createdAt: Custody["createdAt"];
