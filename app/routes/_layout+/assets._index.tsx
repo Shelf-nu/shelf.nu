@@ -20,6 +20,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
@@ -298,6 +299,7 @@ export default function AssetIndexPage() {
         <Filters
           slots={{
             "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+            "right-of-search": <SortBy />,
           }}
         >
           <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
