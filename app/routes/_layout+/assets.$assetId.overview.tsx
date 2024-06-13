@@ -1,9 +1,10 @@
-import type { Asset, Custody, Kit, Note, Organization } from "@prisma/client";
+import type { Custody, Prisma, User } from "@prisma/client";
 import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useFetcher, useRouteLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { AssetCustodyCard } from "~/components/assets/asset-custody-card";
 import AssetQR from "~/components/assets/asset-qr";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
@@ -18,11 +19,9 @@ import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import type { ASSET_INCLUDE_FIELDS } from "~/modules/asset/fields";
 import { updateAssetBookingAvailability } from "~/modules/asset/service.server";
-import type {
-  AssetCustomFieldsValuesWithFields,
-  ShelfAssetCustomFieldValueType,
-} from "~/modules/asset/types";
+import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
@@ -32,7 +31,6 @@ import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
     .string()
@@ -56,48 +54,17 @@ export const handle = {
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export interface AssetType {
-  asset: {
-    id: string;
-    createdAt: Date;
-    notes: Note[];
-    kitId: Asset["kitId"];
-    category: {
-      id: string;
-      name: string;
-      description: string;
-      color: string;
-      createdAt: string;
-      updatedAt: string;
-      userId: string;
-    };
-    title: string;
-    status: string;
-    location: {
-      id: string;
-      name: string;
-    };
-    customFields: AssetCustomFieldsValuesWithFields[];
-    tags: {
-      id: string;
-      name: string;
-    }[];
-    description: string;
-    organization: {
-      name: Organization["name"];
-      currency?: Organization["currency"];
-    };
+  asset: Prisma.AssetGetPayload<{ include: typeof ASSET_INCLUDE_FIELDS }> & {
     custody: {
       custodian: {
         name: string;
+        user?: Pick<
+          User,
+          "firstName" | "lastName" | "email" | "profilePicture"
+        > | null;
       };
       dateDisplay: Date;
       createdAt: Custody["createdAt"];
-    };
-    valuation: Asset["valuation"];
-    availableToBook?: boolean;
-    kit: {
-      name: Kit["name"];
-      image: Kit["image"];
     };
   };
   locale: string;
@@ -153,12 +120,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function AssetOverview() {
   const data = useRouteLoaderData<AssetType>("routes/_layout+/assets.$assetId");
   const { asset, locale, qrObj, lastScan } = data ?? {};
+  const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
 
   const customFieldsValues =
     asset && asset.customFields?.length > 0
       ? asset.customFields.filter((f) => f.value)
       : [];
-  const assetIsAvailable = asset && asset.status === "AVAILABLE";
   const location = asset && asset.location;
   usePosition();
   const fetcher = useFetcher();
@@ -377,27 +344,12 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          {/* We simply check if the asset is available and we can assume that if it't not, there is a custodian assigned */}
-          {!isSelfService && !assetIsAvailable && asset?.custody?.createdAt ? (
-            <Card className="my-3">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/static/images/default_pfp.jpg"
-                  alt="custodian"
-                  className="size-10 rounded"
-                />
-                <div>
-                  <p className="">
-                    In custody of{" "}
-                    <span className="font-semibold">
-                      {resolveTeamMemberName(asset.custody.custodian)}
-                    </span>
-                  </p>
-                  <span>Since {asset.custody.dateDisplay}</span>
-                </div>
-              </div>
-            </Card>
-          ) : null}
+          <AssetCustodyCard
+            booking={booking}
+            custody={asset?.custody || null}
+            isSelfService={isSelfService}
+          />
+
           {asset && <AssetQR qrObj={qrObj} asset={asset} />}
           {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
         </div>
