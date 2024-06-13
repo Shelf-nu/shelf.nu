@@ -22,7 +22,7 @@ import {
   createNotesForBookingUpdate,
   deleteBooking,
   getBooking,
-  getBookingStatus,
+  getBookingFlags,
   removeAssets,
   sendBookingUpdateNotification,
   upsertBooking,
@@ -107,7 +107,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const [teamMembers, org, assets, totalAssets, bookingStatus] =
+    const [teamMembers, org, assets, totalAssets, bookingFlags] =
       await Promise.all([
         /**
          * We need to fetch the team members to be able to display them in the custodian dropdown.
@@ -183,7 +183,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           },
         }),
         /** We use pagination to show assets, so we have to calculate the status of booking considering all the assets of booking and not just single page */
-        getBookingStatus({
+        getBookingFlags({
           id: booking.id,
           assetIds: booking.assets.map((a) => a.id),
           from: booking.from,
@@ -228,7 +228,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         perPage,
         totalPages: totalAssets / perPage,
         teamMembers,
-        bookingStatus,
+        bookingFlags,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],

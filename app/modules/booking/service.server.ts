@@ -1018,7 +1018,7 @@ export function getKitIdsByAssets(assets: Pick<Asset, "id" | "kitId">[]) {
   return [...uniqueKitIds];
 }
 
-export async function getBookingStatus(
+export async function getBookingFlags(
   booking: Pick<Booking, "id" | "from" | "to"> & {
     assetIds: Asset["id"][];
   }

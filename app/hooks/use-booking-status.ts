@@ -1,11 +1,18 @@
 import { useMemo } from "react";
+import type { AssetStatus, Booking } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/bookings.$bookingId";
 
-export function useBookingStatus() {
-  const { booking, bookingStatus } = useLoaderData<typeof loader>();
+type BookingSubset = {
+  id: Booking["id"];
+  status: BookingStatus;
+  assets: {
+    status: AssetStatus;
+    availableToBook: boolean;
+    bookings?: { id: Booking["id"]; status: BookingStatus }[];
+  }[];
+};
 
+export function useBookingStatusHelpers(booking: BookingSubset) {
   const isDraft = useMemo(
     () => booking.status === BookingStatus.DRAFT,
     [booking.status]
@@ -45,6 +52,5 @@ export function useBookingStatus() {
     isArchived,
     isOverdue,
     isCancelled,
-    ...bookingStatus,
   };
 }

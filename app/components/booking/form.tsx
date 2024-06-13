@@ -9,7 +9,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import type { useBookingStatus } from "~/hooks/use-booking-status";
+import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
@@ -94,13 +94,22 @@ export const NewBookingFormSchema = (
       }
     );
 
+type BookingFlags = {
+  hasAssets: boolean;
+  hasUnavailableAssets: boolean;
+  hasCheckedOutAssets: boolean;
+  hasAlreadyBookedAssets: boolean;
+  hasAssetsInCustody: boolean;
+};
+
 type BookingFormData = {
   id?: string;
   name?: string;
   startDate?: string;
   endDate?: string;
   custodianUserId?: string; // This is a stringified value for custodianUser
-  bookingStatus?: ReturnType<typeof useBookingStatus>;
+  bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
+  bookingFlags?: BookingFlags;
 };
 
 export function BookingForm({
@@ -110,6 +119,7 @@ export function BookingForm({
   endDate,
   custodianUserId,
   bookingStatus,
+  bookingFlags,
 }: BookingFormData) {
   const navigation = useNavigation();
 
@@ -178,15 +188,15 @@ export function BookingForm({
               <ControlledActionButton
                 canUseFeature={
                   !disabled &&
-                  bookingStatus?.hasAssets &&
-                  !bookingStatus?.hasUnavailableAssets &&
-                  !bookingStatus?.hasAlreadyBookedAssets
+                  !!bookingFlags?.hasAssets &&
+                  !bookingFlags?.hasUnavailableAssets &&
+                  !bookingFlags?.hasAlreadyBookedAssets
                 }
                 buttonContent={{
                   title: "Reserve",
-                  message: bookingStatus?.hasUnavailableAssets
+                  message: bookingFlags?.hasUnavailableAssets
                     ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
-                    : bookingStatus?.hasAlreadyBookedAssets
+                    : bookingFlags?.hasAlreadyBookedAssets
                     ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
                     : "You need to add assets to your booking before you can reserve it",
                 }}
@@ -208,13 +218,13 @@ export function BookingForm({
               <ControlledActionButton
                 canUseFeature={
                   !disabled &&
-                  !bookingStatus?.hasUnavailableAssets &&
-                  !bookingStatus?.hasCheckedOutAssets &&
-                  !bookingStatus?.hasAssetsInCustody
+                  !bookingFlags?.hasUnavailableAssets &&
+                  !bookingFlags?.hasCheckedOutAssets &&
+                  !bookingFlags?.hasAssetsInCustody
                 }
                 buttonContent={{
                   title: "Check-out",
-                  message: bookingStatus?.hasAssetsInCustody
+                  message: bookingFlags?.hasAssetsInCustody
                     ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
                     : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
                 }}

@@ -8,7 +8,7 @@ import {
   DropdownMenuPortal,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import { useBookingStatus } from "~/hooks/use-booking-status";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId";
 import { tw } from "~/utils/tw";
@@ -23,7 +23,7 @@ interface Props {
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
   const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
-    useBookingStatus();
+    useBookingStatusHelpers(booking);
 
   const submit = useSubmit();
   const isSelfService = useUserIsSelfService();

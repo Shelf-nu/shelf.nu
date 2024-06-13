@@ -1,6 +1,7 @@
 import type { Kit } from "@prisma/client";
-import { Form } from "@remix-run/react";
-import { useBookingStatus } from "~/hooks/use-booking-status";
+import { Form, useLoaderData } from "@remix-run/react";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import { tw } from "~/utils/tw";
 import { TrashIcon, VerticalDotsIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -47,7 +48,8 @@ export default function KitRowActionsDropdown({
 }
 
 function RemoveKitFromBooking({ kit }: { kit: Kit }) {
-  const { isArchived, isCompleted } = useBookingStatus();
+  const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
+  const { isArchived, isCompleted } = useBookingStatusHelpers(booking);
 
   return (
     <AlertDialog>
