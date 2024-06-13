@@ -9,8 +9,8 @@
     "lastName": {
       "name": "lastname"
     },
-    "groupId": {
-      "name": "permissionsGroup"
+    "groups": {
+      "name": "groups"
     }
   }
 }

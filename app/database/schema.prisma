@@ -423,7 +423,7 @@ model SsoDetails {
   id String @id @default(cuid())
   
   // The domain of the organization
-  domain String @unique
+  domain String
 
   organizations Organization[]
 

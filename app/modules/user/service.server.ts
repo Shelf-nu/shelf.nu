@@ -21,6 +21,7 @@ import { ShelfError, isLikeShelfError } from "~/utils/error";
 import type { ValidationError } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { getRoleFromGroupId } from "~/utils/roles.server";
 import {
   deleteProfilePicture,
   getPublicFileURL,
@@ -29,7 +30,7 @@ import {
 import { randomUsernameFromEmail } from "~/utils/user";
 import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
-import { getOrganizationBySsoDomain } from "../organization/service.server";
+import { getOrganizationsBySsoDomain } from "../organization/service.server";
 
 const label: ErrorLabel = "User";
 
@@ -168,15 +169,13 @@ export async function createUserFromSSO(
   userData: {
     firstName: string;
     lastName: string;
+    groupId: string;
   }
 ) {
   try {
     const { email, userId } = authSession;
     const { firstName, lastName } = userData;
     const domain = email.split("@")[1];
-
-    // @TODO this needs to find them all, there could be multiple orgs with the same domain
-    const org = await getOrganizationBySsoDomain(domain);
 
     const user = await createUser({
       email,
@@ -185,12 +184,38 @@ export async function createUserFromSSO(
       userId,
       username: randomUsernameFromEmail(email),
       isSSO: true,
-      ...(org && {
-        organizationId: org?.id,
-        roles: [OrganizationRoles.ADMIN],
-      }),
     });
-    return { user, org };
+
+    const organizations = await getOrganizationsBySsoDomain(domain);
+
+    const orgIds = [];
+    const roles: OrganizationRoles[] = [];
+    for (let org of organizations) {
+      const { ssoDetails } = org;
+      if (!ssoDetails) {
+        throw new ShelfError({
+          cause: null,
+          title: "Organization doesnt have SSO",
+          message:
+            "It looks like the organization you're trying to log in to doesn't have SSO enabled.",
+          additionalData: { org, domain },
+          label,
+        });
+      }
+      orgIds.push(org.id);
+      roles.push(
+        getRoleFromGroupId(ssoDetails, userData.groupId) as OrganizationRoles
+      );
+    }
+
+    /** If the user already exists, we just attach the new org to it */
+    await createUserOrgAssociation(db, {
+      userId: user.id,
+      organizationIds: orgIds,
+      roles,
+    });
+
+    return { user, org: organizations[0] };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -236,19 +261,21 @@ export async function createUser(
             username,
             firstName,
             lastName,
-            organizations: {
-              create: [
-                {
-                  name: "Personal",
-                  categories: {
-                    create: defaultUserCategories.map((c) => ({
-                      ...c,
-                      userId,
-                    })),
+            ...(isSSO && {
+              organizations: {
+                create: [
+                  {
+                    name: "Personal",
+                    categories: {
+                      create: defaultUserCategories.map((c) => ({
+                        ...c,
+                        userId,
+                      })),
+                    },
                   },
-                },
-              ],
-            },
+                ],
+              },
+            }),
             roles: {
               connect: {
                 name: Roles["USER"],

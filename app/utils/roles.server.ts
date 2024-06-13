@@ -1,4 +1,4 @@
-import { Roles } from "@prisma/client";
+import { OrganizationRoles, Roles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
 import { ShelfError } from "./error";
@@ -85,4 +85,27 @@ export async function requirePermission({
     currentOrganization,
     role: roles ? roles[0] : undefined,
   };
+}
+
+/** Gets the role needed for SSO login from the groupID returned by the SSO claims */
+export function getRoleFromGroupId(
+  ssoDetails: {
+    adminGroupId: string | null;
+    selfServiceGroupId: string | null;
+  },
+  groupId: string
+): string {
+  if (ssoDetails.adminGroupId === groupId) {
+    return OrganizationRoles.ADMIN;
+  } else if (ssoDetails.selfServiceGroupId === groupId) {
+    return OrganizationRoles.SELF_SERVICE;
+  } else {
+    throw new ShelfError({
+      cause: null,
+      title: "Group ID not found",
+      message:
+        "The group your user is assigned to is not connected to shelf. Please contact an administrator for more information",
+      label: "Auth",
+    });
+  }
 }

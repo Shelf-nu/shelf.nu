@@ -34,7 +34,6 @@ export async function resolveUserAndOrgForSsoCallback({
    */
 
   let org;
-  console.log("groupId", groupId);
 
   /** Look if the user already exists
    * Also get the userOrgs as if we need them for setting the correct cookie
@@ -55,13 +54,13 @@ export async function resolveUserAndOrgForSsoCallback({
       },
     },
   });
-
   if (!user) {
     /**
      * If the user doesnt exist, we create a new one and link to the org which has the domain the user used to log in */
     const response = await createUserFromSSO(authSession, {
       firstName,
       lastName,
+      groupId,
     });
     user = response.user;
     org = response.org; // This is the org that the user got linked to
