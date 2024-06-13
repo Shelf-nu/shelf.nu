@@ -1049,10 +1049,16 @@ export async function deleteNote({
 
 function extractMainImageName(path: string): string | null {
   const match = path.match(/main-image-[\w-]+\.\w+/);
-  return match ? match[0] : null;
+  if (match) {
+    return match[0];
+  } else {
+    // Handle case without file extension
+    const matchNoExt = path.match(/main-image-[\w-]+/);
+    return matchNoExt ? matchNoExt[0] : null;
+  }
 }
 
-async function deleteOtherImages({
+export async function deleteOtherImages({
   userId,
   assetId,
   data,
