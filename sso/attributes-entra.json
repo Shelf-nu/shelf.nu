@@ -10,7 +10,8 @@
       "name": "lastname"
     },
     "groups": {
-      "name": "groups"
+      "name": "groups",
+      "array": true
     }
   }
 }

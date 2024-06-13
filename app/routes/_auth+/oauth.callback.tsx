@@ -123,10 +123,7 @@ export default function LoginCallback() {
           "lastName",
           user?.user_metadata?.custom_claims.lastName || ""
         );
-        formData.append(
-          "groupId",
-          user?.user_metadata?.custom_claims?.groupId || ""
-        );
+
         console.log(user);
 
         // fetcher.submit(formData, { method: "post" });
