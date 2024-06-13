@@ -1,10 +1,10 @@
-import { useMemo } from "react";
 import type { Custody, Prisma } from "@prisma/client";
 import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { Link, useFetcher, useRouteLoaderData } from "@remix-run/react";
+import { useFetcher, useRouteLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { AssetCustodyCard } from "~/components/assets/asset-custody-card";
 import AssetQR from "~/components/assets/asset-qr";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
@@ -31,7 +31,6 @@ import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
     .string()
@@ -123,7 +122,6 @@ export default function AssetOverview() {
     asset && asset.customFields?.length > 0
       ? asset.customFields.filter((f) => f.value)
       : [];
-  const assetIsAvailable = asset && asset.status === "AVAILABLE";
   const location = asset && asset.location;
   usePosition();
   const fetcher = useFetcher();
@@ -132,56 +130,6 @@ export default function AssetOverview() {
     AvailabilityForBookingFormSchema
   );
   const isSelfService = useUserIsSelfService();
-
-  const bookingCustody = useMemo(() => {
-    if (!booking || isSelfService) {
-      return null;
-    }
-
-    let teamMemberName = "";
-    if (booking.custodianUser) {
-      teamMemberName = resolveTeamMemberName({
-        name: `${booking.custodianUser?.firstName || ""} ${
-          booking.custodianUser?.lastName || ""
-        }`,
-        user: {
-          firstName: booking.custodianUser?.firstName || "",
-          lastName: booking.custodianUser?.lastName || "",
-          profilePicture: booking.custodianUser?.profilePicture || null,
-        },
-      });
-    } else if (booking.custodianTeamMember) {
-      teamMemberName = resolveTeamMemberName({
-        name: booking.custodianTeamMember.name,
-      });
-    }
-
-    return (
-      <Card className="my-3">
-        <div className="flex items-center gap-3">
-          <img
-            src={
-              booking.custodianUser?.profilePicture ??
-              "/static/images/default_pfp.jpg"
-            }
-            alt="custodian"
-            className="size-10 rounded"
-          />
-          <div>
-            <p className="">
-              In custody of{" "}
-              <span className="font-semibold">{teamMemberName} </span>
-              via
-            </p>
-            <Link to={`/bookings/${booking.id}`} className="underline">
-              {booking.name}
-            </Link>
-            <span> Since {booking.from}</span>
-          </div>
-        </div>
-      </Card>
-    );
-  }, [booking, isSelfService]);
 
   return (
     <div>
@@ -392,29 +340,11 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          {/* We simply check if the asset is available and we can assume that if it't not, there is a custodian assigned */}
-          {!isSelfService && !assetIsAvailable && asset?.custody?.createdAt ? (
-            <Card className="my-3">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/static/images/default_pfp.jpg"
-                  alt="custodian"
-                  className="size-10 rounded"
-                />
-                <div>
-                  <p className="">
-                    In custody of{" "}
-                    <span className="font-semibold">
-                      {resolveTeamMemberName(asset.custody.custodian)}
-                    </span>
-                  </p>
-                  <span>Since {asset.custody.dateDisplay}</span>
-                </div>
-              </div>
-            </Card>
-          ) : null}
-
-          {bookingCustody}
+          <AssetCustodyCard
+            booking={booking}
+            custody={asset?.custody || null}
+            isSelfService={isSelfService}
+          />
 
           {asset && <AssetQR qrObj={qrObj} asset={asset} />}
           {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
