@@ -177,6 +177,8 @@ export async function createUserFromSSO(
     const { firstName, lastName, groups } = userData;
     const domain = email.split("@")[1];
 
+    // @TODO: We need to also create a teamMember.
+    // When we are inviting normal users to the org, we create a teamMember so we need to handle it in this case as well
     const user = await createUser({
       email,
       firstName,
