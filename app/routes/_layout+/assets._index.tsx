@@ -527,7 +527,6 @@ const ListAssetContent = ({
                 <span className="mt-px">
                   {resolveTeamMemberName({
                     name: custody.custodian.name,
-
                     user: custody.custodian?.user
                       ? {
                           firstName: custody.custodian?.user?.firstName || null,

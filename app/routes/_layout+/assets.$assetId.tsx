@@ -18,6 +18,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   deleteAsset,
+  deleteOtherImages,
   getAsset,
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
@@ -48,7 +49,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { deleteAssetImage } from "~/utils/storage.server";
 import { tw } from "~/utils/tw";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
@@ -140,6 +140,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       showSidebar: true,
     };
 
+    const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
+    let currentBooking: any = null;
+
+    if (booking && booking.from) {
+      const bookingFrom = new Date(booking.from);
+      const bookingDateDisplay = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(bookingFrom);
+
+      currentBooking = { ...booking, from: bookingDateDisplay };
+
+      asset.bookings = [currentBooking];
+    }
+
     return json(
       data({
         asset: {
@@ -212,9 +227,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         await deleteAsset({ organizationId, id });
 
         if (mainImageUrl) {
-          await deleteAssetImage({
-            url: mainImageUrl,
-            bucketName: "assets",
+          // as it is deletion operation giving hardcoded path(to make sure all the images were deleted)
+          await deleteOtherImages({
+            userId,
+            assetId: id,
+            data: { path: `main-image-${id}.jpg` },
           });
         }
 
