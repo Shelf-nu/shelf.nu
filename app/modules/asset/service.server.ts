@@ -45,6 +45,7 @@ import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
+import { ASSET_INCLUDE_FIELDS } from "./fields";
 import type {
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
@@ -63,58 +64,7 @@ export async function getAsset({
   try {
     return await db.asset.findFirstOrThrow({
       where: { id, organizationId },
-      include: {
-        category: true,
-        notes: {
-          orderBy: { createdAt: "desc" },
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-        qrCodes: true,
-        tags: true,
-        location: true,
-        custody: {
-          select: {
-            createdAt: true,
-            custodian: {
-              include: {
-                user: true,
-              },
-            },
-          },
-        },
-        organization: {
-          select: {
-            currency: true,
-          },
-        },
-        customFields: {
-          where: {
-            customField: {
-              active: true,
-            },
-          },
-          include: {
-            customField: {
-              select: {
-                id: true,
-                name: true,
-                helpText: true,
-                required: true,
-                type: true,
-                categories: true,
-              },
-            },
-          },
-        },
-        kit: { select: { id: true, name: true, status: true } },
-      },
+      include: ASSET_INCLUDE_FIELDS,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -1099,10 +1049,16 @@ export async function deleteNote({
 
 function extractMainImageName(path: string): string | null {
   const match = path.match(/main-image-[\w-]+\.\w+/);
-  return match ? match[0] : null;
+  if (match) {
+    return match[0];
+  } else {
+    // Handle case without file extension
+    const matchNoExt = path.match(/main-image-[\w-]+/);
+    return matchNoExt ? matchNoExt[0] : null;
+  }
 }
 
-async function deleteOtherImages({
+export async function deleteOtherImages({
   userId,
   assetId,
   data,
