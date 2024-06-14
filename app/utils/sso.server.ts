@@ -54,6 +54,8 @@ export async function resolveUserAndOrgForSsoCallback({
       },
     },
   });
+
+  /** Sign up case */
   if (!user) {
     /**
      * If the user doesnt exist, we create a new one and link to the org which has the domain the user used to log in */
@@ -65,6 +67,13 @@ export async function resolveUserAndOrgForSsoCallback({
     user = response.user;
     org = response.org; // This is the org that the user got linked to
   } else {
+    /**
+     * Login case
+     * @TODO on every login we need to re-validate the data
+     *  - update the names
+     *  - update the groups
+     * if they are changed in the IDP
+     */
     const domain = authSession.email.split("@")[1];
     /** If the user already exists, we find the org that belongs to that domain so we can directly set it as the active org */
     const organizations = user.userOrganizations.map((uo) => uo.organization);
