@@ -14,6 +14,10 @@ import type {
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  SortingDirection,
+  SortingOptions,
+} from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
@@ -96,6 +100,9 @@ async function getAssetsFromView(params: {
   /** Page number. Starts at 1 */
   page: number;
   /** Assets to be loaded per page */
+
+  orderBy: SortingOptions;
+  orderDirection: SortingDirection;
   perPage?: number;
   search?: string | null;
   categoriesIds?: Category["id"][] | null;
@@ -110,6 +117,8 @@ async function getAssetsFromView(params: {
 }) {
   const {
     organizationId,
+    orderBy,
+    orderDirection,
     page = 1,
     perPage = 8,
     search,
@@ -328,7 +337,7 @@ async function getAssetsFromView(params: {
             },
           },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: { asset: { [orderBy]: orderDirection } },
       }),
 
       /** Count them */
@@ -353,6 +362,10 @@ async function getAssets(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
   page: number;
+
+  orderBy: SortingOptions;
+  orderDirection: SortingDirection;
+
   /** Assets to be loaded per page */
   perPage?: number;
   search?: string | null;
@@ -368,6 +381,8 @@ async function getAssets(params: {
 }) {
   const {
     organizationId,
+    orderBy,
+    orderDirection,
     page = 1,
     perPage = 8,
     search,
@@ -559,7 +574,7 @@ async function getAssets(params: {
               }
             : {}),
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: { [orderBy]: orderDirection },
       }),
 
       /** Count them */
@@ -1343,6 +1358,8 @@ export async function getPaginatedAndFilterableAssets({
   const {
     page,
     perPageParam,
+    orderBy,
+    orderDirection,
     search,
     categoriesIds,
     tagsIds,
@@ -1412,6 +1429,8 @@ export async function getPaginatedAndFilterableAssets({
       organizationId,
       page,
       perPage,
+      orderBy,
+      orderDirection,
       search,
       categoriesIds,
       tagsIds,

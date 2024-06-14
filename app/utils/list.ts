@@ -1,8 +1,15 @@
 import type { BookingStatus } from "@prisma/client";
+import type {
+  SortingDirection,
+  SortingOptions,
+} from "~/components/list/filters/sort-by";
 
 export const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "1"),
   perPageParam: Number(searchParams.get("per_page") || 0),
+  orderBy: (searchParams.get("orderBy") || "createdAt") as SortingOptions,
+  orderDirection: (searchParams.get("orderDirection") ||
+    "desc") as SortingDirection,
   search: searchParams.get("s") || null,
   categoriesIds: searchParams.getAll("category") || [],
   tagsIds: searchParams.getAll("tag") || [],
