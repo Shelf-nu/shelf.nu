@@ -213,6 +213,15 @@ export async function createUserFromSSO(
       }
     }
 
+    /** Create teamMember for each organization */
+    await db.teamMember.createMany({
+      data: organizations.map((org) => ({
+        name: `${firstName} ${lastName}`,
+        organizationId: org.id,
+        userId,
+      })),
+    });
+
     return { user, org: organizations[0] };
   } catch (cause) {
     throw new ShelfError({
