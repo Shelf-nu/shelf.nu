@@ -7,7 +7,7 @@ import { Card } from "../shared/card";
  * Renders the Asset Custody Card
  * It can be either a card showing custody via a booking or custody via a long term checkout
  */
-export function AssetCustodyCard({
+export function CustodyCard({
   booking,
   isSelfService,
   custody,
