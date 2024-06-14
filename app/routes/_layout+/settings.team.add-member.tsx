@@ -43,7 +43,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 const NewMemberSchema = z.object({
-  name: z.string().min(1, "Name is required!"),
+  name: z.string().min(1, "Name is required"),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
