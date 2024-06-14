@@ -4,7 +4,7 @@ import { json } from "@remix-run/node";
 import { useFetcher, useRouteLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { AssetCustodyCard } from "~/components/assets/asset-custody-card";
+import { CustodyCard } from "~/components/assets/asset-custody-card";
 import AssetQR from "~/components/assets/asset-qr";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
@@ -344,7 +344,7 @@ export default function AssetOverview() {
             </Card>
           ) : null}
 
-          <AssetCustodyCard
+          <CustodyCard
             booking={booking}
             custody={asset?.custody || null}
             isSelfService={isSelfService}

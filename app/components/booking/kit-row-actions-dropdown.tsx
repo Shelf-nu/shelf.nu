@@ -1,6 +1,15 @@
-import type { Asset } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
-import { Button } from "~/components/shared/button";
+import type { Kit } from "@prisma/client";
+import { Form, useLoaderData } from "@remix-run/react";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
+import { tw } from "~/utils/tw";
+import { TrashIcon, VerticalDotsIcon } from "../icons/library";
+import { Button } from "../shared/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "../shared/dropdown";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -10,14 +19,35 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "~/components/shared/modal";
-import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
-import { tw } from "~/utils/tw";
-import { Form } from "../custom-form";
-import { TrashIcon } from "../icons/library";
+} from "../shared/modal";
 
-export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
+export default function KitRowActionsDropdown({
+  kit,
+  fullWidth,
+}: {
+  kit: Kit;
+  fullWidth?: boolean;
+}) {
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger
+        className={tw("asset-actions", fullWidth ? "w-full" : "")}
+      >
+        <span className="flex items-center gap-2">
+          <VerticalDotsIcon />
+        </span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="order w-[180px] rounded-md bg-white p-1.5 text-right "
+      >
+        <RemoveKitFromBooking kit={kit} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function RemoveKitFromBooking({ kit }: { kit: Kit }) {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const { isArchived, isCompleted } = useBookingStatusHelpers(booking);
 
@@ -26,7 +56,6 @@ export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
       <AlertDialogTrigger asChild>
         <Button
           variant="link"
-          data-test-id="deleteBookingButton"
           icon="trash"
           className={tw(
             "justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700",
@@ -50,11 +79,9 @@ export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
               <TrashIcon />
             </span>
           </div>
-          <AlertDialogTitle>
-            Remove "{asset.title}" from booking
-          </AlertDialogTitle>
+          <AlertDialogTitle>Remove "{kit.name}" from booking</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to remove this asset from the booking?
+            Are you sure you want to remove this kit from the booking?
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -64,8 +91,8 @@ export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
             </AlertDialogCancel>
 
             <Form method="post">
-              <input type="hidden" name="assetId" value={asset.id} />
-              <Button name="intent" value="removeAsset">
+              <input type="hidden" name="kitId" value={kit.id} />
+              <Button name="intent" value="removeKit">
                 Remove
               </Button>
             </Form>
@@ -74,4 +101,4 @@ export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
       </AlertDialogContent>
     </AlertDialog>
   );
-};
+}

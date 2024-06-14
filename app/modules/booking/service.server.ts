@@ -1,11 +1,5 @@
-import {
-  type Booking,
-  type Prisma,
-  type Organization,
-  type Asset,
-  BookingStatus,
-  AssetStatus,
-} from "@prisma/client";
+import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
+import type { Booking, Prisma, Organization, Asset, Kit } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -114,6 +108,28 @@ async function updateBookingAssetStates(
   }
 }
 
+async function updateBookingKitStates({
+  kitIds,
+  status,
+}: {
+  kitIds: string[];
+  status: KitStatus;
+}) {
+  try {
+    return await db.kit.updateMany({
+      where: { id: { in: kitIds } },
+      data: { status },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating the booking kit states.",
+      additionalData: { kitIds, status },
+      label,
+    });
+  }
+}
+
 const commonInclude: Prisma.BookingInclude = {
   custodianTeamMember: true,
   custodianUser: true,
@@ -148,6 +164,17 @@ export async function upsertBooking(
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
+
+    const assetsWithKits = id
+      ? await db.asset.findMany({
+          where: { bookings: { some: { id } } },
+          select: { id: true, kitId: true },
+        })
+      : null;
+
+    const kitIds = getKitIdsByAssets(assetsWithKits ?? []);
+    const hasKits = kitIds.length > 0;
+
     if (assetIds?.length) {
       data.assets = {
         connect: assetIds.map((id) => ({
@@ -214,6 +241,7 @@ export async function upsertBooking(
     /** Editing */
     if (id) {
       let newAssetStatus;
+      let newKitStatus;
       const isTerminalState = [
         BookingStatus.ARCHIVED,
         BookingStatus.CANCELLED,
@@ -232,8 +260,13 @@ export async function upsertBooking(
             oldBooking.status as any
           ) // Check if the booking was ongoing or overdue
         ) {
-          //booking has ended, make asset available
+          // booking has ended, make asset available
           newAssetStatus = AssetStatus.AVAILABLE;
+
+          // if booking as some kits, make kits available
+          if (hasKits) {
+            newKitStatus = KitStatus.AVAILABLE;
+          }
         }
         //cancel any active schedulers
         await cancelScheduler(oldBooking);
@@ -267,12 +300,27 @@ export async function upsertBooking(
         //booking status is updated to ongoing or assets added to ongoing booking, make asset checked out
         //no need to worry about overdue as the previous state is always ongoing
         newAssetStatus = AssetStatus.CHECKED_OUT;
+
+        // If booking has some kits, then make them checked out
+        if (hasKits) {
+          newKitStatus = AssetStatus.CHECKED_OUT;
+        }
       }
 
       const promises = [];
       if (newAssetStatus) {
         promises.push(updateBookingAssetStates(res, newAssetStatus));
       }
+
+      if (newKitStatus) {
+        promises.push(
+          updateBookingKitStates({
+            kitIds,
+            status: newKitStatus,
+          })
+        );
+      }
+
       if (res.from && booking.status === BookingStatus.RESERVED) {
         promises.push(cancelScheduler(res));
         const when = new Date(res.from);
@@ -605,6 +653,7 @@ export async function removeAssets({
   firstName,
   lastName,
   userId,
+  kitIds = [],
 }: {
   booking: Pick<Booking, "id"> & {
     assetIds: Asset["id"][];
@@ -612,6 +661,7 @@ export async function removeAssets({
   firstName: string;
   lastName: string;
   userId: string;
+  kitIds?: Kit["id"][];
 }) {
   try {
     const { assetIds, id } = booking;
@@ -633,6 +683,8 @@ export async function removeAssets({
      *
      * Because prisma doesnt support transactional execution of nested queries, we need to do them in 2 steps, because if the disconnect runs first,
      * the updateMany will not find the assets in the booking anymore and wont update them
+     *
+     * If there was some kit removed from the booking, then we have to update the status of that kit to available
      */
     if (
       b.status === BookingStatus.ONGOING ||
@@ -642,6 +694,13 @@ export async function removeAssets({
         where: { id: { in: assetIds } },
         data: { status: AssetStatus.AVAILABLE },
       });
+
+      if (kitIds.length > 0) {
+        await db.kit.updateMany({
+          where: { id: { in: kitIds } },
+          data: { status: KitStatus.AVAILABLE },
+        });
+      }
     }
 
     await createNotes({
@@ -680,10 +739,18 @@ export async function deleteBooking(
         assets: {
           select: {
             id: true,
+            kitId: true,
           },
         },
       },
     });
+
+    const assetWithKits = activeBooking?.assets.filter((a) => !!a.kitId) ?? [];
+    const uniqueKitIds = new Set(
+      assetWithKits.map((a) => a.kitId) as unknown as string
+    );
+    const hasKits = uniqueKitIds.size > 0;
+
     const b = await db.booking.delete({
       where: { id },
       include: {
@@ -731,6 +798,14 @@ export async function deleteBooking(
     /** Because assets in an active booking have a special status, we need to update them if we delete a booking */
     if (activeBooking) {
       await updateBookingAssetStates(activeBooking, AssetStatus.AVAILABLE);
+
+      // If booking has some kits, then make them available too
+      if (hasKits) {
+        await updateBookingKitStates({
+          kitIds: [...uniqueKitIds],
+          status: KitStatus.AVAILABLE,
+        });
+      }
     }
     await cancelScheduler(b);
 
@@ -763,7 +838,12 @@ export async function getBooking(
       include: {
         ...commonInclude,
         assets: {
-          select: { id: true, availableToBook: true, status: true },
+          select: {
+            id: true,
+            availableToBook: true,
+            status: true,
+            kitId: true,
+          },
         },
       },
     });
@@ -924,4 +1004,74 @@ export function sendBookingUpdateNotification(
     default:
       break;
   }
+}
+
+export function getKitIdsByAssets(assets: Pick<Asset, "id" | "kitId">[]) {
+  const assetsWithKit = assets.filter((a) => !!a.kitId) as Array<{
+    id: string;
+    kitId: string;
+  }>;
+
+  const allKitIds = assetsWithKit.map((a) => a.kitId);
+  const uniqueKitIds = new Set(allKitIds);
+
+  return [...uniqueKitIds];
+}
+
+export async function getBookingFlags(
+  booking: Pick<Booking, "id" | "from" | "to"> & {
+    assetIds: Asset["id"][];
+  }
+) {
+  const assets = await db.asset.findMany({
+    where: { id: { in: booking.assetIds } },
+    include: {
+      category: true,
+      custody: true,
+      kit: true,
+      bookings: {
+        where: {
+          ...(booking.from && booking.to
+            ? {
+                status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                OR: [
+                  {
+                    from: { lte: booking.to },
+                    to: { gte: booking.from },
+                  },
+                  {
+                    from: { gte: booking.from },
+                    to: { lte: booking.to },
+                  },
+                ],
+              }
+            : {}),
+        },
+      },
+    },
+  });
+
+  const hasAssets = assets.length > 0;
+
+  const hasUnavailableAssets = assets.some((asset) => !asset.availableToBook);
+
+  const hasCheckedOutAssets = assets.some(
+    (asset) => asset.status === AssetStatus.CHECKED_OUT
+  );
+
+  const hasAlreadyBookedAssets = assets.some(
+    (asset) => asset.bookings && asset.bookings.length > 0
+  );
+
+  const hasAssetsInCustody = assets.some(
+    (asset) => asset.status === AssetStatus.IN_CUSTODY
+  );
+
+  return {
+    hasAssets,
+    hasUnavailableAssets,
+    hasCheckedOutAssets,
+    hasAlreadyBookedAssets,
+    hasAssetsInCustody,
+  };
 }

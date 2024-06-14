@@ -17,8 +17,10 @@ import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import type { KITS_INCLUDE_FIELDS } from "~/modules/asset/fields";
-import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import {
+  getPaginatedAndFilterableKits,
+  updateKitsWithBookingCustodians,
+} from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
@@ -43,7 +45,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const searchParams = getCurrentSearchParams(request);
 
-    const [
+    let [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
       totalTeamMembers,
@@ -51,6 +53,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        extraInclude: {
+          assets: {
+            select: { id: true, availableToBook: true },
+          },
+        },
       }),
       db.teamMember
         .findMany({
@@ -74,6 +81,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     if (totalPages !== 0 && page > totalPages) {
       return redirect("/kits");
     }
+
+    kits = await updateKitsWithBookingCustodians(kits);
 
     const header = {
       title: "Kits",
@@ -184,7 +193,32 @@ function ListContent({
   item,
 }: {
   item: Prisma.KitGetPayload<{
-    include: typeof KITS_INCLUDE_FIELDS;
+    include: {
+      _count: { select: { assets: true } };
+      custody: {
+        select: {
+          custodian: {
+            select: {
+              name: true;
+              user: {
+                select: {
+                  firstName: true;
+                  lastName: true;
+                  email: true;
+                  profilePicture: true;
+                };
+              };
+            };
+          };
+        };
+      };
+      assets: {
+        select: {
+          id: true;
+          availableToBook: true;
+        };
+      };
+    };
   }>;
 }) {
   const isSelfService = useUserIsSelfService();
@@ -210,7 +244,10 @@ function ListContent({
                 {item.name}
               </span>
               <div>
-                <KitStatusBadge status={item.status} availableToBook={true} />
+                <KitStatusBadge
+                  status={item.status}
+                  availableToBook={!item.assets.some((a) => !a.availableToBook)}
+                />
               </div>
             </div>
           </div>
@@ -244,15 +281,18 @@ function ListContent({
                 <span className="mt-px">
                   {resolveTeamMemberName({
                     name: item?.custody?.custodian.name,
-                    user: {
-                      firstName:
-                        item?.custody?.custodian?.user?.firstName || null,
-                      lastName:
-                        item?.custody?.custodian?.user?.lastName || null,
-                      profilePicture:
-                        item?.custody?.custodian?.user?.profilePicture || null,
-                      email: item?.custody?.custodian?.user?.email || "",
-                    },
+                    user: item?.custody?.custodian?.user
+                      ? {
+                          firstName:
+                            item?.custody?.custodian?.user?.firstName || null,
+                          lastName:
+                            item?.custody?.custodian?.user?.lastName || null,
+                          profilePicture:
+                            item?.custody?.custodian?.user?.profilePicture ||
+                            null,
+                          email: item?.custody?.custodian?.user?.email || "",
+                        }
+                      : undefined,
                   })}
                 </span>
               </>

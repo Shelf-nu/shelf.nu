@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { AssetStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
@@ -168,7 +168,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
         include: {
-          assets: { select: { id: true, title: true, kit: true } },
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              kit: true,
+              bookings: { select: { id: true, status: true } },
+            },
+          },
           custody: {
             select: {
               custodian: {
@@ -226,6 +233,27 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: "Cannot add unavailable asset in a kit.",
+        additionalData: { userId, kitId },
+        label: "Kit",
+      });
+    }
+
+    /** User is not allowed to add asset to any of these booking status */
+    const disallowedBookingStatus: BookingStatus[] = [
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+      BookingStatus.RESERVED,
+    ];
+    const kitBookings =
+      kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
+
+    if (
+      kitBookings &&
+      kitBookings.some((b) => disallowedBookingStatus.includes(b.status))
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot add asset to an unavailable kit.",
         additionalData: { userId, kitId },
         label: "Kit",
       });
@@ -317,6 +345,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           })),
         }),
       ]);
+    }
+
+    /**
+     * If user is adding/removing an asset to a kit which is a part of DRAFT or RESERVED booking,
+     * then we have to add or remove these assets to booking also
+     */
+    const bookingsToUpdate = kitBookings.filter(
+      (b) => b.status === "DRAFT" || b.status === "RESERVED"
+    );
+
+    if (bookingsToUpdate?.length) {
+      await Promise.all(
+        bookingsToUpdate.map((booking) =>
+          db.booking.update({
+            where: { id: booking.id },
+            data: {
+              assets: {
+                connect: newlyAddedAssets.map((a) => ({ id: a.id })),
+                disconnect: removedAssets.map((a) => ({ id: a.id })),
+              },
+            },
+          })
+        )
+      );
     }
 
     return redirect(`/kits/${kitId}`);
@@ -557,7 +609,8 @@ const RowComponent = ({
           checked={checked}
           className={tw(
             "text-white",
-            item.isInOtherCustody ? "text-gray-200" : ""
+            item.isInOtherCustody ? "text-gray-200" : "",
+            checked ? "text-primary" : ""
           )}
         />
       </Td>
