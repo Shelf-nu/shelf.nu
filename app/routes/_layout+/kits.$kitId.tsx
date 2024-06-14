@@ -1,4 +1,5 @@
-import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -8,6 +9,7 @@ import type {
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ChevronRight } from "~/components/icons/library";
@@ -36,6 +38,7 @@ import {
   deleteKitImage,
   getAssetsForKits,
   getKit,
+  getKitCurrentBooking,
 } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
@@ -51,7 +54,6 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -81,7 +83,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             select: {
               status: true,
               custody: { select: { id: true } },
-              bookings: { select: { status: true } },
+              bookings: {
+                select: {
+                  id: true,
+                  name: true,
+                  from: true,
+                  status: true,
+                  custodianTeamMember: true,
+                  custodianUser: {
+                    select: {
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                      email: true,
+                    },
+                  },
+                },
+              },
               availableToBook: true,
             },
           },
@@ -89,7 +107,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             select: {
               custodian: {
                 include: {
-                  user: { select: { firstName: true, lastName: true } },
+                  user: {
+                    select: {
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                      email: true,
+                    },
+                  },
                 },
               },
             },
@@ -105,17 +130,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     let custody = null;
     if (kit.custody) {
-      const date = new Date(kit.custody.createdAt);
       const dateDisplay = getDateTimeFormat(request, {
         dateStyle: "short",
         timeStyle: "short",
-      }).format(date);
+      }).format(kit.custody.createdAt);
 
       custody = {
         ...kit.custody,
         dateDisplay,
       };
     }
+
+    const currentBooking = getKitCurrentBooking(request, {
+      id: kit.id,
+      assets: kit.assets,
+    });
 
     const header: HeaderData = {
       title: kit.name,
@@ -132,6 +161,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           ...kit,
           custody,
         },
+        currentBooking,
         header,
         ...assets,
         modelName,
@@ -258,7 +288,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function KitDetails() {
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, currentBooking } = useLoaderData<typeof loader>();
 
   const isSelfService = useUserIsSelfService();
 
@@ -326,26 +356,12 @@ export default function KitDetails() {
           ) : null}
 
           {/* Kit Custody */}
-          {!isSelfService && kit?.custody?.dateDisplay ? (
-            <Card className="my-3">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/static/images/default_pfp.jpg"
-                  alt="custodian"
-                  className="size-10 rounded"
-                />
-                <div>
-                  <p className="">
-                    In custody of{" "}
-                    <span className="font-semibold">
-                      {resolveTeamMemberName(kit.custody.custodian)}
-                    </span>
-                  </p>
-                  <span>Since {kit.custody.dateDisplay}</span>
-                </div>
-              </div>
-            </Card>
-          ) : null}
+          <CustodyCard
+            // @ts-expect-error - we are passing the correct props
+            booking={currentBooking || undefined}
+            isSelfService={isSelfService}
+            custody={kit.custody}
+          />
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
           <Card className="my-3 flex justify-between">

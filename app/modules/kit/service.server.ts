@@ -1,8 +1,15 @@
-import type { Booking, Kit, Organization, Prisma } from "@prisma/client";
+import type {
+  Booking,
+  Kit,
+  Organization,
+  Prisma,
+  TeamMember,
+} from "@prisma/client";
 import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
@@ -598,4 +605,58 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
       label,
     });
   }
+}
+
+type CurrentBookingType = {
+  id: string;
+  name: string;
+  custodianUser: {
+    firstName: string | null;
+    lastName: string | null;
+    profilePicture: string | null;
+    email: string;
+  } | null;
+  custodianTeamMember: Omit<
+    TeamMember,
+    "createdAt" | "updatedAt" | "deletedAt"
+  > | null;
+  status: BookingStatus;
+  from: string | Date | null;
+};
+
+export function getKitCurrentBooking(
+  request: Request,
+  kit: {
+    id: string;
+    assets: {
+      bookings: CurrentBookingType[];
+    }[];
+  }
+) {
+  const ongoingBookingAsset = kit.assets
+    .map((a) => ({
+      ...a,
+      bookings: a.bookings.filter(
+        (b) =>
+          b.status === BookingStatus.ONGOING ||
+          b.status === BookingStatus.OVERDUE
+      ),
+    }))
+    .find((a) => a.bookings.length > 0);
+  const ongoingBooking = ongoingBookingAsset
+    ? ongoingBookingAsset.bookings[0]
+    : undefined;
+
+  let currentBooking: CurrentBookingType | null | undefined = null;
+
+  if (ongoingBooking && ongoingBooking.from) {
+    const bookingFrom = new Date(ongoingBooking.from);
+    const bookingDateDisplay = getDateTimeFormat(request, {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(bookingFrom);
+
+    currentBooking = { ...ongoingBooking, from: bookingDateDisplay };
+  }
+  return currentBooking;
 }

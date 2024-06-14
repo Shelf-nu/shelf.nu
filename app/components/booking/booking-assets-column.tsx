@@ -24,9 +24,10 @@ import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
 
 export function BookingAssetsColumn() {
-  const { booking, items } = useLoaderData<{
+  const { booking, items, totalItems } = useLoaderData<{
     booking: BookingWithCustodians;
     items: ListItemData[];
+    totalItems: number;
   }>();
   const hasItems = items?.length > 0;
   const isSelfService = useUserIsSelfService();
@@ -71,7 +72,7 @@ export function BookingAssetsColumn() {
           <div className="-mx-4 flex justify-between border border-b-0 bg-white p-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t md:px-6">
             <div>
               <div className=" text-md font-semibold text-gray-900">Assets</div>
-              <div>{booking.assets.length} items</div>
+              <div>{totalItems} items</div>
             </div>
             <ControlledActionButton
               canUseFeature={
