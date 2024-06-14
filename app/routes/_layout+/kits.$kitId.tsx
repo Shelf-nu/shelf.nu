@@ -1,4 +1,5 @@
-import { AssetStatus, type Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -8,6 +9,7 @@ import type {
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import { CustodyCard } from "~/components/assets/asset-custody-card";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
 import { ChevronRight } from "~/components/icons/library";
@@ -23,6 +25,7 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
+import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -35,6 +38,7 @@ import {
   deleteKitImage,
   getAssetsForKits,
   getKit,
+  getKitCurrentBooking,
 } from "~/modules/kit/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
@@ -50,7 +54,6 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -71,19 +74,47 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const [kit, assets] = await Promise.all([
+    let [kit, assets] = await Promise.all([
       getKit({
         id: kitId,
         organizationId,
         extraInclude: {
           assets: {
-            select: { status: true, custody: { select: { id: true } } },
+            select: {
+              status: true,
+              custody: { select: { id: true } },
+              bookings: {
+                select: {
+                  id: true,
+                  name: true,
+                  from: true,
+                  status: true,
+                  custodianTeamMember: true,
+                  custodianUser: {
+                    select: {
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                      email: true,
+                    },
+                  },
+                },
+              },
+              availableToBook: true,
+            },
           },
           custody: {
             select: {
               custodian: {
                 include: {
-                  user: { select: { firstName: true, lastName: true } },
+                  user: {
+                    select: {
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                      email: true,
+                    },
+                  },
                 },
               },
             },
@@ -99,17 +130,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     let custody = null;
     if (kit.custody) {
-      const date = new Date(kit.custody.createdAt);
       const dateDisplay = getDateTimeFormat(request, {
         dateStyle: "short",
         timeStyle: "short",
-      }).format(date);
+      }).format(kit.custody.createdAt);
 
       custody = {
         ...kit.custody,
         dateDisplay,
       };
     }
+
+    const currentBooking = getKitCurrentBooking(request, {
+      id: kit.id,
+      assets: kit.assets,
+    });
 
     const header: HeaderData = {
       title: kit.name,
@@ -126,6 +161,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           ...kit,
           custody,
         },
+        currentBooking,
         header,
         ...assets,
         modelName,
@@ -252,15 +288,45 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function KitDetails() {
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, currentBooking } = useLoaderData<typeof loader>();
 
   const isSelfService = useUserIsSelfService();
-  const kitIsAvailable = kit.status === "AVAILABLE";
+
+  /**
+   * User can manage assets if
+   * 1. Kit has AVAILABLE status
+   * 2. Kit has a booking whose status is one of the following
+   *    DRAFT
+   *    RESERVED
+   *    ARCHIVED
+   *    CANCELLED
+   *    COMPLETE
+   * 3. User is not self service
+   */
+  const allowedBookingStatus: BookingStatus[] = [
+    BookingStatus.DRAFT,
+    BookingStatus.RESERVED,
+    BookingStatus.ARCHIVED,
+    BookingStatus.CANCELLED,
+    BookingStatus.COMPLETE,
+  ];
+  const kitIsAvailable = kit.assets.length
+    ? kit.assets[0]?.bookings.every((b) =>
+        allowedBookingStatus.includes(b.status)
+      )
+    : kit.status === "AVAILABLE";
+
+  const canManageAssets = kitIsAvailable && !isSelfService;
 
   return (
     <>
       <Header
-        subHeading={<KitStatusBadge status={kit.status} availableToBook />}
+        subHeading={
+          <KitStatusBadge
+            status={kit.status}
+            availableToBook={!kit.assets.some((a) => !a.availableToBook)}
+          />
+        }
       >
         {!isSelfService ? <ActionsDropdown /> : null}
       </Header>
@@ -290,26 +356,12 @@ export default function KitDetails() {
           ) : null}
 
           {/* Kit Custody */}
-          {!isSelfService && !kitIsAvailable && kit?.custody?.createdAt ? (
-            <Card className="my-3">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/static/images/default_pfp.jpg"
-                  alt="custodian"
-                  className="size-10 rounded"
-                />
-                <div>
-                  <p className="">
-                    In custody of{" "}
-                    <span className="font-semibold">
-                      {resolveTeamMemberName(kit.custody.custodian)}
-                    </span>
-                  </p>
-                  <span>Since {kit.custody.dateDisplay}</span>
-                </div>
-              </div>
-            </Card>
-          ) : null}
+          <CustodyCard
+            // @ts-expect-error - we are passing the correct props
+            booking={currentBooking || undefined}
+            isSelfService={isSelfService}
+            custody={kit.custody}
+          />
 
           <TextualDivider text="Details" className="mb-8 lg:hidden" />
           <Card className="my-3 flex justify-between">
@@ -321,15 +373,24 @@ export default function KitDetails() {
         <div className="w-full lg:ml-6">
           <TextualDivider text="Assets" className="mb-8 lg:hidden" />
           <div className="mb-3 flex gap-4 lg:hidden">
-            <Button
-              as="button"
-              to="add-assets"
-              variant="primary"
-              icon="plus"
-              width="full"
-            >
-              Manage assets
-            </Button>
+            {!isSelfService ? (
+              <ControlledActionButton
+                canUseFeature={canManageAssets}
+                skipCta
+                buttonContent={{
+                  title: "Manage assets",
+                  message:
+                    "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                }}
+                buttonProps={{
+                  as: "button",
+                  to: "manage-assets",
+                  variant: "primary",
+                  icon: "plus",
+                  width: "full",
+                }}
+              />
+            ) : null}
             <div className="w-full">
               <ActionsDropdown fullWidth />
             </div>
@@ -337,21 +398,29 @@ export default function KitDetails() {
 
           <div className="flex flex-col md:gap-2">
             <Filters className="responsive-filters mb-2 lg:mb-0">
-              {!isSelfService && (
+              {!isSelfService ? (
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
-                    <Button
-                      as="button"
-                      to="manage-assets"
-                      variant="primary"
-                      icon="plus"
-                      className="whitespace-nowrap"
-                    >
-                      Manage assets
-                    </Button>
+                    <ControlledActionButton
+                      canUseFeature={canManageAssets}
+                      skipCta
+                      buttonContent={{
+                        title: "Manage assets",
+                        message:
+                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                      }}
+                      buttonProps={{
+                        as: "button",
+                        to: "manage-assets",
+                        variant: "primary",
+                        icon: "plus",
+                        width: "full",
+                        className: "whitespace-nowrap",
+                      }}
+                    />
                   </div>
                 </div>
-              )}
+              ) : null}
             </Filters>
             <List
               ItemComponent={ListContent}

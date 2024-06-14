@@ -258,6 +258,13 @@ async function getAssetsFromView(params: {
       ];
     }
 
+    /**
+     * User should only see the assets without kits for hideUnavailable true
+     */
+    if (hideUnavailable === true && where.asset) {
+      where.asset.kit = null;
+    }
+
     const [assetSearch, totalAssets] = await Promise.all([
       /** Get the assets */
       db.assetSearchView.findMany({
@@ -470,6 +477,13 @@ async function getAssets(params: {
       where.location = {
         id: { in: locationIds },
       };
+    }
+
+    /**
+     * User should only see the assets without kits for hideUnavailable true
+     */
+    if (hideUnavailable === true) {
+      where.kit = null;
     }
 
     if (teamMemberIds && teamMemberIds.length) {
