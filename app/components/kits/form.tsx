@@ -18,7 +18,7 @@ import { Card } from "../shared/card";
 export const NewKitFormSchema = z.object({
   name: z
     .string()
-    .min(2, "Name is required!")
+    .min(2, "Name is required")
     .transform((value) => value.trim()),
   description: z
     .string()
