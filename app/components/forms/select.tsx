@@ -17,8 +17,7 @@ const SelectTrigger = React.forwardRef<
     <SelectPrimitive.Trigger
       ref={ref}
       className={tw(
-        "select-trigger flex w-full items-center justify-between rounded border border-gray-300 bg-white   placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2  disabled:opacity-50 ",
-        "mt-2 px-3.5 py-2 text-left text-base text-gray-500 md:mt-0 md:max-w-fit",
+        "select-trigger flex w-full items-center justify-between rounded border border-gray-300 bg-white px-3 py-2 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50 ",
         className
       )}
       {...props}
@@ -41,8 +40,7 @@ const SelectContent = React.forwardRef<
           ref?.addEventListener("touchend", (e) => e.preventDefault())
         }
         className={tw(
-          " relative z-50 overflow-hidden rounded border border-gray-300 bg-white  shadow-md animate-in fade-in-80",
-          "w-full min-w-[300px] p-0",
+          " relative z-50 overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",
           className
         )}
         {...props}
@@ -77,8 +75,7 @@ const SelectItem = React.forwardRef<
     <SelectPrimitive.Item
       ref={ref}
       className={tw(
-        "relative flex cursor-default select-none items-center text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-gray-50 ",
-        "rounded-none border-b border-gray-200 px-6 py-4 pr-[5px]",
+        "relative flex cursor-default select-none items-center rounded p-1 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-gray-50 ",
         className
       )}
       {...props}
