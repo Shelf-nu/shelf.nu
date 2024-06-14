@@ -19,6 +19,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
+  getActiveCustomFields,
   upsertCustomField,
 } from "~/modules/custom-field/service.server";
 import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
@@ -34,6 +35,7 @@ import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
+  extractCustomFieldValuesFromPayload,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -1151,6 +1153,29 @@ async function uploadDuplicateAssetMainImage(
   }
 }
 
+export function createCustomFieldsPayloadFromAsset(
+  asset: Prisma.AssetGetPayload<{
+    include: {
+      custody: { include: { custodian: true } };
+      tags: true;
+      customFields: true;
+    };
+  }>
+) {
+  if (!asset?.customFields || asset?.customFields?.length === 0) {
+    return {};
+  }
+
+  return (
+    asset.customFields?.reduce(
+      (obj, { customFieldId, value }) => {
+        const rawValue = (value as { raw: string })?.raw ?? value ?? "";
+        return { ...obj, [`cf-${customFieldId}`]: rawValue };
+      },
+      {} as Record<string, any>
+    ) || {}
+  );
+}
 export async function duplicateAsset({
   asset,
   userId,
@@ -1158,7 +1183,11 @@ export async function duplicateAsset({
   organizationId,
 }: {
   asset: Prisma.AssetGetPayload<{
-    include: { custody: { include: { custodian: true } }; tags: true };
+    include: {
+      custody: { include: { custodian: true } };
+      tags: true;
+      customFields: true;
+    };
   }>;
   userId: string;
   amountOfDuplicates: number;
@@ -1167,18 +1196,36 @@ export async function duplicateAsset({
   try {
     const duplicatedAssets: Awaited<ReturnType<typeof createAsset>>[] = [];
 
+    //irrespective category it has to copy all the custom fields;
+    const customFields = await getActiveCustomFields({
+      organizationId,
+    });
+
+    const payload = {
+      title: `${asset.title}`,
+      organizationId,
+      description: asset.description,
+      userId,
+      categoryId: asset.categoryId,
+      locationId: asset.locationId ?? undefined,
+      tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
+      valuation: asset.valuation,
+    };
+
+    const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
+
+    const extractedCustomFieldValues = extractCustomFieldValuesFromPayload({
+      payload: { ...payload, ...customFieldValues },
+      customFieldDef: customFields,
+      isDuplicate: true,
+    });
     for (const i of [...Array(amountOfDuplicates)].keys()) {
       const duplicatedAsset = await createAsset({
+        ...payload,
         title: `${asset.title} (copy ${
           amountOfDuplicates > 1 ? i : ""
         } ${Date.now()})`,
-        organizationId,
-        description: asset.description,
-        userId,
-        categoryId: asset.categoryId,
-        locationId: asset.locationId ?? undefined,
-        tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
-        valuation: asset.valuation,
+        customFieldsValues: extractedCustomFieldValues,
       });
 
       if (asset.mainImage) {
