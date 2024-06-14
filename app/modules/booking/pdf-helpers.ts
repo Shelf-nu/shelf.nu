@@ -27,6 +27,8 @@ export interface PdfDbResult {
   organization: (Partial<Organization> & { image: Image | null }) | null;
   assetIdToQrCodeMap: Map<string, string>;
   defaultOrgImg: string | null;
+  from?: string;
+  to?: string;
 }
 
 async function getImageAsBase64(url: string) {
