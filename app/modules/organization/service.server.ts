@@ -1,5 +1,5 @@
 import { OrganizationRoles, OrganizationType } from "@prisma/client";
-import type { Organization, User } from "@prisma/client";
+import type { Organization, Prisma, User } from "@prisma/client";
 
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
@@ -7,6 +7,25 @@ import { ShelfError } from "~/utils/error";
 import { defaultUserCategories } from "../category/default-categories";
 
 const label: ErrorLabel = "Organization";
+
+export async function getOrganizationById<T extends Prisma.OrganizationInclude>(
+  id: Organization["id"],
+  extraIncludes?: T
+) {
+  try {
+    return (await db.organization.findUniqueOrThrow({
+      where: { id },
+      include: extraIncludes,
+    })) as Prisma.OrganizationGetPayload<{ include: T }>;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "No organization found with this ID",
+      additionalData: { id },
+      label,
+    });
+  }
+}
 
 export const getOrganizationByUserId = async ({
   userId,
@@ -45,32 +64,45 @@ export const getOrganizationByUserId = async ({
   }
 };
 
-export const getOrganizationsBySsoDomain = async (domain: string) =>
-  db.organization
-    .findMany({
-      // We dont throw as we need to handle the case where no organization is found for the domain in the app logic
-      where: {
-        ssoDetails: {
-          is: {
-            domain: domain,
+export const getOrganizationsBySsoDomain = async (domain: string) => {
+  try {
+    const orgs = await db.organization
+      .findMany({
+        // We dont throw as we need to handle the case where no organization is found for the domain in the app logic
+        where: {
+          ssoDetails: {
+            is: {
+              domain: domain,
+            },
           },
+          type: "TEAM",
         },
-        type: "TEAM",
-      },
-      include: {
-        ssoDetails: true,
-      },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        title: "Organization not found",
-        message:
-          "It looks like the organization you're trying to log in to is not found. Please contact our support team to get access to your organization.",
-        additionalData: { domain },
-        label,
+        include: {
+          ssoDetails: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          title: "Organization not found",
+          message:
+            "It looks like the organization you're trying to log in to is not found. Please contact our support team to get access to your organization.",
+          additionalData: { domain },
+          label,
+        });
       });
+
+    return orgs;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong with fetching the organizations related to your domain",
+      additionalData: { domain },
+      label,
     });
+  }
+};
 
 export async function createOrganization({
   name,

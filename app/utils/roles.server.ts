@@ -1,3 +1,4 @@
+import type { SsoDetails } from "@prisma/client";
 import { OrganizationRoles, Roles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
@@ -89,10 +90,7 @@ export async function requirePermission({
 
 /** Gets the role needed for SSO login from the groupID returned by the SSO claims */
 export function getRoleFromGroupId(
-  ssoDetails: {
-    adminGroupId: string | null;
-    selfServiceGroupId: string | null;
-  },
+  ssoDetails: SsoDetails,
   groupIds: string[]
 ): OrganizationRoles {
   // We prioritize the admin group. If for some reason the user is in both groups, they will be an admin
