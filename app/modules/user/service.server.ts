@@ -32,6 +32,7 @@ import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
 import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
 import { getOrganizationsBySsoDomain } from "../organization/service.server";
+import { createTeamMember } from "../team-member/service.server";
 
 const label: ErrorLabel = "User";
 
@@ -285,9 +286,9 @@ export async function updateUserFromSSO(
     const existingUserOrganizations = existingUser.userOrganizations;
 
     /**
-     * Compare the existing orgs with the domainOrganizations the user is trying to log in to
+     * Compare the domainOrganizations with the groups the user is trying to log in to
      * by checking the ssoDetails
-     * The desired organizations is an array or organization ids that the user should belong to
+     * The desired organizations is an array or organization that the user should belong to
      */
     const desiredOrganizations = domainOrganizations.filter((org) => {
       const { ssoDetails } = org;
@@ -368,6 +369,19 @@ export async function updateUserFromSSO(
           userId: user.id,
           organizationIds: [desiredOrg.id], // org.id instead of orgIds
           roles: [role], // role instead of roles
+        });
+
+        /**
+         * Create the team member
+         *
+         * NOTE: There is a case where there could already been a team member created for the user in the past,
+         * however, we cannot be sure if the name is still the same and if its the same real life person
+         * so we create a new team meber for the user
+         */
+        await createTeamMember({
+          name: `${firstName} ${lastName}`,
+          organizationId: desiredOrg.id,
+          userId,
         });
       }
     }
