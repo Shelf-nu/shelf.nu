@@ -295,8 +295,8 @@ export async function updateUserFromSSO(
 
       return (
         /** If the sso details are present, we can safely assume that the ids are both strings */
-        groups.includes(ssoDetails!.adminGroupId as string) ||
-        groups.includes(ssoDetails!.selfServiceGroupId as string)
+        groups.includes(ssoDetails.adminGroupId as string) ||
+        groups.includes(ssoDetails.selfServiceGroupId as string)
       );
     });
     const desiredOrganizationsIds = desiredOrganizations.map((org) => org.id);
