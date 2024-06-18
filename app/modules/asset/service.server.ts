@@ -51,7 +51,6 @@ import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
-import { ASSET_INCLUDE_FIELDS } from "./fields";
 import type {
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
@@ -61,17 +60,26 @@ import type {
 
 const label: ErrorLabel = "Assets";
 
-export async function getAsset({
-  organizationId,
+type AssetWithInclude<T extends Prisma.AssetInclude | undefined> =
+  T extends Prisma.AssetInclude
+    ? Prisma.AssetGetPayload<{ include: T }>
+    : Asset;
+
+export async function getAsset<T extends Prisma.AssetInclude | undefined>({
   id,
+  organizationId,
+  include,
 }: Pick<Asset, "id"> & {
-  organizationId?: Organization["id"];
-}) {
+  organizationId?: Asset["organizationId"];
+  include?: T;
+}): Promise<AssetWithInclude<T>> {
   try {
-    return await db.asset.findFirstOrThrow({
+    const asset = await db.asset.findFirstOrThrow({
       where: { id, organizationId },
-      include: ASSET_INCLUDE_FIELDS,
+      include: { ...include },
     });
+
+    return asset as AssetWithInclude<T>;
   } catch (cause) {
     throw new ShelfError({
       cause,
