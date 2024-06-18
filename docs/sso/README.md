@@ -6,7 +6,7 @@ Shelf currently provides SAML SSO for Team and Enterprise plan customers. Please
 
 ## Setup and limitations [#](#setup-and-limitations)
 
-Shelf supports most identity providers that support the SAML 2.0 SSO protocol. We've prepared these guides for commonly used identity providers to help you get started. If you use a different provider, our support stands ready to support you.
+Shelf supports most identity providers that support the SAML 2.0 SSO protocol. We've prepared these guides for commonly used identity providers to help you get started. If you use a different provider, our support stands ready to help you out.
 
 - [Google Workspaces (formerly GSuite)](./providers/google-workspace.md)
 - Microsoft Entra (formerly Azure Active Directory)
@@ -19,8 +19,10 @@ Accounts signing in with SSO have certain limitations. The following sections ou
 - Workspace invites are not restricted to company members belonging to the same identity provider. You can also invite normal users to your workspace
 - SSO users don't get a personal workspace which by default comes with any normal user
 - An SSO user will not be able to update or reset their password since the company administrator manages their access via the identity provider.
+- An SSO user will not be able to buy their own subscription to Shelf.
 - If an SSO user with the following email of huis@zaans.com attempts to sign in with email, they will be refused access to shelf. Once a email is linked to an SSO account, they are not able to create a normal account with the same email
-- An SSO user will see and be added only to organizations that are mapped to their groups inside teh IDP
+- If a user with email huis@zaans.com already exists as a standard user, they will not be able to login via SSO. Please contact support to get this resolved.
+- An SSO user will see and be added only to organizations that are mapped to their groups inside the IDP
 
 ### Disable SSO for your team [#](#disable-sso-for-your-team)
 
@@ -33,4 +35,4 @@ If you are self-hosting shelf and want to setup SSO, please refer to the supabas
 
 ### Attribute mapping [#](#attribute-mapping)
 
-For SSO users to be able to login to shelf, you will need to do some attribute mapping as per [Supabase documentation](https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml?queryGroups=language&language=js#understanding-attribute-mappings). We already provide a file for mapping attributes which you can find inside the project [root/sso/attributes.json](../../sso/attributes.json)
+For SSO users to be able to login to shelf, you will need to do some attribute mapping as per [Supabase documentation](https://supabase.com/docs/guides/auth/enterprise-sso/auth-sso-saml?queryGroups=language&language=js#understanding-attribute-mappings). We already provide a file for mapping attributes which you can find inside the project root [./sso/attributes.json](../../sso/attributes.json)
