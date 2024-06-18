@@ -98,7 +98,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const asset = await db.asset
       .findFirstOrThrow({
         where: { id: assetId },
-        include: { custody: { include: { custodian: true } }, tags: true },
+        include: {
+          custody: { include: { custodian: true } },
+          tags: true,
+          customFields: true,
+        },
       })
       .catch((cause) => {
         throw new ShelfError({

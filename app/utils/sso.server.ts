@@ -1,7 +1,11 @@
 import type { AuthSession } from "server/session";
 import { db } from "~/database/db.server";
 import { getAuthUserById } from "~/modules/auth/service.server";
-import { createUserFromSSO } from "~/modules/user/service.server";
+import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "~/modules/user/fields";
+import {
+  createUserFromSSO,
+  updateUserFromSSO,
+} from "~/modules/user/service.server";
 import { ShelfError } from "./error";
 
 /**
@@ -43,17 +47,11 @@ export async function resolveUserAndOrgForSsoCallback({
       email: authSession.email,
     },
     include: {
-      userOrganizations: {
-        include: {
-          organization: {
-            include: {
-              ssoDetails: true,
-            },
-          },
-        },
-      },
+      ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
     },
   });
+
+  /** Sign up case */
   if (!user) {
     /**
      * If the user doesnt exist, we create a new one and link to the org which has the domain the user used to log in */
@@ -65,10 +63,20 @@ export async function resolveUserAndOrgForSsoCallback({
     user = response.user;
     org = response.org; // This is the org that the user got linked to
   } else {
-    const domain = authSession.email.split("@")[1];
-    /** If the user already exists, we find the org that belongs to that domain so we can directly set it as the active org */
-    const organizations = user.userOrganizations.map((uo) => uo.organization);
-    org = organizations.find((org) => org?.ssoDetails?.domain === domain); // Find the org that has sso for that user
+    /**
+     * Login case
+     *  - update the names
+     *  - update the groups
+     * if they are changed in the IDP
+     */
+
+    const response = await updateUserFromSSO(authSession, user, {
+      firstName,
+      lastName,
+      groups,
+    });
+    user = response.user;
+    org = response.org;
 
     if (!org) {
       throw new ShelfError({

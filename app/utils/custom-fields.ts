@@ -114,23 +114,29 @@ export const mergedSchema = <T extends ZodRawShape>({
 export const extractCustomFieldValuesFromPayload = ({
   payload,
   customFieldDef,
+  isDuplicate,
 }: {
   payload: { [key: string]: any };
   customFieldDef: CustomField[];
+  isDuplicate?: boolean;
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
   const customFieldsKeys = Object.keys(payload).filter((key) =>
     key.startsWith("cf-")
   );
 
-  return customFieldsKeys.map((key) => {
-    const id = key.split("-")[1];
-    const value = buildCustomFieldValue(
-      { raw: payload[key] },
-      customFieldDef.find((v) => v.id === id)!
-    );
-    return { id, value } as ShelfAssetCustomFieldValueType;
-  });
+  return customFieldsKeys
+    .map((key) => {
+      const id = key.split("-")[1];
+      const fieldDef = customFieldDef.find((v) => v.id === id)!;
+      //making sure that duplicate creation is handled.
+      if (!fieldDef && isDuplicate) {
+        return null;
+      }
+      const value = buildCustomFieldValue({ raw: payload[key] }, fieldDef!);
+      return { id, value } as ShelfAssetCustomFieldValueType;
+    })
+    .filter((v) => v !== null) as ShelfAssetCustomFieldValueType[];
 };
 
 export const buildCustomFieldValue = (
