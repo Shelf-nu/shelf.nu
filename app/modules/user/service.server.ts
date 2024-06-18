@@ -238,9 +238,9 @@ export async function createUserFromSSO(
 
 type OrganizationWithSsoDetails = Organization & { ssoDetails: SsoDetails };
 
-/** Compares the existing user with the sso claims returned on login and update is correctly.
- * We need to handle:
- *
+/**
+ * Compares the existing user with the sso claims returned on login and update is correctly.
+ * Cases we need to handle:
  * 1. Name changes
  * 2. Removing user from orgs
  * 3. Adding user to orgs
