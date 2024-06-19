@@ -1,5 +1,4 @@
-import { useMemo } from "react";
-
+import React, { useMemo } from "react";
 import type { Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
@@ -136,12 +135,8 @@ export function BookingAssetsColumn() {
                       const kit = assets[0].kit as Kit;
 
                       return (
-                        <>
-                          <ListItem
-                            item={kit}
-                            key={kit.id}
-                            className="bg-gray-50"
-                          >
+                        <React.Fragment key={kit.id}>
+                          <ListItem item={kit} className="bg-gray-50">
                             <Td className="w-full">
                               <Button
                                 to={`/kits/${kit.id}`}
@@ -173,7 +168,7 @@ export function BookingAssetsColumn() {
                               />
                             </ListItem>
                           ))}
-                        </>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
