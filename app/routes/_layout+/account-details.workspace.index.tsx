@@ -86,7 +86,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** Get the organization that are owner by the current uer */
     const organizations = user.userOrganizations.map((r) => r.organization);
-
     return json(
       data({
         userId,
@@ -182,6 +181,7 @@ export default function WorkspacePage() {
                       _count: org._count,
                       type: org.type,
                       owner: org.owner,
+                      enabledSso: org.enabledSso,
                       updatedAt: new Date(org.updatedAt),
                     }}
                   />
@@ -200,7 +200,10 @@ export default function WorkspacePage() {
 const OrganizationRow = ({
   item,
 }: {
-  item: Pick<Organization, "id" | "name" | "type" | "updatedAt"> & {
+  item: Pick<
+    Organization,
+    "id" | "name" | "type" | "updatedAt" | "enabledSso"
+  > & {
     image: string | undefined; // We dont pick that one as sometimes we send an id sometimes we send a placeholder
     _count: {
       assets: number | null;
@@ -247,6 +250,13 @@ const OrganizationRow = ({
                     </Badge>
                   </span>
                 ) : null}
+                {item.enabledSso && (
+                  <span className="ml-2">
+                    <Badge color={"#3ba361"} withDot={false}>
+                      SSO enabled
+                    </Badge>
+                  </span>
+                )}
               </div>
             </div>
           </div>

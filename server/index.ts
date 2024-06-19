@@ -109,6 +109,8 @@ app.use(
       "/forgot-password",
       "/join",
       "/login",
+      "/sso-login",
+      "/oauth/callback",
       "/logout",
       "/otp",
       "/resend-otp",

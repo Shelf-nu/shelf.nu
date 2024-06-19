@@ -66,6 +66,17 @@ export async function action({ request }: ActionFunctionArgs) {
           });
         }
 
+        if (user.sso) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "This user is an SSO user and cannot reset password using email.",
+            additionalData: { email },
+            shouldBeCaptured: false,
+            label: "Auth",
+          });
+        }
+
         await sendResetPasswordLink(email);
 
         return json(data({ email }));
