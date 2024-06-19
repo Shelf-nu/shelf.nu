@@ -24,7 +24,7 @@ This is a very important step. Click on _DOWNLOAD METADATA_ and save the file th
 
 ![step-4](../../img/google-workspace-step-4.png)
 
-It's very important to send this file to your support contact at Supabase to complete the SSO setup process. If you're not sure where to send this file, you can always reach us at [hello@shelf.nu](mailto:hello@shelf.nu).
+It's very important to send this file to your support contact at Shelf to complete the SSO setup process. If you're not sure where to send this file, you can always reach us at [hello@shelf.nu](mailto:hello@shelf.nu).
 
 > [!IMPORTANT]
 > Make sure the certificate as shown on screen has at least 1 year before it expires. Mark down this date in your calendar so you will be reminded that you need to update the certificate without any downtime for your users.
