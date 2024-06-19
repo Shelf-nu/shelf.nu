@@ -70,7 +70,7 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
   organizationId,
   include,
 }: Pick<Asset, "id"> & {
-  organizationId?: Asset["organizationId"];
+  organizationId: Asset["organizationId"];
   include?: T;
 }): Promise<AssetWithInclude<T>> {
   try {
