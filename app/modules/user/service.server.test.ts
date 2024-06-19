@@ -19,6 +19,7 @@ import { db } from "~/database/db.server";
 import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
 import {
   createUserAccountForTesting,
+  defaultUserCategories,
   // defaultUserCategories,
 } from "./service.server";
 
@@ -231,19 +232,19 @@ describe(createUserAccountForTesting.name, () => {
         firstName: undefined,
         lastName: undefined,
         // After the last changes because of SSO we dont need this anymore
-        // organizations: {
-        //   create: [
-        //     {
-        //       name: "Personal",
-        //       categories: {
-        //         create: defaultUserCategories.map((c) => ({
-        //           ...c,
-        //           userId: USER_ID,
-        //         })),
-        //       },
-        //     },
-        //   ],
-        // },
+        organizations: {
+          create: [
+            {
+              name: "Personal",
+              categories: {
+                create: defaultUserCategories.map((c) => ({
+                  ...c,
+                  userId: USER_ID,
+                })),
+              },
+            },
+          ],
+        },
         roles: {
           connect: {
             name: Roles["USER"],

@@ -432,7 +432,7 @@ export async function createUser(
             username,
             firstName,
             lastName,
-            ...(isSSO && {
+            ...(!isSSO && {
               organizations: {
                 create: [
                   {
@@ -463,14 +463,6 @@ export async function createUser(
             organizations: true,
           },
         });
-
-        const organizationIds: Organization["id"][] = [
-          user.organizations[0].id,
-        ];
-
-        if (organizationId) {
-          organizationIds.push(organizationId);
-        }
 
         /** Create user organization association
          * 1. For the personal org
