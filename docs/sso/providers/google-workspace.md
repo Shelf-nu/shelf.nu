@@ -86,7 +86,7 @@ Add a name, email and make sure the group is labeled as security. Optionally fil
 
 Once you have created your groups, you can assign any of your organization members to them. It is recommended that a member only belongs to 1 group within the same workspace. If they are added to both, the admin role will take precedence.
 
-### 8.3: Allow users from groups to access Shelf app [#](#83-allow-users-from-groups-to-access-shelf-app)
+### 8.3: Allow groups to access Shelf app [#](#83-groups-to-access-shelf-app)
 
 You can configure which Google Workspace user accounts will get access to Shelf. This is required as only users added to groups will be able to access Shelf.
 
@@ -95,6 +95,14 @@ You can configure this access by clicking on the _User access_ card (or down-arr
 Changes from this step sometimes take a while to propagate across Google’s systems. Wait at least 15 minutes before proceeding to the next step.
 
 ![step-8.3](../../img/google-workspace-step-8-3.png)
+
+### 8.4: Map groups to app attributes [#](#84-map-groups-to-app-attributes)
+
+Once you have created all your groups, you have to make sure to add them to the attributes returned by the app.
+
+![step-8.4](../../img/google-workspace-step-8-4.png)
+
+Make sure to add all groups that you want to access Shelf. The **_App attribute_** name should be **_groups_**
 
 ## Step 9: Map Google workspace groups inside Shelf [#](#step-9-map-google-workspace-groups-inside-shelf)
 
