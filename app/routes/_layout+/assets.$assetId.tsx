@@ -166,6 +166,7 @@ export default function AssetDetailsPage() {
   let items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
+    { to: "bookings", content: "Bookings" },
   ];
 
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type

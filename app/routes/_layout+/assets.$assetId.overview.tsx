@@ -43,13 +43,7 @@ import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import {
-  error,
-  getParams,
-  data,
-  parseData,
-  getCurrentSearchParams,
-} from "~/utils/http.server";
+import { error, getParams, data, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
 import {
   PermissionAction,
@@ -89,9 +83,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: ASSET_OVERVIEW_FIELDS,
     });
 
-    const searchParams = getCurrentSearchParams(request);
-    const size = (searchParams.get("size") || "medium") as SizeKeys;
-
     let qr = await getQrByAssetId({ assetId: id });
 
     /** If for some reason there is no QR, we create one and return it */
@@ -103,7 +94,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const { sizes, code } = await generateCode({
       version: qr.version as TypeNumber,
       errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
-      size,
+      size: "medium",
       qr,
     });
 
@@ -197,8 +188,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export const handle = {
   breadcrumb: () => "Overview",
 };
-
-type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
