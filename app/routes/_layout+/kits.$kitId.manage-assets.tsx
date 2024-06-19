@@ -242,7 +242,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     const disallowedBookingStatus: BookingStatus[] = [
       BookingStatus.ONGOING,
       BookingStatus.OVERDUE,
-      BookingStatus.RESERVED,
     ];
     const kitBookings =
       kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
