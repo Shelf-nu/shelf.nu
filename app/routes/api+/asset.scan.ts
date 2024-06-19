@@ -39,7 +39,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
       })
     );
 
-    const asset = await getAsset({ id: assetId, organizationId });
+    const asset = await getAsset({
+      id: assetId,
+      organizationId,
+      include: { qrCodes: true },
+    });
     /** WE get the first qrCode as the app only supports 1 code per asset for now */
     const qr = asset?.qrCodes[0];
 

@@ -1,7 +1,10 @@
-import type { Custody, Prisma, User } from "@prisma/client";
-import type { MetaFunction, ActionFunctionArgs } from "@remix-run/node";
+import type {
+  MetaFunction,
+  ActionFunctionArgs,
+  LoaderFunctionArgs,
+} from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useFetcher, useRouteLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
@@ -10,6 +13,7 @@ import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
+import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
 
 import { Badge } from "~/components/shared/badge";
@@ -19,18 +23,35 @@ import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import type { ASSET_INCLUDE_FIELDS } from "~/modules/asset/fields";
-import { updateAssetBookingAvailability } from "~/modules/asset/service.server";
+import { ASSET_OVERVIEW_FIELDS } from "~/modules/asset/fields";
+import {
+  getAsset,
+  updateAssetBookingAvailability,
+} from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import {
+  createQr,
+  generateCode,
+  getQrByAssetId,
+} from "~/modules/qr/service.server";
+import { getScanByQrId } from "~/modules/scan/service.server";
+import { parseScanData } from "~/modules/scan/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { error, getParams, data, parseData } from "~/utils/http.server";
 import { isLink } from "~/utils/misc";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
     .string()
@@ -38,45 +59,135 @@ export const AvailabilityForBookingFormSchema = z.object({
     .default("false"),
 });
 
-export function loader() {
-  const title = "Asset Overview";
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  return json(data({ title }));
+  const { assetId: id } = getParams(params, z.object({ assetId: z.string() }), {
+    additionalData: { userId },
+  });
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
+
+    const locale = getLocale(request);
+
+    const asset = await getAsset({
+      id,
+      organizationId,
+      include: ASSET_OVERVIEW_FIELDS,
+    });
+
+    let qr = await getQrByAssetId({ assetId: id });
+
+    /** If for some reason there is no QR, we create one and return it */
+    if (!qr) {
+      qr = await createQr({ assetId: id, userId, organizationId });
+    }
+
+    /** Create a QR code with a URL */
+    const { sizes, code } = await generateCode({
+      version: qr.version as TypeNumber,
+      errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
+      size: "medium",
+      qr,
+    });
+
+    /**
+     * We get the first QR code(for now we can only have 1)
+     * And using the ID of tha qr code, we find the latest scan
+     */
+    const lastScan = asset.qrCodes[0]?.id
+      ? parseScanData({
+          scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
+          userId,
+          request,
+        })
+      : null;
+
+    let custody = null;
+    if (asset.custody) {
+      const date = new Date(asset.custody.createdAt);
+      const dateDisplay = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(date);
+
+      custody = {
+        ...asset.custody,
+        dateDisplay,
+      };
+    }
+
+    const qrObj = {
+      qr: code,
+      sizes,
+      showSidebar: true,
+    };
+
+    const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
+    let currentBooking: any = null;
+
+    if (booking && booking.from) {
+      const bookingFrom = new Date(booking.from);
+      const bookingDateDisplay = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(bookingFrom);
+
+      currentBooking = { ...booking, from: bookingDateDisplay };
+
+      asset.bookings = [currentBooking];
+    }
+
+    const header: HeaderData = {
+      title: `${asset.title}'s overview`,
+    };
+
+    return json(
+      data({
+        asset: {
+          ...asset,
+          createdAt: getDateTimeFormat(request, {
+            dateStyle: "short",
+            timeStyle: "short",
+          }).format(asset.createdAt),
+          custody,
+          /** We only need customField with same category of asset or without any category */
+          customFields: asset.categoryId
+            ? asset.customFields.filter(
+                (cf) =>
+                  !cf.customField.categories.length ||
+                  cf.customField.categories
+                    .map((c) => c.id)
+                    .includes(asset.categoryId!)
+              )
+            : asset.customFields,
+        },
+        lastScan,
+        header,
+        locale,
+        qrObj,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason));
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: data ? appendToMetaTitle(data.title) : "" },
+  { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
 export const handle = {
   breadcrumb: () => "Overview",
 };
-type SizeKeys = "cable" | "small" | "medium" | "large";
-
-export interface AssetType {
-  asset: Prisma.AssetGetPayload<{ include: typeof ASSET_INCLUDE_FIELDS }> & {
-    custody: {
-      custodian: {
-        name: string;
-        user?: Pick<
-          User,
-          "firstName" | "lastName" | "email" | "profilePicture"
-        > | null;
-      };
-      dateDisplay: Date;
-      createdAt: Custody["createdAt"];
-    };
-  };
-  locale: string;
-  qrObj: {
-    qr: {
-      size: SizeKeys;
-      id: string;
-      src: string;
-    };
-  };
-  lastScan: any;
-}
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -118,8 +229,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AssetOverview() {
-  const data = useRouteLoaderData<AssetType>("routes/_layout+/assets.$assetId");
-  const { asset, locale, qrObj, lastScan } = data ?? {};
+  const { asset, locale, qrObj } = useLoaderData<typeof loader>();
+
   const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
 
   const customFieldsValues =
@@ -316,6 +427,7 @@ export default function AssetOverview() {
               </fetcher.Form>
             </Card>
           ) : null}
+
           {asset?.kit?.name ? (
             <Card className="my-3 py-3">
               <div className="flex items-center gap-3">
@@ -351,7 +463,8 @@ export default function AssetOverview() {
           />
 
           {asset && <AssetQR qrObj={qrObj} asset={asset} />}
-          {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
+          {/* @TODO: Figure our the issue with type definition of `lastScan` */}
+          {!isSelfService ? <ScanDetails /> : null}
         </div>
       </div>
       <ContextualSidebar />

@@ -154,33 +154,47 @@ export type RouteHandleWithName = {
   [key: string]: any;
 };
 
-export default function BookingsIndexPage() {
+export default function BookingsIndexPage({
+  className,
+}: {
+  className?: string;
+}) {
   const navigate = useNavigate();
   const matches = useMatches();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
+
   /**
-   * We have 2 cases when we should render index:
+   * We have 3 cases when we should render index:
    * 1. When we are on the index route
    * 2. When we are on the .new route - the reason we do this is because we want to have the .new modal overlaying the index.
+   * 3. When we are on the assets.$assetId.bookings page
    */
   const shouldRenderIndex =
     currentRoute?.handle?.name === ("bookings.index" as string) ||
-    currentRoute?.handle?.name === "bookings.new";
+    currentRoute?.handle?.name === "bookings.new" ||
+    currentRoute?.handle?.name === "$assetId.bookings";
+
+  const isAssetBookingsPage =
+    currentRoute?.handle?.name === "$assetId.bookings";
+
   return shouldRenderIndex ? (
     <>
-      <Header>
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new booking`}
-          data-test-id="createNewBooking"
-          prefetch="none"
-        >
-          New booking
-        </Button>
-      </Header>
-      <ListContentWrapper>
+      {!isAssetBookingsPage ? (
+        <Header>
+          <Button
+            to="new"
+            role="link"
+            aria-label={`new booking`}
+            data-test-id="createNewBooking"
+            prefetch="none"
+          >
+            New booking
+          </Button>
+        </Header>
+      ) : null}
+
+      <ListContentWrapper className={className}>
         <Filters
           slots={{
             "left-of-search": <StatusFilter statusItems={BookingStatus} />,
@@ -188,7 +202,7 @@ export default function BookingsIndexPage() {
         />
         <List
           ItemComponent={ListAssetContent}
-          navigate={(id) => navigate(id)}
+          navigate={(id) => navigate(`/bookings/${id}`)}
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>

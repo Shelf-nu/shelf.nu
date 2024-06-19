@@ -47,7 +47,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
           ) : null}
 
           {menuItemsTop.map((item) =>
-            item.to === "bookings" ? (
+            item.to === "bookings" || item.to === "calendar" ? (
               <li key={item.label}>
                 <ControlledActionButton
                   canUseFeature={canUseBookings}
@@ -86,7 +86,8 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                         ? "justify-start focus:ring-0"
                         : "my-0 text-gray-500 hover:bg-gray-50 hover:text-gray-500",
                       /** We need to do this becasue of a special way we handle the bookings link that doesnt allow us to use NavLink currently */
-                      location.pathname.includes(item.to)
+                      location.pathname.includes(item.to) &&
+                        !location.pathname.includes("assets")
                         ? "active bg-primary-50 text-primary-600"
                         : ""
                     ),
