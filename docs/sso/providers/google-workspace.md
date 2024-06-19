@@ -61,7 +61,7 @@ This information needs to be entered into Shelf before SSO is activated end-to-e
 
 Wait for confirmation that this information has successfully been added to Shelf. It usually takes us 1 business day to configure this information for you.
 
-In the meantime, you can continue with the next steps that will show you how to setup your
+In the meantime, you can continue with the next steps that will show you how to setup your groups and users.
 
 ## Step 8: Create groups and assign users [#](#step-8-create-groups-and-assign-users)
 
