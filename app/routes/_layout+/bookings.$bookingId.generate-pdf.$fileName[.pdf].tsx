@@ -9,6 +9,7 @@ import {
   generatePdfContent,
   getBookingAssetsCustomHeader,
 } from "~/modules/booking/pdf-helpers";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { SERVER_URL } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
@@ -48,6 +49,18 @@ export const loader = async ({
       userId,
       role
     );
+    const { from, to } = pdfMeta.booking;
+    if (from && to) {
+      pdfMeta.from = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(new Date(from));
+
+      pdfMeta.to = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(new Date(to));
+    }
     const htmlContent = ReactDOMServer.renderToString(
       <BookingPDFPreview pdfMeta={pdfMeta} />
     );
@@ -179,10 +192,8 @@ const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
         <div style={{ ...styles.infoRow, borderBottom: "unset" }}>
           <span style={styles.infoLabel}>Booking period</span>
           <span style={styles.infoValue}>
-            {booking?.from && booking?.to
-              ? `${new Date(booking.from).toLocaleString()} - ${new Date(
-                  booking.to
-                ).toLocaleString()}`
+            {pdfMeta?.from && pdfMeta?.to
+              ? `${pdfMeta.from} - ${pdfMeta.to}`
               : ""}
           </span>
         </div>
