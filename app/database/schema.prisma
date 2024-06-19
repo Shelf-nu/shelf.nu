@@ -79,6 +79,7 @@ model Asset {
   status              AssetStatus @default(AVAILABLE)
   valuation           Float?      @map("value") // Field to store the monetary value of an asset
   availableToBook     Boolean     @default(true)
+  propertyId          String?
 
   // Datetime
   createdAt DateTime @default(now())
@@ -105,6 +106,7 @@ model Asset {
   assetSearchView AssetSearchView?
   bookings        Booking[]
 
+  @@unique([propertyId])
   //@@unique([title, organizationId]) //prisma doesnt support case insensitive unique index yet
 }
 

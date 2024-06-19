@@ -56,6 +56,7 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val ? +val : null)),
+  propertyId: z.string().transform((val) => val.trim()),
   addAnother: z
     .string()
     .optional()
@@ -74,6 +75,7 @@ interface Props {
   valuation?: Asset["valuation"];
   qrId?: Qr["id"] | null;
   tags?: Tag[];
+  propertyId?: Asset["propertyId"];
 }
 
 export const AssetForm = ({
@@ -87,6 +89,7 @@ export const AssetForm = ({
   valuation,
   qrId,
   tags,
+  propertyId,
 }: Props) => {
   const navigation = useNavigation();
 
@@ -369,6 +372,28 @@ export const AssetForm = ({
               {currency}
             </span>
           </div>
+        </FormRow>
+
+        <FormRow
+          rowLabel={"Property ID"}
+          subHeading={
+            <p>
+              Specify the property ID of your asset.
+            </p>
+          }
+          className="border-b-0 pb-[10px]"
+          required={false}
+        >
+          <Input
+            label="Property ID"
+            hideLabel
+            name={zo.fields.propertyId()}
+            disabled={disabled}
+            error={zo.errors.propertyId()?.message}
+            className="w-full"
+            defaultValue={propertyId || ""}
+            required={zodFieldIsRequired(FormSchema.shape.propertyId)}
+          />
         </FormRow>
 
         <AssetCustomFields zo={zo} schema={FormSchema} />

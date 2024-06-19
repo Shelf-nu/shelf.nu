@@ -33,6 +33,7 @@ export interface UpdateAssetPayload {
   userId: User["id"];
   customFieldsValues?: ShelfAssetCustomFieldValueType[];
   valuation?: Asset["valuation"];
+  propertyId?: Asset["propertyId"];
 }
 
 export interface CreateAssetFromContentImportPayload

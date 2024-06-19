@@ -268,6 +268,15 @@ export default function AssetOverview() {
                 </div>
               </li>
 
+              {asset?.propertyId ? (
+                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
+                <span className="w-1/4 text-[14px] font-medium text-gray-900">
+                  Property ID
+                </span>
+                <div className="w-3/5 text-gray-600">{asset?.propertyId}</div>
+              </li>
+              ) : null}
+
               {asset?.category ? (
                 <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">

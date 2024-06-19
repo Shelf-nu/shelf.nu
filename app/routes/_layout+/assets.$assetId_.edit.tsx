@@ -177,6 +177,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       newLocationId,
       currentLocationId,
       valuation,
+      propertyId,
       addAnother,
     } = payload;
 
@@ -194,6 +195,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId: authSession.userId,
       customFieldsValues,
       valuation,
+      propertyId,
     });
 
     sendNotification({
@@ -237,6 +239,7 @@ export default function AssetEditPage() {
           description={asset.description}
           valuation={asset.valuation}
           tags={tags}
+          propertyId={asset.propertyId}
         />
       </div>
     </>
