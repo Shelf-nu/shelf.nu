@@ -21,19 +21,8 @@ export const KITS_INCLUDE_FIELDS = {
   },
 } satisfies Prisma.KitInclude;
 
-export const ASSET_INCLUDE_FIELDS = {
+export const ASSET_OVERVIEW_FIELDS = {
   category: true,
-  notes: {
-    orderBy: { createdAt: "desc" },
-    include: {
-      user: {
-        select: {
-          firstName: true,
-          lastName: true,
-        },
-      },
-    },
-  },
   qrCodes: true,
   tags: true,
   location: true,

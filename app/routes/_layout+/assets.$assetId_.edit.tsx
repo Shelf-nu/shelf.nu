@@ -59,7 +59,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const asset = await getAsset({ organizationId, id });
+    const asset = await getAsset({
+      organizationId,
+      id,
+      include: { tags: true, customFields: true },
+    });
 
     const { categories, totalCategories, tags, locations, totalLocations } =
       await getAllEntriesForCreateAndEdit({

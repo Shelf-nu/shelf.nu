@@ -20,37 +20,21 @@ import {
   deleteAsset,
   deleteOtherImages,
   getAsset,
-  updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
-import {
-  createQr,
-  generateCode,
-  getQrByAssetId,
-} from "~/modules/qr/service.server";
-import { getScanByQrId } from "~/modules/scan/service.server";
-import { parseScanData } from "~/modules/scan/utils.server";
 import assetCss from "~/styles/asset.css?url";
 
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
+import { getDateTimeFormat } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
-import {
-  error,
-  getParams,
-  data,
-  parseData,
-  getCurrentSearchParams,
-} from "~/utils/http.server";
-import { parseMarkdownToReact } from "~/utils/md.server";
+import { error, getParams, data, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
-type SizeKeys = "cable" | "small" | "medium" | "large";
 
 export const AvailabilityForBookingFormSchema = z.object({
   availableToBook: z
@@ -74,86 +58,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const locale = getLocale(request);
-
-    const asset = await getAsset({ organizationId, id });
-
-    const searchParams = getCurrentSearchParams(request);
-    const size = (searchParams.get("size") || "medium") as SizeKeys;
-
-    let qr = await getQrByAssetId({ assetId: id });
-
-    if (!qr) {
-      /** If for some reason there is no QR, we create one and return it */
-      qr = await createQr({ assetId: id, userId, organizationId });
-    }
-
-    // Create a QR code with a URL
-    const { sizes, code } = await generateCode({
-      version: qr.version as TypeNumber,
-      errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
-      size,
-      qr,
+    const asset = await getAsset({
+      id,
+      organizationId,
+      include: {
+        custody: true,
+        kit: true,
+      },
     });
-
-    /** We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan
-     */
-    const lastScan = asset.qrCodes[0]?.id
-      ? parseScanData({
-          scan: (await getScanByQrId({ qrId: asset.qrCodes[0].id })) || null,
-          userId,
-          request,
-        })
-      : null;
-
-    const notes = asset.notes.map((note) => ({
-      ...note,
-      dateDisplay: getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(note.createdAt),
-      content: parseMarkdownToReact(note.content),
-    }));
-
-    let custody = null;
-    if (asset.custody) {
-      const date = new Date(asset.custody.createdAt);
-      const dateDisplay = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(date);
-
-      custody = {
-        ...asset.custody,
-        dateDisplay,
-      };
-    }
 
     const header: HeaderData = {
       title: asset.title,
     };
-
-    const qrObj = {
-      qr: code,
-      sizes,
-      showSidebar: true,
-    };
-
-    const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
-    let currentBooking: any = null;
-
-    if (booking && booking.from) {
-      const bookingFrom = new Date(booking.from);
-      const bookingDateDisplay = getDateTimeFormat(request, {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(bookingFrom);
-
-      currentBooking = { ...booking, from: bookingDateDisplay };
-
-      asset.bookings = [currentBooking];
-    }
 
     return json(
       data({
@@ -163,25 +79,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             dateStyle: "short",
             timeStyle: "short",
           }).format(asset.createdAt),
-          custody,
-          notes,
-          /** We only need customField with same category of asset or without any category */
-          customFields: asset.categoryId
-            ? asset.customFields.filter(
-                (cf) =>
-                  !cf.customField.categories.length ||
-                  cf.customField.categories
-                    .map((c) => c.id)
-                    .includes(asset.categoryId!)
-              )
-            : asset.customFields,
         },
-        lastScan,
         header,
-        locale,
-        qrObj: {
-          ...qrObj,
-        },
       })
     );
   } catch (cause) {
@@ -202,12 +101,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["delete", "toggle"]) })
+      z.object({ intent: z.enum(["delete"]) })
     );
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       delete: PermissionAction.delete,
-      toggle: PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -244,23 +142,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         return redirect(`/assets`);
       }
-      case "toggle": {
-        const { availableToBook } = parseData(
-          formData,
-          AvailabilityForBookingFormSchema
-        );
 
-        await updateAssetBookingAvailability(id, availableToBook);
-
-        sendNotification({
-          title: "Asset availability status updated successfully",
-          message: "Your asset's availability for booking has been updated",
-          icon: { name: "success", variant: "success" },
-          senderId: authSession.userId,
-        });
-
-        return json(data(null));
-      }
       default: {
         checkExhaustiveSwitch(intent);
         return json(data(null));
@@ -291,11 +173,14 @@ export default function AssetDetailsPage() {
   let items = [
     { to: "overview", content: "Overview" },
     { to: "activity", content: "Activity" },
+    { to: "bookings", content: "Bookings" },
   ];
+
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
   const isSelfService = useUserIsSelfService();
+
   return (
     <>
       <Header
