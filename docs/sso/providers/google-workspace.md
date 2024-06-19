@@ -24,7 +24,7 @@ This is a very important step. Click on _DOWNLOAD METADATA_ and save the file th
 
 ![step-4](../../img/google-workspace-step-4.png)
 
-It's very important to send this file to your support contact at Supabase to complete the SSO setup process. If you're not sure where to send this file, you can always reach us at [hello@shelf.nu](mailto:hello@shelf.nu).
+It's very important to send this file to your support contact at Shelf to complete the SSO setup process. If you're not sure where to send this file, you can always reach us at [hello@shelf.nu](mailto:hello@shelf.nu).
 
 > [!IMPORTANT]
 > Make sure the certificate as shown on screen has at least 1 year before it expires. Mark down this date in your calendar so you will be reminded that you need to update the certificate without any downtime for your users.
@@ -61,7 +61,7 @@ This information needs to be entered into Shelf before SSO is activated end-to-e
 
 Wait for confirmation that this information has successfully been added to Shelf. It usually takes us 1 business day to configure this information for you.
 
-In the meantime, you can continue with the next steps that will show you how to setup your
+In the meantime, you can continue with the next steps that will show you how to setup your groups and users.
 
 ## Step 8: Create groups and assign users [#](#step-8-create-groups-and-assign-users)
 
