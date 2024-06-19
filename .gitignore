@@ -19,6 +19,7 @@ node_modules
 **/supabase/.branches
 **/supabase/.temp
 **/supabase/.env
+/sso/metadata-files
 
 # OS
 .DS_Store
