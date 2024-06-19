@@ -17,7 +17,7 @@ import { getClientHint, getHints } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -90,6 +90,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const selfServiceUser = isSelfService
       ? teamMembers.find((member) => member.userId === authSession.userId)
       : undefined;
+
+    if (isSelfService && !selfServiceUser) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Seems like something is wrong with your user. Please contact support to get this resolved. Make sure to include the trace id seen below.",
+        label: "Booking",
+      });
+    }
 
     return json(
       data({
