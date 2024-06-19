@@ -26,8 +26,7 @@ import { requirePermission } from "~/utils/roles.server";
 import BookingsIndexPage from "./bookings";
 
 const BOOKING_STATUS_TO_SHOW = [
-  BookingStatus.ARCHIVED,
-  BookingStatus.CANCELLED,
+  BookingStatus.DRAFT,
   BookingStatus.COMPLETE,
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,

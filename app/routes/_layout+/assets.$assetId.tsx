@@ -58,7 +58,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const asset = await getAsset({ id, organizationId });
+    const asset = await getAsset({
+      id,
+      organizationId,
+      include: {
+        custody: true,
+        kit: true,
+      },
+    });
 
     const header: HeaderData = {
       title: asset.title,

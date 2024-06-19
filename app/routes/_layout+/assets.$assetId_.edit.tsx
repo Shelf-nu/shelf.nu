@@ -62,7 +62,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const asset = await getAsset({
       organizationId,
       id,
-      include: { tags: true },
+      include: { tags: true, customFields: true },
     });
 
     const { categories, totalCategories, tags, locations, totalLocations } =
