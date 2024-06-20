@@ -23,6 +23,7 @@ import {
 } from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -32,7 +33,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { canExportAssets } from "~/utils/subscription";
+import { canExportAssets } from "~/utils/subscription.server";
 import { MAX_SIZE } from "./account-details.workspace.new";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -40,7 +41,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.generalSettings,
@@ -54,9 +55,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
         select: {
           firstName: true,
-          tier: {
-            include: { tierLimit: true },
-          },
+
           userOrganizations: {
             include: {
               organization: {
@@ -75,9 +74,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                       firstName: true,
                       lastName: true,
                       profilePicture: true,
-                      tier: {
-                        include: { tierLimit: true },
-                      },
                     },
                   },
                 },
@@ -99,6 +95,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       (userOrg) => userOrg.organizationId === organizationId
     );
 
+    /* Check the tier limit */
+    const tierLimit = await getOrganizationTierLimit({
+      organizationId,
+      organizations,
+    });
+
     if (!currentOrganization) {
       throw new ShelfError({
         cause: null,
@@ -116,9 +118,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       data({
         header,
         organization: currentOrganization.organization,
-        canExportAssets: canExportAssets(
-          currentOrganization.organization.owner.tier.tierLimit
-        ),
+        canExportAssets: canExportAssets(tierLimit),
         user,
         curriences: Object.keys(Currency),
       })

@@ -7,6 +7,7 @@ import { json, redirect } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { InfoIcon } from "~/components/icons/library";
+import { CrispButton } from "~/components/marketing/crisp";
 import { Button } from "~/components/shared/button";
 import {
   Tabs,
@@ -20,6 +21,7 @@ import { CustomerPortalForm } from "~/components/subscription/customer-portal-fo
 import { Prices } from "~/components/subscription/prices";
 import SuccessfulSubscriptionModal from "~/components/subscription/successful-subscription-modal";
 import { db } from "~/database/db.server";
+import { getUserTierLimit } from "~/modules/tier/service.server";
 
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -50,8 +52,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
      * NOTE: all users should be able to access the subscription route no matter which role they have
      * as its their own account settings.
      */
-
-    const user = await getUserByID(userId);
+    const [user, tierLimit] = await Promise.all([
+      getUserByID(userId),
+      getUserTierLimit(userId),
+    ]);
 
     /** Get the Stripe customer */
     const customer = user.customerId
@@ -80,6 +84,8 @@ export async function loader({ context }: LoaderFunctionArgs) {
       data({
         title: "Subscription",
         subTitle: "Pick an account plan that fits your workflow.",
+        tier: user.tierId,
+        tierLimit,
         prices,
         customer,
         subscription: subscription,
@@ -183,10 +189,33 @@ export const handle = {
 };
 
 export default function UserPage() {
-  const { title, subTitle, prices, subscription } =
+  const { title, subTitle, prices, subscription, tier, tierLimit } =
     useLoaderData<typeof loader>();
   const isLegacyPricing =
     subscription?.items?.data[0]?.price?.metadata.legacy === "true";
+
+  const isCustomTier = tier === "custom" && !!tierLimit;
+
+  if (isCustomTier) {
+    return (
+      <div className="mb-2 flex items-center gap-3 rounded border border-gray-300 p-4">
+        <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
+          <InfoIcon />
+        </div>
+        <p className="text-[14px] font-medium text-gray-700">
+          You’re currently using the{" "}
+          <span className="font-semibold">ENTERPRISE</span> version of Shelf.
+          <br />
+          That means you have a custom plan. To get more information about your
+          plan, please{" "}
+          <CrispButton variant="link" className="inline w-auto">
+            contact support
+          </CrispButton>
+          .
+        </p>
+      </div>
+    );
+  }
 
   return (
     <>

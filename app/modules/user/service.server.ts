@@ -36,6 +36,32 @@ import { createTeamMember } from "../team-member/service.server";
 
 const label: ErrorLabel = "User";
 
+type UserWithInclude<T extends Prisma.UserInclude | undefined> =
+  T extends Prisma.UserInclude ? Prisma.UserGetPayload<{ include: T }> : User;
+
+export async function getUserByID<T extends Prisma.UserInclude | undefined>(
+  id: User["id"],
+  include?: T
+): Promise<UserWithInclude<T>> {
+  try {
+    const user = await db.user.findUniqueOrThrow({
+      where: { id },
+      include: { ...include },
+    });
+
+    return user as UserWithInclude<T>;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Asset not found",
+      message:
+        "The asset you are trying to access does not exist or you do not have permission to access it.",
+      additionalData: { id, include },
+      label,
+    });
+  }
+}
+
 export async function findUserByEmail(email: User["email"]) {
   try {
     return await db.user.findUnique({ where: { email: email.toLowerCase() } });
@@ -44,19 +70,6 @@ export async function findUserByEmail(email: User["email"]) {
       cause,
       message: "Failed to find user",
       additionalData: { email },
-      label,
-    });
-  }
-}
-
-export async function getUserByID(id: User["id"]) {
-  try {
-    return await db.user.findUniqueOrThrow({ where: { id } });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "No user found with this ID",
-      additionalData: { id },
       label,
     });
   }
