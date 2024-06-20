@@ -7,24 +7,24 @@ const label: ErrorLabel = "Tier";
 
 export async function getUserTierLimit(id: User["id"]) {
   try {
-    const { tier } = await db.user.findUniqueOrThrow({
-      where: { id },
-      select: {
-        tier: {
-          include: { tierLimit: true },
+    const { tier } = await db.user
+      .findUniqueOrThrow({
+        where: { id },
+        select: {
+          tier: {
+            include: { tierLimit: true },
+          },
         },
-      },
-    });
-
-    if (!tier) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "User tier not found. This seems like a bug. Please contact support.",
-        additionalData: { userId: id },
-        label,
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "User tier not found. This seems like a bug. Please contact support.",
+          additionalData: { userId: id },
+          label,
+        });
       });
-    }
 
     /**
      * If the tier is custom, we fetch the custom tier limit and return it
@@ -37,7 +37,8 @@ export async function getUserTierLimit(id: User["id"]) {
         .catch((cause) => {
           throw new ShelfError({
             cause,
-            message: "Failed to get custom tier limit",
+            message:
+              "Failed to get custom tier limit. This seems like a bug. Please contact support.",
             additionalData: { userId: id },
             label,
           });
