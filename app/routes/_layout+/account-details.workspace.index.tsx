@@ -15,6 +15,7 @@ import { WorkspaceActionsDropdown } from "~/components/workspace/workspace-actio
 import { db } from "~/database/db.server";
 import { useUserData } from "~/hooks/use-user-data";
 import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { getUserTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
@@ -86,13 +87,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** Get the organization that are owner by the current uer */
     const organizations = user.userOrganizations.map((r) => r.organization);
+    /** Get the tier limit */
+    const tierLimit = await getUserTierLimit(userId);
+
     return json(
       data({
         userId,
         tier: user.tier,
+        tierLimit,
         currentOrganizationId: organizationId,
         canCreateMoreOrganizations: canCreateMoreOrganizations({
-          tierLimit: user.tier.tierLimit,
+          tierLimit: tierLimit,
           totalOrganizations: organizations.filter((o) => o.owner.id === userId)
             .length,
         }),
@@ -117,11 +122,15 @@ export default function WorkspacePage() {
     items: organizations,
     canCreateMoreOrganizations,
     tier,
+    tierLimit,
   } = useLoaderData<typeof loader>();
   const user = useUserData();
 
-  let upgradeMessage =
-    "You are currently able to create a max of 2 workspaces. If you want to create more than 1 Team workspace, please get in touch with sales";
+  let upgradeMessage = `You are currently able to create a max of ${
+    tierLimit.maxOrganizations
+  } workspaces. If you want to create more than ${
+    tierLimit.maxOrganizations - 1
+  } Team workspace, please get in touch with sales`;
   if (tier.id === TierId.free || tier.id === TierId.tier_1) {
     upgradeMessage = `You cannot create a workspace on a ${tier.name} subscription. `;
   }

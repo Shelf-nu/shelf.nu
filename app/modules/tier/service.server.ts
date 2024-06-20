@@ -1,4 +1,10 @@
-import type { Organization, OrganizationType, User } from "@prisma/client";
+import type {
+  Organization,
+  OrganizationType,
+  TierId,
+  TierLimit,
+  User,
+} from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -13,7 +19,7 @@ import { countActiveCustomFields } from "../custom-field/service.server";
 
 const label: ErrorLabel = "Tier";
 
-async function getUserTierLimit(id: User["id"]) {
+export async function getUserTierLimit(id: User["id"]) {
   try {
     const { tier } = await db.user.findUniqueOrThrow({
       where: { id },
@@ -24,12 +30,70 @@ async function getUserTierLimit(id: User["id"]) {
       },
     });
 
-    return tier.tierLimit;
+    if (!tier) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "User tier not found. This seems like a bug. Please contact support.",
+        additionalData: { userId: id },
+        label,
+      });
+    }
+
+    /**
+     * If the tier is custom, we fetch the custom tier limit
+     */
+    if (tier.id === "custom") {
+      return (await db.customTierLimit
+        .findUniqueOrThrow({
+          where: { userId: id },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Failed to get custom tier limit",
+            additionalData: { userId: id },
+            label,
+          });
+        })) as TierLimit;
+    }
+
+    return tier.tierLimit as TierLimit;
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Something went wrong while fetching user tier limit",
       additionalData: { userId: id },
+      label,
+    });
+  }
+}
+
+export async function updateUserTierId(id: User["id"], tierId: TierId) {
+  try {
+    return await db.user.update({
+      where: { id },
+      data: {
+        tierId,
+        /**
+         * If the user tier is being change to custom, we upsert CustomTierLimit
+         * The upsert will make sure that if there is no customTierLimit for that user its created
+         */
+        ...(tierId === "custom" && {
+          customTierLimit: {
+            upsert: {
+              create: {},
+              update: {},
+            },
+          },
+        }),
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating user tier limit",
+      additionalData: { userId: id, tierId },
       label,
     });
   }
@@ -186,34 +250,34 @@ export async function assertUserCanInviteUsersToWorkspace({
  * Throws an error if the user cannot create more organizations.
  */
 export async function assertUserCanCreateMoreOrganizations(userId: string) {
-  const user = await db.user
-    .findUnique({
-      where: {
-        id: userId,
-      },
-      include: {
-        tier: {
-          include: { tierLimit: true },
+  const [user, tierLimit] = await Promise.all([
+    db.user
+      .findUnique({
+        where: {
+          id: userId,
         },
-        userOrganizations: {
-          include: {
-            organization: {
-              select: {
-                userId: true,
+        include: {
+          userOrganizations: {
+            include: {
+              organization: {
+                select: {
+                  userId: true,
+                },
               },
             },
           },
         },
-      },
-    })
-    .catch((cause) => {
-      throw new ShelfError({
-        cause,
-        message: "Failed to get user",
-        additionalData: { userId },
-        label,
-      });
-    });
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Failed to get user",
+          additionalData: { userId },
+          label,
+        });
+      }),
+    getUserTierLimit(userId),
+  ]);
 
   if (!user) {
     throw new ShelfError({
@@ -230,7 +294,7 @@ export async function assertUserCanCreateMoreOrganizations(userId: string) {
 
   if (
     !canCreateMoreOrganizations({
-      tierLimit: user.tier.tierLimit,
+      tierLimit: tierLimit,
       totalOrganizations: organizations.length || 1,
     })
   ) {
@@ -238,7 +302,7 @@ export async function assertUserCanCreateMoreOrganizations(userId: string) {
       cause: null,
       title: "Not allowed",
       message: "You cannot create workspaces with your current plan.",
-      additionalData: { userId, tierLimit: user.tier.tierLimit },
+      additionalData: { userId, tierLimit },
       label,
     });
   }
