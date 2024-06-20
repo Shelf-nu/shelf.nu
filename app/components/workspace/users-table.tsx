@@ -1,11 +1,11 @@
 import { useMemo } from "react";
 import type { Invite, InviteStatuses } from "@prisma/client";
 import { Link, useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/settings.team";
 import { tw } from "~/utils/tw";
 import { TeamUsersActionsDropdown } from "./users-actions-dropdown";
 import { Button } from "../shared/button";
 import { Table, Td, Th } from "../table";
+import type { loader } from "~/routes/_layout+/settings.teams";
 
 export const UsersTable = () => {
   const { teamMembersWithUserOrInvite } = useLoaderData<typeof loader>();

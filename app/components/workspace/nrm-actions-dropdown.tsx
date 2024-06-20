@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
-import type { loader } from "~/routes/_layout+/settings.team";
+import type { loader } from "~/routes/_layout+/settings.team.users";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import { DeleteMember } from "./delete-member";
