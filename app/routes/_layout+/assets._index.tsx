@@ -56,7 +56,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { canImportAssets } from "~/utils/subscription";
+import { canImportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 

@@ -30,7 +30,7 @@ import {
   getStripeCustomer,
   stripe,
 } from "~/utils/stripe.server";
-import { canUseBookings } from "~/utils/subscription";
+import { canUseBookings } from "~/utils/subscription.server";
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 

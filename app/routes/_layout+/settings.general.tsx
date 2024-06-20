@@ -33,7 +33,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { canExportAssets } from "~/utils/subscription";
+import { canExportAssets } from "~/utils/subscription.server";
 import { MAX_SIZE } from "./account-details.workspace.new";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {

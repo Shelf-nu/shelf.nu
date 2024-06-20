@@ -20,7 +20,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
-import { canCreateMoreOrganizations } from "~/utils/subscription";
+import { canCreateMoreOrganizations } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
