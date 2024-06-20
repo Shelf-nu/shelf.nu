@@ -20,6 +20,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
 import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
@@ -57,6 +58,7 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export interface IndexResponse {
   /** Page number. Starts at 1 */
@@ -297,6 +299,7 @@ export default function AssetIndexPage() {
         <Filters
           slots={{
             "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+            "right-of-search": <SortBy />,
           }}
         >
           <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
@@ -365,27 +368,30 @@ export default function AssetIndexPage() {
                   </div>
                 )}
               />
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Custodian{" "}
-                    <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{
-                  name: "teamMember",
-                  queryKey: "name",
-                  deletedAt: null,
-                }}
-                transformItem={(item) => ({
-                  ...item,
-                  id: item.metadata?.userId ? item.metadata.userId : item.id,
-                })}
-                label="Filter by custodian"
-                placeholder="Search team members"
-                initialDataKey="teamMembers"
-                countKey="totalTeamMembers"
-              />
+              {!isSelfService && (
+                <DynamicDropdown
+                  trigger={
+                    <div className="flex cursor-pointer items-center gap-2">
+                      Custodian{" "}
+                      <ChevronRight className="hidden rotate-90 md:inline" />
+                    </div>
+                  }
+                  model={{
+                    name: "teamMember",
+                    queryKey: "name",
+                    deletedAt: null,
+                  }}
+                  transformItem={(item) => ({
+                    ...item,
+                    id: item.metadata?.userId ? item.metadata.userId : item.id,
+                  })}
+                  renderItem={(item) => resolveTeamMemberName(item)}
+                  label="Filter by custodian"
+                  placeholder="Search team members"
+                  initialDataKey="teamMembers"
+                  countKey="totalTeamMembers"
+                />
+              )}
             </div>
           </div>
         </Filters>
@@ -420,7 +426,10 @@ const ListAssetContent = ({
       custodian: {
         name: string;
         user?: {
+          firstName: string | null;
+          lastName: string | null;
           profilePicture: string | null;
+          email: string | null;
         };
       };
     };
@@ -517,7 +526,20 @@ const ListAssetContent = ({
                     alt=""
                   />
                 ) : null}
-                <span className="mt-px">{custody.custodian.name}</span>
+                <span className="mt-px">
+                  {resolveTeamMemberName({
+                    name: custody.custodian.name,
+                    user: custody.custodian?.user
+                      ? {
+                          firstName: custody.custodian?.user?.firstName || null,
+                          lastName: custody.custodian?.user?.lastName || null,
+                          profilePicture:
+                            custody.custodian?.user?.profilePicture || null,
+                          email: custody.custodian?.user?.email || "",
+                        }
+                      : undefined,
+                  })}
+                </span>
               </>
             </GrayBadge>
           ) : null}

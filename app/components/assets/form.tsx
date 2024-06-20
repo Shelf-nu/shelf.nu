@@ -1,6 +1,5 @@
 import type { Asset, Qr } from "@prisma/client";
 import {
-  Form,
   Link,
   useActionData,
   useLoaderData,
@@ -19,7 +18,9 @@ import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 
 import { zodFieldIsRequired } from "~/utils/zod";
+import { AssetImage } from "./asset-image";
 import AssetCustomFields from "./custom-fields-inputs";
+import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
@@ -28,7 +29,6 @@ import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { Image } from "../shared/image";
-
 import {
   Tooltip,
   TooltipContent,
@@ -40,7 +40,7 @@ import { TagsAutocomplete } from "../tag/tags-autocomplete";
 export const NewAssetFormSchema = z.object({
   title: z
     .string()
-    .min(2, "Title is required")
+    .min(2, "Name is required")
     .transform((val) => val.trim()), // We trim to avoid white spaces at start and end
 
   description: z.string().transform((val) => val.trim()),
@@ -64,7 +64,10 @@ export const NewAssetFormSchema = z.object({
 
 /** Pass props of the values to be used as default for the form fields */
 interface Props {
+  id?: Asset["id"];
   title?: Asset["title"];
+  mainImage?: Asset["mainImage"];
+  mainImageExpiration?: string;
   category?: Asset["categoryId"];
   location?: Asset["locationId"];
   description?: Asset["description"];
@@ -74,7 +77,10 @@ interface Props {
 }
 
 export const AssetForm = ({
+  id,
   title,
+  mainImage,
+  mainImageExpiration,
   category,
   location,
   description,
@@ -102,7 +108,6 @@ export const AssetForm = ({
   });
 
   const zo = useZorm("NewQuestionWizardScreen", FormSchema);
-
   const disabled = isFormProcessing(navigation.state);
 
   const fileError = useAtomValue(fileErrorAtom);
@@ -146,7 +151,7 @@ export const AssetForm = ({
         <FormRow
           rowLabel={"Name"}
           className="border-b-0 pb-[10px]"
-          required={zodFieldIsRequired(FormSchema.shape.title)}
+          required={true}
         >
           <Input
             label="Name"
@@ -160,30 +165,43 @@ export const AssetForm = ({
             onChange={updateDynamicTitle}
             className="w-full"
             defaultValue={title || ""}
-            required={zodFieldIsRequired(FormSchema.shape.title)}
+            required={true}
           />
         </FormRow>
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG or JPEG (max.4 MB)
-            </p>
-            <Input
-              disabled={disabled}
-              accept="image/png,.png,image/jpeg,.jpg,.jpeg"
-              name="mainImage"
-              type="file"
-              onChange={validateFile}
-              label={"Main image"}
-              hideLabel
-              error={fileError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG or JPEG (max.4 MB)
-            </p>
+          <div className="flex items-center gap-2">
+            {id && mainImage && mainImageExpiration ? (
+              <AssetImage
+                className="size-16"
+                asset={{
+                  assetId: id,
+                  mainImage: mainImage,
+                  mainImageExpiration: new Date(mainImageExpiration),
+                  alt: "",
+                }}
+              />
+            ) : null}
+            <div>
+              <p className="hidden lg:block">
+                Accepts PNG, JPG or JPEG (max.4 MB)
+              </p>
+              <Input
+                disabled={disabled}
+                accept="image/png,.png,image/jpeg,.jpg,.jpeg"
+                name="mainImage"
+                type="file"
+                onChange={validateFile}
+                label={"Main image"}
+                hideLabel
+                error={fileError}
+                className="mt-2"
+                inputClassName="border-0 shadow-none p-0 rounded-none"
+              />
+              <p className="mt-2 lg:hidden">
+                Accepts PNG, JPG or JPEG (max.4 MB)
+              </p>
+            </div>
           </div>
         </FormRow>
 

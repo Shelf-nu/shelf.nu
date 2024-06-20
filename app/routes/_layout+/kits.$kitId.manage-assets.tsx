@@ -1,13 +1,14 @@
 import { useEffect, useMemo } from "react";
-import { AssetStatus, type Prisma } from "@prisma/client";
+import { AssetStatus, BookingStatus, type Prisma } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
 import { kitsSelectedAssetsAtom } from "~/atoms/selected-assets-atoms";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
@@ -38,6 +39,7 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -166,9 +168,31 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
         include: {
-          assets: { select: { id: true, title: true, kit: true } },
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              kit: true,
+              bookings: { select: { id: true, status: true } },
+            },
+          },
           custody: {
-            select: { custodian: { select: { id: true, name: true } } },
+            select: {
+              custodian: {
+                select: {
+                  id: true,
+                  name: true,
+                  user: {
+                    select: {
+                      email: true,
+                      firstName: true,
+                      lastName: true,
+                      profilePicture: true,
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       })
@@ -209,6 +233,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       throw new ShelfError({
         cause: null,
         message: "Cannot add unavailable asset in a kit.",
+        additionalData: { userId, kitId },
+        label: "Kit",
+      });
+    }
+
+    /** User is not allowed to add asset to any of these booking status */
+    const disallowedBookingStatus: BookingStatus[] = [
+      BookingStatus.ONGOING,
+      BookingStatus.OVERDUE,
+    ];
+    const kitBookings =
+      kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
+
+    if (
+      kitBookings &&
+      kitBookings.some((b) => disallowedBookingStatus.includes(b.status))
+    ) {
+      throw new ShelfError({
+        cause: null,
+        message: "Cannot add asset to an unavailable kit.",
         additionalData: { userId, kitId },
         label: "Kit",
       });
@@ -265,7 +309,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         ),
         db.note.createMany({
           data: assetsToInheritStatus.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${kit.custody?.custodian.name.trim()}** custody over **${asset.title.trim()}**`,
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${resolveTeamMemberName(
+              (kit.custody as NonNullable<typeof kit.custody>).custodian
+            )}** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
@@ -289,13 +335,39 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         }),
         db.note.createMany({
           data: removedAssets.map((asset) => ({
-            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${kit.custody?.custodian.name.trim()}'s** custody over **${asset.title.trim()}**`,
+            content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${resolveTeamMemberName(
+              (kit.custody as NonNullable<typeof kit.custody>).custodian
+            )}'s** custody over **${asset.title.trim()}**`,
             type: "UPDATE",
             userId,
             assetId: asset.id,
           })),
         }),
       ]);
+    }
+
+    /**
+     * If user is adding/removing an asset to a kit which is a part of DRAFT or RESERVED booking,
+     * then we have to add or remove these assets to booking also
+     */
+    const bookingsToUpdate = kitBookings.filter(
+      (b) => b.status === "DRAFT" || b.status === "RESERVED"
+    );
+
+    if (bookingsToUpdate?.length) {
+      await Promise.all(
+        bookingsToUpdate.map((booking) =>
+          db.booking.update({
+            where: { id: booking.id },
+            data: {
+              assets: {
+                connect: newlyAddedAssets.map((a) => ({ id: a.id })),
+                disconnect: removedAssets.map((a) => ({ id: a.id })),
+              },
+            },
+          })
+        )
+      );
     }
 
     return redirect(`/kits/${kitId}`);
@@ -536,7 +608,8 @@ const RowComponent = ({
           checked={checked}
           className={tw(
             "text-white",
-            item.isInOtherCustody ? "text-gray-200" : ""
+            item.isInOtherCustody ? "text-gray-200" : "",
+            checked ? "text-primary" : ""
           )}
         />
       </Td>

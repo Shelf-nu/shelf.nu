@@ -1,8 +1,9 @@
 import { json, redirect } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { getKit, releaseCustody } from "~/modules/kit/service.server";
@@ -16,6 +17,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -26,22 +28,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.update,
     });
 
-    const kit = await getKit({ id: kitId });
+    const kit = await getKit({ id: kitId, organizationId });
     if (!kit.custody) {
       return redirect(`/kits/${kitId}`);
     }
 
+    /**
+     * This is not idea but I have no other way to figure out how to make it that TS knows that custody is not null
+     */
+    const kitWithCustody = kit as {
+      custody: NonNullable<typeof kit.custody>;
+    } & typeof kit;
+
     return json(
       data({
         showModal: true,
-        kit,
+        kit: kitWithCustody,
       })
     );
   } catch (cause) {
@@ -115,7 +124,9 @@ export default function ReleaseKitCustody() {
           <h4>Check in kit</h4>
           <p>
             Are you sure you want to release{" "}
-            <span className="font-medium">{kit.custody?.custodian.name}’s</span>{" "}
+            <span className="font-medium">
+              {resolveTeamMemberName(kit.custody.custodian)}’s
+            </span>{" "}
             custody over <span className="font-medium">{kit.name}</span>?
           </p>
         </div>
@@ -124,7 +135,7 @@ export default function ReleaseKitCustody() {
             <input
               type="hidden"
               name="custodianName"
-              value={kit.custody?.custodian.name}
+              value={resolveTeamMemberName(kit.custody.custodian)}
             />
             <Button
               to=".."

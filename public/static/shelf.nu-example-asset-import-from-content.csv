@@ -1,2 +1,2 @@
-title;description;category;tags;location;custodian;cf: Serial number,type:text;cf:brand, type:option;cf:purchase date, type:date
-AMD Radeon RX 6800 XT;GPU from my new home PC.;PC Components;High priority, small;Storage room 2;Some guy;WQE239123d;amd;01-feb-2023
+title;description;category;tags;location;valuation;custodian;cf: Serial number,type:text;cf:brand, type:option;cf:purchase date, type:date
+AMD Radeon RX 6800 XT;GPU from my new home PC.;PC Components;High priority, small;Storage room 2;100;Some guy;WQE239123d;amd;01-feb-2023

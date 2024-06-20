@@ -4,7 +4,8 @@ import {
   type LoaderFunctionArgs,
   type MetaFunction,
 } from "@remix-run/node";
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
+import { Form } from "~/components/custom-form";
 import { CrispButton } from "~/components/marketing/crisp";
 import { Button } from "~/components/shared/button";
 import { PriceBox } from "~/components/subscription/price-box";
@@ -149,7 +150,11 @@ export default function SelectPlan() {
         </CrispButton>
         .
       </p>
-      <Form method="post" className="w-full" action="/settings/subscription">
+      <Form
+        method="post"
+        className="w-full"
+        action="/account-details/subscription"
+      >
         <input type="hidden" name="priceId" value={activePrice?.id || ""} />
         <input
           type="hidden"

@@ -16,8 +16,11 @@ import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
-import type { KITS_INCLUDE_FIELDS } from "~/modules/asset/fields";
-import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import {
+  getPaginatedAndFilterableKits,
+  updateKitsWithBookingCustodians,
+} from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getCurrentSearchParams } from "~/utils/http.server";
@@ -26,6 +29,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -41,7 +45,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     const searchParams = getCurrentSearchParams(request);
 
-    const [
+    let [
       { kits, totalKits, perPage, page, totalPages, search },
       teamMembers,
       totalTeamMembers,
@@ -49,6 +53,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableKits({
         request,
         organizationId,
+        extraInclude: {
+          assets: {
+            select: { id: true, availableToBook: true },
+          },
+        },
       }),
       db.teamMember
         .findMany({
@@ -72,6 +81,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     if (totalPages !== 0 && page > totalPages) {
       return redirect("/kits");
     }
+
+    kits = await updateKitsWithBookingCustodians(kits);
 
     const header = {
       title: "Kits",
@@ -112,13 +123,16 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function KitsIndexPage() {
   const navigate = useNavigate();
+  const isSelfService = useUserIsSelfService();
 
   return (
     <>
       <Header>
-        <Button to="new" role="link" aria-label="new kit" icon="kit">
-          New kit
-        </Button>
+        {!isSelfService && (
+          <Button to="new" role="link" aria-label="new kit" icon="kit">
+            New kit
+          </Button>
+        )}
       </Header>
 
       <ListContentWrapper>
@@ -134,19 +148,26 @@ export default function KitsIndexPage() {
             ),
           }}
         >
-          <DynamicDropdown
-            trigger={
-              <div className="flex cursor-pointer items-center gap-2">
-                Custodian{" "}
-                <ChevronRight className="hidden rotate-90 md:inline" />
-              </div>
-            }
-            model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
-            label="Filter by custodian"
-            placeholder="Search team members"
-            countKey="totalTeamMembers"
-            initialDataKey="teamMembers"
-          />
+          {!isSelfService && (
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Custodian{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              label="Filter by custodian"
+              placeholder="Search team members"
+              countKey="totalTeamMembers"
+              initialDataKey="teamMembers"
+              transformItem={(item) => ({
+                ...item,
+                id: item.metadata?.userId ? item.metadata.userId : item.id,
+              })}
+              renderItem={(item) => resolveTeamMemberName(item)}
+            />
+          )}
         </Filters>
 
         <List
@@ -157,7 +178,9 @@ export default function KitsIndexPage() {
             <>
               <Th className="hidden md:table-cell">Description</Th>
               <Th className="hidden md:table-cell">Assets</Th>
-              <Th className="hidden md:table-cell">Custodian</Th>
+              {!isSelfService && (
+                <Th className="hidden md:table-cell">Custodian</Th>
+              )}
             </>
           }
         />
@@ -170,9 +193,36 @@ function ListContent({
   item,
 }: {
   item: Prisma.KitGetPayload<{
-    include: typeof KITS_INCLUDE_FIELDS;
+    include: {
+      _count: { select: { assets: true } };
+      custody: {
+        select: {
+          custodian: {
+            select: {
+              name: true;
+              user: {
+                select: {
+                  firstName: true;
+                  lastName: true;
+                  email: true;
+                  profilePicture: true;
+                };
+              };
+            };
+          };
+        };
+      };
+      assets: {
+        select: {
+          id: true;
+          availableToBook: true;
+        };
+      };
+    };
   }>;
 }) {
+  const isSelfService = useUserIsSelfService();
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -194,7 +244,10 @@ function ListContent({
                 {item.name}
               </span>
               <div>
-                <KitStatusBadge status={item.status} availableToBook={true} />
+                <KitStatusBadge
+                  status={item.status}
+                  availableToBook={!item.assets.some((a) => !a.availableToBook)}
+                />
               </div>
             </div>
           </div>
@@ -210,26 +263,43 @@ function ListContent({
       </Td>
 
       <Td className="hidden md:table-cell">{item._count.assets}</Td>
-
-      <Td className="hidden md:table-cell">
-        {item.custody ? (
-          <GrayBadge>
-            <>
-              {item.custody.custodian?.user ? (
-                <img
-                  src={
-                    item.custody.custodian?.user?.profilePicture ||
-                    "/static/images/default_pfp.jpg"
-                  }
-                  className="mr-1 size-4 rounded-full"
-                  alt=""
-                />
-              ) : null}
-              <span className="mt-px">{item.custody.custodian.name}</span>
-            </>
-          </GrayBadge>
-        ) : null}
-      </Td>
+      {!isSelfService && (
+        <Td className="hidden md:table-cell">
+          {item.custody ? (
+            <GrayBadge>
+              <>
+                {item.custody.custodian?.user ? (
+                  <img
+                    src={
+                      item.custody.custodian?.user?.profilePicture ||
+                      "/static/images/default_pfp.jpg"
+                    }
+                    className="mr-1 size-4 rounded-full"
+                    alt=""
+                  />
+                ) : null}
+                <span className="mt-px">
+                  {resolveTeamMemberName({
+                    name: item?.custody?.custodian.name,
+                    user: item?.custody?.custodian?.user
+                      ? {
+                          firstName:
+                            item?.custody?.custodian?.user?.firstName || null,
+                          lastName:
+                            item?.custody?.custodian?.user?.lastName || null,
+                          profilePicture:
+                            item?.custody?.custodian?.user?.profilePicture ||
+                            null,
+                          email: item?.custody?.custodian?.user?.email || "",
+                        }
+                      : undefined,
+                  })}
+                </span>
+              </>
+            </GrayBadge>
+          ) : null}
+        </Td>
+      )}
     </>
   );
 }

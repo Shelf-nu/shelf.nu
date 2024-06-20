@@ -5,13 +5,13 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
-  Form,
   useActionData,
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
@@ -170,6 +170,11 @@ export default function IndexLoginForm() {
           </div>
         </div>
       </Form>
+      <div className="mt-6 text-center">
+        <Button variant="link" to="/sso-login">
+          Login with SSO
+        </Button>
+      </div>
       <div className="mt-6">
         <div className="relative">
           <div className="absolute inset-0 flex items-center">

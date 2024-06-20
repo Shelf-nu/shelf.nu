@@ -74,6 +74,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                       firstName: true,
                       lastName: true,
                       profilePicture: true,
+                      email: true,
                     },
                   },
                 },

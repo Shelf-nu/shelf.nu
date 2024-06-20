@@ -1,14 +1,13 @@
-import type { Asset } from "@prisma/client";
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { SuccessIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
-import { getAsset } from "~/modules/asset/service.server";
 import {
   createReport,
   sendReportEmails,
@@ -86,7 +85,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const owner = await getUserByID(qr.userId);
-    const asset = await getAsset({ id: qr.asset.id });
 
     const payload = parseData(await request.formData(), NewReportSchema);
     const { email, content } = payload;
@@ -104,7 +102,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
      */
     await sendReportEmails({
       owner,
-      asset: asset as Asset,
+      asset: qr.asset,
       message: report.content,
       reporterEmail: report.email,
     });

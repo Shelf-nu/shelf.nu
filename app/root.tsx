@@ -16,13 +16,15 @@ import {
   useLoaderData,
 } from "@remix-run/react";
 import { withSentry } from "@sentry/remix";
-
+import nProgressStyles from "nprogress/nprogress.css?url";
 import { ErrorContent } from "./components/errors";
 import { HomeIcon } from "./components/icons/library";
 import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
+import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
+import nProgressCustomStyles from "./styles/nprogress.css?url";
 import styles from "./tailwind.css?url";
 import { ClientHintCheck, getHints } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
@@ -50,6 +52,8 @@ export const links: LinksFunction = () => [
   { rel: "manifest", href: "/static/manifest.json" },
   { rel: "apple-touch-icon", href: "/static/favicon.ico" },
   { rel: "icon", href: "/static/favicon.ico" },
+  { rel: "stylesheet", href: nProgressStyles },
+  { rel: "stylesheet", href: nProgressCustomStyles },
   ...splashScreenLinks,
 ];
 
@@ -102,6 +106,7 @@ function Document({ children, title }: PropsWithChildren<{ title?: string }>) {
 }
 
 function App() {
+  useNprogress();
   const { maintenanceMode } = useLoaderData<typeof loader>();
 
   return (

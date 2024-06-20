@@ -22,6 +22,7 @@ import {
   createNotesForBookingUpdate,
   deleteBooking,
   getBooking,
+  getBookingFlags,
   removeAssets,
   sendBookingUpdateNotification,
   upsertBooking,
@@ -60,6 +61,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     additionalData: { userId },
   });
 
+  const searchParams = getCurrentSearchParams(request);
+  const paramsValues = getParamsValues(searchParams);
+  const { page, perPageParam } = paramsValues;
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+  /** Needed for getting the assets */
+  const skip = page > 1 ? (page - 1) * perPage : 0;
+  const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
+
   try {
     const { organizationId, role } = await requirePermission({
       userId: authSession?.userId,
@@ -67,8 +77,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
-
-    const searchParams = getCurrentSearchParams(request);
 
     /**
      * If the org id in the params is different than the current organization id,
@@ -99,73 +107,89 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const [teamMembers, org, assets] = await Promise.all([
-      /**
-       * We need to fetch the team members to be able to display them in the custodian dropdown.
-       */
-      db.teamMember.findMany({
-        where: {
-          deletedAt: null,
-          organizationId,
-          userId: {
-            not: null,
+    const [teamMembers, org, assets, totalAssets, bookingFlags] =
+      await Promise.all([
+        /**
+         * We need to fetch the team members to be able to display them in the custodian dropdown.
+         */
+        db.teamMember.findMany({
+          where: {
+            deletedAt: null,
+            organizationId,
           },
-        },
-        include: {
-          user: true,
-        },
-        orderBy: {
-          userId: "asc",
-        },
-      }),
-      /** We create a teamMember entry to represent the org owner.
-       * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
-       * assigning custody to users, not NRM.
-       */
-      db.organization.findUnique({
-        where: {
-          id: organizationId,
-        },
-        select: {
-          owner: true,
-        },
-      }),
-      /**
-       * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
-       * That way we know if the asset is available or not because we can see if they are booked for the same period
-       */
-      db.asset.findMany({
-        where: {
-          id: {
-            in: booking?.assets.map((a) => a.id) || [],
+          include: {
+            user: true,
           },
-        },
-        include: {
-          category: true,
-          custody: true,
-          bookings: {
-            where: {
-              // id: { not: booking.id },
-              ...(booking.from && booking.to
-                ? {
-                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-                    OR: [
-                      {
-                        from: { lte: booking.to },
-                        to: { gte: booking.from },
-                      },
-                      {
-                        from: { gte: booking.from },
-                        to: { lte: booking.to },
-                      },
-                    ],
-                  }
-                : {}),
+          orderBy: {
+            userId: "asc",
+          },
+        }),
+        /** We create a teamMember entry to represent the org owner.
+         * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
+         * assigning custody to users, not NRM.
+         */
+        db.organization.findUnique({
+          where: {
+            id: organizationId,
+          },
+          select: {
+            owner: true,
+          },
+        }),
+        /**
+         * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
+         * That way we know if the asset is available or not because we can see if they are booked for the same period
+         */
+        db.asset.findMany({
+          where: {
+            id: {
+              in: booking?.assets.map((a) => a.id) || [],
             },
           },
-        },
-      }),
-    ]);
+          skip,
+          take,
+          include: {
+            category: true,
+            custody: true,
+            kit: true,
+            bookings: {
+              where: {
+                // id: { not: booking.id },
+                ...(booking.from && booking.to
+                  ? {
+                      status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                      OR: [
+                        {
+                          from: { lte: booking.to },
+                          to: { gte: booking.from },
+                        },
+                        {
+                          from: { gte: booking.from },
+                          to: { lte: booking.to },
+                        },
+                      ],
+                    }
+                  : {}),
+              },
+            },
+          },
+        }),
+        /** Count assets them */
+        db.asset.count({
+          where: {
+            id: {
+              in: booking?.assets.map((a) => a.id) || [],
+            },
+          },
+        }),
+        /** We use pagination to show assets, so we have to calculate the status of booking considering all the assets of booking and not just single page */
+        getBookingFlags({
+          id: booking.id,
+          assetIds: booking.assets.map((a) => a.id),
+          from: booking.from,
+          to: booking.to,
+        }),
+      ]);
 
     if (org?.owner) {
       teamMembers.push({
@@ -184,9 +208,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * This is useful for more consistent data in the front-end */
     booking.assets = assets;
 
-    const { page, perPageParam } = getParamsValues(searchParams);
-    const cookie = await updateCookieWithPerPage(request, perPageParam);
-    const { perPage } = cookie;
     const modelName = {
       singular: "asset",
       plural: "assets",
@@ -201,12 +222,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         booking,
         modelName,
-        items: assets,
+        items: booking.assets,
         page,
-        totalItems: booking.assets.length,
+        totalItems: totalAssets,
         perPage,
-        totalPages: booking.assets.length / perPage,
+        totalPages: totalAssets / perPage,
         teamMembers,
+        bookingFlags,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -250,6 +272,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           "checkIn",
           "archive",
           "cancel",
+          "removeKit",
         ]),
         nameChangeOnly: z
           .string()
@@ -270,6 +293,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       checkIn: PermissionAction.checkin,
       archive: PermissionAction.update,
       cancel: PermissionAction.update,
+      removeKit: PermissionAction.update,
     };
 
     const { organizationId, role } = await requirePermission({
@@ -321,7 +345,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           /** WE are updating the whole booking */
           const payload = parseData(
             formData,
-            NewBookingFormSchema(), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
+            NewBookingFormSchema(false, false, getHints(request)), // If we are only changing the name, we are basically setting inputFieldIsDisabled && nameChangeOnly to true
             {
               additionalData: { userId, id, organizationId, role },
             }
@@ -330,18 +354,27 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           const { name, custodian } = payload;
 
           const hints = getHints(request);
-          const startDate = formData.get("startDate")!.toString();
-          const endDate = formData.get("endDate")!.toString();
           const fmt = "yyyy-MM-dd'T'HH:mm";
-          const from = DateTime.fromFormat(startDate, fmt, {
-            zone: hints.timeZone,
-          }).toJSDate();
-          const to = DateTime.fromFormat(endDate, fmt, {
-            zone: hints.timeZone,
-          }).toJSDate();
+
+          const from = DateTime.fromFormat(
+            formData.get("startDate")!.toString()!,
+            fmt,
+            {
+              zone: hints.timeZone,
+            }
+          ).toJSDate();
+
+          const to = DateTime.fromFormat(
+            formData.get("endDate")!.toString()!,
+            fmt,
+            {
+              zone: hints.timeZone,
+            }
+          ).toJSDate();
 
           Object.assign(upsertBookingData, {
-            custodianUserId: custodian,
+            custodianUserId: custodian?.userId,
+            custodianTeamMemberId: custodian?.id,
             name,
             from,
             to,
@@ -495,6 +528,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             headers,
           }
         );
+      }
+      case "removeKit": {
+        const { kitId } = parseData(formData, z.object({ kitId: z.string() }), {
+          additionalData: { userId, id, organizationId, role },
+        });
+
+        const kit = await db.kit.findUniqueOrThrow({
+          where: { id: kitId },
+          select: { assets: { select: { id: true } } },
+        });
+
+        const b = await removeAssets({
+          booking: { id, assetIds: kit.assets.map((a) => a.id) },
+          firstName: user?.firstName || "",
+          lastName: user?.lastName || "",
+          userId: authSession.userId,
+        });
+
+        sendNotification({
+          title: "Kit removed",
+          message: "Your kit has been removed from the booking",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ booking: b }), {
+          headers,
+        });
       }
       default: {
         checkExhaustiveSwitch(intent);

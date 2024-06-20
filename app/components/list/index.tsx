@@ -21,6 +21,7 @@ export const List = ({
   navigate,
   className,
   customEmptyStateContent,
+  emptyStateClassName,
 }: {
   ItemComponent: any;
   headerChildren?: ReactNode;
@@ -31,10 +32,11 @@ export const List = ({
   customEmptyStateContent?: {
     title: string;
     text: string;
-    newButtonRoute: string;
-    newButtonContent: string;
+    newButtonRoute?: string;
+    newButtonContent?: string;
     buttonProps?: any;
   };
+  emptyStateClassName?: string;
 }) => {
   const { items } = useLoaderData<IndexResponse>();
   const hasItems = items?.length > 0;
@@ -47,7 +49,10 @@ export const List = ({
       )}
     >
       {!hasItems ? (
-        <EmptyState customContent={customEmptyStateContent} />
+        <EmptyState
+          className={emptyStateClassName}
+          customContent={customEmptyStateContent}
+        />
       ) : (
         <>
           <Table>

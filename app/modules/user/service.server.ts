@@ -1,4 +1,4 @@
-import type { Organization, User } from "@prisma/client";
+import type { Organization, SsoDetails, User } from "@prisma/client";
 import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
@@ -21,14 +21,18 @@ import { ShelfError, isLikeShelfError } from "~/utils/error";
 import type { ValidationError } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { getRoleFromGroupId } from "~/utils/roles.server";
 import {
   deleteProfilePicture,
   getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
+import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
 import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
+import { getOrganizationsBySsoDomain } from "../organization/service.server";
+import { createTeamMember } from "../team-member/service.server";
 
 const label: ErrorLabel = "User";
 
@@ -162,6 +166,239 @@ export async function createUserOrAttachOrg({
   }
 }
 
+export async function createUserFromSSO(
+  authSession: AuthSession,
+  userData: {
+    firstName: string;
+    lastName: string;
+    groups: string[];
+  }
+) {
+  try {
+    const { email, userId } = authSession;
+    const { firstName, lastName, groups } = userData;
+    const domain = email.split("@")[1];
+
+    // When we are inviting normal users to the org, we create a teamMember so we need to handle it in this case as well
+    const user = await createUser({
+      email,
+      firstName,
+      lastName,
+      userId,
+      username: randomUsernameFromEmail(email),
+      isSSO: true,
+    });
+
+    const organizations = await getOrganizationsBySsoDomain(domain);
+
+    for (let org of organizations) {
+      const { ssoDetails } = org;
+      if (!ssoDetails) {
+        throw new ShelfError({
+          cause: null,
+          title: "Organization doesnt have SSO",
+          message:
+            "It looks like the organization you're trying to log in to doesn't have SSO enabled.",
+          additionalData: { org, domain },
+          label,
+        });
+      }
+      const role = getRoleFromGroupId(ssoDetails, groups);
+      if (role) {
+        // Attach the user to the org with the correct role
+        await createUserOrgAssociation(db, {
+          userId: user.id,
+          organizationIds: [org.id], // org.id instead of orgIds
+          roles: [role], // role instead of roles
+        });
+      }
+    }
+
+    /** Create teamMember for each organization */
+    await db.teamMember.createMany({
+      data: organizations.map((org) => ({
+        name: `${firstName} ${lastName}`,
+        organizationId: org.id,
+        userId,
+      })),
+    });
+
+    return { user, org: organizations[0] };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : `There was an issue with creating/attaching user with email: ${authSession.email}`,
+      additionalData: { email: authSession.email, userId: authSession.userId },
+      label,
+    });
+  }
+}
+
+type OrganizationWithSsoDetails = Organization & { ssoDetails: SsoDetails };
+
+/**
+ * Compares the existing user with the sso claims returned on login and update is correctly.
+ * Cases we need to handle:
+ * 1. Name changes
+ * 2. Removing user from orgs
+ * 3. Adding user to orgs
+ * 4. Changing user role in orgs
+ */
+export async function updateUserFromSSO(
+  authSession: AuthSession,
+  existingUser: Prisma.UserGetPayload<{
+    include: typeof INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION;
+  }>,
+  userData: {
+    firstName: string;
+    lastName: string;
+    groups: string[];
+  }
+) {
+  try {
+    const { email, userId } = authSession;
+    const { firstName, lastName, groups } = userData;
+    const { firstName: oldFirstName, lastName: oldLastName } = existingUser;
+    const domain = email.split("@")[1];
+    /** Those are the organizations linked to the SSO domain */
+    const domainOrganizations = (await getOrganizationsBySsoDomain(
+      domain
+    )) as OrganizationWithSsoDetails[];
+
+    let user = existingUser;
+
+    /** If either the first or last name are different, update them */
+    if (oldFirstName !== firstName || oldLastName !== lastName) {
+      user = await updateUser(
+        {
+          id: userId,
+          firstName,
+          lastName,
+        },
+        {
+          ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
+        }
+      );
+    }
+
+    const existingUserOrganizations = existingUser.userOrganizations;
+
+    /**
+     * Compare the domainOrganizations with the groups the user is trying to log in to
+     * by checking the ssoDetails
+     * The desired organizations is an array or organization that the user should belong to
+     */
+    const desiredOrganizations = domainOrganizations.filter((org) => {
+      const { ssoDetails } = org;
+
+      return (
+        /** If the sso details are present, we can safely assume that the ids are both strings */
+        groups.includes(ssoDetails.adminGroupId as string) ||
+        groups.includes(ssoDetails.selfServiceGroupId as string)
+      );
+    });
+    const desiredOrganizationsIds = desiredOrganizations.map((org) => org.id);
+
+    /**
+     * Iterate over the user's existing organizations
+     * 1. If the user still belongs to org, double check the roles
+     * 2. If the user doesnt belong to the org, revoke their access
+     * */
+    for (const existingUserOrganization of existingUserOrganizations) {
+      const { id } = existingUserOrganization.organization;
+      // Check if the user still belongs to the organization
+      if (desiredOrganizationsIds.includes(id)) {
+        // The user still belongs to the organization
+        // Here we need to check if the role is still the same and update it if it's not
+        const ssoDetails = (
+          existingUserOrganization.organization as OrganizationWithSsoDetails
+        ).ssoDetails; // Its safe to assume that the ssoDetails are present
+        const desiredRole = getRoleFromGroupId(ssoDetails, groups);
+        const currentRole = existingUserOrganization.roles[0];
+
+        if (currentRole !== desiredRole) {
+          // Update the role
+          await db.userOrganization
+            .update({
+              where: {
+                userId_organizationId: {
+                  userId: user.id,
+                  organizationId: id,
+                },
+              },
+              data: {
+                roles: {
+                  set: [desiredRole],
+                },
+              },
+            })
+            .catch((cause) => {
+              throw new ShelfError({
+                cause,
+                message: "Failed to update user organization",
+                additionalData: { userId: user.id, organizationId: id },
+                label,
+              });
+            });
+        }
+      } else {
+        // The user no longer belongs to the organization
+        // Remove the user from the organization
+        await revokeAccessToOrganization({
+          userId: user.id,
+          organizationId: id,
+        });
+      }
+    }
+
+    // Check if there are any new organizations that the user belongs to
+    for (const desiredOrg of desiredOrganizations) {
+      if (
+        !existingUser.userOrganizations.some(
+          (organization) => organization.organization.id === desiredOrg.id
+        )
+      ) {
+        const { ssoDetails } = desiredOrg;
+
+        // Get the correct role based on the id
+        const role = getRoleFromGroupId(ssoDetails, groups);
+        // Add the user to the organization
+        await createUserOrgAssociation(db, {
+          userId: user.id,
+          organizationIds: [desiredOrg.id], // org.id instead of orgIds
+          roles: [role], // role instead of roles
+        });
+
+        /**
+         * Create the team member
+         *
+         * NOTE: There is a case where there could already been a team member created for the user in the past,
+         * however, we cannot be sure if the name is still the same and if its the same real life person
+         * so we create a new team meber for the user
+         */
+        await createTeamMember({
+          name: `${firstName} ${lastName}`,
+          organizationId: desiredOrg.id,
+          userId,
+        });
+      }
+    }
+
+    return { user, org: desiredOrganizations[0] };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : `There was an issue with creating/attaching user with email: ${authSession.email}`,
+      additionalData: { email: authSession.email, userId: authSession.userId },
+      label,
+    });
+  }
+}
+
 export async function createUser(
   payload: Pick<
     AuthSession & { username: string },
@@ -170,9 +407,20 @@ export async function createUser(
     organizationId?: Organization["id"];
     roles?: OrganizationRoles[];
     firstName?: User["firstName"];
+    lastName?: User["lastName"];
+    isSSO?: boolean;
   }
 ) {
-  const { email, userId, username, organizationId, roles, firstName } = payload;
+  const {
+    email,
+    userId,
+    username,
+    organizationId,
+    roles,
+    firstName,
+    lastName,
+    isSSO,
+  } = payload;
 
   try {
     return await db.$transaction(
@@ -183,48 +431,50 @@ export async function createUser(
             id: userId,
             username,
             firstName,
-            organizations: {
-              create: [
-                {
-                  name: "Personal",
-                  categories: {
-                    create: defaultUserCategories.map((c) => ({
-                      ...c,
-                      userId,
-                    })),
+            lastName,
+            ...(!isSSO && {
+              organizations: {
+                create: [
+                  {
+                    name: "Personal",
+                    categories: {
+                      create: defaultUserCategories.map((c) => ({
+                        ...c,
+                        userId,
+                      })),
+                    },
                   },
-                },
-              ],
-            },
+                ],
+              },
+            }),
             roles: {
               connect: {
                 name: Roles["USER"],
               },
             },
+            ...(isSSO && {
+              // When user is coming from SSO, we set them as onboarded as we already have their first and last name and they dont need a password.
+              onboarded: true,
+              sso: true,
+            }),
           },
           include: {
+            ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
             organizations: true,
           },
         });
-
-        const organizationIds: Organization["id"][] = [
-          user.organizations[0].id,
-        ];
-
-        if (organizationId) {
-          organizationIds.push(organizationId);
-        }
 
         /** Create user organization association
          * 1. For the personal org
          * 2. For the org that the user is being attached to
          */
         await Promise.all([
-          createUserOrgAssociation(tx, {
-            userId: user.id,
-            organizationIds: [user.organizations[0].id],
-            roles: [OrganizationRoles.OWNER],
-          }),
+          !isSSO && // We only create a personal org for non-SSO users
+            createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [user.organizations[0].id],
+              roles: [OrganizationRoles.OWNER],
+            }),
           organizationId &&
             roles?.length &&
             createUserOrgAssociation(tx, {
@@ -250,7 +500,10 @@ export async function createUser(
   }
 }
 
-export async function updateUser(updateUserPayload: UpdateUserPayload) {
+export async function updateUser<T extends Prisma.UserInclude>(
+  updateUserPayload: UpdateUserPayload,
+  extraIncludes?: T
+) {
   /**
    * Remove password from object so we can pass it to prisma user update
    * Also we remove the email as we dont allow it to be changed for now
@@ -278,6 +531,9 @@ export async function updateUser(updateUserPayload: UpdateUserPayload) {
           },
         },
       },
+      include: {
+        ...extraIncludes,
+      },
     });
 
     if (
@@ -290,14 +546,15 @@ export async function updateUser(updateUserPayload: UpdateUserPayload) {
       );
     }
 
-    return updatedUser;
+    return updatedUser as Prisma.UserGetPayload<{ include: T }>;
   } catch (cause) {
     const validationErrors: ValidationError<any> = {};
 
-    if (
+    const isUniqueViolation =
       cause instanceof Prisma.PrismaClientKnownRequestError &&
-      cause.code === "P2002"
-    ) {
+      cause.code === "P2002";
+
+    if (isUniqueViolation) {
       // The .code property can be accessed in a type-safe manner
       validationErrors[cause.meta?.target as string] = {
         message: `${cause.meta?.target} is already taken.`,
@@ -310,6 +567,7 @@ export async function updateUser(updateUserPayload: UpdateUserPayload) {
         "Something went wrong while updating your profile. Please try again or contact support.",
       additionalData: { ...cleanClone, validationErrors },
       label,
+      shouldBeCaptured: !isUniqueViolation,
     });
   }
 }

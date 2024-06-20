@@ -1,14 +1,16 @@
 import { useLoaderData } from "@remix-run/react";
 
 import type { SearchableIndexResponse } from "~/modules/types";
+import { tw } from "~/utils/tw";
 import { ClearSearch } from "./filters/clear-search";
 import { Button } from "../shared/button";
 export interface CustomEmptyState {
+  className?: string;
   customContent?: {
     title: string;
     text: string;
-    newButtonRoute: string;
-    newButtonContent: string;
+    newButtonRoute?: string;
+    newButtonContent?: string;
     buttonProps?: any;
   };
   modelName?: {
@@ -16,7 +18,11 @@ export interface CustomEmptyState {
     plural: string;
   };
 }
-export const EmptyState = ({ customContent, modelName }: CustomEmptyState) => {
+export const EmptyState = ({
+  className,
+  customContent,
+  modelName,
+}: CustomEmptyState) => {
   const { search, modelName: modelNameData } =
     useLoaderData<SearchableIndexResponse>();
   const singular = modelName?.singular || modelNameData.singular;
@@ -30,7 +36,12 @@ export const EmptyState = ({ customContent, modelName }: CustomEmptyState) => {
   };
 
   return (
-    <div className="flex h-full flex-col justify-center gap-[32px] px-4 py-[100px] text-center">
+    <div
+      className={tw(
+        "flex h-full flex-col justify-center gap-[32px] px-4 py-[100px] text-center",
+        className
+      )}
+    >
       <div className="flex flex-col items-center">
         <img
           src="/static/images/empty-state.svg"
@@ -63,18 +74,22 @@ export const EmptyState = ({ customContent, modelName }: CustomEmptyState) => {
             Clear Search
           </ClearSearch>
         )}
-        <Button
-          to={
-            customContent?.newButtonRoute ? customContent.newButtonRoute : "new"
-          }
-          aria-label={`new ${singular}`}
-          icon="plus"
-          {...(customContent?.buttonProps || undefined)}
-        >
-          {customContent?.newButtonContent
-            ? customContent.newButtonContent
-            : `New ${singular}`}
-        </Button>
+        {customContent?.newButtonRoute && (
+          <Button
+            to={
+              customContent?.newButtonRoute
+                ? customContent.newButtonRoute
+                : "new"
+            }
+            aria-label={`new ${singular}`}
+            icon="plus"
+            {...(customContent?.buttonProps || undefined)}
+          >
+            {customContent?.newButtonContent
+              ? customContent.newButtonContent
+              : `New ${singular}`}
+          </Button>
+        )}
       </div>
     </div>
   );

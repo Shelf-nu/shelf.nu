@@ -14,11 +14,16 @@ import type {
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import type {
+  SortingDirection,
+  SortingOptions,
+} from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { createCategoriesIfNotExists } from "~/modules/category/service.server";
 import {
   createCustomFieldsIfNotExists,
+  getActiveCustomFields,
   upsertCustomField,
 } from "~/modules/custom-field/service.server";
 import type { CustomFieldDraftPayload } from "~/modules/custom-field/types";
@@ -34,6 +39,7 @@ import type { AllowedModelNames } from "~/routes/api+/model-filters";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import {
   buildCustomFieldValue,
+  extractCustomFieldValuesFromPayload,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
@@ -41,6 +47,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
@@ -53,64 +60,26 @@ import type {
 
 const label: ErrorLabel = "Assets";
 
-export async function getAsset({
-  organizationId,
+type AssetWithInclude<T extends Prisma.AssetInclude | undefined> =
+  T extends Prisma.AssetInclude
+    ? Prisma.AssetGetPayload<{ include: T }>
+    : Asset;
+
+export async function getAsset<T extends Prisma.AssetInclude | undefined>({
   id,
+  organizationId,
+  include,
 }: Pick<Asset, "id"> & {
-  organizationId?: Organization["id"];
-}) {
+  organizationId: Asset["organizationId"];
+  include?: T;
+}): Promise<AssetWithInclude<T>> {
   try {
-    return await db.asset.findFirstOrThrow({
+    const asset = await db.asset.findFirstOrThrow({
       where: { id, organizationId },
-      include: {
-        category: true,
-        notes: {
-          orderBy: { createdAt: "desc" },
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-        qrCodes: true,
-        tags: true,
-        location: true,
-        custody: {
-          select: {
-            createdAt: true,
-            custodian: true,
-          },
-        },
-        organization: {
-          select: {
-            currency: true,
-          },
-        },
-        customFields: {
-          where: {
-            customField: {
-              active: true,
-            },
-          },
-          include: {
-            customField: {
-              select: {
-                id: true,
-                name: true,
-                helpText: true,
-                required: true,
-                type: true,
-                categories: true,
-              },
-            },
-          },
-        },
-        kit: { select: { id: true, name: true, status: true } },
-      },
+      include: { ...include },
     });
+
+    return asset as AssetWithInclude<T>;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -123,6 +92,15 @@ export async function getAsset({
   }
 }
 
+/** This is used by both  getAssetsFromView & getAssets
+ * Those are the statuses that are considered unavailable for booking assets
+ */
+const unavailableBookingStatuses = [
+  BookingStatus.RESERVED,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+];
+
 /**
  * Fetches assets from AssetSearchView
  * This is used to have a more advanced search however its less performant
@@ -132,6 +110,9 @@ async function getAssetsFromView(params: {
   /** Page number. Starts at 1 */
   page: number;
   /** Assets to be loaded per page */
+
+  orderBy: SortingOptions;
+  orderDirection: SortingDirection;
   perPage?: number;
   search?: string | null;
   categoriesIds?: Category["id"][] | null;
@@ -146,6 +127,8 @@ async function getAssetsFromView(params: {
 }) {
   const {
     organizationId,
+    orderBy,
+    orderDirection,
     page = 1,
     perPage = 8,
     search,
@@ -170,10 +153,11 @@ async function getAssetsFromView(params: {
     /** If the search string exists, add it to the where object */
     if (search) {
       const words = search
+        .replace(/([()&|!'<>])/g, "\\$1") // escape special characters
         .trim()
         .replace(/ +/g, " ") //replace multiple spaces into 1
         .split(" ")
-        .map((w) => w.replace(/[^a-zA-Z0-9\-_]/g, "") + ":*") //remove uncommon special character
+        .map((w) => w.trim() + ":*") //remove leading and trailing spaces
         .filter(Boolean)
         .join(" & ");
       where.searchVector = {
@@ -203,11 +187,7 @@ async function getAssetsFromView(params: {
         };
       }
     }
-    const unavailableBookingStatuses = [
-      BookingStatus.DRAFT,
-      BookingStatus.RESERVED,
-      BookingStatus.ONGOING,
-    ];
+
     if (hideUnavailable && where.asset) {
       //not disabled for booking
       where.asset.availableToBook = true;
@@ -297,6 +277,13 @@ async function getAssetsFromView(params: {
       ];
     }
 
+    /**
+     * User should only see the assets without kits for hideUnavailable true
+     */
+    if (hideUnavailable === true && where.asset) {
+      where.asset.kit = null;
+    }
+
     const [assetSearch, totalAssets] = await Promise.all([
       /** Get the assets */
       db.assetSearchView.findMany({
@@ -321,6 +308,8 @@ async function getAssetsFromView(params: {
                       name: true,
                       user: {
                         select: {
+                          firstName: true,
+                          lastName: true,
                           profilePicture: true,
                         },
                       },
@@ -358,7 +347,7 @@ async function getAssetsFromView(params: {
             },
           },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: { asset: { [orderBy]: orderDirection } },
       }),
 
       /** Count them */
@@ -383,6 +372,10 @@ async function getAssets(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
   page: number;
+
+  orderBy: SortingOptions;
+  orderDirection: SortingDirection;
+
   /** Assets to be loaded per page */
   perPage?: number;
   search?: string | null;
@@ -398,6 +391,8 @@ async function getAssets(params: {
 }) {
   const {
     organizationId,
+    orderBy,
+    orderDirection,
     page = 1,
     perPage = 8,
     search,
@@ -449,10 +444,7 @@ async function getAssets(params: {
         };
       }
     }
-    const unavailableBookingStatuses = [
-      BookingStatus.RESERVED,
-      BookingStatus.ONGOING,
-    ];
+
     if (hideUnavailable) {
       //not disabled for booking
       where.availableToBook = true;
@@ -512,6 +504,13 @@ async function getAssets(params: {
       };
     }
 
+    /**
+     * User should only see the assets without kits for hideUnavailable true
+     */
+    if (hideUnavailable === true) {
+      where.kit = null;
+    }
+
     if (teamMemberIds && teamMemberIds.length) {
       where.OR = [
         ...(where.OR ?? []),
@@ -548,6 +547,8 @@ async function getAssets(params: {
                   name: true,
                   user: {
                     select: {
+                      firstName: true,
+                      lastName: true,
                       profilePicture: true,
                     },
                   },
@@ -583,7 +584,7 @@ async function getAssets(params: {
               }
             : {}),
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: { [orderBy]: orderDirection },
       }),
 
       /** Count them */
@@ -721,10 +722,14 @@ export async function createAsset({
 
     /** If custom fields are passed, create them */
     if (customFieldsValues && customFieldsValues.length > 0) {
+      const customFieldValuesToAdd = customFieldsValues.filter(
+        (cf) => !!cf.value
+      );
+
       Object.assign(data, {
         /** Custom fields here refers to the values, check the Schema for more info */
         customFields: {
-          create: customFieldsValues?.map(
+          create: customFieldValuesToAdd?.map(
             ({ id, value }) =>
               id &&
               value && {
@@ -767,7 +772,7 @@ export async function updateAsset({
 }: UpdateAssetPayload) {
   try {
     const isChangingLocation = newLocationId !== currentLocationId;
-    const data = {
+    const data: Prisma.AssetUpdateInput = {
       title,
       description,
       valuation,
@@ -837,9 +842,17 @@ export async function updateAsset({
         }
       );
 
+      const customFieldValuesToAdd = customFieldsValuesFromForm.filter(
+        (cf) => !!cf.value
+      );
+
+      const customFieldValuesToRemove = customFieldsValuesFromForm.filter(
+        (cf) => !cf.value
+      );
+
       Object.assign(data, {
         customFields: {
-          upsert: customFieldsValuesFromForm?.map(({ id, value }) => ({
+          upsert: customFieldValuesToAdd?.map(({ id, value }) => ({
             where: {
               id:
                 currentCustomFieldsValues.find(
@@ -851,6 +864,9 @@ export async function updateAsset({
               value,
               customFieldId: id,
             },
+          })),
+          deleteMany: customFieldValuesToRemove.map((cf) => ({
+            customFieldId: cf.id,
           })),
         },
       });
@@ -969,6 +985,7 @@ export async function updateAssetMainImage({
       mainImageExpiration: oneDayFromNow(),
       userId,
     });
+    await deleteOtherImages({ userId, assetId, data: { path: image } });
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -1069,6 +1086,71 @@ export async function deleteNote({
   }
 }
 
+function extractMainImageName(path: string): string | null {
+  const match = path.match(/main-image-[\w-]+\.\w+/);
+  if (match) {
+    return match[0];
+  } else {
+    // Handle case without file extension
+    const matchNoExt = path.match(/main-image-[\w-]+/);
+    return matchNoExt ? matchNoExt[0] : null;
+  }
+}
+
+export async function deleteOtherImages({
+  userId,
+  assetId,
+  data,
+}: {
+  userId: string;
+  assetId: string;
+  data: { path: string };
+}): Promise<void> {
+  try {
+    if (!data?.path) {
+      // asset image stroage failure. do nothing
+      return;
+    }
+    const currentImage = extractMainImageName(data.path);
+    if (!currentImage) {
+      //do nothing
+      return;
+    }
+    const { data: deletedImagesData, error: deletedImagesError } =
+      await getSupabaseAdmin()
+        .storage.from("assets")
+        .list(`${userId}/${assetId}`);
+
+    if (deletedImagesError) {
+      throw new Error(`Error fetching images: ${deletedImagesError.message}`);
+    }
+
+    // Extract the image names and filter out the one to keep
+    const imagesToDelete = (
+      deletedImagesData?.map((image) => image.name) || []
+    ).filter((image) => image !== currentImage);
+
+    // Delete the images
+    await Promise.all(
+      imagesToDelete.map((image) =>
+        getSupabaseAdmin()
+          .storage.from("assets")
+          .remove([`${userId}/${assetId}/${image}`])
+      )
+    );
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        title: "Oops, deletion of other asset images failed",
+        message: "Something went wrong while deleting other asset images",
+        additionalData: { assetId, userId },
+        label,
+      })
+    );
+  }
+}
+
 async function uploadDuplicateAssetMainImage(
   mainImageUrl: string,
   assetId: string,
@@ -1094,8 +1176,8 @@ async function uploadDuplicateAssetMainImage(
     if (error) {
       throw error;
     }
-
     /** Getting the signed url from supabase to we can view image  */
+    await deleteOtherImages({ userId, assetId, data });
     return await createSignedUrl({ filename: data.path });
   } catch (cause) {
     throw new ShelfError({
@@ -1108,6 +1190,29 @@ async function uploadDuplicateAssetMainImage(
   }
 }
 
+export function createCustomFieldsPayloadFromAsset(
+  asset: Prisma.AssetGetPayload<{
+    include: {
+      custody: { include: { custodian: true } };
+      tags: true;
+      customFields: true;
+    };
+  }>
+) {
+  if (!asset?.customFields || asset?.customFields?.length === 0) {
+    return {};
+  }
+
+  return (
+    asset.customFields?.reduce(
+      (obj, { customFieldId, value }) => {
+        const rawValue = (value as { raw: string })?.raw ?? value ?? "";
+        return { ...obj, [`cf-${customFieldId}`]: rawValue };
+      },
+      {} as Record<string, any>
+    ) || {}
+  );
+}
 export async function duplicateAsset({
   asset,
   userId,
@@ -1115,7 +1220,11 @@ export async function duplicateAsset({
   organizationId,
 }: {
   asset: Prisma.AssetGetPayload<{
-    include: { custody: { include: { custodian: true } }; tags: true };
+    include: {
+      custody: { include: { custodian: true } };
+      tags: true;
+      customFields: true;
+    };
   }>;
   userId: string;
   amountOfDuplicates: number;
@@ -1124,18 +1233,36 @@ export async function duplicateAsset({
   try {
     const duplicatedAssets: Awaited<ReturnType<typeof createAsset>>[] = [];
 
+    //irrespective category it has to copy all the custom fields;
+    const customFields = await getActiveCustomFields({
+      organizationId,
+    });
+
+    const payload = {
+      title: `${asset.title}`,
+      organizationId,
+      description: asset.description,
+      userId,
+      categoryId: asset.categoryId,
+      locationId: asset.locationId ?? undefined,
+      tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
+      valuation: asset.valuation,
+    };
+
+    const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
+
+    const extractedCustomFieldValues = extractCustomFieldValuesFromPayload({
+      payload: { ...payload, ...customFieldValues },
+      customFieldDef: customFields,
+      isDuplicate: true,
+    });
     for (const i of [...Array(amountOfDuplicates)].keys()) {
       const duplicatedAsset = await createAsset({
+        ...payload,
         title: `${asset.title} (copy ${
           amountOfDuplicates > 1 ? i : ""
         } ${Date.now()})`,
-        organizationId,
-        description: asset.description,
-        userId,
-        categoryId: asset.categoryId,
-        locationId: asset.locationId ?? undefined,
-        tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
-        valuation: asset.valuation,
+        customFieldsValues: extractedCustomFieldValues,
       });
 
       if (asset.mainImage) {
@@ -1286,6 +1413,8 @@ export async function getPaginatedAndFilterableAssets({
   const {
     page,
     perPageParam,
+    orderBy,
+    orderDirection,
     search,
     categoriesIds,
     tagsIds,
@@ -1355,6 +1484,8 @@ export async function getPaginatedAndFilterableAssets({
       organizationId,
       page,
       perPage,
+      orderBy,
+      orderDirection,
       search,
       categoriesIds,
       tagsIds,
@@ -1948,7 +2079,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
     if (checkedOutAssetsIds.length > 0) {
       /** We query again the assets that are checked-out so we can get the user via the booking*/
 
-      const assetsWithUsers = await db.asset.findMany({
+      const assetsWithCustodians = await db.asset.findMany({
         where: {
           id: {
             in: checkedOutAssetsIds,
@@ -1964,6 +2095,7 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
             },
             select: {
               id: true,
+              custodianTeamMember: true,
               custodianUser: {
                 select: {
                   firstName: true,
@@ -1979,34 +2111,60 @@ export async function updateAssetsWithBookingCustodians<T extends Asset>(
       /**
        * We take the first booking of the array and extract the user from it and add it to the asset
        */
-
       assets = assets.map((a) => {
-        const assetWithUser = assetsWithUsers.find((awu) => awu.id === a.id);
+        const assetWithUser = assetsWithCustodians.find(
+          (awu) => awu.id === a.id
+        );
         const booking = assetWithUser?.bookings[0];
-        const custodian = booking?.custodianUser;
+        const custodianUser = booking?.custodianUser;
+        const custodianTeamMember = booking?.custodianTeamMember;
 
         if (checkedOutAssetsIds.includes(a.id)) {
-          return {
-            ...a,
-            custody: custodian
-              ? {
-                  custodian: {
-                    name: `${custodian?.firstName || ""} ${
-                      custodian?.lastName || ""
-                    }`, // Concatenate firstName and lastName to form the name property with default values
-                    user: {
-                      profilePicture: custodian?.profilePicture || null,
-                    },
+          /** If there is a custodian user, use its data to display the name */
+          if (custodianUser) {
+            return {
+              ...a,
+              custody: {
+                custodian: {
+                  name: `${custodianUser?.firstName || ""} ${
+                    custodianUser?.lastName || ""
+                  }`, // Concatenate firstName and lastName to form the name property with default values
+                  user: {
+                    firstName: custodianUser?.firstName || "",
+                    lastName: custodianUser?.lastName || "",
+                    profilePicture: custodianUser?.profilePicture || null,
                   },
-                }
-              : null,
-          };
+                },
+              },
+            };
+          }
+
+          /** If there is a custodian teamMember, use its name */
+          if (custodianTeamMember) {
+            return {
+              ...a,
+              custody: {
+                custodian: {
+                  name: custodianTeamMember.name,
+                },
+              },
+            };
+          }
+
+          /** This should not happen as there shouldn't be a case when asset is CHECKED_OUT but has no custodian */
+          Logger.error(
+            new ShelfError({
+              cause: null,
+              message: "Couldn't find custodian for asset",
+              additionalData: { asset: a },
+              label,
+            })
+          );
         }
 
         return a;
       });
     }
-
     return assets;
   } catch (cause) {
     throw new ShelfError({

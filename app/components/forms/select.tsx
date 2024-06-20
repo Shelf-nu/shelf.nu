@@ -17,7 +17,7 @@ const SelectTrigger = React.forwardRef<
     <SelectPrimitive.Trigger
       ref={ref}
       className={tw(
-        "select-trigger flex w-full items-center justify-between rounded border border-gray-300 bg-white px-3 py-2 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2  disabled:opacity-50 ",
+        "select-trigger flex w-full items-center justify-between rounded border border-gray-300 bg-white px-3 py-2 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50 ",
         className
       )}
       {...props}
@@ -40,7 +40,7 @@ const SelectContent = React.forwardRef<
           ref?.addEventListener("touchend", (e) => e.preventDefault())
         }
         className={tw(
-          " relative z-50 overflow-hidden rounded border border-gray-300 bg-white  p-3  shadow-md animate-in fade-in-80",
+          " relative z-50 overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",
           className
         )}
         {...props}

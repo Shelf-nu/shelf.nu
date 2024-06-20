@@ -1,25 +1,37 @@
-import { useMemo } from "react";
-
+import React, { useMemo } from "react";
+import type { Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { useBookingStatus } from "~/hooks/use-booking-status";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import { groupBy } from "~/utils/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
+import KitRowActionsDropdown from "./kit-row-actions-dropdown";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
-import { List } from "../list";
+import { EmptyState } from "../list/empty-state";
+import { ListHeader } from "../list/list-header";
+import { ListItem, type ListItemData } from "../list/list-item";
+import { Pagination } from "../list/pagination";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import { ControlledActionButton } from "../shared/controlled-action-button";
 import TextualDivider from "../shared/textual-divider";
-import { Td, Th } from "../table";
+import { Table, Td, Th } from "../table";
 
 export function BookingAssetsColumn() {
-  const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
+  const { booking, items, totalItems } = useLoaderData<{
+    booking: BookingWithCustodians;
+    items: ListItemData[];
+    totalItems: number;
+  }>();
+  const hasItems = items?.length > 0;
   const isSelfService = useUserIsSelfService();
+  const { isDraft, isReserved, isCompleted, isArchived } =
+    useBookingStatusHelpers(booking);
 
   const manageAssetsUrl = useMemo(
     () =>
@@ -34,18 +46,20 @@ export function BookingAssetsColumn() {
     [booking]
   );
 
-  const isCompleted = useMemo(
-    () => booking.status === BookingStatus.COMPLETE,
-    [booking.status]
-  );
-  const isArchived = useMemo(
-    () => booking.status === BookingStatus.ARCHIVED,
-    [booking.status]
-  );
-
   // Self service can only manage assets for bookings that are DRAFT
   const canManageAssetsAsSelfService =
     isSelfService && booking.status !== BookingStatus.DRAFT;
+
+  const { assetsWithoutKits, groupedAssetsWithKits } = useMemo(
+    () => ({
+      assetsWithoutKits: items.filter((item) => !item.kitId),
+      groupedAssetsWithKits: groupBy(
+        items.filter((item) => !!item.kitId),
+        (item) => item.kitId
+      ),
+    }),
+    [items]
+  );
 
   return (
     <div className="flex-1">
@@ -54,10 +68,10 @@ export function BookingAssetsColumn() {
         <div className="mb-3 flex gap-4 lg:hidden"></div>
         <div className="flex flex-col">
           {/* THis is a fake table header */}
-          <div className="-mx-4 flex justify-between border border-b-0 bg-white p-4 text-left font-normal text-gray-600 md:mx-0 md:rounded md:px-6">
+          <div className="-mx-4 flex justify-between border border-b-0 bg-white p-4 text-left font-normal text-gray-600 md:mx-0 md:rounded-t md:px-6">
             <div>
               <div className=" text-md font-semibold text-gray-900">Assets</div>
-              <div>{booking.assets.length} items</div>
+              <div>{totalItems} items</div>
             </div>
             <ControlledActionButton
               canUseFeature={
@@ -84,28 +98,85 @@ export function BookingAssetsColumn() {
               skipCta={true}
             />
           </div>
-          <List
-            ItemComponent={ListAssetContent}
-            hideFirstHeaderColumn={true}
-            headerChildren={
+
+          <div className="overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">
+            {!hasItems ? (
+              <EmptyState
+                className="py-10"
+                customContent={{
+                  title: "Start by defining a booking period",
+                  text: "Assets added to your booking will show up here. You must select a Start and End date and Save your booking in order to be able to add assets.",
+                  newButtonRoute: manageAssetsUrl,
+                  newButtonContent: "Manage assets",
+                  buttonProps: {
+                    disabled: !booking.from || !booking.to,
+                  },
+                }}
+              />
+            ) : (
               <>
-                <Th>Name</Th>
-                <Th> </Th>
-                <Th>Category</Th>
-                <Th> </Th>
+                <Table>
+                  <ListHeader hideFirstColumn>
+                    <Th>Name</Th>
+                    <Th> </Th>
+                    <Th>Category</Th>
+                    <Th> </Th>
+                  </ListHeader>
+                  <tbody>
+                    {/* List all assets without kit at once */}
+                    {assetsWithoutKits.map((asset) => (
+                      <ListItem key={asset.id} item={asset}>
+                        <ListAssetContent item={asset as AssetWithBooking} />
+                      </ListItem>
+                    ))}
+
+                    {/* List all the assets which are part of a kit */}
+                    {Object.values(groupedAssetsWithKits).map((assets) => {
+                      const kit = assets[0].kit as Kit;
+
+                      return (
+                        <React.Fragment key={kit.id}>
+                          <ListItem item={kit} className="bg-gray-50">
+                            <Td className="w-full">
+                              <Button
+                                to={`/kits/${kit.id}`}
+                                variant="link"
+                                className="text-gray-900 hover:text-gray-700"
+                              >
+                                {kit.name}
+                              </Button>
+
+                              <p className="text-sm text-gray-600">
+                                {assets.length} assets
+                              </p>
+                            </Td>
+
+                            <Td> </Td>
+                            <Td> </Td>
+
+                            <Td className="pr-4 text-right">
+                              {(!isSelfService && isDraft) || isReserved ? (
+                                <KitRowActionsDropdown kit={kit} />
+                              ) : null}
+                            </Td>
+                          </ListItem>
+
+                          {assets.map((asset) => (
+                            <ListItem key={asset.id} item={asset}>
+                              <ListAssetContent
+                                item={asset as AssetWithBooking}
+                              />
+                            </ListItem>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </Table>
+                <Pagination className="border-b" />
               </>
-            }
-            customEmptyStateContent={{
-              title: "Start by defining a booking period",
-              text: "Assets added to your booking will show up here. You must select a Start and End date and Save your booking in order to be able to add assets.",
-              newButtonRoute: manageAssetsUrl,
-              newButtonContent: "Manage assets",
-              buttonProps: {
-                disabled: !booking.from || !booking.to,
-              },
-            }}
-            className="md:rounded-t-none"
-          />
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -116,8 +187,8 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { category } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const isSelfService = useUserIsSelfService();
-  const { isOngoing, isCompleted, isArchived, isOverdue } =
-    useBookingStatus(booking);
+  const { isOngoing, isCompleted, isArchived, isOverdue, isReserved } =
+    useBookingStatusHelpers(booking);
 
   /** Weather the asset is checked out in a booking different than the current one */
   const isCheckedOut = useMemo(
@@ -127,6 +198,8 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
       false,
     [item.status, item.bookings, booking.id]
   );
+
+  const isPartOfKit = !!item.kitId;
 
   return (
     <>
@@ -181,7 +254,8 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
       </Td>
       <Td className="pr-4 text-right">
         {/* Self Service can only remove assets if the booking is not started already */}
-        {isSelfService && (isOngoing || isOverdue) ? null : (
+        {(isSelfService && (isOngoing || isOverdue || isReserved)) ||
+        isPartOfKit ? null : (
           <AssetRowActionsDropdown asset={item} />
         )}
       </Td>

@@ -17,7 +17,7 @@ import { getClientHint, getHints } from "~/utils/client-hints";
 import { setCookie } from "~/utils/cookies.server";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -52,9 +52,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         where: {
           deletedAt: null,
           organizationId,
-          userId: {
-            not: null,
-          },
         },
         include: {
           user: true,
@@ -90,11 +87,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    const selfServiceUser = isSelfService
+      ? teamMembers.find((member) => member.userId === authSession.userId)
+      : undefined;
+
+    if (isSelfService && !selfServiceUser) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Seems like something is wrong with your user. Please contact support to get this resolved. Make sure to include the trace id seen below.",
+        label: "Booking",
+      });
+    }
+
     return json(
       data({
         showModal: true,
         isSelfService,
-        selfServiceId: authSession.userId,
+        selfServiceUser,
         teamMembers,
       }),
       {
@@ -123,9 +133,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const formData = await request.formData();
-    const payload = parseData(formData, NewBookingFormSchema(false, true), {
-      additionalData: { userId, organizationId },
-    });
+
+    const payload = parseData(
+      formData,
+      NewBookingFormSchema(false, true, getHints(request)),
+      {
+        additionalData: { userId, organizationId },
+      }
+    );
 
     const { name, custodian } = payload;
     const hints = getHints(request);
@@ -139,13 +154,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
         zone: hints.timeZone,
       }
     ).toJSDate();
+
     const to = DateTime.fromFormat(formData.get("endDate")!.toString()!, fmt, {
       zone: hints.timeZone,
     }).toJSDate();
 
     const booking = await upsertBooking(
       {
-        custodianUserId: custodian,
+        custodianUserId: custodian?.userId,
+        custodianTeamMemberId: custodian?.id,
         organizationId,
         name,
         from,
@@ -188,8 +205,9 @@ export const handle = {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
-  const { isSelfService, selfServiceId } = useLoaderData<typeof loader>();
+  const { isSelfService, selfServiceUser } = useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
+
   return (
     <div className="booking-inner-wrapper">
       <header className="mb-5">
@@ -204,7 +222,15 @@ export default function NewBooking() {
         <BookingForm
           startDate={startDate}
           endDate={endDate}
-          custodianUserId={isSelfService ? selfServiceId : undefined}
+          custodianUserId={
+            isSelfService
+              ? JSON.stringify({
+                  id: selfServiceUser?.id,
+                  name: selfServiceUser?.name,
+                  userId: selfServiceUser?.userId,
+                })
+              : undefined
+          }
         />
       </div>
     </div>

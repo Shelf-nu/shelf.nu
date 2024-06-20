@@ -105,8 +105,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { name, helpText, active, required, options, categories } = payload;
 
+    const field = await getCustomField({ organizationId, id });
+
     /** If they are activating a field, we have to make sure that they are not already at the limit */
-    if (active) {
+    const isActivatingField = !field.active && active !== field.active;
+    if (isActivatingField) {
       /** Get the tier limit and check if they can export */
       const tierLimit = await getOrganizationTierLimit({
         organizationId,
@@ -140,6 +143,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           },
           label: "Custom fields",
           status: 403,
+          shouldBeCaptured: false,
         });
       }
     }

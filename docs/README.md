@@ -9,6 +9,7 @@ Here you can find the documentation for shelf.
 - [Response and Error handling](./handling-errors.md) - Guide on how to handle responses and errors in actions/loaders and services
 - [Shelf Config file](./shelf-config.md) - Shelf configuration file
 - [Asset Search](./asset-search.md) - Asset search via Prisma Full text search
+- [Single sign-on](./sso/README.md) - Single sign-on powered by Supabase
 - [Docker](./docker.md) - Run shelf via docker
 - [Hooks](./hooks.md) - Shelf's utility hooks
 - [Contributing](../CONTRIBUTING.md) - Contributing to Shelf.

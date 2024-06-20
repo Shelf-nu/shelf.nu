@@ -1,6 +1,6 @@
+import { Currency } from "@prisma/client";
 import {
   json,
-  redirect,
   unstable_createMemoryUploadHandler,
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
@@ -14,13 +14,14 @@ import { invariant } from "framer-motion";
 import { useAtomValue } from "jotai";
 import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
+
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import {
-  NewWorkspaceFormSchema,
-  WorkspaceForm,
-} from "~/components/workspace/form";
 
+import {
+  EditWorkspaceFormSchema,
+  WorkspaceEditForm,
+} from "~/components/workspace/edit-form";
 import { db } from "~/database/db.server";
 import { updateOrganization } from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -39,7 +40,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { MAX_SIZE } from "./settings.workspace.new";
+import { MAX_SIZE } from "./account-details.workspace.new";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -71,6 +72,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             },
           },
         },
+        include: {
+          ssoDetails: true,
+        },
       })
       .catch((cause) => {
         throw new ShelfError({
@@ -93,6 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       data({
         organization,
         header,
+        curriences: Object.keys(Currency),
       })
     );
   } catch (cause) {
@@ -130,14 +135,49 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    /** Because you can access this view even when you have a different currentOrganization than the one you are editing
+     * We need to query the org using the orgId from the params
+     */
+    const organization = await db.organization
+      .findUniqueOrThrow({
+        where: {
+          id,
+          owner: {
+            is: {
+              id: authSession.userId,
+            },
+          },
+        },
+        include: {
+          ssoDetails: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Your are not the owner of this organization.",
+          additionalData: {
+            userId,
+            id,
+          },
+          label: "Organization",
+          status: 403,
+        });
+      });
+
+    const { enabledSso } = organization;
+
     const clonedRequest = request.clone();
 
     const formData = await clonedRequest.formData();
-    const payload = parseData(formData, NewWorkspaceFormSchema, {
+
+    const schema = EditWorkspaceFormSchema(enabledSso);
+
+    const payload = parseData(formData, schema, {
       additionalData: { userId, id },
     });
 
-    const { name, currency } = payload;
+    const { name, currency, selfServiceGroupId, adminGroupId } = payload;
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
@@ -153,6 +193,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       image: file || null,
       userId: authSession.userId,
       currency,
+      ...(enabledSso && {
+        ssoDetails: {
+          selfServiceGroupId: selfServiceGroupId as string, // We can safely assume this is a string because when ssoDetails are enabled, we require the user to provide a value
+          adminGroupId: adminGroupId as string,
+        },
+      }),
     });
 
     sendNotification({
@@ -162,7 +208,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    return redirect("/settings/workspace");
+    return json({ success: true });
+    // return redirect("/account-details/workspace");
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     return json(error(reason), { status: reason.status });
@@ -173,7 +220,6 @@ export default function WorkspaceEditPage() {
   const name = useAtomValue(dynamicTitleAtom);
   const hasName = name !== "Untitled workspace";
   const { organization } = useLoaderData<typeof loader>();
-
   return (
     <>
       <Header
@@ -182,7 +228,7 @@ export default function WorkspaceEditPage() {
         classNames="-mt-5"
       />
       <div className=" items-top flex justify-between">
-        <WorkspaceForm
+        <WorkspaceEditForm
           name={organization.name || name}
           currency={organization.currency}
         />

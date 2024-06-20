@@ -13,9 +13,11 @@ const label: ErrorLabel = "Team Member";
 export async function createTeamMember({
   name,
   organizationId,
+  userId,
 }: {
   name: TeamMember["name"];
   organizationId: Organization["id"];
+  userId?: TeamMember["userId"];
 }) {
   try {
     return await db.teamMember.create({
@@ -26,6 +28,13 @@ export async function createTeamMember({
             id: organizationId,
           },
         },
+        user: userId
+          ? {
+              connect: {
+                id: userId,
+              },
+            }
+          : undefined,
       },
     });
   } catch (cause) {
@@ -214,6 +223,15 @@ export async function getTeamMemberForCustodianFilter({
           organizationId,
           id: { notIn: selectedTeamMembers },
           deletedAt: null,
+        },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
         },
         take: getAll ? undefined : 12,
       }),

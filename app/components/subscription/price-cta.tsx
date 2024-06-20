@@ -1,7 +1,8 @@
-import { Form, useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/settings.subscription";
+import { useLoaderData } from "@remix-run/react";
+import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { CustomerPortalForm } from "./customer-portal-form";
 import type { Price } from "./prices";
+import { Form } from "../custom-form";
 import { Button } from "../shared/button";
 
 export const PriceCta = ({

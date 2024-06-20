@@ -3,17 +3,21 @@ import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import type { ClientHint } from "~/modules/booking/types";
+import { getDateTimeFormatFromHints } from "./client-hints";
 
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
  * This was greatly inspired and done with the help of @rphlmr (https://github.com/rphlmr)
  */
 const getSchema = ({
+  id,
   params,
   field_name,
   required = false,
   options,
 }: {
+  id: string;
   params: {
     invalid_type_error?: string | undefined;
     required_error?: string | undefined;
@@ -32,7 +36,11 @@ const getSchema = ({
       })
     : z.string(params).optional();
 
-  const option = required ? z.string(params) : z.string(params).optional();
+  const option = required
+    ? z
+        .string(params)
+        .min(1, `${field_name ? field_name : "This field"} is required`)
+    : z.string(params).optional();
 
   return {
     text,
@@ -47,7 +55,7 @@ const getSchema = ({
       if (v && !options?.includes(v)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["option"],
+          path: [`cf-${id}`],
           message: `${v} is not a valid option`,
         });
       }
@@ -71,6 +79,7 @@ function buildSchema(fields: CustomFieldZodSchema[]) {
   fields.forEach((field) => {
     let fieldSchema = z.object({
       [`cf-${field.id}`]: getSchema({
+        id: field.id,
         params: {
           description: field.helpText,
           required_error: field.name
@@ -107,30 +116,40 @@ export const mergedSchema = <T extends ZodRawShape>({
 export const extractCustomFieldValuesFromPayload = ({
   payload,
   customFieldDef,
+  isDuplicate,
 }: {
   payload: { [key: string]: any };
   customFieldDef: CustomField[];
+  isDuplicate?: boolean;
 }): ShelfAssetCustomFieldValueType[] => {
   /** Get the custom fields keys and values */
-  const customFieldsKeys = Object.keys(payload).filter(
-    (key) => key.startsWith("cf-") && payload[key] != ""
+  const customFieldsKeys = Object.keys(payload).filter((key) =>
+    key.startsWith("cf-")
   );
 
-  return customFieldsKeys.map((key) => {
-    const id = key.split("-")[1];
-    const value = buildCustomFieldValue(
-      { raw: payload[key] },
-      customFieldDef.find((v) => v.id === id)!
-    );
-    return { id, value } as ShelfAssetCustomFieldValueType;
-  });
+  return customFieldsKeys
+    .map((key) => {
+      const id = key.split("-")[1];
+      const fieldDef = customFieldDef.find((v) => v.id === id)!;
+      //making sure that duplicate creation is handled.
+      if (!fieldDef && isDuplicate) {
+        return null;
+      }
+      const value = buildCustomFieldValue({ raw: payload[key] }, fieldDef!);
+      return { id, value } as ShelfAssetCustomFieldValueType;
+    })
+    .filter((v) => v !== null) as ShelfAssetCustomFieldValueType[];
 };
 
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomField
-): ShelfAssetCustomFieldValueType["value"] => {
+): ShelfAssetCustomFieldValueType["value"] | undefined => {
   const { raw } = value;
+
+  if (!raw) {
+    return undefined;
+  }
 
   switch (def.type) {
     case "BOOLEAN":
@@ -147,10 +166,13 @@ export const buildCustomFieldValue = (
 };
 
 export const getCustomFieldDisplayValue = (
-  value: ShelfAssetCustomFieldValueType["value"]
+  value: ShelfAssetCustomFieldValueType["value"],
+  hints?: ClientHint
 ): string => {
   if (value.valueDate) {
-    return format(new Date(value.valueDate), "PPP");
+    return hints
+      ? getDateTimeFormatFromHints(hints).format(new Date(value.valueDate))
+      : format(new Date(value.valueDate), "PPP"); // Fallback to default date format
   }
   return String(value.raw);
 };

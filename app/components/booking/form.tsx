@@ -1,4 +1,4 @@
-import { Form, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { useAtom } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
@@ -9,12 +9,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "~/components/shared/tooltip";
-import type { useBookingStatus } from "~/hooks/use-booking-status";
+import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { ActionsDropdown } from "./actions-dropdown";
 import CustodianUserSelect from "../custody/custodian-user-select";
+import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
@@ -27,7 +29,8 @@ import { ControlledActionButton } from "../shared/controlled-action-button";
  */
 export const NewBookingFormSchema = (
   inputFieldIsDisabled = false,
-  isNewBooking = false
+  isNewBooking = false,
+  hints?: ReturnType<typeof getHints>
 ) =>
   z
     .object({
@@ -40,24 +43,46 @@ export const NewBookingFormSchema = (
         : z.string().min(2, "Name is required"),
       startDate: inputFieldIsDisabled
         ? z.coerce.date().optional()
-        : z.coerce.date().refine((data) => data > new Date(), {
-            message: "Start date must be in the future",
-          }),
+        : z.coerce.date().refine(
+            (data) => {
+              let now;
+              if (hints?.timeZone) {
+                now = new Date(
+                  new Date().toLocaleString("en-US", {
+                    timeZone: hints.timeZone,
+                  })
+                );
+              } else {
+                now = new Date();
+              }
+              return data > now;
+            },
+            {
+              message: "Start date must be in the future",
+            }
+          ),
       endDate: inputFieldIsDisabled
         ? z.coerce.date().optional()
         : z.coerce.date(),
-      custodian: inputFieldIsDisabled
-        ? z.string().optional()
-        : z.string().transform((val, ctx) => {
-            if (!val && val === "") {
-              ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Please select a custodian",
-              });
-              return z.NEVER;
-            }
-            return JSON.parse(val).userId;
-          }),
+      custodian: z
+        .string()
+        .transform((val, ctx) => {
+          if (!val && val === "") {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Please select a custodian",
+            });
+            return z.NEVER;
+          }
+          return JSON.parse(val);
+        })
+        .pipe(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            userId: z.string().optional().nullable(),
+          })
+        ),
     })
     .refine(
       (data) =>
@@ -69,13 +94,22 @@ export const NewBookingFormSchema = (
       }
     );
 
+type BookingFlags = {
+  hasAssets: boolean;
+  hasUnavailableAssets: boolean;
+  hasCheckedOutAssets: boolean;
+  hasAlreadyBookedAssets: boolean;
+  hasAssetsInCustody: boolean;
+};
+
 type BookingFormData = {
   id?: string;
   name?: string;
   startDate?: string;
   endDate?: string;
-  custodianUserId?: string; // This holds the ID of the user attached to custodian
-  bookingStatus?: ReturnType<typeof useBookingStatus>;
+  custodianUserId?: string; // This is a stringified value for custodianUser
+  bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
+  bookingFlags?: BookingFlags;
 };
 
 export function BookingForm({
@@ -85,6 +119,7 @@ export function BookingForm({
   endDate,
   custodianUserId,
   bookingStatus,
+  bookingFlags,
 }: BookingFormData) {
   const navigation = useNavigation();
 
@@ -153,19 +188,19 @@ export function BookingForm({
               <ControlledActionButton
                 canUseFeature={
                   !disabled &&
-                  bookingStatus?.hasAssets &&
-                  !bookingStatus?.hasUnavailableAssets &&
-                  !bookingStatus?.hasAlreadyBookedAssets
+                  !!bookingFlags?.hasAssets &&
+                  !bookingFlags?.hasAlreadyBookedAssets
                 }
                 buttonContent={{
                   title: "Reserve",
-                  message: bookingStatus?.hasUnavailableAssets
+                  message: bookingFlags?.hasUnavailableAssets
                     ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
-                    : bookingStatus?.hasAlreadyBookedAssets
+                    : bookingFlags?.hasAlreadyBookedAssets
                     ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
                     : "You need to add assets to your booking before you can reserve it",
                 }}
                 buttonProps={{
+                  disabled: disabled,
                   type: "submit",
                   role: "link",
                   name: "intent",
@@ -182,17 +217,18 @@ export function BookingForm({
               <ControlledActionButton
                 canUseFeature={
                   !disabled &&
-                  !bookingStatus?.hasUnavailableAssets &&
-                  !bookingStatus?.hasCheckedOutAssets &&
-                  !bookingStatus?.hasAssetsInCustody
+                  !bookingFlags?.hasUnavailableAssets &&
+                  !bookingFlags?.hasCheckedOutAssets &&
+                  !bookingFlags?.hasAssetsInCustody
                 }
                 buttonContent={{
                   title: "Check-out",
-                  message: bookingStatus?.hasAssetsInCustody
+                  message: bookingFlags?.hasAssetsInCustody
                     ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
                     : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
                 }}
                 buttonProps={{
+                  disabled: disabled,
                   type: "submit",
                   name: "intent",
                   value: "checkOut",
@@ -206,6 +242,7 @@ export function BookingForm({
             {(bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
             !isSelfService ? (
               <Button
+                disabled={disabled}
                 type="submit"
                 name="intent"
                 value="checkIn"

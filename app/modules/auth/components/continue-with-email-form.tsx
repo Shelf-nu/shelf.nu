@@ -29,9 +29,11 @@ export function ContinueWithEmailForm({ mode }: { mode: "login" | "signup" }) {
   const zo = useZorm("NewQuestionWizardScreen", SendOtpSchema);
 
   const isLoading = state === "submitting" || state === "loading";
+  const buttontext =
+    mode === "login" ? "Continue with OTP" : "Sign up with OTP";
   const buttonLabel = isLoading
     ? "Sending you a one time password..."
-    : "Continue with OTP";
+    : buttontext;
 
   return (
     <sendOTP.Form method="post" action="/send-otp" ref={zo.ref}>

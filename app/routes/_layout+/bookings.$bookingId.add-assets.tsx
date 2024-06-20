@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type Asset,
   type Booking,
@@ -12,10 +12,10 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
-  Form,
   useLoaderData,
+  useNavigate,
   useNavigation,
-  useSearchParams,
+  useSubmit,
 } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { z } from "zod";
@@ -24,6 +24,8 @@ import { AssetImage } from "~/components/assets/asset-image";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
 import styles from "~/components/booking/styles.css?url";
+import UnsavedChangesAlert from "~/components/booking/unsaved-changes-alert";
+import { Form } from "~/components/custom-form";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight } from "~/components/icons/library";
@@ -31,8 +33,15 @@ import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
 import { Td } from "~/components/table";
 
 import {
@@ -41,6 +50,7 @@ import {
 } from "~/modules/asset/service.server";
 import {
   getBooking,
+  getKitIdsByAssets,
   removeAssets,
   upsertBooking,
 } from "~/modules/booking/service.server";
@@ -101,6 +111,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     const booking = await getBooking({ id, organizationId });
+    const bookingKitIds = getKitIdsByAssets(booking.assets);
 
     return json(
       data({
@@ -129,6 +140,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalTags,
         locations,
         totalLocations,
+        bookingKitIds,
       })
     );
   } catch (cause) {
@@ -155,11 +167,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // assetIds: z.array(z.string()).optional().default([]),
     // removedAssetIds: z.array(z.string()).optional().default([]),
 
-    const { assetIds, removedAssetIds } = parseData(
+    const { assetIds, removedAssetIds, redirectTo } = parseData(
       await request.formData(),
       z.object({
         assetIds: z.array(z.string()).optional().default([]),
         removedAssetIds: z.array(z.string()).optional().default([]),
+        redirectTo: z.string().optional().nullable(),
       }),
       {
         additionalData: { userId, bookingId },
@@ -200,6 +213,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
+    /**
+     * If redirectTo is in form that means user has submitted the form through alert,
+     * so we have to redirect to add-kits url
+     */
+    if (redirectTo) {
+      return redirect(redirectTo);
+    }
+
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -208,10 +229,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AddAssetsToNewBooking() {
-  const { booking, header } = useLoaderData<typeof loader>();
-  const [_searchParams] = useSearchParams();
+  const [isAlertOpen, setIsAlertOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const { booking, header, bookingKitIds } = useLoaderData<typeof loader>();
+  const navigate = useNavigate();
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
+  const submit = useSubmit();
 
   const bookingAssetsIds = useMemo(
     () => booking?.assets.map((a) => a.id) || [],
@@ -221,9 +246,25 @@ export default function AddAssetsToNewBooking() {
   const [selectedAssets, setSelectedAssets] = useAtom(
     bookingsSelectedAssetsAtom
   );
+
   const removedAssetIds = useMemo(
     () => bookingAssetsIds.filter((prevId) => !selectedAssets.includes(prevId)),
     [bookingAssetsIds, selectedAssets]
+  );
+
+  const hasUnsavedChanges = selectedAssets.length !== bookingAssetsIds.length;
+
+  const manageKitsUrl = useMemo(
+    () =>
+      `/bookings/${booking.id}/add-kits?${new URLSearchParams({
+        // We force the as String because we know that the booking.from and booking.to are strings and exist at this point.
+        // This button wouldnt be available at all if there is no booking.from and booking.to
+        bookingFrom: new Date(booking.from as string).toISOString(),
+        bookingTo: new Date(booking.to as string).toISOString(),
+        hideUnavailable: "true",
+        unhideAssetsBookigIds: booking.id,
+      })}`,
+    [booking]
   );
 
   /**
@@ -238,20 +279,51 @@ export default function AddAssetsToNewBooking() {
   }, [booking.id]);
 
   return (
-    <div className="flex h-full max-h-full flex-col ">
+    <Tabs
+      className="-mx-6 flex h-full max-h-full flex-col"
+      value="assets"
+      onValueChange={() => {
+        if (hasUnsavedChanges) {
+          setIsAlertOpen(true);
+          return;
+        }
+
+        navigate(manageKitsUrl);
+      }}
+    >
       <Header
         {...header}
         hideBreadcrumbs={true}
-        classNames="text-left  -mx-6 [&>div]:px-6 -mt-6"
-      />
-      <Filters
-        slots={{
-          "right-of-search": <AvailabilitySelect />,
-        }}
-        className="-mx-6 justify-between !border-t-0 border-b px-6 md:flex"
+        classNames="text-left [&>div]:px-6 -mt-6 mx-0"
       />
 
-      <div className="-mx-6 flex  justify-around gap-2 border-b p-3 lg:gap-4">
+      <div className="border-b px-6 py-2">
+        <TabsList className="w-full">
+          <TabsTrigger className="flex-1 gap-x-2" value="assets">
+            Assets{" "}
+            {selectedAssets.length > 0 ? (
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {selectedAssets.length}
+              </GrayBadge>
+            ) : null}
+          </TabsTrigger>
+          <TabsTrigger className="flex-1 gap-x-2" value="kits">
+            Kits (beta)
+            {bookingKitIds.length > 0 ? (
+              <GrayBadge className="size-[20px] border border-primary-200 bg-primary-50 text-[10px] leading-[10px] text-primary-700">
+                {bookingKitIds.length}
+              </GrayBadge>
+            ) : null}
+          </TabsTrigger>
+        </TabsList>
+      </div>
+
+      <Filters
+        slots={{ "right-of-search": <AvailabilitySelect /> }}
+        className="justify-between !border-t-0 border-b px-6 md:flex"
+      />
+
+      <div className="flex justify-around gap-2 border-b p-3 lg:gap-4">
         <DynamicDropdown
           trigger={
             <div className="flex h-6 cursor-pointer items-center gap-2">
@@ -301,30 +373,35 @@ export default function AddAssetsToNewBooking() {
         />
       </div>
 
-      {/* Body of the modal*/}
-      <div className="-mx-6 flex-1 overflow-y-auto px-5 md:px-0">
+      <TabsContent value="assets" asChild>
         <List
+          className="mx-0 mt-0 h-full border-0 "
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={(assetId) => {
+          navigate={(assetId, asset) => {
+            /** Only allow user to select if the asset is available */
+            if (!asset.availableToBook || !!asset.kitId) {
+              return;
+            }
+
             setSelectedAssets((selectedAssets) =>
               selectedAssets.includes(assetId)
                 ? selectedAssets.filter((id) => id !== assetId)
                 : [...selectedAssets, assetId]
             );
           }}
+          emptyStateClassName="py-10"
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",
             text: "What are you waiting for? Create your first asset now!",
             newButtonRoute: "/assets/new",
             newButtonContent: "New asset",
           }}
-          className="-mx-5 flex h-full flex-col justify-between border-0"
         />
-      </div>
+      </TabsContent>
 
       {/* Footer of the modal */}
-      <footer className="item-center -mx-6 flex justify-between border-t px-6 pt-3">
+      <footer className="item-center flex justify-between border-t px-6 pt-3">
         <div className="flex items-center">
           {selectedAssets.length} assets selected
         </div>
@@ -332,7 +409,7 @@ export default function AddAssetsToNewBooking() {
           <Button variant="secondary" to={".."}>
             Close
           </Button>
-          <Form method="post">
+          <Form method="post" ref={formRef}>
             {/* We create inputs for both the removed and selected assets, so we can compare and easily add/remove */}
             {/* These are the asset ids, coming from the server */}
             {removedAssetIds.map((assetId, i) => (
@@ -352,6 +429,9 @@ export default function AddAssetsToNewBooking() {
                 value={assetId}
               />
             ))}
+            {hasUnsavedChanges && isAlertOpen ? (
+              <input name="redirectTo" value={manageKitsUrl} type="hidden" />
+            ) : null}
             <Button
               type="submit"
               name="intent"
@@ -363,7 +443,19 @@ export default function AddAssetsToNewBooking() {
           </Form>
         </div>
       </footer>
-    </div>
+
+      <UnsavedChangesAlert
+        type="assets"
+        open={isAlertOpen}
+        onOpenChange={setIsAlertOpen}
+        onCancel={() => {
+          navigate(manageKitsUrl);
+        }}
+        onYes={() => {
+          submit(formRef.current);
+        }}
+      />
+    </Tabs>
   );
 }
 
@@ -371,11 +463,16 @@ export type AssetWithBooking = Asset & {
   bookings: Booking[];
   custody: Custody | null;
   category: Category;
+  kitId?: string | null;
 };
 
 const RowComponent = ({ item }: { item: AssetWithBooking }) => {
   const selectedAssets = useAtomValue(bookingsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
+
+  const isPartOfKit = !!item.kitId;
+  const isAddedThroughKit = isPartOfKit && checked;
+
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -403,13 +500,25 @@ const RowComponent = ({ item }: { item: AssetWithBooking }) => {
 
       <Td className="text-right">
         <AvailabilityLabel
+          isAddedThroughKit={isAddedThroughKit}
+          showKitStatus
           asset={item}
           isCheckedOut={item.status === "CHECKED_OUT"}
         />
       </Td>
 
       <Td>
-        <FakeCheckbox className="text-white" checked={checked} />
+        <FakeCheckbox
+          className={tw(
+            "text-white",
+            isPartOfKit ? "text-gray-100" : "",
+            checked ? "text-primary" : "",
+            isAddedThroughKit ? "text-gray-300" : ""
+          )}
+          fillColor={isPartOfKit ? "#F2F4F7" : undefined}
+          checked={checked}
+          aria-disabled={isPartOfKit}
+        />
       </Td>
     </>
   );

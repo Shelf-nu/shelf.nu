@@ -1,13 +1,14 @@
-import type { Organization, $Enums } from "@prisma/client";
-import { Currency } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import type { Organization, Currency } from "@prisma/client";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
+import type { loader } from "~/routes/_layout+/account-details.workspace.new";
 import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
 import {
@@ -30,9 +31,11 @@ export const NewWorkspaceFormSchema = z.object({
 interface Props {
   name?: Organization["name"];
   currency?: Organization["currency"];
+  children?: string | React.ReactNode;
 }
 
-export const WorkspaceForm = ({ name, currency }: Props) => {
+export const WorkspaceForm = ({ name, currency, children }: Props) => {
+  const { curriences } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const zo = useZorm("NewQuestionWizardScreen", NewWorkspaceFormSchema);
   const disabled = isFormProcessing(navigation.state);
@@ -93,7 +96,10 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
 
         <div>
           <label className="lg:hidden">Currency</label>
-          <FormRow rowLabel={"Currency"}>
+          <FormRow
+            rowLabel={"Currency"}
+            className={children ? "border-b-0" : ""}
+          >
             <Select
               defaultValue={currency || "USD"}
               disabled={disabled}
@@ -108,10 +114,10 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
                 align="start"
               >
                 <div className=" max-h-[320px] overflow-auto">
-                  {Object.keys(Currency).map((value) => (
+                  {curriences.map((value) => (
                     <SelectItem value={value} key={value}>
                       <span className="mr-4 text-[14px] text-gray-700">
-                        {Currency[value as $Enums.Currency]}
+                        {value}
                       </span>
                     </SelectItem>
                   ))}
@@ -120,7 +126,6 @@ export const WorkspaceForm = ({ name, currency }: Props) => {
             </Select>
           </FormRow>
         </div>
-
         <div className="text-right">
           <Button type="submit" disabled={disabled}>
             {disabled ? <Spinner /> : "Save"}

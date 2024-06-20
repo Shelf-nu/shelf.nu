@@ -1,4 +1,5 @@
 import { useLoaderData, useSubmit } from "@remix-run/react";
+import { Divider } from "@tremor/react";
 import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
@@ -7,11 +8,12 @@ import {
   DropdownMenuPortal,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import { useBookingStatus } from "~/hooks/use-booking-status";
+import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId";
 import { tw } from "~/utils/tw";
 import { DeleteBooking } from "./delete-booking";
+import { GenerateBookingPdf } from "./generate-booking-pdf";
 import { Button } from "../shared/button";
 
 interface Props {
@@ -21,7 +23,7 @@ interface Props {
 export const ActionsDropdown = ({ fullWidth }: Props) => {
   const { booking } = useLoaderData<typeof loader>();
   const { isCompleted, isOngoing, isReserved, isOverdue, isDraft } =
-    useBookingStatus(booking);
+    useBookingStatusHelpers(booking);
 
   const submit = useSubmit();
   const isSelfService = useUserIsSelfService();
@@ -45,7 +47,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
       <DropdownMenuPortal>
         <DropdownMenuContent
           align="end"
-          className="order w-[180px] rounded-md bg-white p-1.5 text-right "
+          className="order w-[220px] rounded-md bg-white p-1.5 text-right "
         >
           {isOngoing || isReserved || isOverdue ? (
             <DropdownMenuItem asChild>
@@ -104,6 +106,11 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           {(isSelfService && isDraft) || !isSelfService ? (
             <DeleteBooking booking={booking} />
           ) : null}
+          <Divider className="my-2" />
+          <GenerateBookingPdf
+            booking={booking}
+            timeStamp={new Date().getTime()}
+          />
         </DropdownMenuContent>
       </DropdownMenuPortal>
     </DropdownMenu>

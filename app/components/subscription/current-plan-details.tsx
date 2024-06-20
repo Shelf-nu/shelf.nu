@@ -1,5 +1,5 @@
 import { useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/settings.subscription";
+import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { Button } from "../shared/button";
 
 export const CurrentPlanDetails = () => {
