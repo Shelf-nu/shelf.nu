@@ -38,7 +38,7 @@ import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { getDateTimeFormat, getLocale } from "~/utils/client-hints";
+import { getClientHint, getDateTimeFormat } from "~/utils/client-hints";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -75,7 +75,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const locale = getLocale(request);
+    const { locale, timeZone } = getClientHint(request);
 
     const asset = await getAsset({
       id,
@@ -172,6 +172,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         lastScan,
         header,
         locale,
+        timeZone,
         qrObj,
       })
     );
@@ -229,8 +230,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AssetOverview() {
-  const { asset, locale, qrObj } = useLoaderData<typeof loader>();
-
+  const { asset, locale, timeZone, qrObj } = useLoaderData<typeof loader>();
   const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
 
   const customFieldsValues =
@@ -358,7 +358,8 @@ export default function AssetOverview() {
                 <ul className="item-information">
                   {customFieldsValues.map((field, _index) => {
                     const customFieldDisplayValue = getCustomFieldDisplayValue(
-                      field.value as unknown as ShelfAssetCustomFieldValueType["value"]
+                      field.value as unknown as ShelfAssetCustomFieldValueType["value"],
+                      { locale, timeZone }
                     );
                     return (
                       <li

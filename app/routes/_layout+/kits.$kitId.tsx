@@ -316,7 +316,17 @@ export default function KitDetails() {
       )
     : kit.status === "AVAILABLE";
 
-  const canManageAssets = kitIsAvailable && !isSelfService;
+  const kitBookings =
+    kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
+
+  const canManageAssets =
+    kitIsAvailable &&
+    !isSelfService &&
+    !kitBookings.some((b) =>
+      (
+        [BookingStatus.ONGOING, BookingStatus.OVERDUE] as BookingStatus[]
+      ).includes(b.status)
+    );
 
   return (
     <>

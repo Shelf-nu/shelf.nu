@@ -9,6 +9,8 @@ export function initSentry() {
   if (SENTRY_DSN) {
     Sentry.init({
       dsn: SENTRY_DSN,
+      // auto instrument Remix with OpenTelemetry
+      autoInstrumentRemix: true,
       // Performance Monitoring
       tracesSampleRate: 0.1,
       beforeBreadcrumb(breadcrumb) {

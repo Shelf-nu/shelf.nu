@@ -60,11 +60,13 @@ export function handleError(
   error: unknown,
   { request }: LoaderFunctionArgs | ActionFunctionArgs
 ) {
+  const isRemixV2 = true;
   if (SENTRY_DSN) {
     void Sentry.captureRemixServerException(
       error,
       "unhandled.remix.server",
-      request
+      request,
+      isRemixV2
     );
   }
 }

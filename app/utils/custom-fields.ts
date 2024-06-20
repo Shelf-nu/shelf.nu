@@ -3,6 +3,8 @@ import { format } from "date-fns";
 import type { ZodRawShape } from "zod";
 import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
+import type { ClientHint } from "~/modules/booking/types";
+import { getDateTimeFormatFromHints } from "./client-hints";
 
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
@@ -164,10 +166,13 @@ export const buildCustomFieldValue = (
 };
 
 export const getCustomFieldDisplayValue = (
-  value: ShelfAssetCustomFieldValueType["value"]
+  value: ShelfAssetCustomFieldValueType["value"],
+  hints?: ClientHint
 ): string => {
   if (value.valueDate) {
-    return format(new Date(value.valueDate), "PPP");
+    return hints
+      ? getDateTimeFormatFromHints(hints).format(new Date(value.valueDate))
+      : format(new Date(value.valueDate), "PPP"); // Fallback to default date format
   }
   return String(value.raw);
 };

@@ -17,13 +17,22 @@ export const ListItem = ({
   className?: string;
 }) => (
   <tr
-    key={item.id}
     onClick={navigate ? () => navigate(item.id, item) : undefined}
     className={tw(
       "hover:bg-gray-50",
       navigate ? "cursor-pointer" : "",
       className
     )}
+    /**
+     * Chromium based browsers have a bug since 2014 that is related to
+     * hover effects on table rows while scrolling.
+     *  We add the following styles to fix the issue.
+     */
+    style={{
+      transform: "translateZ(0)",
+      willChange: "transform",
+      backgroundAttachment: "initial",
+    }}
   >
     {children}
   </tr>
