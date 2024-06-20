@@ -41,9 +41,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
         select: {
           firstName: true,
-          tier: {
-            include: { tierLimit: true },
-          },
+          tier: true,
           userOrganizations: {
             include: {
               organization: {

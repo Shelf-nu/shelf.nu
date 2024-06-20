@@ -41,7 +41,7 @@ export async function getUserTierLimit(id: User["id"]) {
     }
 
     /**
-     * If the tier is custom, we fetch the custom tier limit
+     * If the tier is custom, we fetch the custom tier limit and return it
      */
     if (tier.id === "custom") {
       return (await db.customTierLimit
@@ -209,7 +209,7 @@ export async function assertUserCanInviteUsersToWorkspace({
   /** Get the tier limit and check if they can export */
   // const tierLimit = await getUserTierLimit(userId);
   const org = await db.organization
-    .findUnique({
+    .findUniqueOrThrow({
       where: { id: organizationId },
       select: {
         type: true,
@@ -223,15 +223,6 @@ export async function assertUserCanInviteUsersToWorkspace({
         label,
       });
     });
-
-  if (!org) {
-    throw new ShelfError({
-      cause: null,
-      message: "Organization not found",
-      additionalData: { organizationId },
-      label,
-    });
-  }
 
   if (isPersonalOrg(org)) {
     throw new ShelfError({

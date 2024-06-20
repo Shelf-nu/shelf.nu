@@ -62,11 +62,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               roles: true,
             },
           },
-          tier: {
-            select: {
-              tierLimit: true,
-            },
-          },
         },
       })
       .catch((cause) => {
@@ -102,7 +97,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
      */
     const { organizationId, organizations, currentOrganization } =
       await getSelectedOrganisation({ userId: authSession.userId, request });
-
+    const isAdmin = user?.roles.some((role) => role.name === Roles["ADMIN"]);
     return json(
       data({
         user,
@@ -115,14 +110,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         enablePremium: config.enablePremiumFeatures,
         hideSupportBanner: cookie.hideSupportBanner,
         minimizedSidebar: cookie.minimizedSidebar,
-        isAdmin: user?.roles.some((role) => role.name === Roles["ADMIN"]),
+        isAdmin,
         canUseBookings: canUseBookings(currentOrganization),
         /** THis is used to disable team organizations when the currentOrg is Team and no subscription is present  */
-        disabledTeamOrg: await disabledTeamOrg({
-          currentOrganization,
-          organizations,
-          url: request.url,
-        }),
+        disabledTeamOrg: isAdmin
+          ? false
+          : await disabledTeamOrg({
+              currentOrganization,
+              organizations,
+              url: request.url,
+            }),
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],

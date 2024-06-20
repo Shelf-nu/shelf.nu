@@ -111,30 +111,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
             select: {
               firstName: true,
-              tier: {
-                include: { tierLimit: true },
-              },
-              userOrganizations: {
-                where: {
-                  userId,
-                },
-                select: {
-                  organization: {
-                    select: {
-                      id: true,
-                      name: true,
-                      type: true,
-                      owner: {
-                        select: {
-                          tier: {
-                            include: { tierLimit: true },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
             },
           })
           .catch((cause) => {
