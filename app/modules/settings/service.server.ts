@@ -125,6 +125,7 @@ export async function getPaginatedAndFilterableSettingUsers({
           },
         }),
         db.userOrganization.count({ where: userOrganizationWhere }),
+        // @TODO: Getting wrong count because of distinct
         db.invite.count({ where: inviteWhere }),
       ]);
 
