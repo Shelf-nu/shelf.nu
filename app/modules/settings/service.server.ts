@@ -35,12 +35,17 @@ export async function getPaginatedAndFilterableSettingUsers({
 
   const { page, perPageParam, search } = paramsValues;
 
+  const status =
+    searchParams.get("status") === "ALL"
+      ? null
+      : (searchParams.get("status") as InviteStatuses);
+
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   const { perPage } = cookie;
 
   try {
-    // const skip = page > 1 ? (page - 1) * perPage : 0;
-    // const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
 
     const userOrganizationWhere: Prisma.UserOrganizationWhereInput = {
       organizationId,
@@ -79,17 +84,37 @@ export async function getPaginatedAndFilterableSettingUsers({
       ];
     }
 
+    if (status) {
+      Object.assign(userOrganizationWhere, {
+        user: {
+          receivedInvites: { some: { status } },
+        },
+      });
+      inviteWhere.status = status;
+    }
+
+    /**
+     * We have to get the items from two different data models, so have to
+     * divide skip and take into two part to get equal items from each model
+     */
+    const finalSkip = skip / 2;
+    const finalTake = take / 2;
+
     const [userMembers, invites, totalUserMembers, totalInvites] =
       await Promise.all([
         /** Get Users */
         db.userOrganization.findMany({
           where: userOrganizationWhere,
+          skip: finalSkip,
+          take: finalTake,
           select: { user: true, roles: true },
         }),
         /** Get the invites */
         db.invite.findMany({
           where: inviteWhere,
           distinct: ["inviteeEmail"],
+          skip: finalSkip,
+          take: finalTake,
           select: {
             id: true,
             teamMemberId: true,
@@ -99,14 +124,8 @@ export async function getPaginatedAndFilterableSettingUsers({
             roles: true,
           },
         }),
-        db.userOrganization.count({ where: { organizationId } }),
-        db.invite.count({
-          where: {
-            organizationId,
-            status: InviteStatuses.PENDING,
-            inviteeEmail: { not: "" },
-          },
-        }),
+        db.userOrganization.count({ where: userOrganizationWhere }),
+        db.invite.count({ where: inviteWhere }),
       ]);
 
     /**

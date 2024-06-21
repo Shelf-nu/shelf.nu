@@ -7,6 +7,7 @@ import type {
 } from "@remix-run/node";
 import { json, Link, redirect } from "@remix-run/react";
 import { z } from "zod";
+import { StatusFilter } from "~/components/booking/status-filter";
 import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -315,6 +316,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
   }
 }
 
+const STATUS_FILTERS = {
+  PENDING: "PENDING",
+  ACCEPTED: "ACCEPTED",
+};
+
 export default function UserTeamSetting() {
   return (
     <div>
@@ -332,7 +338,11 @@ export default function UserTeamSetting() {
       </p>
 
       <ListContentWrapper>
-        <Filters>
+        <Filters
+          slots={{
+            "left-of-search": <StatusFilter statusItems={STATUS_FILTERS} />,
+          }}
+        >
           <Button
             variant="primary"
             to="invite-user"
