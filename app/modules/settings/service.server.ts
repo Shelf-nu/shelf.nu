@@ -125,8 +125,11 @@ export async function getPaginatedAndFilterableSettingUsers({
           },
         }),
         db.userOrganization.count({ where: userOrganizationWhere }),
-        // @TODO: Getting wrong count because of distinct
-        db.invite.count({ where: inviteWhere }),
+
+        db.invite.groupBy({
+          by: ["inviteeEmail"],
+          where: inviteWhere,
+        }),
       ]);
 
     /**
@@ -158,7 +161,7 @@ export async function getPaginatedAndFilterableSettingUsers({
       });
     }
 
-    const totalItems = totalUserMembers + totalInvites;
+    const totalItems = totalUserMembers + totalInvites.length;
     const totalPages = Math.ceil(totalItems / perPage);
 
     return {
