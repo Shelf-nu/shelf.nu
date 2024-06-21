@@ -18,7 +18,6 @@ import {
   TabsTrigger,
 } from "~/components/shared/tabs";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
-import { assertUserCanImportAssets } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -29,6 +28,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanImportAssets } from "~/utils/subscription.server";
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();

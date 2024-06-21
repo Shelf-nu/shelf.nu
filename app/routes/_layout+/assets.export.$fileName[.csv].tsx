@@ -1,5 +1,4 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { assertUserCanExportAssets } from "~/modules/tier/service.server";
 import { exportAssetsToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
@@ -8,6 +7,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanExportAssets } from "~/utils/subscription.server";
 
 export const loader = async ({ context, request }: LoaderFunctionArgs) => {
   const authSession = context.getSession();

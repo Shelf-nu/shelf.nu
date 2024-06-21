@@ -25,7 +25,6 @@ import { Image } from "~/components/shared/image";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { createInvite } from "~/modules/invite/service.server";
-import { assertUserCanInviteUsersToWorkspace } from "~/modules/tier/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
@@ -37,6 +36,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 import type { UserFriendlyRoles } from "./settings.team";
 
