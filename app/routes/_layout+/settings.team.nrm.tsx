@@ -159,6 +159,9 @@ export default function NrmSettings() {
 
       <ListContentWrapper>
         <Filters>
+          <Button variant="secondary" to="import-members" className="mr-2">
+            <span className="whitespace-nowrap">Import NRM</span>
+          </Button>
           <Button
             variant="primary"
             to="add-member"

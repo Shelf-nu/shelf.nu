@@ -15,6 +15,7 @@ import { getParamsValues } from "~/utils/list";
 const label = "Settings";
 
 export interface TeamMembersWithUserOrInvite {
+  id: string;
   name: string;
   img: string;
   email: string;
@@ -137,6 +138,7 @@ export async function getPaginatedAndFilterableSettingUsers({
      */
     const teamMembersWithUserOrInvite: TeamMembersWithUserOrInvite[] =
       userMembers.map((um) => ({
+        id: um.user.id,
         name: `${um.user.firstName ? um.user.firstName : ""} ${
           um.user.lastName ? um.user.lastName : ""
         }`,
@@ -152,6 +154,7 @@ export async function getPaginatedAndFilterableSettingUsers({
      */
     for (const invite of invites) {
       teamMembersWithUserOrInvite.push({
+        id: invite.id,
         name: invite.inviteeTeamMember.name,
         img: "/static/images/default_pfp.jpg",
         email: invite.inviteeEmail,

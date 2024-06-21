@@ -42,8 +42,8 @@ export default function TeamSettings() {
   const { isPersonalOrg } = useLoaderData<typeof loader>();
 
   const TABS: Item[] = [
-    { to: "nrm", content: "Non-registered members" },
     ...(!isPersonalOrg ? [{ to: "users", content: "Users" }] : []),
+    { to: "nrm", content: "Non-registered members" },
   ];
 
   return (
