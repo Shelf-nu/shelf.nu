@@ -113,6 +113,7 @@ const ConditionalActionsDropdown = () => {
                   width="full"
                   onClick={() => setOpen(false)}
                   disabled={assetIsPartOfUnavailableKit}
+                  data-test-id="check-in-asset-button"
                 >
                   <span className="flex items-center gap-1">
                     <Icon icon="check-in" /> Check in
@@ -126,6 +127,7 @@ const ConditionalActionsDropdown = () => {
                   className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   width="full"
                   onClick={() => setOpen(false)}
+                  data-test-id="check-out-asset-button"
                 >
                   <span className="flex items-center gap-2">
                     <Icon icon="check-out" /> Check out

@@ -33,6 +33,7 @@ export default function SidebarBottom({ user }: Props) {
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger
           onClick={() => setDropdownOpen((prev) => !prev)}
+          data-test-id="user-actions-dropdown"
           className="w-full truncate outline-none focus-visible:border-0"
         >
           <div
@@ -118,6 +119,7 @@ export default function SidebarBottom({ user }: Props) {
                 variant="link"
                 className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                 width="full"
+                data-test-id="logout"
               >
                 Log Out
               </Button>

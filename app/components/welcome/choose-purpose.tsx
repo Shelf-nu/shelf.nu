@@ -15,7 +15,10 @@ export function ChoosePurpose() {
 
   return (
     <>
-      <div className="flex flex-col items-center p-4 sm:p-6">
+      <div
+        className="flex flex-col items-center p-4 sm:p-6"
+        data-test-id="choose-purpose-wrapper"
+      >
         <img
           src="/static/images/shelf-symbol.png"
           alt="logo"
@@ -35,6 +38,7 @@ export function ChoosePurpose() {
             plan="personal"
             selectedPlan={selectedPlan}
             setSelectedPlan={setSelectedPlan}
+            data-test-id="personal-plan"
           >
             <div className="inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
               <Icon icon="profile" />
@@ -78,6 +82,7 @@ export function ChoosePurpose() {
           width="full"
           className="mt-8"
           disabled={disabled}
+          data-test-id="next-button"
         >
           {selectedPlan === "team"
             ? "Next: Select a plan"
@@ -93,6 +98,7 @@ const PlanBox = ({
   plan,
   selectedPlan,
   setSelectedPlan,
+  ...rest
 }: {
   plan: "personal" | "team";
   children: React.ReactNode;
@@ -112,6 +118,7 @@ const PlanBox = ({
         "flex items-start gap-4 rounded border p-4 transition-colors hover:cursor-pointer",
         selected || isHovered ? activeClasses : ""
       )}
+      {...rest}
     >
       {children}
     </div>

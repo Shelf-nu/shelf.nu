@@ -2,6 +2,7 @@ import { test as base } from "@playwright/test";
 import nodemailer from "nodemailer";
 import { faker } from "@faker-js/faker";
 import { expect } from "@playwright/test";
+import { generateRandomCode } from "~/modules/invite/helpers";
 
 type Account = {
   email: string;
@@ -16,17 +17,16 @@ export const test = base.extend<{}, { account: Account }>({
     async ({ browser }, use, workerInfo) => {
       // Unique username.
       const testAccount = await nodemailer.createTestAccount();
-
       const email = testAccount.user;
-      const password = testAccount.pass;
-      const firstName = faker.name.firstName();
-      const lastName = faker.name.lastName();
+      const password = "1234qwer";
+      const firstName = faker.person.firstName();
+      const lastName = faker.person.lastName();
 
       const page = await browser.newPage();
 
-      // page.on("console", (message) => {
-      //   console.log(`[Page Console] ${message.text()}`);
-      // });
+      page.on("console", (message) => {
+        console.log(`[Page Console] ${message.text()}`);
+      });
 
       // await page.evaluate((email) => {
       //   console.log(email);
@@ -38,45 +38,37 @@ export const test = base.extend<{}, { account: Account }>({
       await page.goto("/");
       await page.click("[data-test-id=signupButton]");
       await expect(page).toHaveURL(/.*join/);
-      // await page.fill("#magic-link", email);
+      await page.fill("[data-test-id=email]", email);
+      await page.fill("[data-test-id=password]", password);
+      await page.fill("[data-test-id=confirmPassword]", password);
 
-      await page.click("[data-test-id=continueWithOTPButton]");
+      await page.click("[data-test-id=login]");
 
-      await expect(page.getByText("Check your emails")).toBeVisible();
+      await expect(page.getByText("Confirm your email")).toBeVisible();
 
-      /** We are waiting to make sure the email arrives */
-      await page.waitForTimeout(10000);
+      await page.fill("[data-test-id=otp]", "123456");
+      await page.click("[data-test-id=confirm-otp]");
 
-      await page.goto("https://ethereal.email/login");
-
-      await page.fill("#address", email);
-      await page.fill("#password", password);
-      await page.getByRole("button", { name: "Log in" }).click();
-
-      await page.getByRole("link", { name: "Messages" }).click();
-      await page.getByRole("link", { name: "Your Magic Link" }).click();
-
-      const text = await page.innerText("#plaintext");
-      const regex = /\[([^\]]+)\]/;
-      const matches = text.match(regex);
-      let confirmUrl = "";
-      if (matches && matches.length > 0) {
-        confirmUrl = matches[1];
-      }
-
-      await page.goto(confirmUrl);
-
-      // Wait for the field to be present on the DOM before filling it
-      await page.waitForSelector('[data-test-id="firstName"]');
+      await expect(page).toHaveURL(/.*onboarding/);
 
       await page.fill('[data-test-id="firstName"]', firstName);
       await page.fill('[data-test-id="lastName"]', lastName);
-      await page.fill('[data-test-id="password"]', password);
-      await page.fill('[data-test-id="confirmPassword"]', password); // We use the same password that nodemailer generated for the email account
 
-      await page.locator('[data-test-id="onboard"]').click();
-      await expect(page).toHaveURL(/.*assets/);
-      await expect(page.getByText("No assets on database")).toBeVisible();
+      await page.click('[data-test-id="onboard"]');
+
+      // await page.waitForSelector('[data-test-id="choose-purpose-wrapper"]', {
+      //   timeout: 20000,
+      // });
+
+      await expect(page.getByText("How will you use shelf?")).toBeVisible();
+
+      await page.click("[data-test-id=personal-plan]");
+      await page.click("[data-test-id=next-button]");
+
+      await expect(page.getByText("Untitled Asset")).toBeVisible();
+      await expect(page).toHaveURL(/.*assets\/new/);
+
+      await page.click('[data-test-id="user-actions-dropdown"]');
       await page.click('[data-test-id="logout"]');
       await expect(page).toHaveURL(/.*login/);
 

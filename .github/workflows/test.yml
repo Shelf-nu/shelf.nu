@@ -4,6 +4,12 @@ on:
   pull_request_target:
   workflow_call:
     secrets:
+      SMTP_PWD:
+        required: true
+      SMTP_HOST:
+        required: true
+      SMTP_USER:
+        required: true
       SESSION_SECRET:
         required: true
       SUPABASE_ANON_PUBLIC:
@@ -15,6 +21,12 @@ on:
       SERVER_URL:
         required: true
       DATABASE_URL:
+        required: true
+      DIRECT_URL:
+        required: true
+      SEND_ONBOARDING_EMAIL:
+        required: true
+      ENABLE_PREMIUM_FEATURES:
         required: true
 
 jobs:
@@ -33,15 +45,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 🛑 Cancel Previous Runs
-        uses: styfle/cancel-workflow-action@0.11.0
+        uses: styfle/cancel-workflow-action@0.12.1
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -59,15 +71,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 🛑 Cancel Previous Runs
-        uses: styfle/cancel-workflow-action@0.11.0
+        uses: styfle/cancel-workflow-action@0.12.1
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -85,15 +97,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 🛑 Cancel Previous Runs
-        uses: styfle/cancel-workflow-action@0.11.0
+        uses: styfle/cancel-workflow-action@0.12.1
 
       - name: ⬇️ Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
       - name: ⎔ Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -105,51 +117,57 @@ jobs:
       - name: ⚡ Run vitest
         run: npm run test
 
-  # playwright:
-  #   needs: authorize
-  #   name: 🎭 Playwright
-  #   timeout-minutes: 60
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: 🛑 Cancel Previous Runs
-  #       uses: styfle/cancel-workflow-action@0.11.0
+  playwright:
+    needs: authorize
+    name: 🎭 Playwright
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🛑 Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.12.1
 
-  #     - name: ⬇️ Checkout repo
-  #       uses: actions/checkout@v3
-  #       with:
-  #         ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
 
-  #     - name: 🔑 Make envfile
-  #       uses: SpicyPizza/create-envfile@v2.0
-  #       with:
-  #         envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-  #         envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
-  #         envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-  #         envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  #         envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
-  #         envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
-  #         file_name: .env
+      - name: 🔑 Make envfile
+        uses: SpicyPizza/create-envfile@v2.0.3
+        with:
+          envkey_SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          envkey_SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
+          envkey_SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          envkey_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          envkey_SERVER_URL: ${{ secrets.SERVER_URL }}
+          envkey_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          envkey_DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          envkey_SMTP_PWD: ${{ secrets.SMTP_PWD }}
+          envkey_SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          envkey_SMTP_USER: ${{ secrets.SMTP_USER }}
+          envkey_ENABLE_PREMIUM_FEATURES: ${{ secrets.ENABLE_PREMIUM_FEATURES }}
+          envkey_SEND_ONBOARDING_EMAIL: ${{ secrets.SEND_ONBOARDING_EMAIL }}
+          file_name: .env
 
-  #     - name: ⎔ Setup node
-  #       uses: actions/setup-node@v3
-  #       with:
-  #         node-version: 18
+      - name: ⎔ Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-  #     - name: 📥 Download deps
-  #       uses: bahmutov/npm-install@v1
+      - name: 📥 Download deps
+        uses: bahmutov/npm-install@v1
 
-  #     - name: 📥 Install Playwright Browsers
-  #       run: npm run test:e2e:install
+      - name: 📥 Install Playwright Browsers
+        run: npm run test:e2e:install
 
-  #     - name: ⚙️ Build
-  #       run: npm run build
+      - name: ⚙️ Build
+        run: npm run build
 
-  #     - name: Run Playwright tests
-  #       run: npx playwright test
+      - name: Run Playwright tests
+        run: npx playwright test
 
-  #     - uses: actions/upload-artifact@v3
-  #       if: always()
-  #       with:
-  #         name: playwright-report
-  #         path: playwright-report/
-  #         retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30

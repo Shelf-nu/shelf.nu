@@ -4,3 +4,4 @@
 /test/
 /desktop-app/shelf-installer/*
 /desktop-app/portable/*
+/playwright-report/*

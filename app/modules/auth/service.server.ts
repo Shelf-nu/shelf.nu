@@ -2,7 +2,7 @@ import { isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "server/session";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
-import { SERVER_URL } from "~/utils/env";
+import { NODE_ENV, SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -351,6 +351,18 @@ export async function verifyAuthSession(authSession: AuthSession) {
 
 export async function verifyOtpAndSignin(email: string, otp: string) {
   try {
+    /** This is meant for e2e tests
+     * In that case we manually generate an OTP and use it to verify the email
+     */
+    if (NODE_ENV === "test" || process.env.CI === "true") {
+      const { data } = await getSupabaseAdmin().auth.admin.generateLink({
+        type: "magiclink",
+        email: email,
+      });
+
+      otp = data.properties?.email_otp as string;
+    }
+
     const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
       email,
       token: otp,
