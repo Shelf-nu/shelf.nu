@@ -64,7 +64,7 @@ export function TeamMembersActionsDropdown({
                 "You are not able to invite users to a personal workspace. ",
             }}
             buttonProps={{
-              to: `invite-user?teamMemberId=${teamMember.id}`,
+              to: `/settings/team/users/invite-user?teamMemberId=${teamMember.id}`,
               role: "link",
               variant: "link",
               className: "justify-start  !text-gray-700 !hover:text-gray-700",

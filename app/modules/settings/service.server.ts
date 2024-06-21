@@ -56,19 +56,23 @@ export async function getPaginatedAndFilterableSettingUsers({
       /** Either search the input against organization's user */
       userOrganizationWhere.user = {
         OR: [
-          { firstName: { contains: search } },
-          { lastName: { contains: search } },
+          { firstName: { contains: search, mode: "insensitive" } },
+          { lastName: { contains: search, mode: "insensitive" } },
         ],
       };
 
       /** Or search the input against input user/teamMember */
       inviteWhere.OR = [
-        { inviteeTeamMember: { name: { contains: search } } },
+        {
+          inviteeTeamMember: {
+            name: { contains: search, mode: "insensitive" },
+          },
+        },
         {
           inviteeUser: {
             OR: [
-              { firstName: { contains: search } },
-              { lastName: { contains: search } },
+              { firstName: { contains: search, mode: "insensitive" } },
+              { lastName: { contains: search, mode: "insensitive" } },
             ],
           },
         },
@@ -148,8 +152,75 @@ export async function getPaginatedAndFilterableSettingUsers({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while getting team members with user or invite",
+      message: "Something went wrong while getting registered users",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+export async function getPaginatedAndFilterableSettingTeamMembers({
+  organizationId,
+  request,
+}: {
+  organizationId: Organization["id"];
+  request: LoaderFunctionArgs["request"];
+}) {
+  const searchParams = getCurrentSearchParams(request);
+  const paramsValues = getParamsValues(searchParams);
+
+  const { page, perPageParam, search } = paramsValues;
+
+  const cookie = await updateCookieWithPerPage(request, perPageParam);
+  const { perPage } = cookie;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 && perPage <= 100 ? perPage : 200;
+
+    /**
+     * 1. Don't have any invites(userId:null)
+     * 2. If they have invites, they should not be pending(userId!=null which mean invite is accepted so we only need to worry about pending ones)
+     */
+    const where: Prisma.TeamMemberWhereInput = {
+      deletedAt: null,
+      organizationId,
+      userId: null,
+      receivedInvites: {
+        none: { status: InviteStatuses.PENDING },
+      },
+    };
+
+    if (search) {
+      where.name = { contains: search, mode: "insensitive" };
+    }
+
+    const [teamMembers, totalTeamMembers] = await Promise.all([
+      db.teamMember.findMany({
+        where,
+        take,
+        skip,
+        include: {
+          _count: { select: { custodies: true } },
+        },
+      }),
+      db.teamMember.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(totalTeamMembers / perPage);
+
+    return {
+      page,
+      perPage,
+      totalPages,
+      search,
+      totalTeamMembers,
+      teamMembers,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while getting team members",
       additionalData: { organizationId },
       label,
     });

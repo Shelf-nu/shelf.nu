@@ -333,7 +333,11 @@ export default function UserTeamSetting() {
 
       <ListContentWrapper>
         <Filters>
-          <Button variant="primary" to="invite-user">
+          <Button
+            variant="primary"
+            to="invite-user"
+            className="mt-2 w-full md:mt-0 md:w-max"
+          >
             <span className=" whitespace-nowrap">Invite a user</span>
           </Button>
         </Filters>
@@ -343,9 +347,9 @@ export default function UserTeamSetting() {
           ItemComponent={UserRow}
           headerChildren={
             <>
-              <Th>Role</Th>
-              <Th>Status</Th>
-              <Th> </Th>
+              <Th className="hidden md:table-cell">Role</Th>
+              <Th className="hidden md:table-cell">Status</Th>
+              <Th className="hidden md:table-cell"> </Th>
             </>
           }
         />
