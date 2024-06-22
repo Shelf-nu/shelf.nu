@@ -218,7 +218,11 @@ export async function getPaginatedAndFilterableSettingTeamMembers({
     };
 
     if (search) {
-      where.name = { contains: search, mode: "insensitive" };
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { user: { firstName: { contains: search, mode: "insensitive" } } },
+        { user: { lastName: { contains: search, mode: "insensitive" } } },
+      ];
     }
 
     const [teamMembers, totalTeamMembers] = await Promise.all([
