@@ -36,6 +36,11 @@ type Props = ModelFilterProps & {
   searchIcon?: IconType;
   showSearch?: boolean;
   renderItem?: (item: ModelFilterItem) => React.ReactNode;
+  /**
+   * If `true`, a "Select All" item will be added in dropdown which allow
+   * the user to select all items in the list
+   */
+  allowSelectAll?: boolean;
 };
 
 export default function DynamicDropdown({
@@ -49,6 +54,7 @@ export default function DynamicDropdown({
   showSearch = true,
   renderItem,
   withoutValueItem,
+  allowSelectAll,
   ...hookProps
 }: Props) {
   const navigation = useNavigation();
@@ -66,6 +72,7 @@ export default function DynamicDropdown({
     clearFilters,
     resetModelFiltersFetcher,
     getAllEntries,
+    handleSelectAll,
   } = useModelFilters({ model, withoutValueItem, ...hookProps });
 
   return (
@@ -143,15 +150,26 @@ export default function DynamicDropdown({
               {searchQuery !== "" && items.length === 0 && (
                 <EmptyState searchQuery={searchQuery} modelName={model.name} />
               )}
+
+              {/* Top Divider */}
+              <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
+                <div className="h-2 w-full border border-gray-200 bg-gray-50" />
+              </When>
+
+              <When truthy={!!allowSelectAll}>
+                <label
+                  key="select-all"
+                  className="flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+                  onClick={handleSelectAll}
+                >
+                  <span className="pr-2">Select all</span>
+                </label>
+              </When>
+
               {items.map((item) => {
                 const checked = selectedItems.includes(item.id);
                 return (
                   <>
-                    {/* Top Divider */}
-                    <When truthy={withoutValueItem?.id === item.id}>
-                      <div className="h-2 w-full border border-gray-200 bg-gray-50" />
-                    </When>
-
                     <label
                       key={item.id}
                       htmlFor={item.id}
@@ -206,10 +224,10 @@ export default function DynamicDropdown({
                 </button>
               )}
             </div>
-            <When truthy={totalItems > 6}>
+            <When truthy={withoutValueItem ? totalItems > 7 : totalItems > 6}>
               <div className="border-t p-3 text-gray-500">
-                Showing {items.length} out of {totalItems}, type to search for
-                more
+                Showing {withoutValueItem ? items.length - 1 : items.length} out
+                of {totalItems}, type to search for more
               </div>
             </When>
 

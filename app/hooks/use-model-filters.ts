@@ -194,6 +194,26 @@ export function useModelFilters({
     }
   }
 
+  function handleSelectAll() {
+    setSelectedItems(items.map((i) => i.id));
+
+    if (selectionMode === "none") {
+      return;
+    }
+
+    setSearchParams((prev) => {
+      if (selectionMode === "append") {
+        /** Remove all previously selected items otherwise they will get duplicated */
+        prev.delete(model.name);
+        items.forEach((i) => prev.append(model.name, i.id));
+      } else {
+        prev.set(model.name, items[0].id);
+      }
+
+      return prev;
+    });
+  }
+
   return {
     searchQuery,
     setSearchQuery,
@@ -205,5 +225,6 @@ export function useModelFilters({
     resetModelFiltersFetcher,
     clearFilters,
     getAllEntries,
+    handleSelectAll,
   };
 }

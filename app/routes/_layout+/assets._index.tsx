@@ -311,6 +311,7 @@ export default function AssetIndexPage() {
                   id: "uncategorized",
                   name: "Uncategorized",
                 }}
+                allowSelectAll
               />
               <DynamicDropdown
                 trigger={
