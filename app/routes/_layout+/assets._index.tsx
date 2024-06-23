@@ -307,6 +307,10 @@ export default function AssetIndexPage() {
                 placeholder="Search categories"
                 initialDataKey="categories"
                 countKey="totalCategories"
+                withoutValueItem={{
+                  id: "uncategorized",
+                  name: "Uncategorized",
+                }}
               />
               <DynamicDropdown
                 trigger={

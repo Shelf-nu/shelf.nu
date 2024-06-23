@@ -48,6 +48,7 @@ export default function DynamicDropdown({
   model,
   showSearch = true,
   renderItem,
+  withoutValueItem,
   ...hookProps
 }: Props) {
   const navigation = useNavigation();
@@ -65,7 +66,7 @@ export default function DynamicDropdown({
     clearFilters,
     resetModelFiltersFetcher,
     getAllEntries,
-  } = useModelFilters({ model, ...hookProps });
+  } = useModelFilters({ model, withoutValueItem, ...hookProps });
 
   return (
     <div className="relative w-full text-center">
@@ -145,34 +146,46 @@ export default function DynamicDropdown({
               {items.map((item) => {
                 const checked = selectedItems.includes(item.id);
                 return (
-                  <label
-                    key={item.id}
-                    htmlFor={item.id}
-                    className={tw(
-                      "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                      checked && "bg-gray-50"
-                    )}
-                  >
-                    <span className="pr-2">
-                      {typeof renderItem === "function"
-                        ? renderItem({ ...item, metadata: item })
-                        : item.name}
-                      <input
-                        id={item.id}
-                        type="checkbox"
-                        value={item.id}
-                        className="hidden"
-                        checked={checked}
-                        onChange={(e) => {
-                          handleSelectItemChange(e.currentTarget.value);
-                        }}
-                      />
-                    </span>
-
-                    <When truthy={checked}>
-                      <CheckIcon className="text-primary" />
+                  <>
+                    {/* Top Divider */}
+                    <When truthy={withoutValueItem?.id === item.id}>
+                      <div className="h-2 w-full border border-gray-200 bg-gray-50" />
                     </When>
-                  </label>
+
+                    <label
+                      key={item.id}
+                      htmlFor={item.id}
+                      className={tw(
+                        "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                        checked && "bg-gray-50"
+                      )}
+                    >
+                      <span className="pr-2">
+                        {typeof renderItem === "function"
+                          ? renderItem({ ...item, metadata: item })
+                          : item.name}
+                        <input
+                          id={item.id}
+                          type="checkbox"
+                          value={item.id}
+                          className="hidden"
+                          checked={checked}
+                          onChange={(e) => {
+                            handleSelectItemChange(e.currentTarget.value);
+                          }}
+                        />
+                      </span>
+
+                      <When truthy={checked}>
+                        <CheckIcon className="text-primary" />
+                      </When>
+                    </label>
+
+                    {/* Bottom Divider */}
+                    <When truthy={withoutValueItem?.id === item.id}>
+                      <div className="h-2 w-full border border-gray-200 bg-gray-50" />
+                    </When>
+                  </>
                 );
               })}
 
