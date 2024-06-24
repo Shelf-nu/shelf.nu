@@ -1,7 +1,11 @@
 import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { PenIcon, VerticalDotsIcon } from "~/components/icons/library";
+import {
+  PenIcon,
+  SendIcon,
+  VerticalDotsIcon,
+} from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,34 +57,20 @@ export function TeamMembersActionsDropdown({
         className="order w-[180px] rounded-md bg-white p-[6px] text-right "
         ref={ref}
       >
-        <DropdownMenuItem className="text-gray-700hover:text-gray-700 p-4 hover:bg-slate-100">
-          <Button
-            to={`${teamMember.id}/edit`}
-            role="link"
-            variant="link"
-            className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
-            width="full"
-            onClick={() => setOpen(false)}
-          >
-            <span className="flex items-center gap-1">
-              <Icon icon="pen" /> Edit
-            </span>
-          </Button>
-        </DropdownMenuItem>
-
-        <DropdownMenuItem className="text-gray-700hover:text-gray-700 p-4 hover:bg-slate-100">
+        <DropdownMenuItem className="p-4 text-gray-700 hover:bg-slate-100 hover:text-gray-700">
           <ControlledActionButton
             canUseFeature={!isPersonalOrg}
             buttonContent={{
               title: (
                 <span className="flex items-center gap-2 text-gray-700">
-                  <PenIcon /> Edit
+                  <SendIcon /> Invite user
                 </span>
               ),
-              message: "You are not able to edit this NRM.",
+              message:
+                "You are not able to invite users to a personal workspace. ",
             }}
             buttonProps={{
-              to: `${teamMember.id}/edit`,
+              to: `/settings/team/users/invite-user?teamMemberId=${teamMember.id}`,
               role: "link",
               variant: "link",
               className: "justify-start  !text-gray-700 !hover:text-gray-700",
@@ -88,6 +78,21 @@ export function TeamMembersActionsDropdown({
               onClick: () => setOpen(false),
             }}
           />
+        </DropdownMenuItem>
+
+        <DropdownMenuItem className="text-gray-700 hover:bg-slate-100 hover:text-gray-700">
+          <Button
+            to={`/${teamMember.id}/edit`}
+            role="link"
+            variant="link"
+            className="justify-start whitespace-nowrap px-4 py-3 text-gray-700 hover:text-gray-700"
+            width="full"
+            onClick={() => setOpen(false)}
+          >
+            <span className="flex items-center gap-1">
+              <Icon icon="pen" /> Edit
+            </span>
+          </Button>
         </DropdownMenuItem>
 
         <DeleteMember teamMember={teamMember} />
