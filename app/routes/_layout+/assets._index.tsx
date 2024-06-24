@@ -307,6 +307,11 @@ export default function AssetIndexPage() {
                 placeholder="Search categories"
                 initialDataKey="categories"
                 countKey="totalCategories"
+                withoutValueItem={{
+                  id: "uncategorized",
+                  name: "Uncategorized",
+                }}
+                allowSelectAll
               />
               <DynamicDropdown
                 trigger={
@@ -318,6 +323,11 @@ export default function AssetIndexPage() {
                 label="Filter by tag"
                 initialDataKey="tags"
                 countKey="totalTags"
+                allowSelectAll
+                withoutValueItem={{
+                  id: "untagged",
+                  name: "Without tag",
+                }}
               />
               <DynamicDropdown
                 trigger={
@@ -330,6 +340,11 @@ export default function AssetIndexPage() {
                 label="Filter by location"
                 initialDataKey="locations"
                 countKey="totalLocations"
+                allowSelectAll
+                withoutValueItem={{
+                  id: "without-location",
+                  name: "Without location",
+                }}
                 renderItem={({ metadata }) => (
                   <div className="flex items-center gap-2">
                     <Image
@@ -366,6 +381,11 @@ export default function AssetIndexPage() {
                   placeholder="Search team members"
                   initialDataKey="teamMembers"
                   countKey="totalTeamMembers"
+                  allowSelectAll
+                  withoutValueItem={{
+                    id: "without-custody",
+                    name: "Without Custody",
+                  }}
                 />
               )}
             </div>
