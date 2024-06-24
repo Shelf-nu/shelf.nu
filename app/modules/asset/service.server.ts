@@ -232,19 +232,35 @@ async function getAssetsFromView(params: {
     }
 
     if (tagsIds && tagsIds.length > 0 && where.asset) {
-      where.asset.tags = {
-        some: {
-          id: {
-            in: tagsIds,
+      if (tagsIds.includes("untagged")) {
+        where.asset.OR = [
+          ...(where.asset.OR ?? []),
+          { tags: { some: { id: { in: tagsIds } } } },
+          { tags: { none: {} } },
+        ];
+      } else {
+        where.asset.tags = {
+          some: {
+            id: {
+              in: tagsIds,
+            },
           },
-        },
-      };
+        };
+      }
     }
 
     if (locationIds && locationIds.length > 0 && where.asset) {
-      where.asset.location = {
-        id: { in: locationIds },
-      };
+      if (locationIds.includes("without-location")) {
+        where.asset.OR = [
+          ...(where.asset.OR ?? []),
+          { locationId: { in: locationIds } },
+          { locationId: null },
+        ];
+      } else {
+        where.asset.location = {
+          id: { in: locationIds },
+        };
+      }
     }
 
     if (teamMemberIds && teamMemberIds.length && where.asset) {
@@ -274,6 +290,9 @@ async function getAssetsFromView(params: {
           },
         },
         { custody: { custodian: { userId: { in: teamMemberIds } } } },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: null }]
+          : []),
       ];
     }
 
@@ -489,19 +508,35 @@ async function getAssets(params: {
     }
 
     if (tagsIds && tagsIds.length > 0) {
-      where.tags = {
-        some: {
-          id: {
-            in: tagsIds,
+      if (tagsIds.includes("untagged")) {
+        where.OR = [
+          ...(where.OR ?? []),
+          { tags: { some: { id: { in: tagsIds } } } },
+          { tags: { none: {} } },
+        ];
+      } else {
+        where.tags = {
+          some: {
+            id: {
+              in: tagsIds,
+            },
           },
-        },
-      };
+        };
+      }
     }
 
     if (locationIds && locationIds.length > 0) {
-      where.location = {
-        id: { in: locationIds },
-      };
+      if (locationIds.includes("without-location")) {
+        where.OR = [
+          ...(where.OR ?? []),
+          { locationId: { in: locationIds } },
+          { locationId: null },
+        ];
+      } else {
+        where.location = {
+          id: { in: locationIds },
+        };
+      }
     }
 
     /**
@@ -522,6 +557,9 @@ async function getAssets(params: {
           bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
         },
         { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: null }]
+          : []),
       ];
     }
 
