@@ -16,7 +16,7 @@ import { db } from "~/database/db.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
@@ -69,16 +69,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const { name } = parseData(await request.formData(), NewOrEditMemberSchema);
 
-    await db.teamMember
-      .update({
-        where: { id: nrmId },
-        data: { name: name.trim() },
-      })
-      .catch((cause) => {
-        throw maybeUniqueConstraintViolation(cause, "Team Member", {
-          additionalData: { userId, name },
-        });
-      });
+    await db.teamMember.update({
+      where: { id: nrmId },
+      data: { name: name.trim() },
+    });
 
     sendNotification({
       title: "Success",
@@ -111,13 +105,9 @@ export default function EditNrm() {
       <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
         <UserIcon color="#ef6820" />
       </div>
-      <div className="mb-5">
-        <h4>Edit team member</h4>
-        <p>
-          Team members are added to your environment but do not have an account
-          to log in with.
-        </p>
-      </div>
+
+      <h4 className="mb-5">Edit team member</h4>
+
       <Form method="post" ref={zo.ref}>
         <Input
           defaultValue={teamMember.name}

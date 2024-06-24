@@ -10,7 +10,7 @@ import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, parseData } from "~/utils/http.server";
 import {
@@ -62,18 +62,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { name } = payload;
 
-    await db.teamMember
-      .create({
-        data: {
-          name: name.trim(),
-          organizationId,
-        },
-      })
-      .catch((cause) => {
-        throw maybeUniqueConstraintViolation(cause, "Team Member", {
-          additionalData: { userId, name },
-        });
-      });
+    await db.teamMember.create({
+      data: {
+        name: name.trim(),
+        organizationId,
+      },
+    });
 
     sendNotification({
       title: "Successfully added a new team member",

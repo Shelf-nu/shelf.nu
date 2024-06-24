@@ -1,11 +1,7 @@
 import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import {
-  PenIcon,
-  SendIcon,
-  VerticalDotsIcon,
-} from "~/components/icons/library";
+import { PenIcon, VerticalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +13,8 @@ import type { loader } from "~/routes/_layout+/settings.team.users";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import { DeleteMember } from "./delete-member";
+import Icon from "../icons/icon";
+import { Button } from "../shared/button";
 import { ControlledActionButton } from "../shared/controlled-action-button";
 
 export function TeamMembersActionsDropdown({
@@ -56,26 +54,18 @@ export function TeamMembersActionsDropdown({
         ref={ref}
       >
         <DropdownMenuItem className="text-gray-700hover:text-gray-700 p-4 hover:bg-slate-100">
-          <ControlledActionButton
-            canUseFeature={!isPersonalOrg}
-            buttonContent={{
-              title: (
-                <span className="flex items-center gap-2 text-gray-700">
-                  <SendIcon /> Invite user
-                </span>
-              ),
-              message:
-                "You are not able to invite users to a personal workspace. ",
-            }}
-            buttonProps={{
-              to: `/settings/team/users/invite-user?teamMemberId=${teamMember.id}`,
-              role: "link",
-              variant: "link",
-              className: "justify-start  !text-gray-700 !hover:text-gray-700",
-              width: "full",
-              onClick: () => setOpen(false),
-            }}
-          />
+          <Button
+            to={`${teamMember.id}/edit`}
+            role="link"
+            variant="link"
+            className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
+            width="full"
+            onClick={() => setOpen(false)}
+          >
+            <span className="flex items-center gap-1">
+              <Icon icon="pen" /> Edit
+            </span>
+          </Button>
         </DropdownMenuItem>
 
         <DropdownMenuItem className="text-gray-700hover:text-gray-700 p-4 hover:bg-slate-100">
