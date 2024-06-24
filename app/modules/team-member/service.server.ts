@@ -287,3 +287,16 @@ export async function getTeamMemberForCustodianFilter({
     });
   }
 }
+
+export async function getTeamMember({ id }: { id: TeamMember["id"] }) {
+  try {
+    return await db.teamMember.findUniqueOrThrow({ where: { id } });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Team member not found",
+      additionalData: { id },
+      label,
+    });
+  }
+}
