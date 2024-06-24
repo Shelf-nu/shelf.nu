@@ -323,6 +323,11 @@ export default function AssetIndexPage() {
                 label="Filter by tag"
                 initialDataKey="tags"
                 countKey="totalTags"
+                allowSelectAll
+                withoutValueItem={{
+                  id: "untagged",
+                  name: "Without tag",
+                }}
               />
               <DynamicDropdown
                 trigger={

@@ -232,13 +232,21 @@ async function getAssetsFromView(params: {
     }
 
     if (tagsIds && tagsIds.length > 0 && where.asset) {
-      where.asset.tags = {
-        some: {
-          id: {
-            in: tagsIds,
+      if (tagsIds.includes("untagged")) {
+        where.asset.OR = [
+          ...(where.asset.OR ?? []),
+          { tags: { some: { id: { in: tagsIds } } } },
+          { tags: { none: {} } },
+        ];
+      } else {
+        where.asset.tags = {
+          some: {
+            id: {
+              in: tagsIds,
+            },
           },
-        },
-      };
+        };
+      }
     }
 
     if (locationIds && locationIds.length > 0 && where.asset) {
