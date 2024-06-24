@@ -340,6 +340,11 @@ export default function AssetIndexPage() {
                 label="Filter by location"
                 initialDataKey="locations"
                 countKey="totalLocations"
+                allowSelectAll
+                withoutValueItem={{
+                  id: "without-location",
+                  name: "Without location",
+                }}
                 renderItem={({ metadata }) => (
                   <div className="flex items-center gap-2">
                     <Image

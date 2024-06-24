@@ -250,9 +250,17 @@ async function getAssetsFromView(params: {
     }
 
     if (locationIds && locationIds.length > 0 && where.asset) {
-      where.asset.location = {
-        id: { in: locationIds },
-      };
+      if (locationIds.includes("without-location")) {
+        where.asset.OR = [
+          ...(where.asset.OR ?? []),
+          { locationId: { in: locationIds } },
+          { locationId: null },
+        ];
+      } else {
+        where.asset.location = {
+          id: { in: locationIds },
+        };
+      }
     }
 
     if (teamMemberIds && teamMemberIds.length && where.asset) {
