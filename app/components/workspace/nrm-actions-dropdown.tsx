@@ -1,7 +1,11 @@
 import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { SendIcon, VerticalDotsIcon } from "~/components/icons/library";
+import {
+  PenIcon,
+  SendIcon,
+  VerticalDotsIcon,
+} from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,6 +69,28 @@ export function TeamMembersActionsDropdown({
             }}
             buttonProps={{
               to: `/settings/team/users/invite-user?teamMemberId=${teamMember.id}`,
+              role: "link",
+              variant: "link",
+              className: "justify-start  !text-gray-700 !hover:text-gray-700",
+              width: "full",
+              onClick: () => setOpen(false),
+            }}
+          />
+        </DropdownMenuItem>
+
+        <DropdownMenuItem className="text-gray-700hover:text-gray-700 p-4 hover:bg-slate-100">
+          <ControlledActionButton
+            canUseFeature={!isPersonalOrg}
+            buttonContent={{
+              title: (
+                <span className="flex items-center gap-2 text-gray-700">
+                  <PenIcon /> Edit
+                </span>
+              ),
+              message: "You are not able to edit this NRM.",
+            }}
+            buttonProps={{
+              to: `${teamMember.id}/edit`,
               role: "link",
               variant: "link",
               className: "justify-start  !text-gray-700 !hover:text-gray-700",
