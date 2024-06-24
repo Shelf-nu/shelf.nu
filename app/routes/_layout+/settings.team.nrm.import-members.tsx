@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { memoryUploadHandler } from "~/utils/csv.server";
@@ -28,7 +29,6 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanImportNRM } from "~/utils/subscription.server";
-import { WarningBox } from "~/components/shared/warning-box";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
