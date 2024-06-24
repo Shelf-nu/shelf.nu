@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
-import type { loader } from "~/routes/_layout+/settings.team";
+import type { loader } from "~/routes/_layout+/settings.team.users";
 import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import { DeleteMember } from "./delete-member";
@@ -64,7 +64,7 @@ export function TeamMembersActionsDropdown({
                 "You are not able to invite users to a personal workspace. ",
             }}
             buttonProps={{
-              to: `invite-user?teamMemberId=${teamMember.id}`,
+              to: `/settings/team/users/invite-user?teamMemberId=${teamMember.id}`,
               role: "link",
               variant: "link",
               className: "justify-start  !text-gray-700 !hover:text-gray-700",

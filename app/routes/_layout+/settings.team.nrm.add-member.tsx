@@ -82,7 +82,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: userId,
     });
 
-    return redirect(`/settings/team`);
+    return redirect(`/settings/team/nrm`);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
