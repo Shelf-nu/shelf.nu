@@ -99,7 +99,7 @@ export async function createTeamMemberIfNotExists({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating the team member. Please try again or contact support.",
+        "Something went wrong while creating the team member. Seems like some of the team member data in your import file is invalid. Please check and try again.",
       additionalData: { organizationId },
       label,
     });

@@ -44,7 +44,11 @@ import {
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import {
+  ShelfError,
+  isLikeShelfError,
+  maybeUniqueConstraintViolation,
+} from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
@@ -1829,7 +1833,9 @@ export async function createAssetsFromContentImport({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while creating assets from content import",
+      message: isLikeShelfError(cause)
+        ? cause?.message
+        : "Something went wrong while creating assets from content import",
       additionalData: { userId, organizationId },
       label,
     });
