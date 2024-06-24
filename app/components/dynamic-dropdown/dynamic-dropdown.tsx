@@ -162,7 +162,7 @@ export default function DynamicDropdown({
 
               {/* Top Divider */}
               <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
-                <div className="h-2 w-full border border-gray-200 bg-gray-50" />
+                <div className="h-2 w-full  bg-gray-50" />
               </When>
 
               <When truthy={!!allowSelectAll}>
@@ -211,7 +211,7 @@ export default function DynamicDropdown({
 
               {/* Bottom Divider */}
               <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
-                <div className="h-2 w-full border border-gray-200 bg-gray-50" />
+                <div className="h-2 w-full  bg-gray-50" />
               </When>
 
               {items.map((item) => {
