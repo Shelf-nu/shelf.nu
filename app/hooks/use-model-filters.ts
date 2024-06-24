@@ -35,15 +35,6 @@ export type ModelFilterProps = {
    * transformItem: (item) => ({ ...item, id: JSON.stringify({ id: item.id, name: item.name }) })
    */
   transformItem?: (item: ModelFilterItem) => ModelFilterItem;
-
-  /**
-   * A a new item will be added to the list in dropdown, this item can be used to filter items
-   * like "uncategorized" or "untagged" etc.
-   */
-  withoutValueItem?: {
-    id: string;
-    name: string;
-  };
 };
 
 const GET_ALL_KEY = "getAll";
@@ -55,7 +46,6 @@ export function useModelFilters({
   initialDataKey,
   selectionMode = "append",
   transformItem,
-  withoutValueItem,
 }: ModelFilterProps) {
   const initialData = useLoaderData<any>();
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -70,25 +60,13 @@ export function useModelFilters({
 
   const items = useMemo(() => {
     if (searchQuery && fetcher.data && !fetcher.data.error) {
-      return transformItemUsingTransformer(
-        fetcher.data.filters,
-        transformItem,
-        withoutValueItem
-      );
+      return transformItemUsingTransformer(fetcher.data.filters, transformItem);
     }
     return transformItemUsingTransformer(
       initialData[initialDataKey],
-      transformItem,
-      withoutValueItem
+      transformItem
     );
-  }, [
-    fetcher.data,
-    initialData,
-    initialDataKey,
-    searchQuery,
-    transformItem,
-    withoutValueItem,
-  ]);
+  }, [fetcher.data, initialData, initialDataKey, searchQuery, transformItem]);
 
   const handleSelectItemChange = useCallback(
     (value: string) => {

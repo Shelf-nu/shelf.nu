@@ -37,6 +37,15 @@ type Props = ModelFilterProps & {
   showSearch?: boolean;
   renderItem?: (item: ModelFilterItem) => React.ReactNode;
   /**
+   * A a new item will be added to the list in dropdown, this item can be used to filter items
+   * like "uncategorized" or "untagged" etc.
+   */
+  withoutValueItem?: {
+    id: string;
+    name: string;
+  };
+
+  /**
    * If `true`, a "Select All" item will be added in dropdown which allow
    * the user to select all items in the list
    */
@@ -73,7 +82,7 @@ export default function DynamicDropdown({
     resetModelFiltersFetcher,
     getAllEntries,
     handleSelectAll,
-  } = useModelFilters({ model, withoutValueItem, ...hookProps });
+  } = useModelFilters({ model, ...hookProps });
 
   return (
     <div className="relative w-full text-center">
@@ -166,44 +175,76 @@ export default function DynamicDropdown({
                 </label>
               </When>
 
+              <When truthy={Boolean(withoutValueItem)}>
+                <label
+                  key={withoutValueItem?.id}
+                  htmlFor={withoutValueItem?.id}
+                  className={tw(
+                    "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                    selectedItems.includes(withoutValueItem?.id ?? "") &&
+                      "bg-gray-50"
+                  )}
+                >
+                  <span className="pr-2">
+                    {withoutValueItem?.name}
+                    <input
+                      id={withoutValueItem?.id}
+                      type="checkbox"
+                      value={withoutValueItem?.id}
+                      className="hidden"
+                      checked={selectedItems.includes(
+                        withoutValueItem?.id ?? ""
+                      )}
+                      onChange={(e) => {
+                        handleSelectItemChange(e.currentTarget.value);
+                      }}
+                    />
+                  </span>
+
+                  <When
+                    truthy={selectedItems.includes(withoutValueItem?.id ?? "")}
+                  >
+                    <CheckIcon className="text-primary" />
+                  </When>
+                </label>
+              </When>
+
+              {/* Bottom Divider */}
+              <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
+                <div className="h-2 w-full border border-gray-200 bg-gray-50" />
+              </When>
+
               {items.map((item) => {
                 const checked = selectedItems.includes(item.id);
                 return (
-                  <>
-                    <label
-                      key={item.id}
-                      htmlFor={item.id}
-                      className={tw(
-                        "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                        checked && "bg-gray-50"
-                      )}
-                    >
-                      <span className="pr-2">
-                        {typeof renderItem === "function"
-                          ? renderItem({ ...item, metadata: item })
-                          : item.name}
-                        <input
-                          id={item.id}
-                          type="checkbox"
-                          value={item.id}
-                          className="hidden"
-                          checked={checked}
-                          onChange={(e) => {
-                            handleSelectItemChange(e.currentTarget.value);
-                          }}
-                        />
-                      </span>
+                  <label
+                    key={item.id}
+                    htmlFor={item.id}
+                    className={tw(
+                      "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                      checked && "bg-gray-50"
+                    )}
+                  >
+                    <span className="pr-2">
+                      {typeof renderItem === "function"
+                        ? renderItem({ ...item, metadata: item })
+                        : item.name}
+                      <input
+                        id={item.id}
+                        type="checkbox"
+                        value={item.id}
+                        className="hidden"
+                        checked={checked}
+                        onChange={(e) => {
+                          handleSelectItemChange(e.currentTarget.value);
+                        }}
+                      />
+                    </span>
 
-                      <When truthy={checked}>
-                        <CheckIcon className="text-primary" />
-                      </When>
-                    </label>
-
-                    {/* Bottom Divider */}
-                    <When truthy={withoutValueItem?.id === item.id}>
-                      <div className="h-2 w-full border border-gray-200 bg-gray-50" />
+                    <When truthy={checked}>
+                      <CheckIcon className="text-primary" />
                     </When>
-                  </>
+                  </label>
                 );
               })}
 
