@@ -5,6 +5,7 @@ export type AuthSession = {
   email: string;
   expiresIn: number;
   expiresAt: number;
+  passwordLastUpdatedAt?: number | null;
 };
 
 export const authSessionKey = "auth";

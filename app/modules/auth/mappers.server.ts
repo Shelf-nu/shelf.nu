@@ -7,7 +7,8 @@ import { ShelfError } from "~/utils/error";
 const label: ErrorLabel = "Auth";
 
 export function mapAuthSession(
-  supabaseAuthSession: SupabaseAuthSession
+  supabaseAuthSession: SupabaseAuthSession,
+  passwordLastUpdatedAt?: number | null
 ): AuthSession {
   if (!supabaseAuthSession.user.email) {
     throw new ShelfError({
@@ -27,5 +28,6 @@ export function mapAuthSession(
     email: supabaseAuthSession.user.email,
     expiresIn: supabaseAuthSession.expires_in ?? -1,
     expiresAt: supabaseAuthSession.expires_at ?? -1,
+    passwordLastUpdatedAt: passwordLastUpdatedAt,
   };
 }

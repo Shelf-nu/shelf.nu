@@ -110,8 +110,13 @@ export async function signInWithEmail(email: string, password: string) {
     }
 
     const { session } = data;
-
-    return mapAuthSession(session);
+    let passwordLastUpdatedAt: number | null = null;
+    if (session) {
+      passwordLastUpdatedAt = await getPasswordUpdateAtForUser(
+        session?.user?.id
+      );
+    }
+    return mapAuthSession(session, passwordLastUpdatedAt);
   } catch (cause) {
     let message =
       "Something went wrong. Please try again later or contact support.";
@@ -201,12 +206,17 @@ export async function sendResetPasswordLink(email: string) {
   }
 }
 
-export async function updateAccountPassword(id: string, password: string) {
+export async function updateAccountPassword(
+  id: string,
+  password: string,
+  now?: Date
+) {
   try {
     const user = await db.user.findFirst({
       where: { id },
       select: {
         sso: true,
+        passwordUpdatedAt: true,
       },
     });
     if (user?.sso) {
@@ -214,6 +224,15 @@ export async function updateAccountPassword(id: string, password: string) {
         cause: null,
         message: "You cannot update the password of an SSO user.",
         label,
+      });
+    }
+
+    if (user) {
+      await db.user.update({
+        where: { id },
+        data: {
+          passwordUpdatedAt: now || new Date(),
+        },
       });
     }
 
@@ -291,8 +310,21 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
   }
 }
 
+export async function getPasswordUpdateAtForUser(userId: string) {
+  try {
+    const user = await db.user.findFirst({ where: { id: userId } });
+    const value = user?.passwordUpdatedAt
+      ? new Date(user?.passwordUpdatedAt).valueOf()
+      : null;
+    return value;
+  } catch (err) {
+    return null;
+  }
+}
+
 export async function refreshAccessToken(
-  refreshToken?: string
+  refreshToken?: string,
+  passwordLastUpdatedAt?: number | null
 ): Promise<AuthSession> {
   try {
     if (!refreshToken) {
@@ -310,8 +342,14 @@ export async function refreshAccessToken(
     if (error) {
       throw error;
     }
-
+    console.log("data========>", data);
     const { session } = data;
+
+    if (passwordLastUpdatedAt === undefined && session?.user.id) {
+      passwordLastUpdatedAt = await getPasswordUpdateAtForUser(
+        session?.user?.id
+      );
+    }
 
     if (!session) {
       throw new ShelfError({
@@ -321,7 +359,7 @@ export async function refreshAccessToken(
       });
     }
 
-    return mapAuthSession(session);
+    return mapAuthSession(session, passwordLastUpdatedAt);
   } catch (cause) {
     throw new ShelfError({
       cause,

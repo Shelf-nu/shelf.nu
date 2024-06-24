@@ -67,10 +67,18 @@ export async function action({ context, request }: ActionFunctionArgs) {
           await request.formData(),
           ResetPasswordSchema
         );
+        const passwordUpdatedAt = new Date();
 
-        const authSession = await refreshAccessToken(refreshToken);
+        const authSession = await refreshAccessToken(
+          refreshToken,
+          passwordUpdatedAt.valueOf()
+        );
 
-        await updateAccountPassword(authSession.userId, password);
+        await updateAccountPassword(
+          authSession.userId,
+          password,
+          passwordUpdatedAt
+        );
 
         // Commit the session and redirect
         context.setSession({ ...authSession });

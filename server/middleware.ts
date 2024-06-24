@@ -2,7 +2,11 @@ import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
 
-import { refreshAccessToken } from "~/modules/auth/service.server";
+import {
+  getPasswordUpdateAtForUser,
+  refreshAccessToken,
+} from "~/modules/auth/service.server";
+import { Logger } from "~/utils/logger";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
 
@@ -62,6 +66,23 @@ function isExpiringSoon(expiresAt: number | undefined) {
   return (expiresAt - 60 * 0.1) * 1000 < Date.now(); // 1 minute left before token expires
 }
 
+function isPasswordUpdated(
+  passwordLastUpdatedAt?: Date | number | null,
+  authPasswordLastUpdatedAt?: number | null
+) {
+  if (process.env.V2_AUTH_ENABLED === "false") {
+    return false;
+  }
+  if (!passwordLastUpdatedAt) {
+    return false;
+  }
+  if (!authPasswordLastUpdatedAt) {
+    return true;
+  }
+
+  return new Date(passwordLastUpdatedAt) > new Date(authPasswordLastUpdatedAt); // 1 hour after password last updated
+}
+
 /**
  * Refresh access token middleware
  *
@@ -72,12 +93,36 @@ export function refreshSession() {
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
 
-    if (!auth || !isExpiringSoon(auth.expiresAt)) {
+    let passwordUpdateStatus: boolean = false;
+
+    if (!auth) {
       return next();
     }
 
+    if (!isExpiringSoon(auth.expiresAt)) {
+      if (process.env.V2_AUTH_ENABLED === "true") {
+        let passwordUpdatedAt = await getPasswordUpdateAtForUser(auth.userId);
+        passwordUpdateStatus = isPasswordUpdated(
+          passwordUpdatedAt,
+          auth.passwordLastUpdatedAt
+        );
+      }
+      if (!passwordUpdateStatus) {
+        return next();
+      }
+    }
     try {
-      session.set(authSessionKey, await refreshAccessToken(auth.refreshToken));
+      if (passwordUpdateStatus) {
+        Logger.error("Password has been updated. Please log in again.");
+        throw new Error("Password has been updated. Please log in again.");
+      }
+      session.set(
+        authSessionKey,
+        await refreshAccessToken(
+          auth.refreshToken,
+          auth.passwordLastUpdatedAt || null
+        )
+      );
     } catch (cause) {
       session.flash(
         "errorMessage",

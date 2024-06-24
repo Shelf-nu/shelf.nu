@@ -30,23 +30,24 @@ model Image {
 }
 
 model User {
-  id             String  @id @default(cuid())
-  email          String  @unique
-  username       String  @unique @default(cuid())
-  firstName      String?
-  lastName       String?
-  profilePicture String?
-  usedFreeTrial  Boolean @default(false)
-  onboarded      Boolean @default(false)
-  customerId     String? @unique // Stripe customer id
-  sso            Boolean @default(false)
+  id                String            @id @default(cuid())
+  email             String            @unique
+  username          String            @unique @default(cuid())
+  firstName         String?
+  lastName          String?
+  profilePicture    String?
+  usedFreeTrial     Boolean           @default(false)
+  onboarded         Boolean           @default(false)
+  customerId        String?           @unique
+  sso               Boolean           @default(false)
+  
+  // Dates
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  passwordUpdatedAt DateTime?
 
-  // Datetime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
   // Relationships
-
   assets            Asset[]
   categories        Category[]
   notes             Note[]
@@ -58,21 +59,24 @@ model User {
   images            Image[]
   organizations     Organization[]
   customFields      CustomField[]
-  sentInvites       Invite[]           @relation("inviter")
-  receivedInvites   Invite[]           @relation("invitee")
+  sentInvites       Invite[]          @relation("inviter")
+  receivedInvites   Invite[]          @relation("invitee")
   teamMembers       TeamMember[]
   userOrganizations UserOrganization[]
-  bookings          Booking[]          @relation("creator")
-  custodies         Booking[]          @relation("custodian")
+  bookings          Booking[]         @relation("creator")
+  custodies         Booking[]         @relation("custodian")
   createdKits       Kit[]
-  tierId            TierId             @default(free)
-  tier              Tier               @relation(fields: [tierId], references: [id])
+  
+  // Tier-related fields
+  tierId            TierId            @default(free)
+  tier              Tier              @relation(fields: [tierId], references: [id])
 
-  // This relationship will be used only when tierId == custom
-  customTierLimit CustomTierLimit?
+  // Custom tier limit relationship
+  customTierLimit   CustomTierLimit?
 
   @@unique([email, username])
 }
+
 
 model Asset {
   id                  String      @id @default(cuid())
