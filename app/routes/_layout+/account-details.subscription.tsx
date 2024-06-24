@@ -99,7 +99,8 @@ export async function loader({ context }: LoaderFunctionArgs) {
             (subscription?.current_period_end as number) * 1000
           ).toLocaleTimeString(),
         },
-        isTrialSubscription: !!subscription?.trial_end,
+        isTrialSubscription:
+          !!subscription?.trial_end && subscription.status === "trialing",
       })
     );
   } catch (cause) {
