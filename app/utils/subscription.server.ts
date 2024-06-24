@@ -107,6 +107,45 @@ export async function assertUserCanImportAssets({
   }
 }
 
+export const canImportNRM = (
+  tierLimit: { canImportNRM: boolean } | null | undefined
+) => {
+  /** If the premium features are not enabled, just return true */
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit?.canImportNRM) return false;
+  return tierLimit?.canImportNRM;
+};
+
+export async function assertUserCanImportNRM({
+  organizationId,
+  organizations,
+}: {
+  organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
+}) {
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  if (!canImportNRM(tierLimit)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Not allowed",
+      message:
+        "You are not allowed to import Non-registered members due to your current plan. Please upgrade to unlock this feature.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
 /** End Import */
 
 /** Custom Fields */

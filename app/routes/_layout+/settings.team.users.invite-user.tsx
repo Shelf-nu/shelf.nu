@@ -133,7 +133,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         senderId: userId,
       });
 
-      return redirect("/settings/team");
+      return redirect("/settings/team/users");
     }
 
     return json(data(null));

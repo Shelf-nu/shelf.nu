@@ -466,6 +466,7 @@ model TierLimit {
   tier             Tier?
   canImportAssets  Boolean  @default(false)
   canExportAssets  Boolean  @default(false)
+  canImportNRM     Boolean  @default(false)
   maxCustomFields  Int      @default(0)
   maxOrganizations Int      @default(1)
   createdAt        DateTime @default(now())
@@ -479,6 +480,7 @@ model CustomTierLimit {
   userId           String?  @unique // This is the foreign key
   canImportAssets  Boolean  @default(true)
   canExportAssets  Boolean  @default(true)
+  canImportNRM     Boolean  @default(true)
   maxCustomFields  Int      @default(1000)
   maxOrganizations Int      @default(1)
   createdAt        DateTime @default(now())
