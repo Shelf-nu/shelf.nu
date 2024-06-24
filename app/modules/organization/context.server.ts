@@ -42,11 +42,8 @@ export function destroySelectedOrganizationIdCookie() {
 
 /**
  * This function is used to get the selected organization for the user.
- *
  * It checks if the user is part of the current selected organization
- *
- * **It always defaults to the personal organization if the user is not part of the current selected organization.**
- *
+ * It always defaults to the personal organization if the user is not part of the current selected organization.
  * @throws If the user is not part of any organization
  */
 export async function getSelectedOrganisation({
