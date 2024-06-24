@@ -60,7 +60,6 @@ export function TeamMembersActionsDropdown({
               title: (
                 <span className="flex items-center gap-2 text-gray-700">
                   <SendIcon /> Invite user
-                  <SendIcon /> Invite user
                 </span>
               ),
               message:

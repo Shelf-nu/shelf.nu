@@ -127,7 +127,7 @@ export default function EditNrm() {
           type="submit"
           disabled={disabled}
         >
-          Edit team member
+          Save
         </Button>
       </Form>
       {actionData?.error && (
