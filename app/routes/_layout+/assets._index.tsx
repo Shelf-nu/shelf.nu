@@ -381,6 +381,11 @@ export default function AssetIndexPage() {
                   placeholder="Search team members"
                   initialDataKey="teamMembers"
                   countKey="totalTeamMembers"
+                  allowSelectAll
+                  withoutValueItem={{
+                    id: "without-custody",
+                    name: "Without Custody",
+                  }}
                 />
               )}
             </div>
