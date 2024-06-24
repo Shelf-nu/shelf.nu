@@ -5,6 +5,7 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
 } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import ContextualModal from "~/components/layout/contextual-modal";
 
@@ -14,9 +15,11 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
+import { ImportNrmButton } from "~/components/workspace/import-nrm-button";
 import { TeamMembersActionsDropdown } from "~/components/workspace/nrm-actions-dropdown";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableSettingTeamMembers } from "~/modules/settings/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, parseData } from "~/utils/http.server";
@@ -25,24 +28,33 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { canImportNRM } from "~/utils/subscription.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.read,
     });
 
-    const { page, perPage, search, totalPages, teamMembers, totalTeamMembers } =
-      await getPaginatedAndFilterableSettingTeamMembers({
+    const [
+      tierLimit,
+      { page, perPage, search, totalPages, teamMembers, totalTeamMembers },
+    ] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId,
+        organizations,
+      }),
+      getPaginatedAndFilterableSettingTeamMembers({
         organizationId,
         request,
-      });
+      }),
+    ]);
 
     const header: HeaderData = {
       title: `Settings - Manage Team Members`,
@@ -62,6 +74,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       totalPages,
       items: teamMembers,
       totalItems: totalTeamMembers,
+      canImportNRM: canImportNRM(tierLimit),
     };
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -150,6 +163,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function NrmSettings() {
+  const { canImportNRM } = useLoaderData<typeof loader>();
   return (
     <div>
       <p className="mb-6 text-xs text-gray-600">
@@ -159,16 +173,17 @@ export default function NrmSettings() {
 
       <ListContentWrapper>
         <Filters>
-          <Button variant="secondary" to="import-members" className="mr-2">
-            <span className="whitespace-nowrap">Import NRM</span>
-          </Button>
-          <Button
-            variant="primary"
-            to="add-member"
-            className="mt-2 w-full md:mt-0 md:w-max"
-          >
-            <span className=" whitespace-nowrap">Add NRM</span>
-          </Button>
+          <div className="flex items-center justify-end gap-2">
+            <ImportNrmButton canImportNRM={canImportNRM} />
+
+            <Button
+              variant="primary"
+              to="add-member"
+              className="mt-2 w-full md:mt-0 md:w-max"
+            >
+              <span className=" whitespace-nowrap">Add NRM</span>
+            </Button>
+          </div>
         </Filters>
 
         <List

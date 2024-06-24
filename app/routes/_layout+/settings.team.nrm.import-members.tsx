@@ -27,18 +27,21 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanImportNRM } from "~/utils/subscription.server";
+import { WarningBox } from "~/components/shared/warning-box";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.create,
     });
+    await assertUserCanImportNRM({ organizationId, organizations });
 
     return json(
       data({
@@ -56,12 +59,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.create,
     });
+
+    await assertUserCanImportNRM({ organizationId, organizations });
 
     // Upload handler to store file in memory
     const formData = await unstable_parseMultipartFormData(
@@ -105,8 +110,10 @@ export default function ImportNRMs() {
             team members just requires you to upload a txt file with member
             names separated by comas.
             <br />
-            Import is final and cannot be reverted. If you want to later edit
-            team members, you can do so from the Team settings page.
+            <WarningBox className="my-2">
+              Import is final and cannot be reverted. If you want to later edit
+              team members, you can do so from the Team settings page.
+            </WarningBox>
           </p>
         </div>
         <ImportForm />
