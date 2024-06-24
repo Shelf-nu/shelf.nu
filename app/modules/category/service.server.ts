@@ -171,7 +171,7 @@ export async function createCategoriesIfNotExists({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating categories. Please try again or contact support.",
+        "Something went wrong while creating categories. Seems like some of the category data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
     });
