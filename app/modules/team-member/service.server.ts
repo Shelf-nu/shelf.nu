@@ -212,58 +212,35 @@ export async function getTeamMemberForCustodianFilter({
   getAll?: boolean;
 }) {
   try {
-    const [
-      teamMemberExcludedSelected,
-      teamMembersSelected,
-      totalTeamMembers,
-      org,
-    ] = await Promise.all([
-      db.teamMember.findMany({
-        where: {
-          organizationId,
-          id: { notIn: selectedTeamMembers },
-          deletedAt: null,
-        },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-              email: true,
+    const [teamMemberExcludedSelected, teamMembersSelected, totalTeamMembers] =
+      await Promise.all([
+        db.teamMember.findMany({
+          where: {
+            organizationId,
+            id: { notIn: selectedTeamMembers },
+            deletedAt: null,
+          },
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
             },
           },
-        },
-        take: getAll ? undefined : 12,
-      }),
-      db.teamMember.findMany({
-        where: { organizationId, id: { in: selectedTeamMembers } },
-      }),
-      db.teamMember.count({ where: { organizationId, deletedAt: null } }),
-      db.organization.findUnique({
-        where: { id: organizationId },
-        select: { owner: true },
-      }),
-    ]);
+          take: getAll ? undefined : 12,
+        }),
+        db.teamMember.findMany({
+          where: { organizationId, id: { in: selectedTeamMembers } },
+        }),
+        db.teamMember.count({ where: { organizationId, deletedAt: null } }),
+      ]);
 
     const allTeamMembers = [
       ...teamMembersSelected,
       ...teamMemberExcludedSelected,
     ];
-
-    /**
-     * Owners can be assigned in bookings so have to add it to the list
-     */
-    if (org?.owner && typeof org.owner.id === "string") {
-      allTeamMembers.push({
-        id: "owner",
-        name: `${org.owner.firstName} ${org.owner.lastName} (Owner)`,
-        userId: org.owner.id,
-        organizationId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        deletedAt: null,
-      });
-    }
 
     /**
      * If teamMember has a user associated then we have to use that user's id
