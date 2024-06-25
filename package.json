@@ -4,7 +4,7 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "NODE_OPTIONS='--import=./server/instrument.server.mjs' remix vite:build",
+    "build": "remix vite:build",
     "build-with-sentry": "remix vite:build --sourcemap && sentry-upload-sourcemaps --org ${SENTRY_ORG} --project ${SENTRY_PROJECT}",
     "db:diff": "prisma migrate diff --from-url=${DATABASE_URL} --to-migrations=./app/database/migrations --shadow-database-url=${SHADOW_DATABASE_URL} --script > rollback.sql",
     "db:prepare-migration": "prisma generate && prisma migrate dev --create-only --skip-seed",
@@ -22,7 +22,7 @@
     "setup": "prisma generate && prisma migrate deploy",
     "reset:db": "prisma migrate reset",
     "reset:db:staging": "dotenv -e .env.staging -- prisma migrate reset",
-    "start": "NODE_ENV=production node ./build/server/index.js",
+    "start": "NODE_OPTIONS='--import=./server/instrument.server.mjs' NODE_ENV=production node ./build/server/index.js",
     "start:ci": "dotenv -- npm run start",
     "test": "vitest",
     "test:cov": "vitest --coverage",
