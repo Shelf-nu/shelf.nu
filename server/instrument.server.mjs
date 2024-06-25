@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/remix";
-import { isLikeShelfError } from "./error";
+import { isLikeShelfError } from "../app/utils/error";
 
 /**
  * This initialtes sentry. It has very specific requirements on how to be handled:
