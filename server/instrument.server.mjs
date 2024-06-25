@@ -1,5 +1,4 @@
 import * as Sentry from "@sentry/remix";
-import { isLikeShelfError } from "../app/utils/error";
 
 /**
  * This initialtes sentry. It has very specific requirements on how to be handled:
@@ -40,6 +39,20 @@ if (process.env.SENTRY_DSN) {
       return handleBeforeSend(event, hint);
     },
   });
+}
+
+/**
+ * This helper function is used to check if an error is an instance of `ShelfError` or an object that looks like an `ShelfError`.
+ * WARNING: Because of how we initiate Sentry, we need to add this function inside this file as it cant be imported from its original source
+ */
+function isLikeShelfError(cause) {
+  return (
+    cause instanceof ShelfError ||
+    (typeof cause === "object" &&
+      cause !== null &&
+      "label" in cause &&
+      "message" in cause)
+  );
 }
 
 /**
