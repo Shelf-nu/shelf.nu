@@ -1,10 +1,5 @@
-import type {
-  Organization,
-  SsoDetails,
-  User,
-  OrganizationRoles,
-} from "@prisma/client";
-import { Prisma, Roles } from "@prisma/client";
+import type { Organization, SsoDetails, User } from "@prisma/client";
+import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
@@ -36,10 +31,7 @@ import { randomUsernameFromEmail } from "~/utils/user";
 import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
 import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
-import {
-  createOrganizationForNewUser,
-  getOrganizationsBySsoDomain,
-} from "../organization/service.server";
+import { getOrganizationsBySsoDomain } from "../organization/service.server";
 import { createTeamMember } from "../team-member/service.server";
 
 const label: ErrorLabel = "User";
@@ -458,6 +450,31 @@ export async function createUser(
                 name: Roles["USER"],
               },
             },
+            ...(!isSSO && {
+              organizations: {
+                create: [
+                  {
+                    name: "Personal",
+                    categories: {
+                      create: defaultUserCategories.map((c) => ({
+                        ...c,
+                        userId,
+                      })),
+                    },
+                    /**
+                     * Creating a teamMember when a new organization/workspace is created
+                     * so that the owner appear in the list by default
+                     */
+                    members: {
+                      create: {
+                        name: `${firstName} ${lastName} (Owner)`,
+                        user: { connect: { id: userId } },
+                      },
+                    },
+                  },
+                ],
+              },
+            }),
             ...(isSSO && {
               // When user is coming from SSO, we set them as onboarded as we already have their first and last name and they dont need a password.
               onboarded: true,
@@ -476,10 +493,11 @@ export async function createUser(
          * 2. For the org that the user is being attached to
          */
         await Promise.all([
-          !isSSO &&
-            createOrganizationForNewUser(tx, {
-              name: "Personal",
-              newUser: user,
+          !isSSO && // We only create a personal org for non-SSO users
+            createUserOrgAssociation(tx, {
+              userId: user.id,
+              organizationIds: [user.organizations[0].id],
+              roles: [OrganizationRoles.OWNER],
             }),
           organizationId &&
             roles?.length &&

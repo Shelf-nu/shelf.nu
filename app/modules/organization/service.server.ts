@@ -1,8 +1,6 @@
 import { OrganizationRoles, OrganizationType } from "@prisma/client";
 import type { Organization, Prisma, User } from "@prisma/client";
 
-import type { ITXClientDenyList } from "@prisma/client/runtime/library";
-import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -344,60 +342,6 @@ export async function toggleOrganizationSso({
       message:
         "Something went wrong while toggling organization SSO. Please try again or contact support.",
       additionalData: { organizationId, enabledSso },
-      label,
-    });
-  }
-}
-
-export async function createOrganizationForNewUser(
-  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
-  payload: Pick<Organization, "name"> & {
-    newUser: User;
-  }
-) {
-  try {
-    const { name, newUser } = payload;
-
-    const org = await tx.organization.create({
-      data: {
-        name: name,
-        type: OrganizationType.PERSONAL,
-        categories: {
-          create: defaultUserCategories.map((c) => ({
-            ...c,
-            userId: newUser.id,
-          })),
-        },
-        userOrganizations: {
-          create: {
-            userId: newUser.id,
-            roles: [OrganizationRoles.OWNER],
-          },
-        },
-        owner: {
-          connect: {
-            id: newUser.id,
-          },
-        },
-        /**
-         * Creating a teamMember when a new organization/workspace is created
-         * so that the owner appear in the list by default
-         */
-        members: {
-          create: {
-            name: `${newUser.firstName} ${newUser.lastName} (Owner)`,
-            user: { connect: { id: newUser.id } },
-          },
-        },
-      },
-    });
-
-    return org;
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Failed to create organization for new user.",
-      additionalData: { payload },
       label,
     });
   }
