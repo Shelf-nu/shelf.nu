@@ -1840,6 +1840,7 @@ export async function createAssetsFromContentImport({
               customFieldsValues,
             });
           } catch (error) {
+            // eslint-disable-next-line no-console
             console.error("Error processing asset", error);
             // Handle the error as needed
           }

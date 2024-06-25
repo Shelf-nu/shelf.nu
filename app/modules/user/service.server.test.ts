@@ -242,6 +242,12 @@ describe(createUserAccountForTesting.name, () => {
                   userId: USER_ID,
                 })),
               },
+              members: {
+                create: {
+                  name: `${undefined} ${undefined} (Owner)`,
+                  user: { connect: { id: USER_ID } },
+                },
+              },
             },
           ],
         },
