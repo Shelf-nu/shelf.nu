@@ -40,6 +40,7 @@ export const LocationSelect = () => {
               variant="link"
               icon="plus"
               className="w-full justify-start pt-4"
+              target="_blank"
             >
               Create new location
             </Button>
