@@ -108,7 +108,6 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   data-test-id={`${item.title.toLowerCase()}SidebarMenuItem`}
                   onClick={toggleMobileNav}
                   title={item.title}
-                  target={item.target || undefined}
                 >
                   <i className="icon inline-flex pl-[2px] text-gray-500">
                     {item.icon}
@@ -148,6 +147,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   data-test-id={`${item.title.toLowerCase()}SidebarMenuItem`}
                   onClick={toggleMobileNav}
                   title={item.title}
+                  target={item?.target || undefined}
                 >
                   <i className="icon inline-flex pl-[2px] text-gray-500">
                     {item.icon}

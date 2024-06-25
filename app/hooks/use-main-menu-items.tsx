@@ -46,14 +46,14 @@ export function useMainMenuItems() {
       to: "bookings",
       title: "Bookings",
     },
+  ];
+  let menuItemsBottom = [
     {
       icon: <Icon icon="bookings" />,
-      to: `https://www.shelf.nu/order-tags`,
+      to: `https://www.shelf.nu/order-tags?email=${user?.email}`,
       title: "Asset labels",
       target: "_blank",
     },
-  ];
-  let menuItemsBottom = [
     {
       icon: <Icon icon="scanQR" />,
       to: "scanner",
