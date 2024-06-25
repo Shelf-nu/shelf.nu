@@ -5,6 +5,7 @@ import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import Icon from "~/components/icons/icon";
 import { ControlledActionButton } from "~/components/shared/controlled-action-button";
+import When from "~/components/when/when";
 import { useMainMenuItems } from "~/hooks/use-main-menu-items";
 import type { loader } from "~/routes/_layout+/_layout";
 import { tw } from "~/utils/tw";
@@ -138,7 +139,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 <NavLink
                   className={({ isActive }) =>
                     tw(
-                      "my-1 flex items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                      " my-1 flex items-center  gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
                       isActive ? "active bg-primary-50 text-primary-600" : "",
                       workspaceSwitching ? "pointer-events-none" : ""
                     )
@@ -155,6 +156,11 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
                     {item.title}
                   </span>
+                  <When truthy={item.isNew || false}>
+                    <span className="ml-auto rounded-lg bg-primary-50 px-2 py-1 text-xs text-primary-600">
+                      New
+                    </span>
+                  </When>
                 </NavLink>
               </li>
             ))}
