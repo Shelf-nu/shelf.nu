@@ -1,60 +1,69 @@
 import Icon from "~/components/icons/icon";
+import { useUserData } from "./use-user-data";
 import { useUserIsSelfService } from "./user-user-is-self-service";
 
 export function useMainMenuItems() {
+  const user = useUserData();
+
   let menuItemsTop = [
     {
       icon: <Icon icon="graph" />,
       to: "dashboard",
-      label: "Dashboard",
+      title: "Dashboard",
     },
     {
       icon: <Icon icon="asset" />,
       to: "assets",
-      label: "Assets",
+      title: "Assets",
     },
     {
       icon: <Icon icon="kit" />,
       to: "kits",
-      label: "Kits",
+      title: "Kits",
     },
     {
       icon: <Icon icon="category" />,
       to: "categories",
-      label: "Categories",
+      title: "Categories",
     },
     {
       icon: <Icon icon="tag" />,
       to: "tags",
-      label: "Tags",
+      title: "Tags",
     },
     {
       icon: <Icon icon="location" />,
       to: "locations",
-      label: "Locations",
+      title: "Locations",
     },
     {
       icon: <Icon icon="calendar" />,
       to: "calendar",
-      label: "Calendar",
+      title: "Calendar",
     },
     {
       icon: <Icon icon="bookings" />,
       to: "bookings",
-      label: "Bookings",
+      title: "Bookings",
+    },
+    {
+      icon: <Icon icon="bookings" />,
+      to: `https://www.shelf.nu/order-tags`,
+      title: "Asset labels",
+      target: "_blank",
     },
   ];
   let menuItemsBottom = [
     {
       icon: <Icon icon="scanQR" />,
       to: "scanner",
-      label: "QR scanner",
+      title: "QR scanner",
       end: true,
     },
     {
       icon: <Icon icon="settings" />,
       to: "settings",
-      label: "Workspace settings",
+      title: "Workspace settings",
       end: true,
     },
   ];

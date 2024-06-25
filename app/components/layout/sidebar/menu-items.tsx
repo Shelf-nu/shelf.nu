@@ -48,7 +48,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
 
           {menuItemsTop.map((item) =>
             item.to === "bookings" || item.to === "calendar" ? (
-              <li key={item.label}>
+              <li key={item.title}>
                 <ControlledActionButton
                   canUseFeature={canUseBookings}
                   buttonContent={{
@@ -65,7 +65,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                           {item.icon}
                         </i>
                         <span className="text whitespace-nowrap transition duration-200 ease-linear hover:text-primary-600">
-                          {item.label}
+                          {item.title}
                         </span>
                       </span>
                     ),
@@ -76,9 +76,9 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   }}
                   buttonProps={{
                     to: item.to,
-                    "data-test-id": `${item.label.toLowerCase()}SidebarMenuItem`,
+                    "data-test-id": `${item.title.toLowerCase()}SidebarMenuItem`,
                     onClick: toggleMobileNav,
-                    title: item.label,
+                    title: item.title,
                     disabled: workspaceSwitching,
                     className: tw(
                       "my-1 flex items-center gap-3 rounded border-0 bg-transparent px-3 text-left text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
@@ -95,7 +95,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 />
               </li>
             ) : (
-              <li key={item.label}>
+              <li key={item.title}>
                 <NavLink
                   className={({ isActive }) =>
                     tw(
@@ -105,15 +105,16 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     )
                   }
                   to={item.to}
-                  data-test-id={`${item.label.toLowerCase()}SidebarMenuItem`}
+                  data-test-id={`${item.title.toLowerCase()}SidebarMenuItem`}
                   onClick={toggleMobileNav}
-                  title={item.label}
+                  title={item.title}
+                  target={item.target || undefined}
                 >
                   <i className="icon inline-flex pl-[2px] text-gray-500">
                     {item.icon}
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                    {item.label}
+                    {item.title}
                   </span>
                 </NavLink>
               </li>
@@ -134,7 +135,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
           ) : null}
           <ul className="menu mb-6">
             {menuItemsBottom.map((item) => (
-              <li key={item.label}>
+              <li key={item.title}>
                 <NavLink
                   className={({ isActive }) =>
                     tw(
@@ -144,15 +145,15 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     )
                   }
                   to={item.to}
-                  data-test-id={`${item.label.toLowerCase()}SidebarMenuItem`}
+                  data-test-id={`${item.title.toLowerCase()}SidebarMenuItem`}
                   onClick={toggleMobileNav}
-                  title={item.label}
+                  title={item.title}
                 >
                   <i className="icon inline-flex pl-[2px] text-gray-500">
                     {item.icon}
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
-                    {item.label}
+                    {item.title}
                   </span>
                 </NavLink>
               </li>
