@@ -1,5 +1,10 @@
-import type { Organization, SsoDetails, User } from "@prisma/client";
-import { Prisma, Roles, OrganizationRoles } from "@prisma/client";
+import type {
+  Organization,
+  SsoDetails,
+  User,
+  OrganizationRoles,
+} from "@prisma/client";
+import { Prisma, Roles } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
@@ -31,7 +36,10 @@ import { randomUsernameFromEmail } from "~/utils/user";
 import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
 import type { UpdateUserPayload } from "./types";
 import { defaultUserCategories } from "../category/default-categories";
-import { getOrganizationsBySsoDomain } from "../organization/service.server";
+import {
+  createOrganizationForNewUser,
+  getOrganizationsBySsoDomain,
+} from "../organization/service.server";
 import { createTeamMember } from "../team-member/service.server";
 
 const label: ErrorLabel = "User";
@@ -445,21 +453,6 @@ export async function createUser(
             username,
             firstName,
             lastName,
-            ...(!isSSO && {
-              organizations: {
-                create: [
-                  {
-                    name: "Personal",
-                    categories: {
-                      create: defaultUserCategories.map((c) => ({
-                        ...c,
-                        userId,
-                      })),
-                    },
-                  },
-                ],
-              },
-            }),
             roles: {
               connect: {
                 name: Roles["USER"],
@@ -477,16 +470,16 @@ export async function createUser(
           },
         });
 
-        /** Create user organization association
+        /**
+         * Creating an organization for the user
          * 1. For the personal org
          * 2. For the org that the user is being attached to
          */
         await Promise.all([
-          !isSSO && // We only create a personal org for non-SSO users
-            createUserOrgAssociation(tx, {
-              userId: user.id,
-              organizationIds: [user.organizations[0].id],
-              roles: [OrganizationRoles.OWNER],
+          !isSSO &&
+            createOrganizationForNewUser(tx, {
+              name: "Personal",
+              newUser: user,
             }),
           organizationId &&
             roles?.length &&
