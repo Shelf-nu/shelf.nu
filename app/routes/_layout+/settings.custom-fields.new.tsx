@@ -11,7 +11,6 @@ import Header from "~/components/layout/header";
 import { getAllEntriesForCreateAndEdit } from "~/modules/asset/service.server";
 
 import { createCustomField } from "~/modules/custom-field/service.server";
-import { assertUserCanCreateMoreCustomFields } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -22,6 +21,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanCreateMoreCustomFields } from "~/utils/subscription.server";
 
 const title = "New Custom Field";
 

@@ -269,7 +269,7 @@ export async function createCustomFieldsIfNotExists({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating custom fields. Please try again or contact support.",
+        "Something went wrong while creating custom fields. Seems like some of the custom field data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
     });

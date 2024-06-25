@@ -99,7 +99,7 @@ export async function createTeamMemberIfNotExists({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating the team member. Please try again or contact support.",
+        "Something went wrong while creating the team member. Seems like some of the team member data in your import file is invalid. Please check and try again.",
       additionalData: { organizationId },
       label,
     });
@@ -212,58 +212,35 @@ export async function getTeamMemberForCustodianFilter({
   getAll?: boolean;
 }) {
   try {
-    const [
-      teamMemberExcludedSelected,
-      teamMembersSelected,
-      totalTeamMembers,
-      org,
-    ] = await Promise.all([
-      db.teamMember.findMany({
-        where: {
-          organizationId,
-          id: { notIn: selectedTeamMembers },
-          deletedAt: null,
-        },
-        include: {
-          user: {
-            select: {
-              firstName: true,
-              lastName: true,
-              email: true,
+    const [teamMemberExcludedSelected, teamMembersSelected, totalTeamMembers] =
+      await Promise.all([
+        db.teamMember.findMany({
+          where: {
+            organizationId,
+            id: { notIn: selectedTeamMembers },
+            deletedAt: null,
+          },
+          include: {
+            user: {
+              select: {
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
             },
           },
-        },
-        take: getAll ? undefined : 12,
-      }),
-      db.teamMember.findMany({
-        where: { organizationId, id: { in: selectedTeamMembers } },
-      }),
-      db.teamMember.count({ where: { organizationId, deletedAt: null } }),
-      db.organization.findUnique({
-        where: { id: organizationId },
-        select: { owner: true },
-      }),
-    ]);
+          take: getAll ? undefined : 12,
+        }),
+        db.teamMember.findMany({
+          where: { organizationId, id: { in: selectedTeamMembers } },
+        }),
+        db.teamMember.count({ where: { organizationId, deletedAt: null } }),
+      ]);
 
     const allTeamMembers = [
       ...teamMembersSelected,
       ...teamMemberExcludedSelected,
     ];
-
-    /**
-     * Owners can be assigned in bookings so have to add it to the list
-     */
-    if (org?.owner && typeof org.owner.id === "string") {
-      allTeamMembers.push({
-        id: "owner",
-        name: `${org.owner.firstName} ${org.owner.lastName} (Owner)`,
-        userId: org.owner.id,
-        organizationId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        deletedAt: null,
-      });
-    }
 
     /**
      * If teamMember has a user associated then we have to use that user's id
@@ -283,6 +260,19 @@ export async function getTeamMemberForCustodianFilter({
       cause,
       message: "Failed to fetch team members",
       additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+export async function getTeamMember({ id }: { id: TeamMember["id"] }) {
+  try {
+    return await db.teamMember.findUniqueOrThrow({ where: { id } });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Team member not found",
+      additionalData: { id },
       label,
     });
   }

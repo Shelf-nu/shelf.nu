@@ -230,7 +230,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function AssetOverview() {
-  const { asset, locale, timeZone, qrObj } = useLoaderData<typeof loader>();
+  const { asset, locale, timeZone, qrObj, lastScan } =
+    useLoaderData<typeof loader>();
   const booking = asset?.bookings?.length ? asset?.bookings[0] : undefined;
 
   const customFieldsValues =
@@ -464,8 +465,7 @@ export default function AssetOverview() {
           />
 
           {asset && <AssetQR qrObj={qrObj} asset={asset} />}
-          {/* @TODO: Figure our the issue with type definition of `lastScan` */}
-          {!isSelfService ? <ScanDetails /> : null}
+          {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
         </div>
       </div>
       <ContextualSidebar />

@@ -54,7 +54,7 @@ export function useMainMenuItems() {
     {
       icon: <Icon icon="settings" />,
       to: "settings",
-      label: "Settings",
+      label: "Workspace settings",
       end: true,
     },
   ];

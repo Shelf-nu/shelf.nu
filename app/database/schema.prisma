@@ -39,8 +39,6 @@ model User {
   usedFreeTrial  Boolean @default(false)
   onboarded      Boolean @default(false)
   customerId     String? @unique // Stripe customer id
-  tierId         TierId  @default(free)
-  tier           Tier    @relation(fields: [tierId], references: [id])
   sso            Boolean @default(false)
 
   // Datetime
@@ -48,6 +46,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relationships
+
   assets            Asset[]
   categories        Category[]
   notes             Note[]
@@ -66,6 +65,11 @@ model User {
   bookings          Booking[]          @relation("creator")
   custodies         Booking[]          @relation("custodian")
   createdKits       Kit[]
+  tierId            TierId             @default(free)
+  tier              Tier               @relation(fields: [tierId], references: [id])
+
+  // This relationship will be used only when tierId == custom
+  customTierLimit CustomTierLimit?
 
   @@unique([email, username])
 }
@@ -373,7 +377,7 @@ model Organization {
 
   // Not required. It will only be created for orgs that need sso
   // We can know if an org has SSO by checking the ssoDetailsId
-  enabledSso Boolean @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
+  enabledSso   Boolean     @default(false) // If true, the organization has enabled SSO. This cannot be changed by the user, just managed by the admin
   ssoDetailsId String?
   ssoDetails   SsoDetails? @relation(fields: [ssoDetailsId], references: [id])
 
@@ -421,7 +425,7 @@ enum OrganizationRoles {
 
 model SsoDetails {
   id String @id @default(cuid())
-  
+
   // The domain of the organization
   domain String
 
@@ -435,7 +439,6 @@ model SsoDetails {
   updatedAt DateTime @updatedAt
 }
 
-
 // Tier Ids are used to identify tiers (products) in Stripe. They must be predictable in our model.
 // Each product in stripe has a metadata value called `shelf_tier` which holds the value of the enum
 // Add more tiers if needed
@@ -443,6 +446,7 @@ enum TierId {
   free
   tier_1
   tier_2
+  custom
 }
 
 // Tiers correspond to Stripe products
@@ -456,12 +460,28 @@ model Tier {
   updatedAt   DateTime   @updatedAt
 }
 
+// TierLimit is used for the basic tiers
 model TierLimit {
   id               TierId   @id
   tier             Tier?
   canImportAssets  Boolean  @default(false)
   canExportAssets  Boolean  @default(false)
+  canImportNRM     Boolean  @default(false)
   maxCustomFields  Int      @default(0)
+  maxOrganizations Int      @default(1)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// CustomTierLimit is used for users which has Tier with ID: custom
+model CustomTierLimit {
+  id               String   @id @unique @default(cuid())
+  user             User?    @relation(fields: [userId], references: [id])
+  userId           String?  @unique // This is the foreign key
+  canImportAssets  Boolean  @default(true)
+  canExportAssets  Boolean  @default(true)
+  canImportNRM     Boolean  @default(true)
+  maxCustomFields  Int      @default(1000)
   maxOrganizations Int      @default(1)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

@@ -30,7 +30,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { canCreateMoreCustomFields } from "~/utils/subscription";
+import { canCreateMoreCustomFields } from "~/utils/subscription.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();

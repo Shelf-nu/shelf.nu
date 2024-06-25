@@ -61,8 +61,12 @@ export const List = ({
               hideFirstColumn={hideFirstHeaderColumn}
             />
             <tbody>
-              {items.map((item) => (
-                <ListItem item={item} key={item.id} navigate={navigate}>
+              {items.map((item, i) => (
+                <ListItem
+                  item={item}
+                  key={`${item.id}-${i}`}
+                  navigate={navigate}
+                >
                   <ItemComponent item={item} />
                 </ListItem>
               ))}

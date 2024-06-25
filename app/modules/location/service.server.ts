@@ -329,7 +329,7 @@ export async function createLocationsIfNotExists({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating locations. Please try again or contact support.",
+        "Something went wrong while creating locations. Seems like some of the location data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
     });

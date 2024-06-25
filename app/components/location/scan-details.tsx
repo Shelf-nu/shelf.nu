@@ -1,31 +1,16 @@
-import type { ReactNode } from "react";
+import type { SerializeFrom } from "@remix-run/node";
 import { Button } from "~/components/shared/button";
+import type { parseScanData } from "~/modules/scan/utils.server";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
 import { HelpIcon } from "../icons/library";
 import { InfoTooltip } from "../shared/info-tooltip";
 
-export interface lastScanType {
-  lastScan?: {
-    coordinates: string;
-    dateTime: ReactNode;
-    ua: {
-      device: {
-        model: string;
-        vendor: string;
-      };
-      browser: {
-        name: string;
-      };
-      os: {
-        name: string;
-      };
-    };
-    manuallyGenerated: boolean;
-  };
-}
-
-export function ScanDetails({ lastScan }: lastScanType) {
+export function ScanDetails({
+  lastScan,
+}: {
+  lastScan?: SerializeFrom<ReturnType<typeof parseScanData>> | null;
+}) {
   let latitude, longitude;
 
   const hasLocation = lastScan?.coordinates !== "Unknown location";

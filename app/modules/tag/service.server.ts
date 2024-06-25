@@ -177,7 +177,7 @@ export async function createTagsIfNotExists({
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while creating the tags. Please try again or contact support.",
+        "Something went wrong while creating the tags. Seems like some of the tag data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
     });

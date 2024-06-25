@@ -112,7 +112,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     return redirect(
-      `/assets/${qr.assetId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
+      `/assets/${qr.assetId}/overview?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
       {
         headers,
       }
