@@ -56,7 +56,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
-import { canImportAssets } from "~/utils/subscription";
+import { canImportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
@@ -111,30 +111,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             },
             select: {
               firstName: true,
-              tier: {
-                include: { tierLimit: true },
-              },
-              userOrganizations: {
-                where: {
-                  userId,
-                },
-                select: {
-                  organization: {
-                    select: {
-                      id: true,
-                      name: true,
-                      type: true,
-                      owner: {
-                        select: {
-                          tier: {
-                            include: { tierLimit: true },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
             },
           })
           .catch((cause) => {
@@ -331,6 +307,10 @@ export default function AssetIndexPage() {
                 placeholder="Search categories"
                 initialDataKey="categories"
                 countKey="totalCategories"
+                withoutValueItem={{
+                  id: "uncategorized",
+                  name: "Uncategorized",
+                }}
               />
               <DynamicDropdown
                 trigger={
@@ -342,6 +322,10 @@ export default function AssetIndexPage() {
                 label="Filter by tag"
                 initialDataKey="tags"
                 countKey="totalTags"
+                withoutValueItem={{
+                  id: "untagged",
+                  name: "Without tag",
+                }}
               />
               <DynamicDropdown
                 trigger={
@@ -354,6 +338,10 @@ export default function AssetIndexPage() {
                 label="Filter by location"
                 initialDataKey="locations"
                 countKey="totalLocations"
+                withoutValueItem={{
+                  id: "without-location",
+                  name: "Without location",
+                }}
                 renderItem={({ metadata }) => (
                   <div className="flex items-center gap-2">
                     <Image
@@ -390,6 +378,10 @@ export default function AssetIndexPage() {
                   placeholder="Search team members"
                   initialDataKey="teamMembers"
                   countKey="totalTeamMembers"
+                  withoutValueItem={{
+                    id: "without-custody",
+                    name: "Without custody",
+                  }}
                 />
               )}
             </div>

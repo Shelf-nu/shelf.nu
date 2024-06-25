@@ -19,8 +19,10 @@ import { Button } from "~/components/shared/button";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
 
-import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import {
+  getSelectedOrganisation,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod } from "~/utils/error";
@@ -72,10 +74,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
         if (!authSession) {
           return redirect(`/otp?email=${encodeURIComponent(email)}&mode=login`);
         }
+        const { userId } = authSession;
 
-        const personalOrganization = await getOrganizationByUserId({
-          userId: authSession.userId,
-          orgType: "PERSONAL",
+        /**
+         * The only reason we need to do this is because of the initial login
+         * Theoretically, the user should always have a selected organization cookie as soon as they login for the first time
+         * However we do this check to make sure they are still part of that organization
+         */
+        const { organizationId } = await getSelectedOrganisation({
+          userId,
+          request,
         });
 
         // Set the auth session and redirect to the assets page
@@ -83,9 +91,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect(safeRedirect(redirectTo || "/assets"), {
           headers: [
-            setCookie(
-              await setSelectedOrganizationIdCookie(personalOrganization.id)
-            ),
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
           ],
         });
       }

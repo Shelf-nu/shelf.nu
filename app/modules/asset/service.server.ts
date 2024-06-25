@@ -44,7 +44,11 @@ import {
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import {
+  ShelfError,
+  isLikeShelfError,
+  maybeUniqueConstraintViolation,
+} from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
@@ -232,19 +236,35 @@ async function getAssetsFromView(params: {
     }
 
     if (tagsIds && tagsIds.length > 0 && where.asset) {
-      where.asset.tags = {
-        some: {
-          id: {
-            in: tagsIds,
+      if (tagsIds.includes("untagged")) {
+        where.asset.OR = [
+          ...(where.asset.OR ?? []),
+          { tags: { some: { id: { in: tagsIds } } } },
+          { tags: { none: {} } },
+        ];
+      } else {
+        where.asset.tags = {
+          some: {
+            id: {
+              in: tagsIds,
+            },
           },
-        },
-      };
+        };
+      }
     }
 
     if (locationIds && locationIds.length > 0 && where.asset) {
-      where.asset.location = {
-        id: { in: locationIds },
-      };
+      if (locationIds.includes("without-location")) {
+        where.asset.OR = [
+          ...(where.asset.OR ?? []),
+          { locationId: { in: locationIds } },
+          { locationId: null },
+        ];
+      } else {
+        where.asset.location = {
+          id: { in: locationIds },
+        };
+      }
     }
 
     if (teamMemberIds && teamMemberIds.length && where.asset) {
@@ -274,6 +294,9 @@ async function getAssetsFromView(params: {
           },
         },
         { custody: { custodian: { userId: { in: teamMemberIds } } } },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: null }]
+          : []),
       ];
     }
 
@@ -489,19 +512,35 @@ async function getAssets(params: {
     }
 
     if (tagsIds && tagsIds.length > 0) {
-      where.tags = {
-        some: {
-          id: {
-            in: tagsIds,
+      if (tagsIds.includes("untagged")) {
+        where.OR = [
+          ...(where.OR ?? []),
+          { tags: { some: { id: { in: tagsIds } } } },
+          { tags: { none: {} } },
+        ];
+      } else {
+        where.tags = {
+          some: {
+            id: {
+              in: tagsIds,
+            },
           },
-        },
-      };
+        };
+      }
     }
 
     if (locationIds && locationIds.length > 0) {
-      where.location = {
-        id: { in: locationIds },
-      };
+      if (locationIds.includes("without-location")) {
+        where.OR = [
+          ...(where.OR ?? []),
+          { locationId: { in: locationIds } },
+          { locationId: null },
+        ];
+      } else {
+        where.location = {
+          id: { in: locationIds },
+        };
+      }
     }
 
     /**
@@ -522,6 +561,9 @@ async function getAssets(params: {
           bookings: { some: { custodianTeamMemberId: { in: teamMemberIds } } },
         },
         { bookings: { some: { custodianUserId: { in: teamMemberIds } } } },
+        ...(teamMemberIds.includes("without-custody")
+          ? [{ custody: null }]
+          : []),
       ];
     }
 
@@ -1750,48 +1792,67 @@ export async function createAssetsFromContentImport({
       userId,
     });
 
-    for (let asset of data) {
-      const customFieldsValues: ShelfAssetCustomFieldValueType[] =
-        Object.entries(asset).reduce((res, [key, val]) => {
-          if (key.startsWith("cf:") && val) {
-            const { name } = getDefinitionFromCsvHeader(key);
-            if (customFields[name].id) {
-              res.push({
-                id: customFields[name].id,
-                value: buildCustomFieldValue(
-                  { raw: asset[key] },
-                  customFields[name]
-                ),
-              } as ShelfAssetCustomFieldValueType);
-            }
-          }
-          return res;
-        }, [] as ShelfAssetCustomFieldValueType[]);
+    const BATCH_SIZE = 10; // Adjust based on your server's capacity
 
-      await createAsset({
-        organizationId,
-        title: asset.title,
-        description: asset.description || "",
-        userId,
-        categoryId: asset.category ? categories[asset.category] : null,
-        locationId: asset.location ? locations[asset.location] : undefined,
-        custodian: asset.custodian ? teamMembers[asset.custodian] : undefined,
-        tags:
-          asset.tags.length > 0
-            ? {
-                set: asset.tags
-                  .filter((t) => tags[t])
-                  .map((t) => ({ id: tags[t] })),
-              }
-            : undefined,
-        valuation: asset.valuation ? +asset.valuation : null,
-        customFieldsValues,
-      });
+    for (let i = 0; i < data.length; i += BATCH_SIZE) {
+      const batch = data.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (asset) => {
+          try {
+            // Your existing logic to process each asset
+            const customFieldsValues: ShelfAssetCustomFieldValueType[] =
+              Object.entries(asset).reduce((res, [key, val]) => {
+                if (key.startsWith("cf:") && val) {
+                  const { name } = getDefinitionFromCsvHeader(key);
+                  if (customFields[name].id) {
+                    res.push({
+                      id: customFields[name].id,
+                      value: buildCustomFieldValue(
+                        { raw: asset[key] },
+                        customFields[name]
+                      ),
+                    } as ShelfAssetCustomFieldValueType);
+                  }
+                }
+                return res;
+              }, [] as ShelfAssetCustomFieldValueType[]);
+            await createAsset({
+              organizationId,
+              title: asset.title,
+              description: asset.description || "",
+              userId,
+              categoryId: asset.category ? categories[asset.category] : null,
+              locationId: asset.location
+                ? locations[asset.location]
+                : undefined,
+              custodian: asset.custodian
+                ? teamMembers[asset.custodian]
+                : undefined,
+              tags:
+                asset.tags.length > 0
+                  ? {
+                      set: asset.tags
+                        .filter((t) => tags[t])
+                        .map((t) => ({ id: tags[t] })),
+                    }
+                  : undefined,
+              valuation: asset.valuation ? +asset.valuation : null,
+              customFieldsValues,
+            });
+          } catch (error) {
+            // eslint-disable-next-line no-console
+            console.error("Error processing asset", error);
+            // Handle the error as needed
+          }
+        })
+      );
     }
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while creating assets from content import",
+      message: isLikeShelfError(cause)
+        ? cause?.message
+        : "Something went wrong while creating assets from content import",
       additionalData: { userId, organizationId },
       label,
     });

@@ -404,5 +404,8 @@ export const disabledTeamOrg = async ({
     organizations,
   });
 
-  return currentOrganization.type === "TEAM" && tierLimit?.id !== "tier_2";
+  return (
+    currentOrganization.type === "TEAM" &&
+    ["free", "tier_1"].includes(tierLimit?.id)
+  );
 };
