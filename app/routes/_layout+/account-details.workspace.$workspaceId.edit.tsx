@@ -1,4 +1,4 @@
-import { Currency } from "@prisma/client";
+import { Currency, OrganizationType } from "@prisma/client";
 import {
   json,
   unstable_createMemoryUploadHandler,
@@ -98,6 +98,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organization,
         header,
         curriences: Object.keys(Currency),
+        isPersonalWorkspace: organization.type === OrganizationType.PERSONAL,
       })
     );
   } catch (cause) {
