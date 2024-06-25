@@ -1,12 +1,10 @@
 {
   "name": "shelf-webapp",
   "private": true,
-  "sideEffects": [
-    "./server/instrument.server.mjs"
-  ],
+  "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "remix vite:build",
+    "build": "NODE_OPTIONS='--import=./server/instrument.server.mjs' remix vite:build",
     "build-with-sentry": "remix vite:build --sourcemap && sentry-upload-sourcemaps --org ${SENTRY_ORG} --project ${SENTRY_PROJECT}",
     "db:diff": "prisma migrate diff --from-url=${DATABASE_URL} --to-migrations=./app/database/migrations --shadow-database-url=${SHADOW_DATABASE_URL} --script > rollback.sql",
     "db:prepare-migration": "prisma generate && prisma migrate dev --create-only --skip-seed",
