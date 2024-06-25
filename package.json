@@ -1,7 +1,9 @@
 {
   "name": "shelf-webapp",
   "private": true,
-  "sideEffects": false,
+  "sideEffects": [
+    "./server/instrument.server.mjs"
+  ],
   "type": "module",
   "scripts": {
     "build": "remix vite:build",
