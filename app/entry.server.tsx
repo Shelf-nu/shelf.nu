@@ -2,18 +2,12 @@
 import { PassThrough } from "stream";
 
 import { createReadableStreamFromReadable } from "@remix-run/node";
-import type {
-  ActionFunctionArgs,
-  AppLoadContext,
-  EntryContext,
-  LoaderFunctionArgs,
-} from "@remix-run/node";
+import type { AppLoadContext, EntryContext } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { registerBookingWorkers } from "./modules/booking/worker.server";
-import { SENTRY_DSN } from "./utils/env";
 import { ShelfError } from "./utils/error";
 import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
@@ -53,22 +47,7 @@ schedulerService
  * If this happen, you will have Sentry logs with a `Unhandled` tag and `unhandled.remix.server` as origin.
  *
  */
-// export const handleError = Sentry.wrapHandleErrorWithSentry;
-// @TODO this can be updated to the new way - see above  - https://docs.sentry.io/platforms/javascript/guides/remix/manual-setup/#server-side-errors
-export function handleError(
-  error: unknown,
-  { request }: LoaderFunctionArgs | ActionFunctionArgs
-) {
-  const isRemixV2 = true;
-  if (SENTRY_DSN) {
-    void Sentry.captureRemixServerException(
-      error,
-      "unhandled.remix.server",
-      request,
-      isRemixV2
-    );
-  }
-}
+export const handleError = Sentry.wrapHandleErrorWithSentry;
 
 const ABORT_DELAY = 5000;
 
