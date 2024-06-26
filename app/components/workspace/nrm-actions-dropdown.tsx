@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { SendIcon, VerticalDotsIcon } from "~/components/icons/library";
@@ -10,11 +9,11 @@ import {
 } from "~/components/shared/dropdown";
 
 import type { loader } from "~/routes/_layout+/settings.team.nrm";
+import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import { DeleteMember } from "./delete-member";
 import { Button } from "../shared/button";
 import { ControlledActionButton } from "../shared/controlled-action-button";
-import { tw } from "~/utils/tw";
 
 export function TeamMembersActionsDropdown({
   teamMember,
