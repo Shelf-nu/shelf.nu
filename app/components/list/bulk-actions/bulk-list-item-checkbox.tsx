@@ -1,5 +1,5 @@
-import { useAtom } from "jotai";
-import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useAtomValue, useSetAtom } from "jotai";
+import { selectedBulkItemsAtom, setSelectedBulkItemAtom } from "~/atoms/list";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { Td } from "~/components/table";
 import { tw } from "~/utils/tw";
@@ -12,9 +12,8 @@ type BulkListItemCheckboxProps = {
 export default function BulkListItemCheckbox({
   item,
 }: BulkListItemCheckboxProps) {
-  const [selectedBulkItems, setSelectedBulkItems] = useAtom(
-    selectedBulkItemsAtom
-  );
+  const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
+  const setSelectedBulkItem = useSetAtom(setSelectedBulkItemAtom);
 
   const checked = selectedBulkItems.includes(item.id);
 
@@ -24,18 +23,14 @@ export default function BulkListItemCheckbox({
     e.preventDefault();
     e.stopPropagation();
 
-    setSelectedBulkItems((prev) => {
-      /** Remove item if already selected */
-      if (checked) {
-        return [...prev.filter((i) => i !== item.id)];
-      }
-
-      return [...prev, item.id];
-    });
+    setSelectedBulkItem(item.id);
   }
 
   return (
-    <Td className="hidden md:table-cell" onClick={handleBulkItemSelection}>
+    <Td
+      className="hidden md:table-cell md:px-4"
+      onClick={handleBulkItemSelection}
+    >
       <FakeCheckbox
         className={tw("text-white", checked ? "text-primary" : "")}
         checked={checked}

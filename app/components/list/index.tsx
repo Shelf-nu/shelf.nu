@@ -56,6 +56,7 @@ export const List = ({
   const totalIncomingItems = items.length;
   const hasItems = totalIncomingItems > 0;
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
+
   return (
     <div
       className={tw(

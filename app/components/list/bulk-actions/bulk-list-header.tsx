@@ -1,6 +1,9 @@
 import { useLoaderData } from "@remix-run/react";
-import { useAtom } from "jotai";
-import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useAtomValue, useSetAtom } from "jotai";
+import {
+  selectedBulkItemsCountAtom,
+  setSelectedBulkItemsAtom,
+} from "~/atoms/list";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { PartialCheckboxIcon } from "~/components/icons/library";
 import { Th } from "~/components/table";
@@ -11,14 +14,13 @@ import { tw } from "~/utils/tw";
 export default function BulkListHeader() {
   const { items } = useLoaderData<IndexResponse>();
 
-  const [selectedBulkItems, setSelectedBulkItems] = useAtom(
-    selectedBulkItemsAtom
-  );
+  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const itemsSelected = useAtomValue(selectedBulkItemsCountAtom);
 
   const partialItemsSelected =
-    selectedBulkItems.length > 0 && selectedBulkItems.length < items.length;
+    itemsSelected > 0 && itemsSelected < items.length;
 
-  const allItemsSelected = selectedBulkItems.length >= items.length;
+  const allItemsSelected = itemsSelected >= items.length;
 
   function handleSelectAllIncomingItems() {
     setSelectedBulkItems(allItemsSelected ? [] : items.map((item) => item.id));
@@ -34,9 +36,14 @@ export default function BulkListHeader() {
   }
 
   return (
-    <Th className="hidden md:table-cell">
+    <Th className="hidden md:table-cell md:px-4">
       {partialItemsSelected ? (
-        <PartialCheckboxIcon />
+        <PartialCheckboxIcon
+          className="cursor-pointer"
+          onClick={() => {
+            setSelectedBulkItems([]);
+          }}
+        />
       ) : (
         <FakeCheckbox
           className={tw("text-white", allItemsSelected ? "text-primary" : "")}
