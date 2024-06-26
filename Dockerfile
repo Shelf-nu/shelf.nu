@@ -44,6 +44,8 @@ COPY --from=build /src/app/database /src/app/database
 COPY --from=build /src/build /src/build
 COPY --from=build /src/package.json /src/package.json
 COPY --from=build /src/start.sh /src/start.sh
+COPY --from=build /src/server/instrument.server.mjs /src/server/instrument.server.mjs
+
 
 RUN chmod +x /src/start.sh
 
