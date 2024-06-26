@@ -1476,3 +1476,26 @@ export const CheckInIcon = (props: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
+
+export function PartialCheckboxIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      fill="none"
+      viewBox="0 0 20 20"
+      {...props}
+    >
+      <rect width={19} height={19} x={0.5} y={0.5} fill="#FEF6EE" rx={3.5} />
+      <rect width={19} height={19} x={0.5} y={0.5} stroke="#EF6820" rx={3.5} />
+      <path
+        stroke="#EF6820"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M5.917 10h8.166"
+      />
+    </svg>
+  );
+}

@@ -391,6 +391,7 @@ export default function AssetIndexPage() {
           ItemComponent={ListAssetContent}
           navigate={(itemId) => navigate(itemId)}
           className=" overflow-x-visible md:overflow-x-auto"
+          bulkActions={<div>Test</div>}
           headerChildren={
             <>
               <Th className="hidden md:table-cell">Category</Th>

@@ -3,6 +3,7 @@ import { useLoaderData } from "@remix-run/react";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
 
 import { tw } from "~/utils/tw";
+import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
 import { EmptyState } from "./empty-state";
 
 import { ListHeader } from "./list-header";
@@ -11,18 +12,7 @@ import { ListItem } from "./list-item";
 import { Pagination } from "./pagination";
 import { Table } from "../table";
 
-/**
- * The route is required to export {@link IndexResponse}
- */
-export const List = ({
-  ItemComponent,
-  headerChildren,
-  hideFirstHeaderColumn = false,
-  navigate,
-  className,
-  customEmptyStateContent,
-  emptyStateClassName,
-}: {
+export type ListProps = {
   ItemComponent: any;
   headerChildren?: ReactNode;
   hideFirstHeaderColumn?: boolean;
@@ -37,9 +27,28 @@ export const List = ({
     buttonProps?: any;
   };
   emptyStateClassName?: string;
-}) => {
+  /**
+   * Allow bulk actions on List by providing Bulk actions dropdown
+   */
+  bulkActions?: React.ReactElement;
+};
+
+/**
+ * The route is required to export {@link IndexResponse}
+ */
+export const List = ({
+  ItemComponent,
+  headerChildren,
+  hideFirstHeaderColumn = false,
+  navigate,
+  className,
+  customEmptyStateContent,
+  emptyStateClassName,
+  bulkActions,
+}: ListProps) => {
   const { items } = useLoaderData<IndexResponse>();
-  const hasItems = items?.length > 0;
+  const totalIncomingItems = items.length;
+  const hasItems = totalIncomingItems > 0;
 
   return (
     <div
@@ -57,6 +66,7 @@ export const List = ({
         <>
           <Table>
             <ListHeader
+              bulkActions={bulkActions}
               children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
             />
@@ -67,6 +77,7 @@ export const List = ({
                   key={`${item.id}-${i}`}
                   navigate={navigate}
                 >
+                  {bulkActions ? <BulkListItemCheckbox item={item} /> : null}
                   <ItemComponent item={item} />
                 </ListItem>
               ))}

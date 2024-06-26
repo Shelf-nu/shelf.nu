@@ -36,3 +36,5 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
   teamMemberIds: searchParams.getAll("teamMember") || [],
   tab: searchParams.get("tab") as "assets" | "kits",
 });
+
+export const ALL_SELECTED_KEY = "all-selected";

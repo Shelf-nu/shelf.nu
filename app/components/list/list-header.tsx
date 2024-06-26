@@ -1,21 +1,28 @@
 import { useLoaderData } from "@remix-run/react";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
+import type { ListProps } from ".";
+import BulkListHeader from "./bulk-actions/bulk-list-header";
 import { Th } from "../table";
+
+type ListHeaderProps = {
+  children: React.ReactNode;
+  hideFirstColumn?: boolean;
+  bulkActions?: ListProps["bulkActions"];
+};
 
 export const ListHeader = ({
   children,
   hideFirstColumn = false,
-}: {
-  children?: React.ReactNode;
-  hideFirstColumn?: boolean;
-}) => {
+  bulkActions,
+}: ListHeaderProps) => {
   const { items, totalItems, perPage, modelName } =
     useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
 
   return (
-    <thead className="border-b ">
+    <thead className="border-b">
       <tr className="">
+        {bulkActions ? <BulkListHeader /> : null}
         {hideFirstColumn ? null : (
           <Th
             className="text-left font-normal text-gray-600"
@@ -35,7 +42,6 @@ export const ListHeader = ({
             </div>
           </Th>
         )}
-
         {children}
       </tr>
     </thead>
