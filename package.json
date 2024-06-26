@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "remix vite:build && npm run build:instrument",
-    "build:instrument": "node --experimental-modules build-instrument.mjs",
+    "build:instrument": "node build-instrument.mjs",
     "db:diff": "prisma migrate diff --from-url=${DATABASE_URL} --to-migrations=./app/database/migrations --shadow-database-url=${SHADOW_DATABASE_URL} --script > rollback.sql",
     "db:prepare-migration": "prisma generate && prisma migrate dev --create-only --skip-seed",
     "db:generate-type": "prisma generate",
