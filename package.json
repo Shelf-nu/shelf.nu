@@ -4,8 +4,7 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "remix vite:build && npm run build:instrument",
-    "build:instrument": "node build-instrument.mjs",
+    "build": "remix vite:build",
     "db:diff": "prisma migrate diff --from-url=${DATABASE_URL} --to-migrations=./app/database/migrations --shadow-database-url=${SHADOW_DATABASE_URL} --script > rollback.sql",
     "db:prepare-migration": "prisma generate && prisma migrate dev --create-only --skip-seed",
     "db:generate-type": "prisma generate",
@@ -22,7 +21,7 @@
     "setup": "prisma generate && prisma migrate deploy",
     "reset:db": "prisma migrate reset",
     "reset:db:staging": "dotenv -e .env.staging -- prisma migrate reset",
-    "start": "NODE_ENV=production NODE_OPTIONS='--require=./build/server/instrument.server.cjs' node ./build/server/index.js",
+    "start": "NODE_ENV=production node ./build/server/index.js",
     "start:local": "NODE_ENV=production node ./build/server/index.js",
     "start:ci": "dotenv -- npm run start",
     "test": "vitest",
