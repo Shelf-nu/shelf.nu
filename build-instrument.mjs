@@ -3,7 +3,7 @@ import esbuild from "esbuild";
 esbuild
   .build({
     entryPoints: ["./server/instrument.sentry.server.ts"],
-    outfile: "./build/server/instrument.server.mjs",
+    outfile: "./build/server/instrument.server.cjs",
     platform: "node",
     format: "esm",
     target: "es2022",
