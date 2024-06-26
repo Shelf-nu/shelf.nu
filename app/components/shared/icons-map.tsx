@@ -38,6 +38,7 @@ import {
   CheckOutIcon,
   CheckInIcon,
   CheckIcon,
+  AssetLabel,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -79,7 +80,8 @@ export type IconType =
   | "kit"
   | "bookings"
   | "check-out"
-  | "check-in";
+  | "check-in"
+  | "asset-label";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -124,6 +126,7 @@ export const iconsMap: IconsMap = {
   kit: <KitIcon />,
   "check-out": <CheckOutIcon />,
   "check-in": <CheckInIcon />,
+  "asset-label": <AssetLabel />,
 };
 
 export default iconsMap;

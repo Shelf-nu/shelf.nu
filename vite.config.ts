@@ -55,14 +55,16 @@ export default defineConfig({
       buildEnd: async () => {
         await esbuild
           .build({
-            alias: { "~": "./app" },
+            alias: {
+              "~": "./app",
+            },
             // The final file name
-            outfile: "build/server/index.js",
+            outdir: "build/server",
             // Our server entry point
-            entryPoints: ["server/index.ts"],
+            entryPoints: ["server/index.ts", "server/instrument.server.ts"],
             // Dependencies that should not be bundled
-            // We import the remix build from "../build/server/remix.js", so no need to bundle it again
-            external: ["./build/server/*"],
+            // We import the remix build from "../build/server/remix.js", and the sentry build from "../build/server/instrument.server.js", so no need to bundle it again
+            external: ["./build/server/*", "./instrument.server.js"],
             platform: "node",
             format: "esm",
             // Don't include node_modules in the bundle
