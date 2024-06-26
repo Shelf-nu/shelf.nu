@@ -53,6 +53,8 @@ schedulerService
  * If this happen, you will have Sentry logs with a `Unhandled` tag and `unhandled.remix.server` as origin.
  *
  */
+// export const handleError = Sentry.wrapHandleErrorWithSentry;
+// @TODO this can be updated to the new way - see above  - https://docs.sentry.io/platforms/javascript/guides/remix/manual-setup/#server-side-errors
 export function handleError(
   error: unknown,
   { request }: LoaderFunctionArgs | ActionFunctionArgs
