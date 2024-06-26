@@ -114,6 +114,8 @@ export async function createOrganization({
   image: File | null;
 }) {
   try {
+    const owner = await db.user.findFirstOrThrow({ where: { id: userId } });
+
     const data = {
       name,
       currency,
@@ -132,7 +134,17 @@ export async function createOrganization({
           id: userId,
         },
       },
-    };
+      /**
+       * Creating a teamMember when a new organization/workspace is created
+       * so that the owner appear in the list by default
+       */
+      members: {
+        create: {
+          name: `${owner.firstName} ${owner.lastName} (Owner)`,
+          user: { connect: { id: owner.id } },
+        },
+      },
+    } satisfies Prisma.OrganizationCreateInput;
 
     const org = await db.organization.create({ data });
 

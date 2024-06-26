@@ -445,6 +445,11 @@ export async function createUser(
             username,
             firstName,
             lastName,
+            roles: {
+              connect: {
+                name: Roles["USER"],
+              },
+            },
             ...(!isSSO && {
               organizations: {
                 create: [
@@ -456,15 +461,20 @@ export async function createUser(
                         userId,
                       })),
                     },
+                    /**
+                     * Creating a teamMember when a new organization/workspace is created
+                     * so that the owner appear in the list by default
+                     */
+                    members: {
+                      create: {
+                        name: `${firstName} ${lastName} (Owner)`,
+                        user: { connect: { id: userId } },
+                      },
+                    },
                   },
                 ],
               },
             }),
-            roles: {
-              connect: {
-                name: Roles["USER"],
-              },
-            },
             ...(isSSO && {
               // When user is coming from SSO, we set them as onboarded as we already have their first and last name and they dont need a password.
               onboarded: true,
@@ -477,7 +487,8 @@ export async function createUser(
           },
         });
 
-        /** Create user organization association
+        /**
+         * Creating an organization for the user
          * 1. For the personal org
          * 2. For the org that the user is being attached to
          */
