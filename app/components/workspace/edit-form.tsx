@@ -50,7 +50,8 @@ export const WorkspaceEditForm = ({
   children,
   className,
 }: Props) => {
-  const { curriences, organization } = useLoaderData<typeof loader>();
+  const { curriences, organization, isPersonalWorkspace } =
+    useLoaderData<typeof loader>();
   const navigation = useNavigation();
 
   let schema = EditWorkspaceFormSchema(organization.enabledSso);
@@ -79,7 +80,7 @@ export const WorkspaceEditForm = ({
             label="Name"
             hideLabel
             name={zo.fields.name()}
-            disabled={disabled}
+            disabled={isPersonalWorkspace || disabled}
             error={zo.errors.name()?.message}
             autoFocus
             onChange={updateTitle}

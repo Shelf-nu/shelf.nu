@@ -1,4 +1,4 @@
-import { Currency } from "@prisma/client";
+import { Currency, OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -121,6 +121,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         canExportAssets: canExportAssets(tierLimit),
         user,
         curriences: Object.keys(Currency),
+        isPersonalWorkspace:
+          currentOrganization.organization.type === OrganizationType.PERSONAL,
       })
     );
   } catch (cause) {
