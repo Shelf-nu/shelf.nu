@@ -1,5 +1,5 @@
 // // import the Sentry instrumentation file before anything else.
-// import "./instrument.server.mjs";
+import "./instrument.server.js";
 
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";

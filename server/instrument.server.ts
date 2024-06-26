@@ -1,5 +1,5 @@
-import { type Event, type EventHint } from "@sentry/remix";
 import * as Sentry from "@sentry/remix";
+import { type Event, type EventHint } from "@sentry/remix";
 
 import { SENTRY_DSN } from "~/utils/env";
 import type { ShelfError } from "~/utils/error";
