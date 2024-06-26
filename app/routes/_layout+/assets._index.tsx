@@ -1,6 +1,5 @@
 import type { Category, Asset, Tag, Custody, Kit } from "@prisma/client";
 import { OrganizationRoles, AssetStatus } from "@prisma/client";
-import { ChevronDownIcon } from "@radix-ui/react-icons";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
