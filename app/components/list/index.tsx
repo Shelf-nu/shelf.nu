@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { useLoaderData } from "@remix-run/react";
+import { useAtomValue } from "jotai";
+import { selectedBulkItemsCountAtom } from "~/atoms/list";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
 
 import { tw } from "~/utils/tw";
@@ -13,6 +15,7 @@ import { Pagination } from "./pagination";
 import { Table } from "../table";
 
 export type ListProps = {
+  title?: string;
   ItemComponent: any;
   headerChildren?: ReactNode;
   hideFirstHeaderColumn?: boolean;
@@ -37,6 +40,7 @@ export type ListProps = {
  * The route is required to export {@link IndexResponse}
  */
 export const List = ({
+  title,
   ItemComponent,
   headerChildren,
   hideFirstHeaderColumn = false,
@@ -46,10 +50,12 @@ export const List = ({
   emptyStateClassName,
   bulkActions,
 }: ListProps) => {
-  const { items } = useLoaderData<IndexResponse>();
+  const { items, totalItems, perPage, modelName, header } =
+    useLoaderData<IndexResponse>();
+  const { singular, plural } = modelName;
   const totalIncomingItems = items.length;
   const hasItems = totalIncomingItems > 0;
-
+  const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   return (
     <div
       className={tw(
@@ -64,6 +70,34 @@ export const List = ({
         />
       ) : (
         <>
+          {/* The title and the total number of items. This basically acts like a fake table row */}
+          <div className="flex items-center justify-between border-b p-4">
+            <div>
+              <h5>{title || header.title}</h5>
+              <div className="flex justify-between">
+                {selectedBulkItemsCount > 0 ? (
+                  <span>{selectedBulkItemsCount} selected</span>
+                ) : (
+                  <>
+                    {perPage < totalItems ? (
+                      <p>
+                        {items.length} {items.length > 1 ? plural : singular}{" "}
+                        <span className="text-gray-400">
+                          out of {totalItems}
+                        </span>
+                      </p>
+                    ) : (
+                      <span>
+                        {totalItems} {items.length > 1 ? plural : singular}
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+            <div>{bulkActions}</div>
+          </div>
+
           <Table>
             <ListHeader
               bulkActions={bulkActions}

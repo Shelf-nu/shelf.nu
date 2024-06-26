@@ -1,5 +1,6 @@
 import type { Category, Asset, Tag, Custody, Kit } from "@prisma/client";
 import { OrganizationRoles, AssetStatus } from "@prisma/client";
+import { ChevronDownIcon } from "@radix-ui/react-icons";
 import type {
   LinksFunction,
   LoaderFunctionArgs,
@@ -61,6 +62,10 @@ import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export interface IndexResponse {
+  header: {
+    title: string;
+    subTitle?: string;
+  };
   /** Page number. Starts at 1 */
   page: number;
 
@@ -388,10 +393,20 @@ export default function AssetIndexPage() {
           </div>
         </Filters>
         <List
+          title="Assets"
           ItemComponent={ListAssetContent}
           navigate={(itemId) => navigate(itemId)}
           className=" overflow-x-visible md:overflow-x-auto"
-          bulkActions={<div>Test</div>}
+          bulkActions={
+            <div>
+              <Button
+                variant="secondary"
+                className="flex items-center justify-between"
+              >
+                Actions
+              </Button>
+            </div>
+          }
           headerChildren={
             <>
               <Th className="hidden md:table-cell">Category</Th>
