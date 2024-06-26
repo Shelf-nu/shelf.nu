@@ -61,7 +61,7 @@ const HoverMessage = ({
   buttonProps.as = "button";
 
   return (
-    <HoverCard>
+    <HoverCard openDelay={100}>
       <HoverCardTrigger
         className={tw(
           "disabled inline-flex cursor-not-allowed items-center justify-center border-none p-0 text-left text-text-sm font-semibold text-primary-700 hover:text-primary-800",
