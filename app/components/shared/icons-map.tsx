@@ -82,7 +82,7 @@ export type IconType =
   | "bookings"
   | "check-out"
   | "check-in"
-  | "partial-checkbox";
+  | "partial-checkbox"
   | "asset-label";
 
 type IconsMap = {
