@@ -30,7 +30,7 @@ export const LocationSelect = () => {
           fieldName="newLocationId"
           defaultValue={locationId}
           model={{ name: "location", queryKey: "name" }}
-          label="Locations"
+          contentLabel="Locations"
           initialDataKey="locations"
           countKey="totalLocations"
           closeOnSelect

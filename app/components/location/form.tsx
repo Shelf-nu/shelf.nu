@@ -146,7 +146,8 @@ export const LocationForm = ({ name, address, description }: Props) => {
           >
             <Input
               inputType="textarea"
-              label={zo.fields.description()}
+              label="Description"
+              hideLabel
               name={zo.fields.description()}
               defaultValue={description || ""}
               placeholder="Add a description for your location."

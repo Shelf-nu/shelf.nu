@@ -15,6 +15,7 @@ import type {
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { EmptyState } from "../dynamic-dropdown/empty-state";
+import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -26,7 +27,18 @@ type Props = ModelFilterProps & {
   className?: string;
   style?: React.CSSProperties;
   fieldName?: string;
+
+  /** This is the html label */
   label?: React.ReactNode;
+
+  /** This is to be shown inside the popover */
+  contentLabel?: React.ReactNode;
+
+  /** Hide the label */
+  hideLabel?: boolean;
+
+  /** Is this input required. Used to show a required star */
+  required?: boolean;
   searchIcon?: IconType;
   showSearch?: boolean;
   defaultValue?: string;
@@ -47,7 +59,10 @@ export default function DynamicSelect({
   className,
   style,
   fieldName,
+  contentLabel,
   label,
+  hideLabel,
+  required,
   searchIcon = "search",
   showSearch = true,
   defaultValue,
@@ -133,14 +148,22 @@ export default function DynamicSelect({
 
         <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
           <PopoverTrigger disabled={disabled} asChild>
-            <div
-              ref={triggerRef}
-              className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
-            >
-              <span className="truncate whitespace-nowrap pr-2">
-                {triggerValue}
-              </span>
-              <ChevronDownIcon />
+            <div>
+              {label && (
+                <InnerLabel hideLg={hideLabel} required={required}>
+                  {label}
+                </InnerLabel>
+              )}
+
+              <div
+                ref={triggerRef}
+                className="flex items-center justify-between whitespace-nowrap rounded border border-gray-300 px-[14px] py-2 text-[16px] text-gray-500 hover:cursor-pointer disabled:opacity-50"
+              >
+                <span className="truncate whitespace-nowrap pr-2">
+                  {triggerValue}
+                </span>
+                <ChevronDownIcon />
+              </div>
             </div>
           </PopoverTrigger>
           <PopoverPortal>
@@ -158,7 +181,7 @@ export default function DynamicSelect({
             >
               <div className="flex items-center justify-between p-3">
                 <div className="text-xs font-semibold text-gray-700">
-                  {label}
+                  {contentLabel}
                 </div>
                 <When truthy={selectedItems?.length > 0 && showSearch}>
                   <Button
@@ -179,8 +202,8 @@ export default function DynamicSelect({
                 <div className="filters-form relative border-y border-y-gray-200 p-3">
                   <Input
                     type="text"
-                    label={`Search ${label}`}
-                    placeholder={`Search ${label}`}
+                    label={`Search ${contentLabel}`}
+                    placeholder={`Search ${contentLabel}`}
                     hideLabel
                     className="text-gray-500"
                     icon={searchIcon}

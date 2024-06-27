@@ -128,8 +128,9 @@ export function BookingForm({
 
   const [, updateName] = useAtom(updateDynamicTitleAtom);
 
-  const disabled =
-    isFormProcessing(navigation.state) || bookingStatus?.isArchived;
+  const isProcessing = isFormProcessing(navigation.state);
+
+  const disabled = isProcessing || bookingStatus?.isArchived;
 
   const inputFieldIsDisabled =
     disabled ||
@@ -197,6 +198,8 @@ export function BookingForm({
                     ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
                     : bookingFlags?.hasAlreadyBookedAssets
                     ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
+                    : isProcessing
+                    ? undefined // If we are currently submitting, we shouldnt show anything
                     : "You need to add assets to your booking before you can reserve it",
                 }}
                 buttonProps={{
@@ -225,6 +228,8 @@ export function BookingForm({
                   title: "Check-out",
                   message: bookingFlags?.hasAssetsInCustody
                     ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                    : isProcessing
+                    ? undefined
                     : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
                 }}
                 buttonProps={{
