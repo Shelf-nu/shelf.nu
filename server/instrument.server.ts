@@ -1,44 +1,42 @@
-import { type Event, type EventHint } from "@sentry/remix";
 import * as Sentry from "@sentry/remix";
+import { type Event, type EventHint } from "@sentry/remix";
 
 import { SENTRY_DSN } from "~/utils/env";
-import type { ShelfError } from "./error";
-import { isLikeShelfError } from "./error";
+import type { ShelfError } from "~/utils/error";
+import { isLikeShelfError } from "~/utils/error";
 
-export function initSentry() {
-  if (SENTRY_DSN) {
-    Sentry.init({
-      dsn: SENTRY_DSN,
-      // Performance Monitoring
-      tracesSampleRate: 0.1,
-      beforeBreadcrumb(breadcrumb) {
-        // Remove some noisy breadcrumbs
-        if (
-          breadcrumb.message?.startsWith("🚀") ||
-          breadcrumb.message?.startsWith("🌍")
-        ) {
-          return null;
-        }
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    // Performance Monitoring
+    tracesSampleRate: 0.1,
+    beforeBreadcrumb(breadcrumb) {
+      // Remove some noisy breadcrumbs
+      if (
+        breadcrumb.message?.startsWith("🚀") ||
+        breadcrumb.message?.startsWith("🌍")
+      ) {
+        return null;
+      }
 
-        if (breadcrumb.message) {
-          // Remove chalk colors that pollute the logs
-          breadcrumb.message = breadcrumb.message.replace(
-            // eslint-disable-next-line no-control-regex -- let me do my thing
-            /(\x1B\[32m|\x1B\[0m)/gm,
-            ""
-          );
-        }
+      if (breadcrumb.message) {
+        // Remove chalk colors that pollute the logs
+        breadcrumb.message = breadcrumb.message.replace(
+          // eslint-disable-next-line no-control-regex -- let me do my thing
+          /(\x1B\[32m|\x1B\[0m)/gm,
+          ""
+        );
+      }
 
-        return breadcrumb;
-      },
-      beforeSendTransaction(event, hint) {
-        return handleBeforeSend(event, hint);
-      },
-      beforeSend(event, hint) {
-        return handleBeforeSend(event, hint);
-      },
-    });
-  }
+      return breadcrumb;
+    },
+    beforeSendTransaction(event, hint) {
+      return handleBeforeSend(event, hint);
+    },
+    beforeSend(event, hint) {
+      return handleBeforeSend(event, hint);
+    },
+  });
 }
 
 /**

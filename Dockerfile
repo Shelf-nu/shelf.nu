@@ -12,6 +12,7 @@ RUN apt-get update && \
     apt-get install -y openssl && \
     rm -rf /var/lib/apt/lists/*
 
+
 # Install all node_modules, including dev dependencies
 FROM base AS deps
 
