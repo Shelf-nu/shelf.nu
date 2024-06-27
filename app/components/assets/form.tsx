@@ -124,7 +124,7 @@ export const AssetForm = ({
   }>();
 
   return (
-    <Card className="w-full md:w-min">
+    <Card className="w-full lg:w-min">
       <Form
         ref={zo.ref}
         method="post"
@@ -249,7 +249,9 @@ export const AssetForm = ({
             disabled={disabled}
             defaultValue={category ?? undefined}
             model={{ name: "category", queryKey: "name" }}
-            label="Categories"
+            contentLabel="Categories"
+            label="Category"
+            hideLabel
             initialDataKey="categories"
             countKey="totalCategories"
             closeOnSelect
@@ -309,7 +311,9 @@ export const AssetForm = ({
             fieldName="newLocationId"
             defaultValue={location || undefined}
             model={{ name: "location", queryKey: "name" }}
-            label="Locations"
+            contentLabel="Locations"
+            label="Location"
+            hideLabel
             initialDataKey="locations"
             countKey="totalLocations"
             closeOnSelect

@@ -67,7 +67,7 @@ const Input = forwardRef(function Input(
   ref
 ) {
   const iconClasses = tw(
-    "pointer-events-none absolute flex h-full items-center  border-gray-300  px-[14px]"
+    "pointer-events-none absolute flex h-full items-center border-gray-300 px-[14px]"
   );
 
   const addonClasses = tw(
@@ -121,7 +121,7 @@ const Input = forwardRef(function Input(
       <span
         className={tw(
           `mb-[6px] text-text-sm font-medium text-gray-700`,
-          hideLabel && "md:hidden",
+          hideLabel && "lg:hidden",
           required && "required-input-label"
         )}
       >
