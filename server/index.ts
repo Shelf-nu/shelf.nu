@@ -5,7 +5,6 @@ import "./instrument.server.js";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { AppLoadContext, ServerBuild } from "@remix-run/node";
-import { createCookieSessionStorage } from "@remix-run/node";
 import { Hono } from "hono";
 import { remix } from "remix-hono/handler";
 import { getSession, session } from "remix-hono/session";
@@ -16,7 +15,7 @@ import { ShelfError } from "~/utils/error";
 import { importDevBuild } from "./dev/server";
 import { logger } from "./logger";
 import { cache, protect, refreshSession } from "./middleware";
-import { authSessionKey } from "./session";
+import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 
 // Server will not start if the env is not valid
@@ -69,16 +68,7 @@ app.use(
   session({
     autoCommit: true,
     createSessionStorage() {
-      const sessionStorage = createCookieSessionStorage({
-        cookie: {
-          name: "__authSession",
-          httpOnly: true,
-          path: "/",
-          sameSite: "lax",
-          secrets: [env.SESSION_SECRET],
-          secure: env.NODE_ENV === "production",
-        },
-      });
+      const sessionStorage = createSessionStorage();
 
       return {
         ...sessionStorage,
