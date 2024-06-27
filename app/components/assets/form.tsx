@@ -23,6 +23,7 @@ import AssetCustomFields from "./custom-fields-inputs";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
+import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
@@ -221,7 +222,7 @@ export const AssetForm = ({
             <Input
               inputType="textarea"
               maxLength={1000}
-              label={zo.fields.description()}
+              label={"Description"}
               name={zo.fields.description()}
               defaultValue={description || ""}
               hideLabel
@@ -284,6 +285,7 @@ export const AssetForm = ({
           className="border-b-0 py-[10px]"
           required={zodFieldIsRequired(FormSchema.shape.tags)}
         >
+          <InnerLabel hideLg={true}>Tags</InnerLabel>
           <TagsAutocomplete existingTags={tags ?? []} />
         </FormRow>
 
@@ -359,7 +361,7 @@ export const AssetForm = ({
           <div className="relative w-full">
             <Input
               type="number"
-              label="value"
+              label="Value"
               inputClassName="pl-[70px] valuation-input"
               hideLabel
               name={zo.fields.valuation()}

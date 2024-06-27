@@ -2,6 +2,7 @@ import type { RefObject } from "react";
 import { forwardRef } from "react";
 
 import { tw } from "~/utils/tw";
+import { InnerLabel } from "./inner-label";
 import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
@@ -118,15 +119,9 @@ const Input = forwardRef(function Input(
   return (
     <label className={tw("relative flex flex-col", className)}>
       {/* Label */}
-      <span
-        className={tw(
-          `mb-[6px] text-text-sm font-medium text-gray-700`,
-          hideLabel && "lg:hidden",
-          required && "required-input-label"
-        )}
-      >
+      <InnerLabel hideLg={hideLabel} required={required}>
         {label}
-      </span>
+      </InnerLabel>
 
       <div className={`relative flex flex-wrap items-stretch`}>
         {/* IconType */}

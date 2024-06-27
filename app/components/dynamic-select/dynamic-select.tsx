@@ -15,6 +15,7 @@ import type {
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { EmptyState } from "../dynamic-dropdown/empty-state";
+import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { CheckIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -149,15 +150,9 @@ export default function DynamicSelect({
           <PopoverTrigger disabled={disabled} asChild>
             <div>
               {label && (
-                <div
-                  className={tw(
-                    `mb-[6px] text-text-sm font-medium text-gray-700`,
-                    hideLabel && "lg:hidden",
-                    required && "required-input-label"
-                  )}
-                >
+                <InnerLabel hideLg={hideLabel} required={required}>
                   {label}
-                </div>
+                </InnerLabel>
               )}
 
               <div
