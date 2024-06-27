@@ -21,6 +21,8 @@ import {
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
+import { CrispButton } from "../marketing/crisp";
+import { InnerLabel } from "../forms/inner-label";
 
 export const NewWorkspaceFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -95,11 +97,22 @@ export const WorkspaceForm = ({ name, currency, children }: Props) => {
         </FormRow>
 
         <div>
-          <label className="lg:hidden">Currency</label>
           <FormRow
             rowLabel={"Currency"}
             className={children ? "border-b-0" : ""}
+            subHeading={
+              <p>
+                Choose the currency for your workspace. If you don't see your
+                currency, please{" "}
+                <CrispButton variant="link" className="inline text-xs">
+                  contact support
+                </CrispButton>
+                .
+              </p>
+            }
           >
+            <InnerLabel hideLg>Currency</InnerLabel>
+
             <Select
               defaultValue={currency || "USD"}
               disabled={disabled}
