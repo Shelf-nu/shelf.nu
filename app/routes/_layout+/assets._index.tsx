@@ -11,6 +11,7 @@ import { useLoaderData, useNavigate } from "@remix-run/react";
 import { redirect } from "react-router";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -396,16 +397,7 @@ export default function AssetIndexPage() {
           ItemComponent={ListAssetContent}
           navigate={(itemId) => navigate(itemId)}
           className=" overflow-x-visible md:overflow-x-auto"
-          bulkActions={
-            <div>
-              <Button
-                variant="secondary"
-                className="flex items-center justify-between"
-              >
-                Actions
-              </Button>
-            </div>
-          }
+          bulkActions={<BulkActionsDropdown />}
           headerChildren={
             <>
               <Th className="hidden md:table-cell">Category</Th>
