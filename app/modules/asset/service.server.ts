@@ -55,6 +55,7 @@ import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
+import { resolveTeamMemberName } from "~/utils/user";
 import type {
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
@@ -2530,6 +2531,86 @@ export async function bulkCheckOutAssets({
       cause,
       message: "Something went wrong while bulk checking out assets.",
       additionalData: { assetIds, custodianId },
+      label,
+    });
+  }
+}
+
+export async function bulkCheckInAssets({
+  userId,
+  assetIds,
+}: {
+  userId: User["id"];
+  assetIds: Asset["id"][];
+}) {
+  try {
+    /**
+     * In order to make notes for the assets we have to make this query to get info about assets
+     */
+    const [assets, user] = await Promise.all([
+      db.asset.findMany({
+        where: { id: { in: assetIds } },
+        select: {
+          id: true,
+          title: true,
+          custody: {
+            select: { id: true, custodian: { include: { user: true } } },
+          },
+        },
+      }),
+      getUserByID(userId),
+    ]);
+
+    /**
+     * updateMany does not allow to update nested relationship rows
+     * so we have to make two queries to bulk check-in assets
+     * 1. Delete all custodies for all assets
+     * 2. Update status of all assets to AVAILABLE
+     */
+    await db.$transaction(async (tx) => {
+      /** Deleting custodies over assets */
+      await tx.custody.deleteMany({
+        where: {
+          id: {
+            in: assets.map((asset) => {
+              /** This case should not happen but in case */
+              if (!asset.custody) {
+                throw new Error("Could not find custody over asset.");
+              }
+
+              return asset.custody.id;
+            }),
+          },
+        },
+      });
+
+      /** Updating status of assets to AVAILABLE */
+      await tx.asset.updateMany({
+        where: { id: { in: assetIds } },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+
+      /** Creating notes for the assets */
+      await tx.note.createMany({
+        data: assets.map((asset) => ({
+          content: `**${user.firstName?.trim()} ${
+            user.lastName
+          }** has released **${resolveTeamMemberName(
+            asset.custody!.custodian
+          )}'s** custody over **${asset.title?.trim()}**`,
+          type: "UPDATE",
+          userId,
+          assetId: asset.id,
+        })),
+      });
+    });
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk checking in assets.",
+      additionalData: { assetIds, userId },
       label,
     });
   }
