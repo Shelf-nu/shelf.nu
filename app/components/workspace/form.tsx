@@ -10,6 +10,7 @@ import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
+import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import {
   Select,
@@ -18,11 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../forms/select";
+import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
-import { CrispButton } from "../marketing/crisp";
-import { InnerLabel } from "../forms/inner-label";
 
 export const NewWorkspaceFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
