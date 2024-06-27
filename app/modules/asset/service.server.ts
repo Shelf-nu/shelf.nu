@@ -1,3 +1,4 @@
+import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type {
   Category,
   Location,
@@ -12,7 +13,6 @@ import type {
   Booking,
   Kit,
 } from "@prisma/client";
-import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import type {
   SortingDirection,
@@ -2416,6 +2416,53 @@ export async function createKitChangeNote({
       message:
         "Something went wrong while creating a kit change note. Please try again or contact support",
       additionalData: { userId, assetId },
+      label,
+    });
+  }
+}
+
+export async function bulkDeleteAssets({
+  assetIds,
+  organizationId,
+  userId,
+}: {
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  userId: User["id"];
+}) {
+  try {
+    /**
+     * We have to remove the images of assets so we have to make this query first
+     */
+    const assets = await db.asset.findMany({
+      where: { id: { in: assetIds }, organizationId },
+      select: { id: true, mainImage: true },
+    });
+
+    return await db.$transaction(async (tx) => {
+      /** Deleting all assets */
+      await tx.asset.deleteMany({
+        where: { id: { in: assets.map((asset) => asset.id) } },
+      });
+
+      /** Deleting images of the assets (if any) */
+      const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
+
+      await Promise.all(
+        assetsWithImages.map((asset) =>
+          deleteOtherImages({
+            userId,
+            assetId: asset.id,
+            data: { path: `main-image-${asset.id}.jpg` },
+          })
+        )
+      );
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting assets",
+      additionalData: { assetIds, organizationId },
       label,
     });
   }

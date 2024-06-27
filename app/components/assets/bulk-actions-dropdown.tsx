@@ -1,6 +1,11 @@
+import type { Prisma } from "@prisma/client";
+import { useLoaderData } from "@remix-run/react";
+import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
+import { selectedBulkItemsAtom } from "~/atoms/list";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import BulkDeleteAssets from "./bulk-delete-assets";
 import Icon from "../icons/icon";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -32,6 +37,10 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
+  const { items } = useLoaderData<{
+    items: Prisma.AssetGetPayload<{ include: { kit: true } }>[];
+  }>();
+
   const {
     ref: dropdownRef,
     defaultApplied,
@@ -39,6 +48,22 @@ function ConditionalDropdown() {
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
+
+  const selectedAssetIds = useAtomValue(selectedBulkItemsAtom);
+
+  const selectedAssets = items.filter((item) =>
+    selectedAssetIds.includes(item.id)
+  );
+
+  const disabled = selectedAssetIds.length === 0;
+
+  const someAssetCheckedOut = selectedAssets.some(
+    (asset) => asset.status === "CHECKED_OUT"
+  );
+
+  const someAssetPartOfUnavailableKit = selectedAssets.some(
+    (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
+  );
 
   return (
     <>
@@ -62,6 +87,7 @@ function ConditionalDropdown() {
           className="actions-dropdown hidden sm:flex"
           onClick={() => setOpen(!open)}
           asChild
+          disabled={disabled}
         >
           <Button variant="secondary">
             <span className="flex items-center gap-2">
@@ -75,6 +101,7 @@ function ConditionalDropdown() {
           variant="secondary"
           className="asset-actions sm:hidden"
           onClick={() => setOpen(true)}
+          disabled={disabled}
         >
           <span className="flex items-center gap-2">
             Actions <ChevronRight className="chev" />
@@ -182,19 +209,14 @@ function ConditionalDropdown() {
               </Button>
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="px-4 py-1 md:p-0">
-              <Button
-                to="bulk-delete"
-                role="link"
-                variant="link"
-                className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                width="full"
-                onClick={() => setOpen(false)}
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon="trash" /> Delete
-                </span>
-              </Button>
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+              disabled={someAssetCheckedOut || someAssetPartOfUnavailableKit}
+            >
+              <BulkDeleteAssets />
             </DropdownMenuItem>
 
             <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
@@ -208,16 +230,16 @@ function ConditionalDropdown() {
                 Close
               </Button>
             </DropdownMenuItem>
-            {/* {assetIsCheckedOut ? (
+            {someAssetCheckedOut ? (
               <div className=" border-t p-2 text-left text-xs">
-                Some actions are disabled due to the asset being checked out.
+                Some actions are disabled due to the assets being checked out.
               </div>
             ) : null}
-            {assetIsPartOfUnavailableKit ? (
+            {someAssetPartOfUnavailableKit ? (
               <div className=" border-t p-2 text-left text-xs">
-                Some actions are disabled due to the asset being part of a kit.
+                Some actions are disabled due to the assets being part of a kit.
               </div>
-            ) : null} */}
+            ) : null}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
