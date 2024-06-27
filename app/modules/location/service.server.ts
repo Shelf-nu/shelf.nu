@@ -332,6 +332,8 @@ export async function createLocationsIfNotExists({
         "Something went wrong while creating locations. Seems like some of the location data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
     });
   }
 }
