@@ -38,7 +38,7 @@ export default function BulkActionsDropdown() {
 
 function ConditionalDropdown() {
   const { items } = useLoaderData<{
-    items: Prisma.AssetGetPayload<{ include: { kit: true } }>[];
+    items: Prisma.AssetGetPayload<{ include: { kit: true; custody: true } }>[];
   }>();
 
   const {
@@ -64,6 +64,26 @@ function ConditionalDropdown() {
   const someAssetPartOfUnavailableKit = selectedAssets.some(
     (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
   );
+
+  /** Asset can be release only if all selected items has custody */
+  const assetsCanBeReleased = selectedAssets.every((asset) => !!asset?.custody);
+
+  const someAssetsAvailable = selectedAssets.some(
+    (asset) => asset.status === "AVAILABLE"
+  );
+  const someAssetsInCustody = selectedAssets.some(
+    (asset) => asset.status === "IN_CUSTODY"
+  );
+
+  /**
+   * Check-in and check-out are disabled for the following reasons
+   * 1. User has selected AVAILABLE and IN_CUSTODY assets at same time
+   * 2. Some assets are CHECKED_OUT and cannot be released
+   */
+  const isCheckInCheckOutDisabled = [
+    someAssetsAvailable && someAssetsInCustody,
+    someAssetCheckedOut && !assetsCanBeReleased,
+  ].some(Boolean);
 
   return (
     <>
@@ -133,30 +153,30 @@ function ConditionalDropdown() {
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
               className="border-b px-4 py-1 md:p-0"
-              //   disabled={assetIsCheckedOut && !assetCanBeReleased}
+              disabled={isCheckInCheckOutDisabled}
             >
-              {/* {assetCanBeReleased ? ( */}
-              <Button
-                to="bulk-check-in"
-                role="link"
-                variant="link"
-                className={tw(
-                  "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
-                  //   assetIsPartOfUnavailableKit
-                  // ? "pointer-events-none cursor-not-allowed opacity-50"
-                  // : ""
-                )}
-                width="full"
-                onClick={() => setOpen(false)}
-                // disabled={assetIsPartOfUnavailableKit}
-              >
-                <span className="flex items-center gap-1">
-                  <Icon icon="check-in" /> Check in
-                </span>
-              </Button>
-              {/* ) : (
+              {assetsCanBeReleased ? (
                 <Button
-                  to="overview/check-out"
+                  to="bulk-check-in"
+                  role="link"
+                  variant="link"
+                  className={tw(
+                    "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700",
+                    someAssetPartOfUnavailableKit
+                      ? "pointer-events-none cursor-not-allowed opacity-50"
+                      : ""
+                  )}
+                  width="full"
+                  onClick={() => setOpen(false)}
+                  disabled={someAssetPartOfUnavailableKit}
+                >
+                  <span className="flex items-center gap-1">
+                    <Icon icon="check-in" /> Check in
+                  </span>
+                </Button>
+              ) : (
+                <Button
+                  to="bulk-check-out"
                   role="link"
                   variant="link"
                   className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
@@ -167,11 +187,12 @@ function ConditionalDropdown() {
                     <Icon icon="check-out" /> Check out
                   </span>
                 </Button>
-              )} */}
+              )}
             </DropdownMenuItem>
+
             <DropdownMenuItem
               className={tw("px-4 py-1 md:p-0")}
-              //   disabled={assetIsCheckedOut}
+              disabled={someAssetCheckedOut}
             >
               <Button
                 to="bulk-update-location"
@@ -191,7 +212,7 @@ function ConditionalDropdown() {
 
             <DropdownMenuItem
               className={tw("px-4 py-1 md:p-0")}
-              //   disabled={assetIsCheckedOut}
+              disabled={someAssetCheckedOut}
             >
               <Button
                 to="bulk-update-category"
@@ -238,6 +259,12 @@ function ConditionalDropdown() {
             {someAssetPartOfUnavailableKit ? (
               <div className=" border-t p-2 text-left text-xs">
                 Some actions are disabled due to the assets being part of a kit.
+              </div>
+            ) : null}
+            {isCheckInCheckOutDisabled ? (
+              <div className=" border-t p-2 text-left text-xs">
+                Some actions are disabled due to the selection of available and
+                unavailable assets at same time.
               </div>
             ) : null}
           </div>

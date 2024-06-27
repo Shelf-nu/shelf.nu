@@ -61,6 +61,7 @@ import type {
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
+import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
 
@@ -2463,6 +2464,72 @@ export async function bulkDeleteAssets({
       cause,
       message: "Something went wrong while bulk deleting assets",
       additionalData: { assetIds, organizationId },
+      label,
+    });
+  }
+}
+
+export async function bulkCheckOutAssets({
+  userId,
+  assetIds,
+  custodianId,
+  custodianName,
+}: {
+  userId: User["id"];
+  assetIds: Asset["id"][];
+  custodianId: TeamMember["id"];
+  custodianName: TeamMember["name"];
+}) {
+  try {
+    /**
+     * In order to make notes for the assets we have to make this query to get info about assets
+     */
+    const [assets, user] = await Promise.all([
+      db.asset.findMany({
+        where: { id: { in: assetIds } },
+        select: { id: true, title: true },
+      }),
+      getUserByID(userId),
+    ]);
+
+    /**
+     * updateMany does not allow to create nested relationship rows
+     * so we have to make two queries to bulk check-out assets
+     * 1. Create custodies for all assets
+     * 2. Update status of all assets to IN_CUSTODY
+     */
+    await db.$transaction(async (tx) => {
+      /** Creating custodies over assets */
+      await tx.custody.createMany({
+        data: assetIds.map((assetId) => ({
+          assetId,
+          teamMemberId: custodianId,
+        })),
+      });
+
+      /** Updating status of assets to IN_CUSTODY */
+      await tx.asset.updateMany({
+        where: { id: { in: assetIds } },
+        data: { status: AssetStatus.IN_CUSTODY },
+      });
+
+      /** Creating notes for the assets */
+      await tx.note.createMany({
+        data: assets.map((asset) => ({
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          type: "UPDATE",
+          userId,
+          assetId: asset.id,
+        })),
+      });
+    });
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk checking out assets.",
+      additionalData: { assetIds, custodianId },
       label,
     });
   }
