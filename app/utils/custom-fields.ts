@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
 import type { ClientHint } from "~/modules/booking/types";
 import { getDateTimeFormatFromHints } from "./client-hints";
+import { ShelfError } from "./error";
 
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
@@ -145,24 +146,32 @@ export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
   def: CustomField
 ): ShelfAssetCustomFieldValueType["value"] | undefined => {
-  const { raw } = value;
+  try {
+    const { raw } = value;
 
-  if (!raw) {
-    return undefined;
+    if (!raw) {
+      return undefined;
+    }
+
+    switch (def.type) {
+      case "BOOLEAN":
+        return { raw, valueBoolean: Boolean(raw) };
+      case "DATE":
+        return { raw, valueDate: new Date(raw as string).toISOString() };
+      case "OPTION":
+        return { raw, valueOption: String(raw) };
+      case "MULTILINE_TEXT":
+        return { raw, valueMultiLineText: String(raw) };
+    }
+
+    return { raw, valueText: String(raw) };
+  } catch (cause) {
+    throw new ShelfError({
+      cause: cause,
+      message: `Failed to parse custom field value for '${def.name}' with type '${def.type}'`,
+      label: "Custom fields",
+    });
   }
-
-  switch (def.type) {
-    case "BOOLEAN":
-      return { raw, valueBoolean: Boolean(raw) };
-    case "DATE":
-      return { raw, valueDate: new Date(raw as string).toISOString() };
-    case "OPTION":
-      return { raw, valueOption: String(raw) };
-    case "MULTILINE_TEXT":
-      return { raw, valueMultiLineText: String(raw) };
-  }
-
-  return { raw, valueText: String(raw) };
 };
 
 export const getCustomFieldDisplayValue = (
