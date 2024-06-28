@@ -291,6 +291,11 @@ export async function createLocationsIfNotExists({
         .map((asset) => [asset.location, ""])
     );
 
+    // Handle the case where there are no teamMembers
+    if (locations.has(undefined)) {
+      return {};
+    }
+
     // now we loop through the locations and check if they exist
     for (const [location, _] of locations) {
       const existingLocation = await db.location.findFirst({
