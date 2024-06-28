@@ -2,6 +2,7 @@ import type { Asset } from "@prisma/client";
 import { Form } from "../custom-form";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
+import { ControlledActionButton } from "../shared/controlled-action-button";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -17,14 +18,22 @@ export default function RemoveAssetFromKit({ asset }: { asset: Asset }) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button
-          variant="link"
-          icon="trash"
-          className="justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
-          width="full"
-        >
-          Remove
-        </Button>
+        <ControlledActionButton
+          canUseFeature={asset.status !== "CHECKED_OUT"}
+          buttonContent={{
+            title: "Remove",
+            message:
+              "You cannot remove this asset from the kit because it is currently checked out. Please check in the kit first, then try again",
+          }}
+          buttonProps={{
+            variant: "link",
+            icon: "trash",
+            className:
+              "justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700",
+            width: "full",
+          }}
+          skipCta={true}
+        />
       </AlertDialogTrigger>
 
       <AlertDialogContent>

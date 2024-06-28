@@ -272,6 +272,8 @@ export async function createCustomFieldsIfNotExists({
         "Something went wrong while creating custom fields. Seems like some of the custom field data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
     });
   }
 }

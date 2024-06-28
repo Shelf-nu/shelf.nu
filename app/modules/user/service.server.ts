@@ -53,9 +53,8 @@ export async function getUserByID<T extends Prisma.UserInclude | undefined>(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      title: "Asset not found",
-      message:
-        "The asset you are trying to access does not exist or you do not have permission to access it.",
+      title: "User not found",
+      message: "The user you are trying to access does not exist.",
       additionalData: { id, include },
       label,
     });

@@ -52,6 +52,11 @@ function handleBeforeSend<E extends Event>(event: E, hint: EventHint) {
     return null;
   }
 
+  /** Hide the __authSession cookie */
+  if (event.request?.cookies) {
+    event.request.cookies["__authSession"] = "hidden";
+  }
+
   return {
     ...event,
     ...makeSentryContext(exception),

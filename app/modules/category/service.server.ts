@@ -174,6 +174,8 @@ export async function createCategoriesIfNotExists({
         "Something went wrong while creating categories. Seems like some of the category data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
     });
   }
 }

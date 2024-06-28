@@ -11,7 +11,7 @@ import QRCode from "qrcode-generator";
 import { db } from "~/database/db.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { gifToPng } from "~/utils/gif-to-png";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
@@ -207,7 +207,9 @@ export async function generateUnclaimedCodesForPrint({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Failed to generate orphaned codes",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to generate orphaned codes",
       additionalData: { amount },
       label,
     });

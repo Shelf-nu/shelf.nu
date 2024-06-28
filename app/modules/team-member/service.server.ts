@@ -102,6 +102,8 @@ export async function createTeamMemberIfNotExists({
         "Something went wrong while creating the team member. Seems like some of the team member data in your import file is invalid. Please check and try again.",
       additionalData: { organizationId },
       label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
     });
   }
 }

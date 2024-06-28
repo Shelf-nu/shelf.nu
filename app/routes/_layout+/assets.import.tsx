@@ -125,8 +125,8 @@ export default function AssetsImport() {
   return (
     <div className="h-full">
       <Header />
-      <div className="flex size-full flex-col items-center">
-        <div className="h-[180px] w-full"></div>
+      <div className="flex h-auto w-full flex-col items-center">
+        <div className="h-[80px] w-full"></div>
         <Tabs defaultValue="content" className="w-1/2">
           <TabsList>
             <TabsTrigger value="content">Import your own content</TabsTrigger>

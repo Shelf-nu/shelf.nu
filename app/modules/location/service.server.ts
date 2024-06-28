@@ -291,6 +291,11 @@ export async function createLocationsIfNotExists({
         .map((asset) => [asset.location, ""])
     );
 
+    // Handle the case where there are no teamMembers
+    if (locations.has(undefined)) {
+      return {};
+    }
+
     // now we loop through the locations and check if they exist
     for (const [location, _] of locations) {
       const existingLocation = await db.location.findFirst({
@@ -332,6 +337,8 @@ export async function createLocationsIfNotExists({
         "Something went wrong while creating locations. Seems like some of the location data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
     });
   }
 }

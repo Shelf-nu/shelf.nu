@@ -1792,60 +1792,43 @@ export async function createAssetsFromContentImport({
       userId,
     });
 
-    const BATCH_SIZE = 10; // Adjust based on your server's capacity
-
-    for (let i = 0; i < data.length; i += BATCH_SIZE) {
-      const batch = data.slice(i, i + BATCH_SIZE);
-      await Promise.all(
-        batch.map(async (asset) => {
-          try {
-            // Your existing logic to process each asset
-            const customFieldsValues: ShelfAssetCustomFieldValueType[] =
-              Object.entries(asset).reduce((res, [key, val]) => {
-                if (key.startsWith("cf:") && val) {
-                  const { name } = getDefinitionFromCsvHeader(key);
-                  if (customFields[name].id) {
-                    res.push({
-                      id: customFields[name].id,
-                      value: buildCustomFieldValue(
-                        { raw: asset[key] },
-                        customFields[name]
-                      ),
-                    } as ShelfAssetCustomFieldValueType);
-                  }
-                }
-                return res;
-              }, [] as ShelfAssetCustomFieldValueType[]);
-            await createAsset({
-              organizationId,
-              title: asset.title,
-              description: asset.description || "",
-              userId,
-              categoryId: asset.category ? categories[asset.category] : null,
-              locationId: asset.location
-                ? locations[asset.location]
-                : undefined,
-              custodian: asset.custodian
-                ? teamMembers[asset.custodian]
-                : undefined,
-              tags:
-                asset.tags.length > 0
-                  ? {
-                      set: asset.tags
-                        .filter((t) => tags[t])
-                        .map((t) => ({ id: tags[t] })),
-                    }
-                  : undefined,
-              valuation: asset.valuation ? +asset.valuation : null,
-              customFieldsValues,
-            });
-          } catch (error) {
-            // eslint-disable-next-line no-console
-            console.error("Error processing asset", error);
-            // Handle the error as needed
+    for (let asset of data) {
+      const customFieldsValues: ShelfAssetCustomFieldValueType[] =
+        Object.entries(asset).reduce((res, [key, val]) => {
+          if (key.startsWith("cf:") && val) {
+            const { name } = getDefinitionFromCsvHeader(key);
+            if (customFields[name].id) {
+              res.push({
+                id: customFields[name].id,
+                value: buildCustomFieldValue(
+                  { raw: asset[key] },
+                  customFields[name]
+                ),
+              } as ShelfAssetCustomFieldValueType);
+            }
           }
-        })
-      );
+          return res;
+        }, [] as ShelfAssetCustomFieldValueType[]);
+
+      await createAsset({
+        organizationId,
+        title: asset.title,
+        description: asset.description || "",
+        userId,
+        categoryId: asset.category ? categories?.[asset.category] : null,
+        locationId: asset.location ? locations?.[asset.location] : undefined,
+        custodian: asset.custodian ? teamMembers?.[asset.custodian] : undefined,
+        tags:
+          asset?.tags?.length > 0
+            ? {
+                set: asset.tags
+                  .filter((t) => tags[t])
+                  .map((t) => ({ id: tags[t] })),
+              }
+            : undefined,
+        valuation: asset.valuation ? +asset.valuation : null,
+        customFieldsValues,
+      });
     }
   } catch (cause) {
     throw new ShelfError({

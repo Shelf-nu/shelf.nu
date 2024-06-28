@@ -31,7 +31,7 @@ export default function CategoriesInput({
             fieldName={name(i)}
             defaultValue={category}
             model={{ name: "category", queryKey: "name" }}
-            label="Category"
+            contentLabel="Category"
             initialDataKey="categories"
             countKey="totalCategories"
             placeholder="Select Category"

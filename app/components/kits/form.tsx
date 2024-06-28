@@ -98,7 +98,7 @@ export default function KitsForm({
           <Input
             inputType="textarea"
             maxLength={1000}
-            label={zo.fields.description()}
+            label={"Description"}
             name={zo.fields.description()}
             defaultValue={description || ""}
             hideLabel

@@ -584,6 +584,7 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
           },
         });
       } else {
+        resolvedKits.push(kit);
         /** This case should never happen because there must be a custodianUser or custodianTeamMember assigned to a booking */
         Logger.error(
           new ShelfError({
