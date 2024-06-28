@@ -43,49 +43,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       action: PermissionAction.create,
     });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
-    const [teamMembers, org] = await Promise.all([
-      /**
-       * We need to fetch the team members to be able to display them in the custodian dropdown.
-       */
-      db.teamMember.findMany({
-        where: {
-          deletedAt: null,
-          organizationId,
-        },
-        include: {
-          user: true,
-        },
-        orderBy: {
-          userId: "asc",
-        },
-      }),
-      /** We create a teamMember entry to represent the org owner.
-       * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
-       * assigning custody to users, not NRM.
-       */
-      db.organization.findUnique({
-        where: {
-          id: organizationId,
-        },
-        select: {
-          owner: true,
-        },
-      }),
-    ]);
-
-    if (org?.owner) {
-      teamMembers.push({
-        id: "owner",
-        name: "owner",
-        user: org.owner,
-        userId: org.owner.id as string,
-        organizationId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+    /**
+     * We need to fetch the team members to be able to display them in the custodian dropdown.
+     */
+    const teamMembers = await db.teamMember.findMany({
+      where: {
         deletedAt: null,
-      });
-    }
+        organizationId,
+      },
+      include: {
+        user: true,
+      },
+      orderBy: {
+        userId: "asc",
+      },
+    });
 
     const selfServiceUser = isSelfService
       ? teamMembers.find((member) => member.userId === authSession.userId)

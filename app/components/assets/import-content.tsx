@@ -84,7 +84,7 @@ export const ImportContent = () => (
         <b>"purchase date"</b> and type <b>"date"</b> :{" "}
         <b>"cf:purchase date, type:date"</b>
         <br /> if no type is mentioned "text" is used as default type.
-        <br /> date can be in <b>mm-dd-yyyy</b> or <b>dd-mon-yyyy</b> format.
+        <br /> date must be in <b>mm/dd/yyyy</b> format.
         <br /> in case of options, you dont have to have the options created, we
         create option(both the field and the option) while importing if the
         option doesnt exisit.

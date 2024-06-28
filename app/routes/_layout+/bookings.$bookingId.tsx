@@ -107,102 +107,77 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const [teamMembers, org, assets, totalAssets, bookingFlags] =
-      await Promise.all([
-        /**
-         * We need to fetch the team members to be able to display them in the custodian dropdown.
-         */
-        db.teamMember.findMany({
-          where: {
-            deletedAt: null,
-            organizationId,
-          },
-          include: {
-            user: true,
-          },
-          orderBy: {
-            userId: "asc",
-          },
-        }),
-        /** We create a teamMember entry to represent the org owner.
-         * Most important thing is passing the ID of the owner as the userId as we are currently only supporting
-         * assigning custody to users, not NRM.
-         */
-        db.organization.findUnique({
-          where: {
-            id: organizationId,
-          },
-          select: {
-            owner: true,
-          },
-        }),
-        /**
-         * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
-         * That way we know if the asset is available or not because we can see if they are booked for the same period
-         */
-        db.asset.findMany({
-          where: {
-            id: {
-              in: booking?.assets.map((a) => a.id) || [],
-            },
-          },
-          skip,
-          take,
-          include: {
-            category: true,
-            custody: true,
-            kit: true,
-            bookings: {
-              where: {
-                // id: { not: booking.id },
-                ...(booking.from && booking.to
-                  ? {
-                      status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
-                      OR: [
-                        {
-                          from: { lte: booking.to },
-                          to: { gte: booking.from },
-                        },
-                        {
-                          from: { gte: booking.from },
-                          to: { lte: booking.to },
-                        },
-                      ],
-                    }
-                  : {}),
-              },
-            },
-          },
-        }),
-        /** Count assets them */
-        db.asset.count({
-          where: {
-            id: {
-              in: booking?.assets.map((a) => a.id) || [],
-            },
-          },
-        }),
-        /** We use pagination to show assets, so we have to calculate the status of booking considering all the assets of booking and not just single page */
-        getBookingFlags({
-          id: booking.id,
-          assetIds: booking.assets.map((a) => a.id),
-          from: booking.from,
-          to: booking.to,
-        }),
-      ]);
+    const [teamMembers, assets, totalAssets, bookingFlags] = await Promise.all([
+      /**
+       * We need to fetch the team members to be able to display them in the custodian dropdown.
+       */
+      db.teamMember.findMany({
+        where: {
+          deletedAt: null,
+          organizationId,
+        },
+        include: {
+          user: true,
+        },
+        orderBy: {
+          userId: "asc",
+        },
+      }),
 
-    if (org?.owner) {
-      teamMembers.push({
-        id: "owner",
-        name: "owner",
-        user: org.owner,
-        userId: org.owner.id as string,
-        organizationId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        deletedAt: null,
-      });
-    }
+      /**
+       * We need to do this in a separate query because we need to filter the bookings within an asset based on the booking.from and booking.to
+       * That way we know if the asset is available or not because we can see if they are booked for the same period
+       */
+      db.asset.findMany({
+        where: {
+          id: {
+            in: booking?.assets.map((a) => a.id) || [],
+          },
+        },
+        skip,
+        take,
+        include: {
+          category: true,
+          custody: true,
+          kit: true,
+          bookings: {
+            where: {
+              // id: { not: booking.id },
+              ...(booking.from && booking.to
+                ? {
+                    status: { in: ["RESERVED", "ONGOING", "OVERDUE"] },
+                    OR: [
+                      {
+                        from: { lte: booking.to },
+                        to: { gte: booking.from },
+                      },
+                      {
+                        from: { gte: booking.from },
+                        to: { lte: booking.to },
+                      },
+                    ],
+                  }
+                : {}),
+            },
+          },
+        },
+      }),
+      /** Count assets them */
+      db.asset.count({
+        where: {
+          id: {
+            in: booking?.assets.map((a) => a.id) || [],
+          },
+        },
+      }),
+      /** We use pagination to show assets, so we have to calculate the status of booking considering all the assets of booking and not just single page */
+      getBookingFlags({
+        id: booking.id,
+        assetIds: booking.assets.map((a) => a.id),
+        from: booking.from,
+        to: booking.to,
+      }),
+    ]);
 
     /** We replace the assets ids in the booking object with the assets fetched in the separate request.
      * This is useful for more consistent data in the front-end */
