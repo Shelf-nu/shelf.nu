@@ -115,9 +115,7 @@ function ConditionalDropdown() {
           disabled={disabled}
         >
           <Button variant="secondary">
-            <span className="flex items-center gap-2">
-              Actions <ChevronRight className="chev" />
-            </span>
+            <span className="flex items-center gap-2">Actions</span>
           </Button>
         </DropdownMenuTrigger>
 
@@ -128,9 +126,7 @@ function ConditionalDropdown() {
           onClick={() => setOpen(true)}
           disabled={disabled}
         >
-          <span className="flex items-center gap-2">
-            Actions <ChevronRight className="chev" />
-          </span>
+          <span className="flex items-center gap-2">Actions</span>
         </Button>
 
         {open && (
@@ -227,7 +223,6 @@ function ConditionalDropdown() {
               onSelect={(e) => {
                 e.preventDefault();
               }}
-              disabled={someAssetCheckedOut || someAssetPartOfUnavailableKit}
             >
               <BulkDeleteAssets />
             </DropdownMenuItem>

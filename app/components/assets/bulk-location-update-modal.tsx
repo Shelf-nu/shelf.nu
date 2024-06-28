@@ -62,13 +62,13 @@ export const useBulkLocationUpdateModal = ({
           onClose={handleCloseDialog}
           className="lg:w-[400px]"
           title={
-            <div>
-              <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-gray-50 bg-gray-100 p-2 text-gray-600">
+            <div className="w-full">
+              <div className="mb-2 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
                 <LocationMarkerIcon />
               </div>
               <div className="mb-5">
                 <h4>Update location</h4>
-                <p>Adjust the location of {itemsSelected} assets.</p>
+                <p>Adjust the location of selected ({itemsSelected}) assets.</p>
               </div>
             </div>
           }
@@ -88,7 +88,8 @@ export const useBulkLocationUpdateModal = ({
             ))}
             <div className="modal-content-wrapper">
               <div className=" relative z-50 mb-8">
-                {/* <LocationSelect /> */}
+                {/* @TODO - this is causing an endless re-render. Seems to be something in the hook useModelFilters */}
+                {/* <LocationSelect isBulk /> */}
               </div>
 
               <div className="flex gap-3">
