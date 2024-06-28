@@ -62,6 +62,7 @@ import type {
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
+import { getLocationUpdateNoteContent } from "./utils.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
@@ -1626,41 +1627,6 @@ export async function createLocationChangeNote({
   }
 }
 
-function getLocationUpdateNoteContent({
-  currentLocation,
-  newLocation,
-  firstName,
-  lastName,
-  assetName,
-  isRemoving,
-}: {
-  currentLocation?: Pick<Location, "id" | "name"> | null;
-  newLocation?: Location | null;
-  firstName: string;
-  lastName: string;
-  assetName: string;
-  isRemoving?: boolean;
-}) {
-  let message = "";
-  if (currentLocation && newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **[${currentLocation.name.trim()}](/locations/${
-      currentLocation.id
-    })** to **[${newLocation.name.trim()}](/locations/${newLocation.id})**`; // updating location
-  }
-
-  if (newLocation && !currentLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **[${newLocation.name.trim()}](/locations/${
-      newLocation.id
-    })**`; // setting to first location
-  }
-
-  if (isRemoving || !newLocation) {
-    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **[${currentLocation?.name.trim()}](/locations/${currentLocation?.id})**`; // removing location
-  }
-
-  return message;
-}
-
 export async function createBulkLocationChangeNotes({
   modifiedAssets,
   assetIds,
@@ -2648,20 +2614,18 @@ export async function bulkUpdateAssetLocation({
   assetIds,
   organizationId,
   newLocationId,
-  currentLocationId,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   newLocationId?: Location["id"] | null;
-  currentLocationId?: Location["id"];
 }) {
   try {
     /** We have to create notes for all the assets so we have make this query */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
         where: { id: { in: assetIds }, organizationId },
-        select: { id: true, title: true },
+        select: { id: true, title: true, location: true },
       }),
       getUserByID(userId),
     ]);
@@ -2669,12 +2633,6 @@ export async function bulkUpdateAssetLocation({
     const newLocation = newLocationId
       ? await db.location.findFirst({
           where: { id: newLocationId, organizationId },
-        })
-      : null;
-
-    const currentLocation = currentLocationId
-      ? await db.location.findFirstOrThrow({
-          where: { id: currentLocationId, organizationId },
         })
       : null;
 
@@ -2691,7 +2649,7 @@ export async function bulkUpdateAssetLocation({
           const isRemoving = !newLocationId;
 
           const content = getLocationUpdateNoteContent({
-            currentLocation,
+            currentLocation: asset.location,
             newLocation,
             firstName: user?.firstName ?? "",
             lastName: user?.lastName ?? "",
@@ -2714,7 +2672,7 @@ export async function bulkUpdateAssetLocation({
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk updating location.",
-      additionalData: { userId, assetIds, newLocationId, currentLocationId },
+      additionalData: { userId, assetIds, newLocationId },
       label,
     });
   }

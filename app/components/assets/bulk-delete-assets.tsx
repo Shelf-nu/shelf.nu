@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Form, useActionData } from "@remix-run/react";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { selectedBulkItemsAtom, setSelectedBulkItemsAtom } from "~/atoms/list";
+import { isFormProcessing } from "~/utils/form";
 import { TrashIcon } from "../icons/library";
 import { Button } from "../shared/button";
 import {
@@ -17,6 +18,8 @@ import {
 
 export default function BulkDeleteAssets() {
   const [open, setOpen] = useState(false);
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
 
   const actionData = useActionData<{ success: boolean }>();
 
@@ -80,7 +83,10 @@ export default function BulkDeleteAssets() {
 
               <input type="hidden" value="bulk-delete" name="intent" />
 
-              <Button className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800">
+              <Button
+                disabled={disabled}
+                className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
+              >
                 Delete
               </Button>
             </Form>
