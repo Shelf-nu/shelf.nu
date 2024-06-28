@@ -2,7 +2,11 @@ import type { CustomField, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import {
+  ShelfError,
+  isLikeShelfError,
+  maybeUniqueConstraintViolation,
+} from "~/utils/error";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -187,7 +191,7 @@ export async function upsertCustomField(
         if (existingCustomField.type !== def.type) {
           throw new ShelfError({
             cause: null,
-            message: "Duplicate custom field name with different type",
+            message: `Duplicate custom field name with different type. '${def.name}' already exist with different type '${existingCustomField.type}'`,
             additionalData: {
               validationErrors: {
                 name: {
@@ -222,8 +226,9 @@ export async function upsertCustomField(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Failed to update or create custom fields. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Failed to update or create custom fields. Please try again or contact support.",
       additionalData: { definitions },
       label,
     });
@@ -268,8 +273,9 @@ export async function createCustomFieldsIfNotExists({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while creating custom fields. Seems like some of the custom field data in your import file is invalid. Please check and try again.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while creating custom fields. Seems like some of the custom field data in your import file is invalid. Please check and try again.",
       additionalData: { userId, organizationId },
       label,
       /** No need to capture those. They are mostly related to malformed CSV data */
