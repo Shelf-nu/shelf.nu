@@ -256,7 +256,7 @@ export default function GiveKitCustody() {
               deletedAt: null,
             }}
             fieldName="custodian"
-            label="Team members"
+            contentLabel="Team members"
             initialDataKey="teamMembers"
             countKey="totalTeamMembers"
             placeholder="Select a team member"

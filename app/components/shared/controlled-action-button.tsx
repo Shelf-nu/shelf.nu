@@ -17,7 +17,7 @@ export const ControlledActionButton = ({
   canUseFeature: boolean;
   buttonContent: {
     title: string | JSX.Element | JSX.Element[];
-    message: string;
+    message?: string;
     ctaText?: string;
   };
   buttonProps: ButtonProps;
@@ -44,7 +44,7 @@ const HoverMessage = ({
 }: {
   buttonContent: {
     title: string | JSX.Element | JSX.Element[];
-    message: string;
+    message?: string;
     variant?: ButtonVariant;
     ctaText: string;
   };
@@ -72,18 +72,20 @@ const HoverMessage = ({
           {buttonContent.title}
         </Button>
       </HoverCardTrigger>
-      <HoverCardContent>
-        <p className="text-left">
-          {buttonContent.message}
-          {!skipCta ? (
-            <span>
-              {" "}
-              Please switch to your team workspace to use this feature
-            </span>
-          ) : null}
-          .
-        </p>
-      </HoverCardContent>
+      {buttonContent.message && (
+        <HoverCardContent>
+          <p className="text-left">
+            {buttonContent.message}
+            {!skipCta ? (
+              <span>
+                {" "}
+                Please switch to your team workspace to use this feature
+              </span>
+            ) : null}
+            .
+          </p>
+        </HoverCardContent>
+      )}
     </HoverCard>
   );
 };

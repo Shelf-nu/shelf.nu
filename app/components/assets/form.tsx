@@ -23,6 +23,7 @@ import AssetCustomFields from "./custom-fields-inputs";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
+import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
@@ -124,7 +125,7 @@ export const AssetForm = ({
   }>();
 
   return (
-    <Card className="w-full md:w-min">
+    <Card className="w-full lg:w-min">
       <Form
         ref={zo.ref}
         method="post"
@@ -221,7 +222,7 @@ export const AssetForm = ({
             <Input
               inputType="textarea"
               maxLength={1000}
-              label={zo.fields.description()}
+              label={"Description"}
               name={zo.fields.description()}
               defaultValue={description || ""}
               hideLabel
@@ -249,7 +250,9 @@ export const AssetForm = ({
             disabled={disabled}
             defaultValue={category ?? undefined}
             model={{ name: "category", queryKey: "name" }}
-            label="Categories"
+            contentLabel="Categories"
+            label="Category"
+            hideLabel
             initialDataKey="categories"
             countKey="totalCategories"
             closeOnSelect
@@ -282,6 +285,7 @@ export const AssetForm = ({
           className="border-b-0 py-[10px]"
           required={zodFieldIsRequired(FormSchema.shape.tags)}
         >
+          <InnerLabel hideLg={true}>Tags</InnerLabel>
           <TagsAutocomplete existingTags={tags ?? []} />
         </FormRow>
 
@@ -309,7 +313,9 @@ export const AssetForm = ({
             fieldName="newLocationId"
             defaultValue={location || undefined}
             model={{ name: "location", queryKey: "name" }}
-            label="Locations"
+            contentLabel="Locations"
+            label="Location"
+            hideLabel
             initialDataKey="locations"
             countKey="totalLocations"
             closeOnSelect
@@ -355,7 +361,7 @@ export const AssetForm = ({
           <div className="relative w-full">
             <Input
               type="number"
-              label="value"
+              label="Value"
               inputClassName="pl-[70px] valuation-input"
               hideLabel
               name={zo.fields.valuation()}

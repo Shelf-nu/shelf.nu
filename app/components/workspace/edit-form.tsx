@@ -10,6 +10,7 @@ import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import FormRow from "../forms/form-row";
+import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
 import {
   Select,
@@ -18,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../forms/select";
+import { CrispButton } from "../marketing/crisp";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
@@ -115,11 +117,21 @@ export const WorkspaceEditForm = ({
         </FormRow>
 
         <div>
-          <label className="lg:hidden">Currency</label>
           <FormRow
             rowLabel={"Currency"}
             className={children ? "border-b-0" : ""}
+            subHeading={
+              <p>
+                Choose the currency for your workspace. If you don't see your
+                currency, please{" "}
+                <CrispButton variant="link" className="inline text-xs">
+                  contact support
+                </CrispButton>
+                .
+              </p>
+            }
           >
+            <InnerLabel hideLg>Currency</InnerLabel>
             <Select
               defaultValue={currency || "USD"}
               disabled={disabled}

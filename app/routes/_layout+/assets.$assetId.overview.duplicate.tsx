@@ -11,12 +11,11 @@ import Icon from "~/components/icons/icon";
 import Header from "~/components/layout/header";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
-import { db } from "~/database/db.server";
-import { duplicateAsset } from "~/modules/asset/service.server";
+import { duplicateAsset, getAsset } from "~/modules/asset/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import { data, error, getParams, parseData } from "~/utils/http.server";
@@ -34,26 +33,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    await requirePermission({
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.create,
     });
 
-    const asset = await db.asset
-      .findFirstOrThrow({ where: { id: assetId } })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          title: "Asset Not Found",
-          message:
-            "The asset you are trying to access does not exist or you do not have permission to access it.",
-          additionalData: { userId, assetId },
-          status: 404,
-          label: "Assets",
-        });
-      });
+    const asset = await getAsset({ id: assetId, organizationId });
 
     return json(
       data({
@@ -95,26 +82,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const asset = await db.asset
-      .findFirstOrThrow({
-        where: { id: assetId },
-        include: {
-          custody: { include: { custodian: true } },
-          tags: true,
-          customFields: true,
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          title: "Asset Not Found",
-          message:
-            "The asset you are trying to access does not exist or you do not have permission to access it.",
-          additionalData: { userId, assetId },
-          status: 404,
-          label: "Assets",
-        });
-      });
+    const asset = await getAsset({
+      id: assetId,
+      organizationId,
+      include: {
+        custody: { include: { custodian: true } },
+        tags: true,
+        customFields: true,
+      },
+    });
 
     const { amountOfDuplicates } = parseData(
       await request.formData(),
