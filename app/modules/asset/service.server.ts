@@ -1600,22 +1600,14 @@ export async function createLocationChangeNote({
   isRemoving: boolean;
 }) {
   try {
-    let message = "";
-    if (currentLocation && newLocation) {
-      message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **[${currentLocation.name.trim()}](/locations/${
-        currentLocation.id
-      })** to **[${newLocation.name.trim()}](/locations/${newLocation.id})**`; // updating location
-    }
-
-    if (newLocation && !currentLocation) {
-      message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **[${newLocation.name.trim()}](/locations/${
-        newLocation.id
-      })**`; // setting to first location
-    }
-
-    if (isRemoving || !newLocation) {
-      message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **[${currentLocation?.name.trim()}](/locations/${currentLocation?.id})**`; // removing location
-    }
+    const message = getLocationUpdateNoteContent({
+      currentLocation,
+      newLocation,
+      firstName,
+      lastName,
+      assetName,
+      isRemoving,
+    });
 
     await createNote({
       content: message,
@@ -1632,6 +1624,41 @@ export async function createLocationChangeNote({
       label,
     });
   }
+}
+
+function getLocationUpdateNoteContent({
+  currentLocation,
+  newLocation,
+  firstName,
+  lastName,
+  assetName,
+  isRemoving,
+}: {
+  currentLocation?: Pick<Location, "id" | "name"> | null;
+  newLocation?: Location | null;
+  firstName: string;
+  lastName: string;
+  assetName: string;
+  isRemoving?: boolean;
+}) {
+  let message = "";
+  if (currentLocation && newLocation) {
+    message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **[${currentLocation.name.trim()}](/locations/${
+      currentLocation.id
+    })** to **[${newLocation.name.trim()}](/locations/${newLocation.id})**`; // updating location
+  }
+
+  if (newLocation && !currentLocation) {
+    message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **[${newLocation.name.trim()}](/locations/${
+      newLocation.id
+    })**`; // setting to first location
+  }
+
+  if (isRemoving || !newLocation) {
+    message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **[${currentLocation?.name.trim()}](/locations/${currentLocation?.id})**`; // removing location
+  }
+
+  return message;
 }
 
 export async function createBulkLocationChangeNotes({
@@ -2611,6 +2638,81 @@ export async function bulkCheckInAssets({
       cause,
       message: "Something went wrong while bulk checking in assets.",
       additionalData: { assetIds, userId },
+      label,
+    });
+  }
+}
+
+export async function bulkUpdateAssetLocation({
+  userId,
+  assetIds,
+  organizationId,
+  newLocationId,
+  currentLocationId,
+}: {
+  userId: User["id"];
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  newLocationId?: Location["id"] | null;
+  currentLocationId?: Location["id"];
+}) {
+  try {
+    /** We have to create notes for all the assets so we have make this query */
+    const [assets, user] = await Promise.all([
+      db.asset.findMany({
+        where: { id: { in: assetIds }, organizationId },
+        select: { id: true, title: true },
+      }),
+      getUserByID(userId),
+    ]);
+
+    const newLocation = newLocationId
+      ? await db.location.findFirst({
+          where: { id: newLocationId, organizationId },
+        })
+      : null;
+
+    const currentLocation = currentLocationId
+      ? await db.location.findFirstOrThrow({
+          where: { id: currentLocationId, organizationId },
+        })
+      : null;
+
+    await db.$transaction(async (tx) => {
+      /** Updating location of assets to newLocation */
+      await tx.asset.updateMany({
+        where: { id: { in: assetIds } },
+        data: { locationId: newLocation?.id ? newLocation.id : null },
+      });
+
+      /** Creating notes for the assets */
+      await tx.note.createMany({
+        data: assets.map((asset) => {
+          const isRemoving = !newLocationId;
+
+          const content = getLocationUpdateNoteContent({
+            currentLocation,
+            newLocation,
+            firstName: user?.firstName ?? "",
+            lastName: user?.lastName ?? "",
+            assetName: asset.title,
+            isRemoving,
+          });
+
+          return {
+            content,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
+      });
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating location.",
+      additionalData: { userId, assetIds, newLocationId, currentLocationId },
       label,
     });
   }
