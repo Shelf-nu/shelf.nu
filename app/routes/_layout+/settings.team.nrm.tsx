@@ -23,6 +23,7 @@ import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { error, parseData } from "~/utils/http.server";
+import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
@@ -35,12 +36,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, organizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.teamMember,
-      action: PermissionAction.read,
-    });
+    const { organizationId, organizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.teamMember,
+        action: PermissionAction.read,
+      });
 
     const [
       tierLimit,
@@ -75,6 +77,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       items: teamMembers,
       totalItems: totalTeamMembers,
       canImportNRM: canImportNRM(tierLimit),
+      isPersonalOrg: checkIsPersonalOrg(currentOrganization),
     };
   } catch (cause) {
     const reason = makeShelfError(cause);

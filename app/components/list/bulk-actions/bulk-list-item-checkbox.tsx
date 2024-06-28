@@ -28,7 +28,7 @@ export default function BulkListItemCheckbox({
 
   return (
     <Td
-      className="hidden md:table-cell md:px-4"
+      className="hidden md:table-cell md:pl-4 md:pr-3"
       onClick={handleBulkItemSelection}
     >
       <FakeCheckbox

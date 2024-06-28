@@ -501,7 +501,7 @@ const ListAssetContent = ({
     <>
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        <div className="flex justify-between gap-3 p-4 !pl-0 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage

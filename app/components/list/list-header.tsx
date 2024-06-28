@@ -1,3 +1,4 @@
+import { tw } from "~/utils/tw";
 import type { ListProps } from ".";
 import BulkListHeader from "./bulk-actions/bulk-list-header";
 import { Th } from "../table";
@@ -19,7 +20,10 @@ export const ListHeader = ({
       {bulkActions ? <BulkListHeader /> : null}
       {hideFirstColumn ? null : (
         <Th
-          className="text-left font-normal text-gray-600"
+          className={tw(
+            "text-left font-normal text-gray-600",
+            bulkActions ? "!pl-0" : ""
+          )}
           colSpan={children ? 1 : 100}
         >
           Name

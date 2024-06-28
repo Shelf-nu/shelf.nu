@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { SendIcon, VerticalDotsIcon } from "~/components/icons/library";
@@ -9,8 +8,8 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
-import type { loader } from "~/routes/_layout+/settings.team.users";
-import { isPersonalOrg as checkIsPersonalOrg } from "~/utils/organization";
+import type { loader } from "~/routes/_layout+/settings.team.nrm";
+import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import { DeleteMember } from "./delete-member";
 import { Button } from "../shared/button";
@@ -29,12 +28,8 @@ export function TeamMembersActionsDropdown({
     };
   }>;
 }) {
-  const { organization } = useLoaderData<typeof loader>();
+  const { isPersonalOrg } = useLoaderData<typeof loader>();
   const { ref, open, setOpen } = useControlledDropdownMenu();
-  const isPersonalOrg = useMemo(
-    () => checkIsPersonalOrg(organization),
-    [organization]
-  );
 
   return (
     <DropdownMenu
@@ -68,9 +63,12 @@ export function TeamMembersActionsDropdown({
               to: `/settings/team/users/invite-user?teamMemberId=${teamMember.id}`,
               role: "link",
               variant: "link",
-              className:
-                "justify-start p-4  !text-gray-700 !hover:text-gray-700",
+              className: tw(
+                "!hover:text-gray-700 justify-start  p-4 !text-gray-700",
+                isPersonalOrg ? "opacity-70" : ""
+              ),
               width: "full",
+              disabled: isPersonalOrg,
               onClick: () => setOpen(false),
             }}
           />

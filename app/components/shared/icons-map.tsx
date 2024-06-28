@@ -39,6 +39,7 @@ import {
   CheckInIcon,
   CheckIcon,
   PartialCheckboxIcon,
+  AssetLabel,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -81,7 +82,8 @@ export type IconType =
   | "bookings"
   | "check-out"
   | "check-in"
-  | "partial-checkbox";
+  | "partial-checkbox"
+  | "asset-label";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -127,6 +129,7 @@ export const iconsMap: IconsMap = {
   "check-out": <CheckOutIcon />,
   "check-in": <CheckInIcon />,
   "partial-checkbox": <PartialCheckboxIcon />,
+  "asset-label": <AssetLabel />,
 };
 
 export default iconsMap;
