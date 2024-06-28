@@ -198,7 +198,7 @@ export const getDefinitionFromCsvHeader = (
   let type =
     defArr.find((e) => e.toLowerCase().startsWith("type:"))?.substring(5) ||
     "text"; //"text"
-  type = type.replace(/\s+/g, "_").toUpperCase();
+  type = type.replace(/\s+/g, "").toUpperCase();
   return {
     name,
     active: true,
