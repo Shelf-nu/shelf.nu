@@ -133,11 +133,15 @@ export async function createTagsIfNotExists({
 }): Promise<Record<string, TeamMember["id"]>> {
   try {
     const tags = data
-      .filter(({ tags }) => tags.length > 0)
+      .filter(({ tags }) => tags?.length > 0)
       .reduce((acc: Record<string, string>, curr) => {
         curr.tags.forEach((tag) => tag !== "" && (acc[tag.trim()] = ""));
         return acc;
       }, {});
+    // Handle the case where there are no tags
+    if (!Object.keys(tags).length) {
+      return {};
+    }
 
     // now we loop through the categories and check if they exist
     for (const tag of Object.keys(tags)) {

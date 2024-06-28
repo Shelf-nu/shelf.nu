@@ -9,21 +9,22 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import { XIcon } from "../icons/library";
 import { Image } from "../shared/image";
 
-export const LocationSelect = () => {
+export const LocationSelect = ({ isBulk = false }: { isBulk?: boolean }) => {
   const navigation = useNavigation();
 
-  const { asset } = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
+  const assetLocationId = isBulk
+    ? undefined
+    : data?.asset?.locationId ?? undefined;
 
-  const [locationId, setLocationId] = useState(asset.locationId ?? undefined);
+  const [locationId, setLocationId] = useState(undefined);
   const disabled = isFormProcessing(navigation.state);
 
   return (
     <div className="relative w-full">
-      <input
-        type="hidden"
-        name="currentLocationId"
-        value={asset.locationId || ""}
-      />
+      {!isBulk && (
+        <input type="hidden" name="currentLocationId" value={assetLocationId} />
+      )}
       <div className="flex items-center gap-2">
         <DynamicSelect
           disabled={disabled}

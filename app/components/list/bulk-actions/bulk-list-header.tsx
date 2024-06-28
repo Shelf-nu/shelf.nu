@@ -8,7 +8,6 @@ import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { PartialCheckboxIcon } from "~/components/icons/library";
 import { Th } from "~/components/table";
 import type { IndexResponse } from "~/routes/_layout+/assets._index";
-import { ALL_SELECTED_KEY } from "~/utils/list";
 import { tw } from "~/utils/tw";
 
 export default function BulkListHeader() {
@@ -24,15 +23,6 @@ export default function BulkListHeader() {
 
   function handleSelectAllIncomingItems() {
     setSelectedBulkItems(allItemsSelected ? [] : items.map((item) => item.id));
-  }
-
-  /**
-   * We can select all the incoming items and we can add ALL_SELECTED_KEY
-   * in the selected items. We check in backend for this ALL_SELECTED_KEY, if it is selected
-   * then we do operation on all items of organization
-   */
-  function handleSelectAllItems() {
-    setSelectedBulkItems([...items.map((item) => item.id), ALL_SELECTED_KEY]);
   }
 
   return (

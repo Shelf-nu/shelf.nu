@@ -45,6 +45,7 @@ import {
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   bulkDeleteAssets,
+  bulkUpdateAssetLocation,
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset/service.server";
@@ -236,11 +237,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["bulk-delete"]) })
+      z.object({ intent: z.enum(["bulk-delete", "bulk-update-location"]) })
     );
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       "bulk-delete": PermissionAction.delete,
+      "bulk-update-location": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -262,7 +264,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
         sendNotification({
           title: "Assets deleted",
           message: "Your assets has been deleted successfully",
-          icon: { name: "trash", variant: "error" },
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+      case "bulk-update-location": {
+        // @TODO handle case)
+        const { assetIds } = parseData(
+          formData,
+          z.object({ assetIds: z.array(z.string()).min(1) })
+        );
+
+        await bulkUpdateAssetLocation({ assetIds, organizationId, userId });
+
+        sendNotification({
+          title: "Assets updated",
+          message: "Your assets' locations have been successfully updated",
+          icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
 
