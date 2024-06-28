@@ -2537,7 +2537,7 @@ export async function bulkCheckOutAssets({
 
       /** Updating status of assets to IN_CUSTODY */
       await tx.asset.updateMany({
-        where: { id: { in: assetIds } },
+        where: { id: { in: assets.map((asset) => asset.id) } },
         data: { status: AssetStatus.IN_CUSTODY },
       });
 
@@ -2613,7 +2613,7 @@ export async function bulkCheckInAssets({
 
       /** Updating status of assets to AVAILABLE */
       await tx.asset.updateMany({
-        where: { id: { in: assetIds } },
+        where: { id: { in: assets.map((asset) => asset.id) } },
         data: { status: AssetStatus.AVAILABLE },
       });
 
@@ -2681,7 +2681,7 @@ export async function bulkUpdateAssetLocation({
     await db.$transaction(async (tx) => {
       /** Updating location of assets to newLocation */
       await tx.asset.updateMany({
-        where: { id: { in: assetIds } },
+        where: { id: { in: assets.map((asset) => asset.id) } },
         data: { locationId: newLocation?.id ? newLocation.id : null },
       });
 
@@ -2708,11 +2708,44 @@ export async function bulkUpdateAssetLocation({
         }),
       });
     });
+
+    return true;
   } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk updating location.",
       additionalData: { userId, assetIds, newLocationId, currentLocationId },
+      label,
+    });
+  }
+}
+
+export async function bulkUpdateAssetCategory({
+  userId,
+  assetIds,
+  organizationId,
+  categoryId,
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  categoryId: Asset["categoryId"];
+}) {
+  try {
+    /** If uncategorized is selected then we have to remove the relation and set category to null */
+    await db.asset.updateMany({
+      where: { id: { in: assetIds } },
+      data: {
+        categoryId: categoryId === "uncategorized" ? null : categoryId,
+      },
+    });
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating category.",
+      additionalData: { userId, assetIds, organizationId },
       label,
     });
   }
