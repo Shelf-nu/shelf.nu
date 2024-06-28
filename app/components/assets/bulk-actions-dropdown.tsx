@@ -6,7 +6,10 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkDeleteAssets from "./bulk-delete-assets";
-import { useBulkLocationUpdateModal } from "./bulk-location-update-modal";
+import {
+  BulkLocationUpdateDialog,
+  BulkLocationUpdateTrigger,
+} from "./bulk-location-update-modal";
 import Icon from "../icons/icon";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -86,9 +89,6 @@ function ConditionalDropdown() {
     someAssetCheckedOut && !assetsCanBeReleased,
   ].some(Boolean);
 
-  const [BulkLocationUpdateTrigger, BulkLocationUpdateModal] =
-    useBulkLocationUpdateModal({ onClick: () => setOpen(false) });
-
   return (
     <>
       {open && (
@@ -98,7 +98,7 @@ function ConditionalDropdown() {
           )}
         />
       )}
-      <BulkLocationUpdateModal />
+      <BulkLocationUpdateDialog />
 
       <DropdownMenu
         modal={false}
@@ -195,7 +195,11 @@ function ConditionalDropdown() {
               className={tw("px-4 py-1 md:p-0")}
               disabled={someAssetCheckedOut}
             >
-              <BulkLocationUpdateTrigger />
+              <BulkLocationUpdateTrigger
+                onClick={() => {
+                  setOpen(false);
+                }}
+              />
             </DropdownMenuItem>
 
             <DropdownMenuItem
