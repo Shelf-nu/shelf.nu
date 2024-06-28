@@ -11,8 +11,8 @@
   @apply text-primary-500;
 }
 
-.main-navigation .menu .icon {
-  /* @apply size-[16px]; */
+.main-navigation .menu .icon svg {
+  @apply size-[16px];
 }
 
 @media (min-width: 768px) {
@@ -27,7 +27,7 @@
 
   .collapsed-navigation .menu li a:not(.disabled),
   .collapsed-navigation .menu li button:not(.disabled) {
-    @apply py-2.5;
+    @apply py-1;
   }
 
   .collapsed-navigation .logout-btn form {

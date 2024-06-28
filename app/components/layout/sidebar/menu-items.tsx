@@ -21,7 +21,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
   const baseMenuItemClasses = tw(
-    "my-1 flex items-center gap-2 rounded px-2 py-1 text-[14px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600"
+    "my-1 flex items-center gap-1 rounded p-1 text-[14px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600"
   );
 
   return (
@@ -33,7 +33,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
               <NavLink
                 className={({ isActive }) =>
                   tw(
-                    "my-1 flex items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                    baseMenuItemClasses,
                     isActive ? "active bg-primary-50 text-primary-600" : "",
                     workspaceSwitching ? "pointer-events-none" : ""
                   )
@@ -58,10 +58,10 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   canUseFeature={canUseBookings}
                   buttonContent={{
                     title: (
-                      <span className="flex items-center gap-2 rounded ">
+                      <span className="flex items-center gap-1 rounded ">
                         <i
                           className={tw(
-                            "icon inline-flex pl-[2px] text-gray-500",
+                            "icon inline-flex pl-[5px] text-gray-500",
                             !canUseBookings
                               ? "!hover:text-gray-500 !text-gray-500"
                               : ""
@@ -115,7 +115,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   onClick={toggleMobileNav}
                   title={item.title}
                 >
-                  <i className="icon inline-flex pl-[2px] text-gray-500">
+                  <i className="icon inline-flex pl-[5px] text-gray-500">
                     {item.icon}
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
@@ -155,7 +155,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   title={item.title}
                   target={item?.target || undefined}
                 >
-                  <i className="icon inline-flex pl-[2px] text-gray-500">
+                  <i className="icon inline-flex pl-[5px] text-gray-500">
                     {item.icon}
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
@@ -187,7 +187,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     workspaceSwitching ? "pointer-events-none" : ""
                   )}
                 >
-                  <i className="icon inline-flex pl-[2px] text-gray-500">
+                  <i className="icon inline-flex pl-[5px] text-gray-500">
                     <Icon icon="switch" />
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
