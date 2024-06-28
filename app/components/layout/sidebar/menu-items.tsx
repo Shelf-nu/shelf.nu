@@ -62,6 +62,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                         <i
                           className={tw(
                             "icon inline-flex pl-[5px] text-gray-500",
+
                             !canUseBookings
                               ? "!hover:text-gray-500 !text-gray-500"
                               : ""
@@ -86,8 +87,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     title: item.title,
                     disabled: workspaceSwitching,
                     className: tw(
-                      baseMenuItemClasses,
-                      "border-0 bg-transparent text-left",
+                      "my-1 flex items-center gap-3 rounded border-0 bg-transparent px-3 text-left text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
                       canUseBookings
                         ? "justify-start focus:ring-0"
                         : "my-0 text-gray-500 hover:bg-gray-50 hover:text-gray-500",
@@ -105,7 +105,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 <NavLink
                   className={({ isActive }) =>
                     tw(
-                      baseMenuItemClasses,
+                      "my-1 flex items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
                       isActive ? "active bg-primary-50 text-primary-600" : "",
                       workspaceSwitching ? "pointer-events-none" : ""
                     )
@@ -144,7 +144,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 <NavLink
                   className={({ isActive }) =>
                     tw(
-                      baseMenuItemClasses,
+                      " my-1 flex items-center  gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
                       isActive ? "active bg-primary-50 text-primary-600" : "",
                       workspaceSwitching ? "pointer-events-none" : ""
                     )
@@ -182,8 +182,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 <button
                   type="submit"
                   className={tw(
-                    baseMenuItemClasses,
-                    "crisp-btn mt-1 flex w-full items-center ",
+                    "crisp-btn mt-1 flex w-full items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
                     workspaceSwitching ? "pointer-events-none" : ""
                   )}
                 >
