@@ -80,14 +80,20 @@ export const ImportContent = () => (
         To import custom fields, prefix your column heading with <b>"cf: "</b>,
         add the type followed by a coma from one of the allowed types(
         <b>"text", "boolean", "option", "multiline text", "date"</b>).
-        <br /> this is how a sample header looks like for custom type with name{" "}
+      </li>
+      <li>
+        this is how a sample header looks like for custom type with name{" "}
         <b>"purchase date"</b> and type <b>"date"</b> :{" "}
         <b>"cf:purchase date, type:date"</b>
-        <br /> if no type is mentioned "text" is used as default type.
-        <br /> date must be in <b>mm/dd/yyyy</b> format.
-        <br /> in case of options, you dont have to have the options created, we
-        create option(both the field and the option) while importing if the
-        option doesnt exisit.
+      </li>
+      <li>if no type is mentioned "text" is used as default type.</li>
+      <li>
+        date must be in <b>mm/dd/yyyy</b> format.
+      </li>
+      <li>
+        in case of options, you dont have to have the options created, we create
+        option(both the field and the option) while importing if the option
+        doesnt exisit.
       </li>
       <li>
         <b>IMPORTANT:</b> The first row of the sheet will be ignored. Use it to
