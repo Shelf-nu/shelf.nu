@@ -5,6 +5,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import { useBulkCategoryUpdateModal } from "./bulk-category-update-modal";
 import BulkDeleteAssets from "./bulk-delete-assets";
 import { useBulkLocationUpdateModal } from "./bulk-location-update-modal";
 import Icon from "../icons/icon";
@@ -88,6 +89,8 @@ function ConditionalDropdown() {
 
   const [BulkLocationUpdateTrigger, BulkLocationUpdateModal] =
     useBulkLocationUpdateModal({ onClick: () => setOpen(false) });
+  const [BulkCategoryUpdateTrigger, BulkCategoryUpdateModal] =
+    useBulkCategoryUpdateModal({ onClick: () => setOpen(false) });
 
   return (
     <>
@@ -99,6 +102,7 @@ function ConditionalDropdown() {
         />
       )}
       <BulkLocationUpdateModal />
+      <BulkCategoryUpdateModal />
 
       <DropdownMenu
         modal={false}
@@ -202,20 +206,7 @@ function ConditionalDropdown() {
               className={tw("px-4 py-1 md:p-0")}
               disabled={someAssetCheckedOut}
             >
-              <Button
-                to="bulk-update-category"
-                role="link"
-                variant="link"
-                className={tw(
-                  "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                )}
-                width="full"
-                onClick={() => setOpen(false)}
-              >
-                <span className="flex items-center gap-2">
-                  <Icon icon="category" /> Update category
-                </span>
-              </Button>
+              <BulkCategoryUpdateTrigger />
             </DropdownMenuItem>
 
             <DropdownMenuItem

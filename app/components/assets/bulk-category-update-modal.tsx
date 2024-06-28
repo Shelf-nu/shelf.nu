@@ -1,28 +1,28 @@
 import { useBulkModal } from "./bulk-update-modal";
 import { Button } from "../shared/button";
 
-export const useBulkLocationUpdateModal = ({
+export const useBulkCategoryUpdateModal = ({
   onClick,
 }: {
   onClick: () => void;
 }) => {
   const {
-    BulkUpdateTrigger: BulkLocationUpdateTrigger,
-    BulkUpdateModal: BulkLocationUpdateModal,
+    BulkUpdateTrigger: BulkCategoryUpdateTrigger,
+    BulkUpdateModal: BulkCategoryUpdateModal,
     disabled,
     handleCloseDialog,
   } = useBulkModal({
-    key: "location",
-    modalContent: <BulkLocationUpdateModalContent />,
+    key: "category",
+    modalContent: <BulkCategoryUpdateModalContent />,
     onClick,
   });
 
-  function BulkLocationUpdateModalContent() {
+  function BulkCategoryUpdateModalContent() {
     return (
       <>
         <div className=" relative z-50 mb-8">
           {/* @TODO - this is causing an endless re-render. Seems to be something in the hook useModelFilters */}
-          {/* <LocationSelect isBulk /> */}
+          {/* <CategorySelect isBulk /> */}
         </div>
 
         <div className="flex gap-3">
@@ -41,7 +41,7 @@ export const useBulkLocationUpdateModal = ({
             type="submit"
             disabled={disabled}
             name="intent"
-            value="bulk-update-location"
+            value="bulk-update-category"
           >
             Confirm
           </Button>
@@ -50,5 +50,5 @@ export const useBulkLocationUpdateModal = ({
     );
   }
 
-  return [BulkLocationUpdateTrigger, BulkLocationUpdateModal];
+  return [BulkCategoryUpdateTrigger, BulkCategoryUpdateModal];
 };

@@ -237,12 +237,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { intent } = parseData(
       formData,
-      z.object({ intent: z.enum(["bulk-delete", "bulk-update-location"]) })
+      z.object({
+        intent: z.enum([
+          "bulk-delete",
+          "bulk-update-location",
+          "bulk-update-category",
+        ]),
+      })
     );
 
     const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
       "bulk-delete": PermissionAction.delete,
       "bulk-update-location": PermissionAction.update,
+      "bulk-update-category": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -285,6 +292,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
+
+        return json(data({ success: true }));
+      }
+      case "bulk-update-category": {
+        // @TODO handle case)
+        // const { assetIds } = parseData(
+        //   formData,
+        //   z.object({ assetIds: z.array(z.string()).min(1) })
+        // );
+
+        // await bulkUpdateAssetLocation({ assetIds, organizationId, userId });
+
+        // sendNotification({
+        //   title: "Assets updated",
+        //   message: "Your assets' locations have been successfully updated",
+        //   icon: { name: "success", variant: "success" },
+        //   senderId: authSession.userId,
+        // });
 
         return json(data({ success: true }));
       }
