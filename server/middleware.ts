@@ -2,7 +2,10 @@ import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
 
-import { refreshAccessToken } from "~/modules/auth/service.server";
+import {
+  refreshAccessToken,
+  validateSession,
+} from "~/modules/auth/service.server";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
 
@@ -72,10 +75,18 @@ export function refreshSession() {
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
 
-    if (!auth || !isExpiringSoon(auth.expiresAt)) {
+    if (!auth) {
       return next();
     }
 
+    if (!isExpiringSoon(auth.expiresAt)) {
+      const isValidateSession =
+        process.env.REFRESH_APPROACH_VERSION === "v2" ||
+        (await validateSession());
+      if (isValidateSession) {
+        return next();
+      }
+    }
     try {
       session.set(authSessionKey, await refreshAccessToken(auth.refreshToken));
     } catch (cause) {
