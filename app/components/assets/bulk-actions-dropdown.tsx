@@ -5,12 +5,10 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
-import { useBulkCategoryUpdateModal } from "./bulk-category-update-modal";
+import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
 import BulkDeleteAssets from "./bulk-delete-assets";
-import {
-  BulkLocationUpdateDialog,
-  BulkLocationUpdateTrigger,
-} from "./bulk-location-update-modal";
+import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
+import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import Icon from "../icons/icon";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -90,8 +88,9 @@ function ConditionalDropdown() {
     someAssetCheckedOut && !assetsCanBeReleased,
   ].some(Boolean);
 
-  const [BulkCategoryUpdateTrigger, BulkCategoryUpdateModal] =
-    useBulkCategoryUpdateModal({ onClick: () => setOpen(false) });
+  function closeMenu() {
+    setOpen(false);
+  }
 
   return (
     <>
@@ -103,7 +102,7 @@ function ConditionalDropdown() {
         />
       )}
       <BulkLocationUpdateDialog />
-      <BulkCategoryUpdateModal />
+      <BulkCategoryUpdateDialog />
 
       <DropdownMenu
         modal={false}
@@ -200,18 +199,14 @@ function ConditionalDropdown() {
               className={tw("px-4 py-1 md:p-0")}
               disabled={someAssetCheckedOut}
             >
-              <BulkLocationUpdateTrigger
-                onClick={() => {
-                  setOpen(false);
-                }}
-              />
+              <BulkUpdateDialogTrigger type="location" onClick={closeMenu} />
             </DropdownMenuItem>
 
             <DropdownMenuItem
               className={tw("px-4 py-1 md:p-0")}
               disabled={someAssetCheckedOut}
             >
-              <BulkCategoryUpdateTrigger />
+              <BulkUpdateDialogTrigger type="category" onClick={closeMenu} />
             </DropdownMenuItem>
 
             <DropdownMenuItem

@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { BulkLocationUpdateSchema } from "~/components/assets/bulk-location-update-modal";
+import { BulkLocationUpdateSchema } from "~/components/assets/bulk-location-update-dialog";
 import { bulkUpdateAssetLocation } from "~/modules/asset/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
