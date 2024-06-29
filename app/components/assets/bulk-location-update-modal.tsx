@@ -1,5 +1,8 @@
+import { useEffect } from "react";
 import { useFetcher } from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useZorm } from "react-zorm";
+import { z } from "zod";
 import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
@@ -9,6 +12,7 @@ import {
   closeBulkUpdateLocationDialogAtom,
   openBulkUpdateLocationDialogAtom,
 } from "~/atoms/location";
+import { type action } from "~/routes/api+/assets.bulk-update-location";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
@@ -16,6 +20,13 @@ import { LocationMarkerIcon } from "../icons/library";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { LocationSelect } from "../location/location-select";
 import { Button } from "../shared/button";
+
+export const BulkLocationUpdateSchema = z.object({
+  assetIds: z.array(z.string()),
+  newLocationId: z
+    .string({ required_error: "Location is required!" })
+    .min(1, "Location is required!"),
+});
 
 export function BulkLocationUpdateTrigger({
   onClick,
@@ -44,15 +55,31 @@ export function BulkLocationUpdateTrigger({
 }
 
 export function BulkLocationUpdateDialog() {
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<typeof action>();
   const disabled = isFormProcessing(fetcher.state);
 
-  // @TODO - here the form needs some validations and error rendering based on what is returned from the fetcher.data
-  const selectedAssets = useAtomValue(selectedBulkItemsAtom);
+  const zo = useZorm("BulkLocationUpdate", BulkLocationUpdateSchema);
+
+  const [selectedAssets, setSelectedAssets] = useAtom(selectedBulkItemsAtom);
   const itemsSelected = useAtomValue(selectedBulkItemsCountAtom);
 
   const closeDialog = useSetAtom(closeBulkUpdateLocationDialogAtom);
   const isDialogOpen = useAtomValue(bulkLocationUpdateDialogOpenAtom);
+
+  useEffect(
+    function handleOnSuccess() {
+      if (fetcher.data?.error) {
+        return;
+      }
+
+      /** We have to close the dialog and remove all selected assets when update is success */
+      if (fetcher.data?.success) {
+        closeDialog();
+        setSelectedAssets([]);
+      }
+    },
+    [closeDialog, fetcher.data, setSelectedAssets]
+  );
 
   return (
     <DialogPortal>
@@ -74,8 +101,9 @@ export function BulkLocationUpdateDialog() {
       >
         <fetcher.Form
           method="post"
-          action="/assets/bulk-update-location"
+          action="/api/assets/bulk-update-location"
           className="px-6 pb-6"
+          ref={zo.ref}
         >
           {selectedAssets.map((assetId, i) => (
             <input
@@ -86,8 +114,18 @@ export function BulkLocationUpdateDialog() {
             />
           ))}
           <div className="modal-content-wrapper">
-            <div className=" relative z-50 mb-8">
+            <div className="relative z-50 mb-8">
               <LocationSelect isBulk />
+              {zo.errors.newLocationId()?.message ? (
+                <p className="text-sm text-error-500">
+                  {zo.errors.newLocationId()?.message}
+                </p>
+              ) : null}
+              {fetcher?.data?.error ? (
+                <p className="text-sm text-error-500">
+                  {fetcher.data.error.message}
+                </p>
+              ) : null}
             </div>
 
             <div className="flex gap-3">
@@ -100,14 +138,7 @@ export function BulkLocationUpdateDialog() {
               >
                 Cancel
               </Button>
-              <Button
-                variant="primary"
-                width="full"
-                type="submit"
-                disabled={disabled}
-                name="intent"
-                value="bulk-update-location"
-              >
+              <Button variant="primary" width="full" disabled={disabled}>
                 Confirm
               </Button>
             </div>
