@@ -1,4 +1,4 @@
-import { forwardRef } from "react";
+import { forwardRef, useCallback, useEffect } from "react";
 import { useFetcher } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
@@ -9,6 +9,7 @@ import {
 import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
+  setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 import type { action } from "~/routes/api+/assets.bulk-update-location";
 import { isFormProcessing } from "~/utils/form";
@@ -73,6 +74,7 @@ type DialogContentChildrenProps = {
 };
 
 type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
+  onSuccess?: () => void;
   children:
     | React.ReactNode
     | ((props: DialogContentChildrenProps) => React.ReactNode);
@@ -82,7 +84,7 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
 const BulkUpdateDialogContent = forwardRef<
   React.ElementRef<"form">,
   BulkUpdateDialogContentProps
->(function ({ type, children }, ref) {
+>(function ({ type, children, onSuccess }, ref) {
   const fetcher = useFetcher<typeof action>();
   const disabled = isFormProcessing(fetcher.state);
 
@@ -90,13 +92,30 @@ const BulkUpdateDialogContent = forwardRef<
   const closeBulkDialog = useSetAtom(closeBulkDialogAtom);
 
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
+  const setSelectedAssets = useSetAtom(setSelectedBulkItemsAtom);
   const itemsSelected = useAtomValue(selectedBulkItemsCountAtom);
 
   const isDialogOpen = bulkDialogOpenState[type] === true;
 
-  function handleCloseDialog() {
+  const handleCloseDialog = useCallback(() => {
     closeBulkDialog(type);
-  }
+  }, [closeBulkDialog, type]);
+
+  useEffect(
+    function handleOnSuccess() {
+      if (fetcher.data?.error) {
+        return;
+      }
+
+      /** We have to close the dialog and remove all selected assets when update is success */
+      if (fetcher.data?.success) {
+        handleCloseDialog();
+        setSelectedAssets([]);
+        onSuccess && onSuccess();
+      }
+    },
+    [fetcher, handleCloseDialog, onSuccess, setSelectedAssets]
+  );
 
   return (
     <DialogPortal>
