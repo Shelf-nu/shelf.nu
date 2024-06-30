@@ -6,6 +6,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
+import BulkCheckInDialog from "./bulk-checkin-dialog";
 import BulkCheckoutDialog from "./bulk-checkout-dialog";
 import BulkDeleteAssets from "./bulk-delete-assets";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
@@ -105,6 +106,7 @@ function ConditionalDropdown() {
       <BulkLocationUpdateDialog />
       <BulkCategoryUpdateDialog />
       <BulkCheckoutDialog />
+      <BulkCheckInDialog />
 
       <DropdownMenu
         modal={false}
@@ -163,24 +165,12 @@ function ConditionalDropdown() {
               disabled={isCheckInCheckOutDisabled}
             >
               {assetsCanBeReleased ? (
-                <Button
-                  to="bulk-check-in"
-                  role="link"
-                  variant="link"
-                  className={tw(
-                    "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700",
-                    someAssetPartOfUnavailableKit
-                      ? "pointer-events-none cursor-not-allowed opacity-50"
-                      : ""
-                  )}
-                  width="full"
-                  onClick={() => setOpen(false)}
+                <BulkUpdateDialogTrigger
+                  type="check-in"
+                  label="Check in"
+                  onClick={closeMenu}
                   disabled={someAssetPartOfUnavailableKit}
-                >
-                  <span className="flex items-center gap-1">
-                    <Icon icon="check-in" /> Check in
-                  </span>
-                </Button>
+                />
               ) : (
                 <BulkUpdateDialogTrigger
                   type="check-out"

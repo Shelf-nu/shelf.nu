@@ -1,6 +1,6 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { BulkCheckoutAssetsSchema } from "~/components/assets/bulk-checkout-dialog";
-import { bulkCheckOutAssets } from "~/modules/asset/service.server";
+import { BulkCheckInAssetsSchema } from "~/components/assets/bulk-checkin-dialog";
+import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -10,7 +10,7 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 
-export async function action({ context, request }: ActionFunctionArgs) {
+export async function action({ request, context }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const userId = authSession.userId;
 
@@ -18,30 +18,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
     assertIsPost(request);
 
     await requirePermission({
-      request,
       userId,
+      request,
       entity: PermissionEntity.asset,
-      action: PermissionAction.checkout,
+      action: PermissionAction.checkin,
     });
 
     const formData = await request.formData();
 
-    const { assetIds, custodian } = parseData(
-      formData,
-      BulkCheckoutAssetsSchema
-    );
+    const { assetIds } = parseData(formData, BulkCheckInAssetsSchema);
 
-    await bulkCheckOutAssets({
+    await bulkCheckInAssets({
       userId,
       assetIds,
-      custodianId: custodian.id,
-      custodianName: custodian.name,
     });
 
     sendNotification({
-      title: `Assets are now in custody of ${custodian.name}`,
-      message:
-        "Remember, these assets will be unavailable until it is manually checked in.",
+      title: "Assets are no longer in custody",
+      message: "These assets are available again.",
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });

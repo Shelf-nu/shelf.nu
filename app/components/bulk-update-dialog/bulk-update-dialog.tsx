@@ -31,6 +31,7 @@ type CommonBulkDialogProps = {
 type BulkUpdateDialogTriggerProps = CommonBulkDialogProps & {
   label?: string;
   onClick?: () => void;
+  disabled?: boolean;
 };
 
 /** This component is going to trigger the open state of dialog */
@@ -38,6 +39,7 @@ function BulkUpdateDialogTrigger({
   type,
   onClick,
   label = `Update ${type}`,
+  disabled,
 }: BulkUpdateDialogTriggerProps) {
   const openBulkDialog = useSetAtom(openBulkDialogAtom);
 
@@ -56,6 +58,7 @@ function BulkUpdateDialogTrigger({
         onClick && onClick();
         handleOpenDialog();
       }}
+      disabled={disabled}
     >
       <span className="flex items-center gap-2">
         <Icon icon={type} /> {label}
