@@ -14,7 +14,7 @@ import {
 import type { action } from "~/routes/api+/assets.bulk-update-location";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
-import { CategoriesIcon, LocationMarkerIcon } from "../icons/library";
+import Icon from "../icons/icon";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 
@@ -22,18 +22,14 @@ import { Button } from "../shared/button";
  * Type of the dialog
  * This `type` will be used to find which dialog to open while clicking on trigger
  * */
-type BulkDialogType = "location" | "category";
-
-const iconsMap: Record<BulkDialogType, React.ReactNode | null> = {
-  location: <LocationMarkerIcon />,
-  category: <CategoriesIcon />,
-};
+type BulkDialogType = "location" | "category" | "check-out" | "check-in";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
 };
 
 type BulkUpdateDialogTriggerProps = CommonBulkDialogProps & {
+  label?: string;
   onClick?: () => void;
 };
 
@@ -41,6 +37,7 @@ type BulkUpdateDialogTriggerProps = CommonBulkDialogProps & {
 function BulkUpdateDialogTrigger({
   type,
   onClick,
+  label = `Update ${type}`,
 }: BulkUpdateDialogTriggerProps) {
   const openBulkDialog = useSetAtom(openBulkDialogAtom);
 
@@ -61,7 +58,7 @@ function BulkUpdateDialogTrigger({
       }}
     >
       <span className="flex items-center gap-2">
-        {iconsMap[type]} Update {type}
+        <Icon icon={type} /> {label}
       </span>
     </Button>
   );
@@ -74,7 +71,29 @@ type DialogContentChildrenProps = {
 };
 
 type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
+  /**
+   * Title for the Dialog content
+   * @default `Update ${type}`
+   */
+  title?: string;
+  /**
+   * Description for the dialog content
+   * @default `Adjust the ${type} of selected (${itemsSelected}) assets.`
+   */
+  description?: string;
+  /**
+   * URL of your action handler
+   * @example /api/assets/update-bulk-location
+   *  */
+  actionUrl?: string;
+  /**
+   * This will be called when the request was success
+   */
   onSuccess?: () => void;
+  /**
+   * Content to be rendered inside the Dialog.
+   * It can either be a `React.ReactNode` or it can be a function returning `React.ReactNode`
+   */
   children:
     | React.ReactNode
     | ((props: DialogContentChildrenProps) => React.ReactNode);
@@ -84,7 +103,17 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
 const BulkUpdateDialogContent = forwardRef<
   React.ElementRef<"form">,
   BulkUpdateDialogContentProps
->(function ({ type, children, onSuccess }, ref) {
+>(function (
+  {
+    type,
+    children,
+    onSuccess,
+    title = `Update ${type}`,
+    description,
+    actionUrl,
+  },
+  ref
+) {
   const fetcher = useFetcher<typeof action>();
   const disabled = isFormProcessing(fetcher.state);
 
@@ -126,12 +155,14 @@ const BulkUpdateDialogContent = forwardRef<
         title={
           <div className="w-full">
             <div className="mb-2 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
-              {iconsMap[type]}
+              <Icon icon={type} />
             </div>
             <div className="mb-5">
-              <h4>Update {type}</h4>
+              <h4>{title}</h4>
               <p>
-                Adjust the {type} of selected ({itemsSelected}) assets.
+                {description
+                  ? description
+                  : `Adjust the ${type} of selected (${itemsSelected}) assets.`}
               </p>
             </div>
           </div>
@@ -140,7 +171,7 @@ const BulkUpdateDialogContent = forwardRef<
         <fetcher.Form
           ref={ref}
           method="post"
-          action={`/api/assets/bulk-update-${type}`}
+          action={actionUrl ? actionUrl : `/api/assets/bulk-update-${type}`}
           className="px-6 pb-6"
         >
           {selectedAssets.map((assetId, i) => (

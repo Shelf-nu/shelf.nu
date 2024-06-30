@@ -6,6 +6,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
+import BulkCheckoutDialog from "./bulk-checkout-dialog";
 import BulkDeleteAssets from "./bulk-delete-assets";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
@@ -103,6 +104,7 @@ function ConditionalDropdown() {
       )}
       <BulkLocationUpdateDialog />
       <BulkCategoryUpdateDialog />
+      <BulkCheckoutDialog />
 
       <DropdownMenu
         modal={false}
@@ -180,18 +182,11 @@ function ConditionalDropdown() {
                   </span>
                 </Button>
               ) : (
-                <Button
-                  to="bulk-check-out"
-                  role="link"
-                  variant="link"
-                  className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
-                  width="full"
-                  onClick={() => setOpen(false)}
-                >
-                  <span className="flex items-center gap-2">
-                    <Icon icon="check-out" /> Check out
-                  </span>
-                </Button>
+                <BulkUpdateDialogTrigger
+                  type="check-out"
+                  label="Check out"
+                  onClick={closeMenu}
+                />
               )}
             </DropdownMenuItem>
 
