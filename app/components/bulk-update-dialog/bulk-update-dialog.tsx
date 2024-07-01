@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect } from "react";
-import { useFetcher } from "@remix-run/react";
+import { useFetcher, useSearchParams } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   bulkDialogAtom,
@@ -22,7 +22,12 @@ import { Button } from "../shared/button";
  * Type of the dialog
  * This `type` will be used to find which dialog to open while clicking on trigger
  * */
-type BulkDialogType = "location" | "category" | "check-out" | "check-in";
+type BulkDialogType =
+  | "location"
+  | "category"
+  | "check-out"
+  | "check-in"
+  | "trash";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
@@ -122,6 +127,8 @@ const BulkUpdateDialogContent = forwardRef<
   const fetcher = useFetcher<typeof action>();
   const disabled = isFormProcessing(fetcher.state);
 
+  const [searchParams] = useSearchParams();
+
   const bulkDialogOpenState = useAtomValue(bulkDialogAtom);
   const closeBulkDialog = useSetAtom(closeBulkDialogAtom);
 
@@ -143,12 +150,14 @@ const BulkUpdateDialogContent = forwardRef<
 
       /** We have to close the dialog and remove all selected assets when update is success */
       if (fetcher.data?.success) {
+        if (type === "trash") {
+          setSelectedAssets([]);
+        }
         handleCloseDialog();
-        setSelectedAssets([]);
         onSuccess && onSuccess();
       }
     },
-    [fetcher, handleCloseDialog, onSuccess, setSelectedAssets]
+    [fetcher, handleCloseDialog, onSuccess, setSelectedAssets, type]
   );
 
   return (
@@ -179,6 +188,12 @@ const BulkUpdateDialogContent = forwardRef<
           action={actionUrl ? actionUrl : `/api/assets/bulk-update-${type}`}
           className="px-6 pb-6"
         >
+          <input
+            type="hidden"
+            name="currentSearchParams"
+            value={searchParams.toString()}
+          />
+
           {selectedAssets.map((assetId, i) => (
             <input
               key={assetId}

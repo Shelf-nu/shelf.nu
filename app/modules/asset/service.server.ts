@@ -62,7 +62,10 @@ import type {
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
-import { getLocationUpdateNoteContent } from "./utils.server";
+import {
+  getAssetsWhereInput,
+  getLocationUpdateNoteContent,
+} from "./utils.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
@@ -2403,21 +2406,26 @@ export async function bulkDeleteAssets({
   assetIds,
   organizationId,
   userId,
+  currentSearchParams,
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   userId: User["id"];
+  currentSearchParams?: string | null;
 }) {
   try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
     /**
      * We have to remove the images of assets so we have to make this query first
      */
     const assets = await db.asset.findMany({
-      where: {
-        /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
-        id: assetIds.includes(ALL_SELECTED_KEY) ? undefined : { in: assetIds },
-        organizationId,
-      },
+      where,
       select: { id: true, mainImage: true },
     });
 
@@ -2456,30 +2464,46 @@ export async function bulkCheckOutAssets({
   custodianId,
   custodianName,
   organizationId,
+  currentSearchParams,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
   organizationId: Asset["organizationId"];
+  currentSearchParams?: string | null;
 }) {
   try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where: {
-          /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
-          id: assetIds.includes(ALL_SELECTED_KEY)
-            ? undefined
-            : { in: assetIds },
-          organizationId,
-        },
-        select: { id: true, title: true },
+        where,
+        select: { id: true, title: true, status: true },
       }),
       getUserByID(userId),
     ]);
+
+    const assetsNotAvailable = assets.some(
+      (asset) => asset.status !== "AVAILABLE"
+    );
+
+    if (assetsNotAvailable) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "There are sone unavailable assets. Please make sure you are selecting only available assets.",
+        label: "Assets",
+      });
+    }
 
     /**
      * updateMany does not allow to create nested relationship rows
@@ -2515,9 +2539,14 @@ export async function bulkCheckOutAssets({
 
     return true;
   } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk checking out assets.";
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while bulk checking out assets.",
+      message,
       additionalData: { assetIds, custodianId },
       label,
     });
@@ -2528,24 +2557,27 @@ export async function bulkCheckInAssets({
   userId,
   assetIds,
   organizationId,
+  currentSearchParams,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
+  currentSearchParams?: string | null;
 }) {
   try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where: {
-          /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
-          id: assetIds.includes(ALL_SELECTED_KEY)
-            ? undefined
-            : { in: assetIds },
-          organizationId,
-        },
+        where,
         select: {
           id: true,
           title: true,
@@ -2556,6 +2588,17 @@ export async function bulkCheckInAssets({
       }),
       getUserByID(userId),
     ]);
+
+    const hasAssetsWithoutCustody = assets.some((asset) => !asset.custody);
+
+    if (hasAssetsWithoutCustody) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "There are some assets without custody. Please make sure you are selecting assets with custody.",
+        label: "Assets",
+      });
+    }
 
     /**
      * updateMany does not allow to update nested relationship rows
@@ -2603,9 +2646,14 @@ export async function bulkCheckInAssets({
 
     return true;
   } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk checking in assSets.";
+
     throw new ShelfError({
       cause,
-      message: "Something went wrong while bulk checking in assets.",
+      message,
       additionalData: { assetIds, userId },
       label,
     });
@@ -2617,23 +2665,26 @@ export async function bulkUpdateAssetLocation({
   assetIds,
   organizationId,
   newLocationId,
+  currentSearchParams,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   newLocationId?: Location["id"] | null;
+  currentSearchParams?: string | null;
 }) {
   try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
     /** We have to create notes for all the assets so we have make this query */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where: {
-          /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
-          id: assetIds.includes(ALL_SELECTED_KEY)
-            ? undefined
-            : { in: assetIds },
-          organizationId,
-        },
+        where,
         select: { id: true, title: true, location: true },
       }),
       getUserByID(userId),
@@ -2692,22 +2743,27 @@ export async function bulkUpdateAssetCategory({
   assetIds,
   organizationId,
   categoryId,
+  currentSearchParams,
 }: {
   userId: string;
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   categoryId: Asset["categoryId"];
+  currentSearchParams?: string | null;
 }) {
   try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
     await db.asset.updateMany({
-      where: {
-        /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
-        id: assetIds.includes(ALL_SELECTED_KEY) ? undefined : { in: assetIds },
-        organizationId,
-      },
+      where,
       data: {
-        /** If uncategorized is selected then we have to remove the relation and set category to null */
-        categoryId: categoryId === "uncategorized" ? null : categoryId,
+        /** If nothing is selected then we have to remove the relation and set category to null */
+        categoryId: !categoryId ? null : categoryId,
       },
     });
 
@@ -2716,7 +2772,7 @@ export async function bulkUpdateAssetCategory({
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk updating category.",
-      additionalData: { userId, assetIds, organizationId },
+      additionalData: { userId, assetIds, organizationId, categoryId },
       label,
     });
   }

@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { BulkLocationUpdateSchema } from "~/components/assets/bulk-location-update-dialog";
 import { bulkUpdateAssetLocation } from "~/modules/asset/service.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -27,9 +28,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { assetIds, newLocationId } = parseData(
+    const { assetIds, newLocationId, currentSearchParams } = parseData(
       formData,
-      BulkLocationUpdateSchema
+      BulkLocationUpdateSchema.and(CurrentSearchParamsSchema)
     );
 
     await bulkUpdateAssetLocation({
@@ -37,6 +38,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       assetIds,
       organizationId,
       newLocationId,
+      currentSearchParams,
     });
 
     sendNotification({
