@@ -23,4 +23,9 @@ export interface Config {
    * Primary color for emails
    */
   emailPrimaryColor: string;
+
+  /**
+   * Path to favicon
+   */
+  faviconPath: string;
 }
