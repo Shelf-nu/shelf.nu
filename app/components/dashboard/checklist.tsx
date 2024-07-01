@@ -47,7 +47,9 @@ export default function OnboardingChecklist() {
             <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
               <div className="flex items-start">
                 <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-                  <AssetsIcon />
+                  <i className="size-5">
+                    <AssetsIcon />
+                  </i>
                 </div>
                 <div className="text-[14px]">
                   <div className="mb-3">
@@ -126,7 +128,9 @@ export default function OnboardingChecklist() {
             <div className="flex h-full items-start justify-between gap-1 rounded border p-4">
               <div className="flex items-start">
                 <div className="mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
-                  <TagsIcon />
+                  <i className="size-5">
+                    <TagsIcon />
+                  </i>
                 </div>
                 <div className="text-[14px]">
                   <div className="mb-3">
