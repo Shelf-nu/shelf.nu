@@ -97,6 +97,7 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
   /**
    * Content to be rendered inside the Dialog.
    * It can either be a `React.ReactNode` or it can be a function returning `React.ReactNode`
+   * The function can receive props like `disabled`, `handleCloseDialog`, `fetcherError` with {@link DialogContentChildrenProps}
    */
   children:
     | React.ReactNode
