@@ -12,7 +12,7 @@ import MenuButton from "./menu-button";
 import MenuItems from "./menu-items";
 import { OrganizationSelectForm } from "./organization-select-form";
 import Overlay from "./overlay";
-import { ShelfMobileLogo, ShelfSidebarLogo } from "./shelf-sidebar-logo";
+import { ShelfMobileLogo, ShelfSidebarLogo } from "../../marketing/logos";
 
 export default function Sidebar() {
   const { user, minimizedSidebar, currentOrganizationId } =

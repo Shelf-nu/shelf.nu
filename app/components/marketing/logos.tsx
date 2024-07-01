@@ -1,5 +1,6 @@
 import { ShelfTypography } from "~/components/icons/library";
 import { config } from "~/config/shelf.config";
+import { tw } from "~/utils/tw";
 
 /**
  * Logo shown in the sidebar
@@ -54,6 +55,42 @@ export const ShelfMobileLogo = () => {
       src="/static/images/logo-full-color(x2).png"
       alt="logo"
       className="h-full"
+    />
+  );
+};
+
+/**
+ * Lego symbol
+ */
+export const ShelfSymbolLogo = ({ className }: { className?: string }) => {
+  const { logoPath } = config;
+  const classes = tw("mx-auto mb-2 size-12", className);
+
+  if (logoPath) {
+    return <img src={logoPath.symbol} alt="Shelf Logo" className={classes} />;
+  }
+
+  return (
+    <img src="/static/images/shelf-symbol.png" alt="logo" className={classes} />
+  );
+};
+
+/**
+ * Full logo
+ */
+export const ShelfFullLogo = ({ className }: { className?: string }) => {
+  const { logoPath } = config;
+  const classes = tw(className);
+
+  if (logoPath) {
+    return <img src={logoPath.fullLogo} alt="Shelf Logo" className={classes} />;
+  }
+
+  return (
+    <img
+      src="/static/images/logo-full-color(x2).png"
+      alt="logo"
+      className={classes}
     />
   );
 };

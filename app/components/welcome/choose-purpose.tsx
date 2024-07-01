@@ -4,6 +4,7 @@ import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
 import { CheckmarkIcon } from "../icons/library";
+import { ShelfSymbolLogo } from "../marketing/logos";
 import { Button } from "../shared/button";
 
 export function ChoosePurpose() {
@@ -16,13 +17,7 @@ export function ChoosePurpose() {
   return (
     <>
       <div className="flex flex-col items-center p-4 sm:p-6">
-        <img
-          src="/static/images/shelf-symbol.png"
-          alt="logo"
-          className="mb-4"
-          width={32}
-          height={32}
-        />
+        <ShelfSymbolLogo className="mb-4 size-8" />
         <div className="mb-8 text-center">
           <h3>How will you use shelf?</h3>
           <p>
