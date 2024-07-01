@@ -8,6 +8,8 @@ import type { BulkDialogType } from "~/components/bulk-update-dialog/bulk-update
 export const bulkDialogAtom = atom<Record<BulkDialogType, boolean>>({
   location: false,
   category: false,
+  "check-out": false,
+  "check-in": false,
 });
 
 /**
