@@ -1,4 +1,5 @@
 import type { Attachment } from "nodemailer/lib/mailer";
+import { config } from "~/config/shelf.config";
 import { transporter } from "~/emails/transporter.server";
 import { SMTP_FROM } from "./env";
 import { ShelfError } from "./error";
@@ -28,6 +29,8 @@ export const sendEmail = async ({
   /** Override the default sender */
   from?: string;
 }) => {
+  const { logoPath } = config;
+
   try {
     // send mail with defined transport object
     await transporter.sendMail({
@@ -38,8 +41,10 @@ export const sendEmail = async ({
       html: html || "", // html body
       attachments: [
         {
-          filename: "shelf-symbol.png",
-          path: `${process.env.SERVER_URL}/static/images/shelf-symbol.png`,
+          filename: "symbol-logo.png",
+          path: logoPath
+            ? `${process.env.SERVER_URL}${config.logoPath?.symbol}`
+            : `${process.env.SERVER_URL}/static/images/shelf-symbol.png`,
           cid: "shelf-logo",
         },
         ...(attachments || []),

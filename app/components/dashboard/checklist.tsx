@@ -72,7 +72,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -112,7 +112,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -143,7 +143,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -194,7 +194,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -231,7 +231,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -281,7 +281,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
