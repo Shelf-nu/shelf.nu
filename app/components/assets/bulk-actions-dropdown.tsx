@@ -9,7 +9,7 @@ import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu"
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
 import BulkCheckInDialog from "./bulk-checkin-dialog";
 import BulkCheckoutDialog from "./bulk-checkout-dialog";
-import BulkDeleteAssets from "./bulk-delete-assets";
+import BulkDeleteDialog from "./bulk-delete-dialog";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
@@ -110,6 +110,7 @@ function ConditionalDropdown() {
       <BulkCategoryUpdateDialog />
       <BulkCheckoutDialog />
       <BulkCheckInDialog />
+      <BulkDeleteDialog />
 
       <DropdownMenu
         modal={false}
@@ -125,7 +126,7 @@ function ConditionalDropdown() {
           asChild
           disabled={disabled}
         >
-          <Button variant="secondary">
+          <Button type="button" variant="secondary">
             <span className="flex items-center gap-2">Actions</span>
           </Button>
         </DropdownMenuTrigger>
@@ -136,6 +137,7 @@ function ConditionalDropdown() {
           className="asset-actions sm:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
+          type="button"
         >
           <span className="flex items-center gap-2">Actions</span>
         </Button>
@@ -184,24 +186,25 @@ function ConditionalDropdown() {
             </DropdownMenuItem>
 
             <DropdownMenuItem
-              className={tw("py-1 lg:p-0")}
+              className="py-1 lg:p-0"
               disabled={someAssetCheckedOut || isLoading}
             >
               <BulkUpdateDialogTrigger type="location" onClick={closeMenu} />
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="py-1 lg:p-0" disabled={isLoading}>
+            <DropdownMenuItem
+              className="border-b py-1 lg:p-0"
+              disabled={isLoading}
+            >
               <BulkUpdateDialogTrigger type="category" onClick={closeMenu} />
             </DropdownMenuItem>
 
-            <DropdownMenuItem
-              className="py-1 lg:p-0"
-              disabled={isLoading}
-              onSelect={(e) => {
-                e.preventDefault();
-              }}
-            >
-              <BulkDeleteAssets />
+            <DropdownMenuItem className="py-1 lg:p-0" disabled={isLoading}>
+              <BulkUpdateDialogTrigger
+                type="trash"
+                label="Delete"
+                onClick={closeMenu}
+              />
             </DropdownMenuItem>
 
             <DropdownMenuItem className="border-t md:hidden lg:p-0">

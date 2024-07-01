@@ -22,7 +22,12 @@ import { Button } from "../shared/button";
  * Type of the dialog
  * This `type` will be used to find which dialog to open while clicking on trigger
  * */
-type BulkDialogType = "location" | "category" | "check-out" | "check-in";
+type BulkDialogType =
+  | "location"
+  | "category"
+  | "check-out"
+  | "check-in"
+  | "trash";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;

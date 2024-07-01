@@ -10,6 +10,7 @@ export const bulkDialogAtom = atom<Record<BulkDialogType, boolean>>({
   category: false,
   "check-out": false,
   "check-in": false,
+  trash: false,
 });
 
 /**
