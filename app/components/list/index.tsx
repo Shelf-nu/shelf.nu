@@ -65,6 +65,7 @@ export const List = ({
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const hasSelectedAllItems = selectedBulkItems.includes(ALL_SELECTED_KEY);
+
   /**
    * We can select all the incoming items and we can add ALL_SELECTED_KEY
    * in the selected items. We check in backend for this ALL_SELECTED_KEY, if it is selected

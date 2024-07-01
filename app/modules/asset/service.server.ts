@@ -50,7 +50,7 @@ import {
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
@@ -2413,7 +2413,11 @@ export async function bulkDeleteAssets({
      * We have to remove the images of assets so we have to make this query first
      */
     const assets = await db.asset.findMany({
-      where: { id: { in: assetIds }, organizationId },
+      where: {
+        /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
+        id: assetIds.includes(ALL_SELECTED_KEY) ? undefined : { in: assetIds },
+        organizationId,
+      },
       select: { id: true, mainImage: true },
     });
 
@@ -2451,11 +2455,13 @@ export async function bulkCheckOutAssets({
   assetIds,
   custodianId,
   custodianName,
+  organizationId,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
+  organizationId: Asset["organizationId"];
 }) {
   try {
     /**
@@ -2463,7 +2469,13 @@ export async function bulkCheckOutAssets({
      */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where: { id: { in: assetIds } },
+        where: {
+          /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
+          id: assetIds.includes(ALL_SELECTED_KEY)
+            ? undefined
+            : { in: assetIds },
+          organizationId,
+        },
         select: { id: true, title: true },
       }),
       getUserByID(userId),
@@ -2478,8 +2490,8 @@ export async function bulkCheckOutAssets({
     await db.$transaction(async (tx) => {
       /** Creating custodies over assets */
       await tx.custody.createMany({
-        data: assetIds.map((assetId) => ({
-          assetId,
+        data: assets.map((asset) => ({
+          assetId: asset.id,
           teamMemberId: custodianId,
         })),
       });
@@ -2515,9 +2527,11 @@ export async function bulkCheckOutAssets({
 export async function bulkCheckInAssets({
   userId,
   assetIds,
+  organizationId,
 }: {
   userId: User["id"];
   assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
 }) {
   try {
     /**
@@ -2525,7 +2539,13 @@ export async function bulkCheckInAssets({
      */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where: { id: { in: assetIds } },
+        where: {
+          /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
+          id: assetIds.includes(ALL_SELECTED_KEY)
+            ? undefined
+            : { in: assetIds },
+          organizationId,
+        },
         select: {
           id: true,
           title: true,
@@ -2607,7 +2627,13 @@ export async function bulkUpdateAssetLocation({
     /** We have to create notes for all the assets so we have make this query */
     const [assets, user] = await Promise.all([
       db.asset.findMany({
-        where: { id: { in: assetIds }, organizationId },
+        where: {
+          /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
+          id: assetIds.includes(ALL_SELECTED_KEY)
+            ? undefined
+            : { in: assetIds },
+          organizationId,
+        },
         select: { id: true, title: true, location: true },
       }),
       getUserByID(userId),
@@ -2673,10 +2699,14 @@ export async function bulkUpdateAssetCategory({
   categoryId: Asset["categoryId"];
 }) {
   try {
-    /** If uncategorized is selected then we have to remove the relation and set category to null */
     await db.asset.updateMany({
-      where: { id: { in: assetIds } },
+      where: {
+        /** If ALL_SELECTED_KEY is there then we have to select all assets of organization */
+        id: assetIds.includes(ALL_SELECTED_KEY) ? undefined : { in: assetIds },
+        organizationId,
+      },
       data: {
+        /** If uncategorized is selected then we have to remove the relation and set category to null */
         categoryId: categoryId === "uncategorized" ? null : categoryId,
       },
     });

@@ -1,8 +1,9 @@
 import type { Prisma } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
@@ -11,7 +12,6 @@ import BulkCheckoutDialog from "./bulk-checkout-dialog";
 import BulkDeleteAssets from "./bulk-delete-assets";
 import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
-import Icon from "../icons/icon";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
 import {
@@ -45,6 +45,9 @@ function ConditionalDropdown() {
   const { items } = useLoaderData<{
     items: Prisma.AssetGetPayload<{ include: { kit: true; custody: true } }>[];
   }>();
+
+  const navigation = useNavigation();
+  const isLoading = isFormProcessing(navigation.state);
 
   const {
     ref: dropdownRef,
@@ -162,7 +165,7 @@ function ConditionalDropdown() {
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
               className="border-b px-4 py-1 md:p-0"
-              disabled={isCheckInCheckOutDisabled}
+              disabled={isCheckInCheckOutDisabled || isLoading}
             >
               {assetsCanBeReleased ? (
                 <BulkUpdateDialogTrigger
@@ -182,20 +185,18 @@ function ConditionalDropdown() {
 
             <DropdownMenuItem
               className={tw("px-4 py-1 md:p-0")}
-              disabled={someAssetCheckedOut}
+              disabled={someAssetCheckedOut || isLoading}
             >
               <BulkUpdateDialogTrigger type="location" onClick={closeMenu} />
             </DropdownMenuItem>
 
-            <DropdownMenuItem
-              className={tw("px-4 py-1 md:p-0")}
-              disabled={someAssetCheckedOut}
-            >
+            <DropdownMenuItem className="px-4 py-1 md:p-0" disabled={isLoading}>
               <BulkUpdateDialogTrigger type="category" onClick={closeMenu} />
             </DropdownMenuItem>
 
             <DropdownMenuItem
               className="px-4 py-1 md:p-0"
+              disabled={isLoading}
               onSelect={(e) => {
                 e.preventDefault();
               }}
