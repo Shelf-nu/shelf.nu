@@ -9,4 +9,13 @@ export interface Config {
    * Enable premium features
    */
   enablePremiumFeatures: boolean;
+
+  /**
+   * Logo paths
+   * Used to override the default logo. Both values are required
+   */
+  logoPath?: {
+    fullLogo: string;
+    symbol: string;
+  };
 }
