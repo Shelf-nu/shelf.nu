@@ -164,7 +164,7 @@ function ConditionalDropdown() {
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
-              className="border-b px-4 py-1 md:p-0"
+              className="border-b py-1 lg:p-0"
               disabled={isCheckInCheckOutDisabled || isLoading}
             >
               {assetsCanBeReleased ? (
@@ -184,18 +184,18 @@ function ConditionalDropdown() {
             </DropdownMenuItem>
 
             <DropdownMenuItem
-              className={tw("px-4 py-1 md:p-0")}
+              className={tw("py-1 lg:p-0")}
               disabled={someAssetCheckedOut || isLoading}
             >
               <BulkUpdateDialogTrigger type="location" onClick={closeMenu} />
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="px-4 py-1 md:p-0" disabled={isLoading}>
+            <DropdownMenuItem className="py-1 lg:p-0" disabled={isLoading}>
               <BulkUpdateDialogTrigger type="category" onClick={closeMenu} />
             </DropdownMenuItem>
 
             <DropdownMenuItem
-              className="px-4 py-1 md:p-0"
+              className="py-1 lg:p-0"
               disabled={isLoading}
               onSelect={(e) => {
                 e.preventDefault();
@@ -204,7 +204,7 @@ function ConditionalDropdown() {
               <BulkDeleteAssets />
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="border-t p-4 md:hidden md:p-0">
+            <DropdownMenuItem className="border-t md:hidden lg:p-0">
               <Button
                 role="button"
                 variant="secondary"
