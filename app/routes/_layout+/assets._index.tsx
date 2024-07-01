@@ -152,6 +152,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalLocations,
         teamMembers,
         totalTeamMembers,
+        rawTeamMembers,
       },
     ] = await Promise.all([
       getOrganizationTierLimit({
@@ -216,6 +217,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalLocations,
         teamMembers,
         totalTeamMembers,
+        rawTeamMembers,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],

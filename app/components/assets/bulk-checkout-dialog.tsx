@@ -36,7 +36,7 @@ export default function BulkCheckoutDialog() {
               }}
               fieldName="custodian"
               contentLabel="Team members"
-              initialDataKey="teamMembers"
+              initialDataKey="rawTeamMembers"
               countKey="totalTeamMembers"
               placeholder="Select a team member"
               allowClear
