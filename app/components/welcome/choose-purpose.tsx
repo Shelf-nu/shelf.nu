@@ -64,10 +64,16 @@ export function ChoosePurpose() {
               </p>
               <div className="mt-3 flex flex-col gap-4 md:flex-row">
                 <div className="flex items-center gap-3">
-                  <CheckmarkIcon /> <span>Free 14-day trial</span>
+                  <span className="text-primary">
+                    <CheckmarkIcon />
+                  </span>{" "}
+                  <span>Free 14-day trial</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <CheckmarkIcon /> No credit card required
+                  <span className="text-primary">
+                    <CheckmarkIcon />
+                  </span>{" "}
+                  No credit card required
                 </div>
               </div>
             </div>
