@@ -1,4 +1,5 @@
 import { Text, Link } from "@react-email/components";
+import { config } from "~/config/shelf.config";
 import type { BookingForEmail } from "../types";
 
 /** Footer used when sending normal user emails */
@@ -7,7 +8,7 @@ export const UserFooter = ({ booking }: { booking: BookingForEmail }) => (
     <Text style={{ fontSize: "14px", color: "#344054" }}>
       This email was sent to{" "}
       <Link
-        style={{ color: "#EF6820" }}
+        style={{ color: config.emailPrimaryColor }}
         href={`mailto:${booking.custodianUser!.email}`}
       >
         {booking.custodianUser!.email}
