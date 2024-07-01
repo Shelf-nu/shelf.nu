@@ -9,4 +9,5 @@ export const config: Config = {
   //   fullLogo: "/static/images/logo-full-color(x2).png",
   //   symbol: "/static/images/shelf-symbol.png",
   // },
+  emailPrimaryColor: "#EF6820",
 };

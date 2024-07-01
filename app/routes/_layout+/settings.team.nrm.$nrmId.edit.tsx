@@ -103,7 +103,7 @@ export default function EditNrm() {
   return (
     <div className="modal-content-wrapper">
       <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
-        <UserIcon color="#ef6820" />
+        <UserIcon />
       </div>
 
       <h4 className="mb-5">Edit team member</h4>

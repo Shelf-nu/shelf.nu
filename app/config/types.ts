@@ -18,4 +18,9 @@ export interface Config {
     fullLogo: string;
     symbol: string;
   };
+
+  /**
+   * Primary color for emails
+   */
+  emailPrimaryColor: string;
 }

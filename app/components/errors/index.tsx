@@ -40,7 +40,7 @@ export const ErrorContent = () => {
   );
 };
 
-const ErrorIcon = () => (
+export const ErrorIcon = () => (
   <svg
     width="100%"
     height="100%"

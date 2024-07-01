@@ -1509,3 +1509,20 @@ export const AssetLabel = (props: SVGProps<SVGSVGElement>) => (
     />
   </svg>
 );
+
+export const LockIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 19 22"
+    {...props}
+  >
+    <path
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M17 9V5.8c0-1.68 0-2.52-.327-3.162a3 3 0 0 0-1.311-1.311C14.72 1 13.88 1 12.2 1H5.8c-1.68 0-2.52 0-3.162.327a3 3 0 0 0-1.311 1.311C1 3.28 1 4.12 1 5.8v10.4c0 1.68 0 2.52.327 3.162a3 3 0 0 0 1.311 1.311C3.28 21 4.12 21 5.8 21h1.7M10 10H5m3 4H5m8-8H5m11.25 10v-1.75a1.75 1.75 0 1 0-3.5 0V16m-.15 4h3.8c.56 0 .84 0 1.054-.109a1 1 0 0 0 .437-.437C18 19.24 18 18.96 18 18.4v-.8c0-.56 0-.84-.109-1.054a1 1 0 0 0-.437-.437C17.24 16 16.96 16 16.4 16h-3.8c-.56 0-.84 0-1.054.109a1 1 0 0 0-.437.437C11 16.76 11 17.04 11 17.6v.8c0 .56 0 .84.109 1.054a1 1 0 0 0 .437.437C11.76 20 12.04 20 12.6 20Z"
+    />
+  </svg>
+);
