@@ -129,15 +129,16 @@ export const List = ({
                         selected
                       </div>
                     </div>
-                    {!hasSelectedAllItems && (
-                      <Button
-                        onClick={handleSelectAllItems}
-                        variant="link"
-                        className="-mb-1 px-2 py-1 text-[14px] font-normal hover:bg-primary-50 hover:text-primary-600"
-                      >
-                        Select all {totalItems} entries
-                      </Button>
-                    )}
+                    {!hasSelectedAllItems &&
+                      selectedBulkItemsCount < totalItems && (
+                        <Button
+                          onClick={handleSelectAllItems}
+                          variant="link"
+                          className="-mb-1 px-2 py-1 text-[14px] font-normal hover:bg-primary-50 hover:text-primary-600"
+                        >
+                          Select all {totalItems} entries
+                        </Button>
+                      )}
                   </div>
                 ) : (
                   <>
