@@ -1,6 +1,7 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkCategoryUpdateSchema } from "~/components/assets/bulk-category-update-dialog";
 import { bulkUpdateAssetCategory } from "~/modules/asset/service.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -26,9 +27,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { assetIds, category } = parseData(
+    const { assetIds, category, currentSearchParams } = parseData(
       formData,
-      BulkCategoryUpdateSchema
+      BulkCategoryUpdateSchema.and(CurrentSearchParamsSchema)
     );
 
     await bulkUpdateAssetCategory({
@@ -36,6 +37,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       assetIds,
       categoryId: category,
       organizationId,
+      currentSearchParams,
     });
 
     sendNotification({

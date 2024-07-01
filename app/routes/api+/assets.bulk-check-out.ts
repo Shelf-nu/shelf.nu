@@ -1,6 +1,7 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { BulkCheckoutAssetsSchema } from "~/components/assets/bulk-checkout-dialog";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
@@ -26,9 +27,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, custodian } = parseData(
+    const { assetIds, custodian, currentSearchParams } = parseData(
       formData,
-      BulkCheckoutAssetsSchema
+      BulkCheckoutAssetsSchema.and(CurrentSearchParamsSchema)
     );
 
     await bulkCheckOutAssets({
@@ -37,6 +38,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       custodianId: custodian.id,
       custodianName: custodian.name,
       organizationId,
+      currentSearchParams,
     });
 
     sendNotification({

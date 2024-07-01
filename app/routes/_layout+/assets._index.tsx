@@ -48,6 +48,7 @@ import {
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset/service.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -254,12 +255,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { assetIds } = parseData(
+        const { assetIds, currentSearchParams } = parseData(
           formData,
-          z.object({ assetIds: z.array(z.string()).min(1) })
+          z
+            .object({ assetIds: z.array(z.string()).min(1) })
+            .and(CurrentSearchParamsSchema)
         );
 
-        await bulkDeleteAssets({ assetIds, organizationId, userId });
+        await bulkDeleteAssets({
+          assetIds,
+          organizationId,
+          userId,
+          currentSearchParams,
+        });
 
         sendNotification({
           title: "Assets deleted",
