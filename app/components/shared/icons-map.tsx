@@ -38,6 +38,7 @@ import {
   CheckOutIcon,
   CheckInIcon,
   CheckIcon,
+  PartialCheckboxIcon,
   AssetLabel,
 } from "../icons/library";
 
@@ -81,6 +82,7 @@ export type IconType =
   | "bookings"
   | "check-out"
   | "check-in"
+  | "partial-checkbox"
   | "asset-label";
 
 type IconsMap = {
@@ -126,6 +128,7 @@ export const iconsMap: IconsMap = {
   kit: <KitIcon />,
   "check-out": <CheckOutIcon />,
   "check-in": <CheckInIcon />,
+  "partial-checkbox": <PartialCheckboxIcon />,
   "asset-label": <AssetLabel />,
 };
 

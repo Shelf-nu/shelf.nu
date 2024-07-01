@@ -115,7 +115,7 @@ export default function Custody() {
     <>
       <Form method="post">
         <div className="modal-content-wrapper">
-          <div className="mb-4 inline-flex items-center justify-center rounded-full border-8 border-solid border-gray-50 bg-gray-100 p-2 text-gray-600">
+          <div className="mb-2 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
             <LocationMarkerIcon />
           </div>
           <div className="mb-5">
