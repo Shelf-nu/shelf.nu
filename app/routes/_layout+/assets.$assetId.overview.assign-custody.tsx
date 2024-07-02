@@ -252,7 +252,7 @@ export default function Custody() {
             <UserIcon />
           </div>
           <div className="mb-5">
-            <h4>Check out asset</h4>
+            <h4>Assign custody of asset</h4>
             <p>
               This asset is currently available. You’re about to assign custody
               to one of your team members.

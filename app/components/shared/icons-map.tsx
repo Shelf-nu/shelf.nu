@@ -38,7 +38,9 @@ import {
   CheckOutIcon,
   CheckInIcon,
   CheckIcon,
+  PartialCheckboxIcon,
   AssetLabel,
+  LockIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -79,9 +81,11 @@ export type IconType =
   | "switch"
   | "kit"
   | "bookings"
-  | "check-out"
-  | "check-in"
-  | "asset-label";
+  | "assign-custody"
+  | "release-custody"
+  | "partial-checkbox"
+  | "asset-label"
+  | "lock";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -124,9 +128,11 @@ export const iconsMap: IconsMap = {
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
   kit: <KitIcon />,
-  "check-out": <CheckOutIcon />,
-  "check-in": <CheckInIcon />,
+  "assign-custody": <CheckOutIcon />,
+  "release-custody": <CheckInIcon />,
+  "partial-checkbox": <PartialCheckboxIcon />,
   "asset-label": <AssetLabel />,
+  lock: <LockIcon />,
 };
 
 export default iconsMap;

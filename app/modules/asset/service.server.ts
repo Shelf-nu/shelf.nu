@@ -1,3 +1,4 @@
+import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type {
   Category,
   Location,
@@ -12,7 +13,6 @@ import type {
   Booking,
   Kit,
 } from "@prisma/client";
-import { AssetStatus, BookingStatus, ErrorCorrection } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import type {
   SortingDirection,
@@ -50,17 +50,23 @@ import {
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 
+import { resolveTeamMemberName } from "~/utils/user";
 import type {
   CreateAssetFromBackupImportPayload,
   CreateAssetFromContentImportPayload,
   ShelfAssetCustomFieldValueType,
   UpdateAssetPayload,
 } from "./types";
+import {
+  getAssetsWhereInput,
+  getLocationUpdateNoteContent,
+} from "./utils.server";
+import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
 
@@ -1598,22 +1604,14 @@ export async function createLocationChangeNote({
   isRemoving: boolean;
 }) {
   try {
-    let message = "";
-    if (currentLocation && newLocation) {
-      message = `**${firstName.trim()} ${lastName.trim()}** updated the location of **${assetName.trim()}** from **[${currentLocation.name.trim()}](/locations/${
-        currentLocation.id
-      })** to **[${newLocation.name.trim()}](/locations/${newLocation.id})**`; // updating location
-    }
-
-    if (newLocation && !currentLocation) {
-      message = `**${firstName.trim()} ${lastName.trim()}** set the location of **${assetName.trim()}** to **[${newLocation.name.trim()}](/locations/${
-        newLocation.id
-      })**`; // setting to first location
-    }
-
-    if (isRemoving || !newLocation) {
-      message = `**${firstName.trim()} ${lastName.trim()}** removed  **${assetName.trim()}** from location **[${currentLocation?.name.trim()}](/locations/${currentLocation?.id})**`; // removing location
-    }
+    const message = getLocationUpdateNoteContent({
+      currentLocation,
+      newLocation,
+      firstName,
+      lastName,
+      assetName,
+      isRemoving,
+    });
 
     await createNote({
       content: message,
@@ -2399,6 +2397,382 @@ export async function createKitChangeNote({
       message:
         "Something went wrong while creating a kit change note. Please try again or contact support",
       additionalData: { userId, assetId },
+      label,
+    });
+  }
+}
+
+export async function bulkDeleteAssets({
+  assetIds,
+  organizationId,
+  userId,
+  currentSearchParams,
+}: {
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  userId: User["id"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
+    /**
+     * We have to remove the images of assets so we have to make this query first
+     */
+    const assets = await db.asset.findMany({
+      where,
+      select: { id: true, mainImage: true },
+    });
+
+    return await db.$transaction(async (tx) => {
+      /** Deleting all assets */
+      await tx.asset.deleteMany({
+        where: { id: { in: assets.map((asset) => asset.id) } },
+      });
+
+      /** Deleting images of the assets (if any) */
+      const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
+
+      await Promise.all(
+        assetsWithImages.map((asset) =>
+          deleteOtherImages({
+            userId,
+            assetId: asset.id,
+            data: { path: `main-image-${asset.id}.jpg` },
+          })
+        )
+      );
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting assets",
+      additionalData: { assetIds, organizationId },
+      label,
+    });
+  }
+}
+
+export async function bulkCheckOutAssets({
+  userId,
+  assetIds,
+  custodianId,
+  custodianName,
+  organizationId,
+  currentSearchParams,
+}: {
+  userId: User["id"];
+  assetIds: Asset["id"][];
+  custodianId: TeamMember["id"];
+  custodianName: TeamMember["name"];
+  organizationId: Asset["organizationId"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
+    /**
+     * In order to make notes for the assets we have to make this query to get info about assets
+     */
+    const [assets, user] = await Promise.all([
+      db.asset.findMany({
+        where,
+        select: { id: true, title: true, status: true },
+      }),
+      getUserByID(userId),
+    ]);
+
+    const assetsNotAvailable = assets.some(
+      (asset) => asset.status !== "AVAILABLE"
+    );
+
+    if (assetsNotAvailable) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "There are sone unavailable assets. Please make sure you are selecting only available assets.",
+        label: "Assets",
+      });
+    }
+
+    /**
+     * updateMany does not allow to create nested relationship rows
+     * so we have to make two queries to bulk assign custody of assets
+     * 1. Create custodies for all assets
+     * 2. Update status of all assets to IN_CUSTODY
+     */
+    await db.$transaction(async (tx) => {
+      /** Creating custodies over assets */
+      await tx.custody.createMany({
+        data: assets.map((asset) => ({
+          assetId: asset.id,
+          teamMemberId: custodianId,
+        })),
+      });
+
+      /** Updating status of assets to IN_CUSTODY */
+      await tx.asset.updateMany({
+        where: { id: { in: assets.map((asset) => asset.id) } },
+        data: { status: AssetStatus.IN_CUSTODY },
+      });
+
+      /** Creating notes for the assets */
+      await tx.note.createMany({
+        data: assets.map((asset) => ({
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          type: "UPDATE",
+          userId,
+          assetId: asset.id,
+        })),
+      });
+    });
+
+    return true;
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk checking out assets.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { assetIds, custodianId },
+      label,
+    });
+  }
+}
+
+export async function bulkCheckInAssets({
+  userId,
+  assetIds,
+  organizationId,
+  currentSearchParams,
+}: {
+  userId: User["id"];
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
+    /**
+     * In order to make notes for the assets we have to make this query to get info about assets
+     */
+    const [assets, user] = await Promise.all([
+      db.asset.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          custody: {
+            select: { id: true, custodian: { include: { user: true } } },
+          },
+        },
+      }),
+      getUserByID(userId),
+    ]);
+
+    const hasAssetsWithoutCustody = assets.some((asset) => !asset.custody);
+
+    if (hasAssetsWithoutCustody) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "There are some assets without custody. Please make sure you are selecting assets with custody.",
+        label: "Assets",
+      });
+    }
+
+    /**
+     * updateMany does not allow to update nested relationship rows
+     * so we have to make two queries to bulk release custody of assets
+     * 1. Delete all custodies for all assets
+     * 2. Update status of all assets to AVAILABLE
+     */
+    await db.$transaction(async (tx) => {
+      /** Deleting custodies over assets */
+      await tx.custody.deleteMany({
+        where: {
+          id: {
+            in: assets.map((asset) => {
+              /** This case should not happen but in case */
+              if (!asset.custody) {
+                throw new Error("Could not find custody over asset.");
+              }
+
+              return asset.custody.id;
+            }),
+          },
+        },
+      });
+
+      /** Updating status of assets to AVAILABLE */
+      await tx.asset.updateMany({
+        where: { id: { in: assets.map((asset) => asset.id) } },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+
+      /** Creating notes for the assets */
+      await tx.note.createMany({
+        data: assets.map((asset) => ({
+          content: `**${user.firstName?.trim()} ${
+            user.lastName
+          }** has released **${resolveTeamMemberName(
+            asset.custody!.custodian
+          )}'s** custody over **${asset.title?.trim()}**`,
+          type: "UPDATE",
+          userId,
+          assetId: asset.id,
+        })),
+      });
+    });
+
+    return true;
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk checking in assSets.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { assetIds, userId },
+      label,
+    });
+  }
+}
+
+export async function bulkUpdateAssetLocation({
+  userId,
+  assetIds,
+  organizationId,
+  newLocationId,
+  currentSearchParams,
+}: {
+  userId: User["id"];
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  newLocationId?: Location["id"] | null;
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
+    /** We have to create notes for all the assets so we have make this query */
+    const [assets, user] = await Promise.all([
+      db.asset.findMany({
+        where,
+        select: { id: true, title: true, location: true },
+      }),
+      getUserByID(userId),
+    ]);
+
+    const newLocation = newLocationId
+      ? await db.location.findFirst({
+          where: { id: newLocationId, organizationId },
+        })
+      : null;
+
+    await db.$transaction(async (tx) => {
+      /** Updating location of assets to newLocation */
+      await tx.asset.updateMany({
+        where: { id: { in: assets.map((asset) => asset.id) } },
+        data: { locationId: newLocation?.id ? newLocation.id : null },
+      });
+
+      /** Creating notes for the assets */
+      await tx.note.createMany({
+        data: assets.map((asset) => {
+          const isRemoving = !newLocationId;
+
+          const content = getLocationUpdateNoteContent({
+            currentLocation: asset.location,
+            newLocation,
+            firstName: user?.firstName ?? "",
+            lastName: user?.lastName ?? "",
+            assetName: asset.title,
+            isRemoving,
+          });
+
+          return {
+            content,
+            type: "UPDATE",
+            userId,
+            assetId: asset.id,
+          };
+        }),
+      });
+    });
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating location.",
+      additionalData: { userId, assetIds, newLocationId },
+      label,
+    });
+  }
+}
+
+export async function bulkUpdateAssetCategory({
+  userId,
+  assetIds,
+  organizationId,
+  categoryId,
+  currentSearchParams,
+}: {
+  userId: string;
+  assetIds: Asset["id"][];
+  organizationId: Asset["organizationId"];
+  categoryId: Asset["categoryId"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /**
+     * If we are selecting all assets in list then we have to consider other filters too
+     */
+    const where: Prisma.AssetWhereInput = assetIds.includes(ALL_SELECTED_KEY)
+      ? getAssetsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: assetIds }, organizationId };
+
+    await db.asset.updateMany({
+      where,
+      data: {
+        /** If nothing is selected then we have to remove the relation and set category to null */
+        categoryId: !categoryId ? null : categoryId,
+      },
+    });
+
+    return true;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk updating category.",
+      additionalData: { userId, assetIds, organizationId, categoryId },
       label,
     });
   }

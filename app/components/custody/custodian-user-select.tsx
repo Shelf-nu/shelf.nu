@@ -1,5 +1,5 @@
 import { useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/assets.$assetId.overview.check-out";
+import type { loader } from "~/routes/_layout+/assets.$assetId.overview.assign-custody";
 import { tw } from "~/utils/tw";
 import {
   Select,
