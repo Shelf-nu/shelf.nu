@@ -81,7 +81,7 @@ export function refreshSession() {
 
     if (!isExpiringSoon(auth.expiresAt)) {
       const isValidSession =
-        process.env.REFRESH_APPROACH_VERSION === "v2" ||
+        process.env.REFRESH_APPROACH_VERSION === "v1" ||
         (await validateSession());
       if (isValidSession) {
         return next();
