@@ -17,6 +17,7 @@ import { supabaseClient } from "~/integrations/supabase/client";
 
 import {
   refreshAccessToken,
+  signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -70,10 +71,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const authSession = await refreshAccessToken(refreshToken);
 
-        await updateAccountPassword(authSession.userId, password);
+        await updateAccountPassword(
+          authSession.userId,
+          password,
+          authSession.accessToken
+        );
+        //on updating the password. it is removing the session_id from the collection. so we need to create a new session
+        const newSession = await signInWithEmail(authSession?.email, password);
 
         // Commit the session and redirect
-        context.setSession({ ...authSession });
+        if (newSession) context.setSession({ ...newSession });
 
         return redirect("/");
       }

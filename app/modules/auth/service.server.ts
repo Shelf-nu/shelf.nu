@@ -201,7 +201,11 @@ export async function sendResetPasswordLink(email: string) {
   }
 }
 
-export async function updateAccountPassword(id: string, password: string) {
+export async function updateAccountPassword(
+  id: string,
+  password: string,
+  accessToken?: string | undefined
+) {
   try {
     const user = await db.user.findFirst({
       where: { id },
@@ -216,7 +220,11 @@ export async function updateAccountPassword(id: string, password: string) {
         label,
       });
     }
-
+    //logout all the others session expect the current sesssion.
+    if (accessToken) {
+      await getSupabaseAdmin().auth.admin.signOut(accessToken, "others");
+    }
+    //on password update, it is remvoing the session in th supbase.
     const { error } = await getSupabaseAdmin().auth.admin.updateUserById(id, {
       password,
     });
@@ -289,6 +297,11 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
       label,
     });
   }
+}
+
+export async function validateSession() {
+  const { data } = await getSupabaseAdmin().auth.getSession();
+  return !!(data && data?.session);
 }
 
 export async function refreshAccessToken(
