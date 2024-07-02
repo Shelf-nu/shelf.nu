@@ -9,7 +9,13 @@ import DynamicSelect from "../dynamic-select/dynamic-select";
 import { XIcon } from "../icons/library";
 import { Image } from "../shared/image";
 
-export const LocationSelect = ({ isBulk = false }: { isBulk?: boolean }) => {
+export const LocationSelect = ({
+  isBulk = false,
+  hideClearButton = false,
+}: {
+  isBulk?: boolean;
+  hideClearButton?: boolean;
+}) => {
   const navigation = useNavigation();
 
   const data = useLoaderData<typeof loader>();
@@ -61,15 +67,17 @@ export const LocationSelect = ({ isBulk = false }: { isBulk?: boolean }) => {
           )}
         />
 
-        <Button
-          variant="secondary"
-          type="button"
-          className="p-3.5"
-          onClick={() => setLocationId(undefined)}
-          disabled={!locationId}
-        >
-          <XIcon />
-        </Button>
+        {hideClearButton ? null : (
+          <Button
+            variant="secondary"
+            type="button"
+            className="p-3.5"
+            onClick={() => setLocationId(undefined)}
+            disabled={!locationId}
+          >
+            <XIcon />
+          </Button>
+        )}
       </div>
     </div>
   );

@@ -1,7 +1,10 @@
+import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
-import { selectedBulkItemsCountAtom } from "~/atoms/list";
+import { selectedBulkItemsAtom } from "~/atoms/list";
+import type { IndexResponse } from "~/routes/_layout+/assets._index";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
@@ -10,16 +13,21 @@ export const BulkDeleteAssetsSchema = z.object({
 });
 
 export default function BulkDeleteDialog() {
+  const { totalItems } = useLoaderData<IndexResponse>();
   const zo = useZorm("BulkDeleteAssets", BulkDeleteAssetsSchema);
 
-  const selectedAssets = useAtomValue(selectedBulkItemsCountAtom);
+  const selectedAssets = useAtomValue(selectedBulkItemsAtom);
+
+  const totalSelected = selectedAssets.includes(ALL_SELECTED_KEY)
+    ? totalItems
+    : selectedAssets.length;
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="trash"
-      title={`Delete ${selectedAssets} assets`}
-      description={`Are you sure you want to delete all ${selectedAssets} assets? This action cannot be undone.`}
+      title={`Delete ${totalSelected} assets`}
+      description={`Are you sure you want to delete all ${totalSelected} assets? This action cannot be undone.`}
       actionUrl="."
     >
       {({ fetcherError, disabled, handleCloseDialog }) => (

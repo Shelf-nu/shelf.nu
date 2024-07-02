@@ -2,6 +2,11 @@ import { atom } from "jotai";
 
 export const selectedBulkItemsAtom = atom<string[]>([]);
 
+/** Reset the atom when it mounts */
+selectedBulkItemsAtom.onMount = (setAtom) => {
+  setAtom([]);
+};
+
 /* This atom is used to keep track of the number of selected items */
 export const selectedBulkItemsCountAtom = atom(
   (get) => get(selectedBulkItemsAtom).length
