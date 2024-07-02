@@ -299,9 +299,19 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
   }
 }
 
-export async function validateSession() {
-  const { data } = await getSupabaseAdmin().auth.getSession();
-  return !!(data && data?.session);
+export async function validateSession(token:string) {
+  try{
+    const { data, error } = await getSupabaseAdmin().auth.getUser(token);
+    return !!(data && data.user);
+  }catch(err){
+    Logger.error(new ShelfError({
+      cause: null,
+      message: "Session expired. Please log in again.",
+      label,
+    }));
+  }
+  return false;
+  
 }
 
 export async function refreshAccessToken(

@@ -82,7 +82,7 @@ export function refreshSession() {
     if (!isExpiringSoon(auth.expiresAt)) {
       const isValidSession =
         process.env.REFRESH_APPROACH_VERSION === "v1" ||
-        (await validateSession());
+        (await validateSession(auth.accessToken));
       if (isValidSession) {
         return next();
       }
