@@ -20,6 +20,10 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const location = useLocation();
   const [workspaceSwitching] = useAtom(switchingWorkspaceAtom);
 
+  const baseMenuItemClasses = tw(
+    "my-1 flex items-center gap-1 rounded p-2 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600 lg:p-1 lg:text-[14px]"
+  );
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-full flex-col justify-between">
@@ -29,7 +33,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
               <NavLink
                 className={({ isActive }) =>
                   tw(
-                    "my-1 flex items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                    baseMenuItemClasses,
                     isActive ? "active bg-primary-50 text-primary-600" : "",
                     workspaceSwitching ? "pointer-events-none" : ""
                   )
@@ -38,7 +42,9 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 onClick={toggleMobileNav}
                 title={"Admin dashboard"}
               >
-                <i className="icon text-gray-500">🛸</i>
+                <i className="icon inline-flex pl-[5px] text-[14px] text-gray-500">
+                  🛸
+                </i>
                 <span className="text whitespace-nowrap transition duration-200 ease-linear">
                   Admin dashboard
                 </span>
@@ -54,10 +60,11 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   canUseFeature={canUseBookings}
                   buttonContent={{
                     title: (
-                      <span className="flex items-center gap-3 rounded ">
+                      <span className="flex items-center gap-1 rounded ">
                         <i
                           className={tw(
-                            "icon pl-[2px] text-gray-500",
+                            "icon inline-flex pl-[5px] text-gray-500",
+
                             !canUseBookings
                               ? "!hover:text-gray-500 !text-gray-500"
                               : ""
@@ -82,7 +89,8 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                     title: item.title,
                     disabled: workspaceSwitching,
                     className: tw(
-                      "my-1 flex items-center gap-3 rounded border-0 bg-transparent px-3 text-left text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                      baseMenuItemClasses,
+                      "my-1 flex items-center border-0 bg-transparent",
                       canUseBookings
                         ? "justify-start focus:ring-0"
                         : "my-0 text-gray-500 hover:bg-gray-50 hover:text-gray-500",
@@ -100,7 +108,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 <NavLink
                   className={({ isActive }) =>
                     tw(
-                      "my-1 flex items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                      baseMenuItemClasses,
                       isActive ? "active bg-primary-50 text-primary-600" : "",
                       workspaceSwitching ? "pointer-events-none" : ""
                     )
@@ -110,7 +118,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   onClick={toggleMobileNav}
                   title={item.title}
                 >
-                  <i className="icon inline-flex pl-[2px] text-gray-500">
+                  <i className="icon inline-flex pl-[5px] text-gray-500">
                     {item.icon}
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
@@ -139,7 +147,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 <NavLink
                   className={({ isActive }) =>
                     tw(
-                      " my-1 flex items-center  gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                      baseMenuItemClasses,
                       isActive ? "active bg-primary-50 text-primary-600" : "",
                       workspaceSwitching ? "pointer-events-none" : ""
                     )
@@ -150,7 +158,7 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                   title={item.title}
                   target={item?.target || undefined}
                 >
-                  <i className="icon inline-flex pl-[2px] text-gray-500">
+                  <i className="icon inline-flex pl-[5px] text-gray-500">
                     {item.icon}
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">
@@ -177,11 +185,12 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
                 <button
                   type="submit"
                   className={tw(
-                    "crisp-btn mt-1 flex w-full items-center gap-3 rounded px-3 py-2.5 text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                    baseMenuItemClasses,
+                    "crisp-btn mt-1 flex w-full items-center",
                     workspaceSwitching ? "pointer-events-none" : ""
                   )}
                 >
-                  <i className="icon inline-flex pl-[2px] text-gray-500">
+                  <i className="icon inline-flex pl-[5px] text-gray-500">
                     <Icon icon="switch" />
                   </i>
                   <span className="text whitespace-nowrap transition duration-200 ease-linear">

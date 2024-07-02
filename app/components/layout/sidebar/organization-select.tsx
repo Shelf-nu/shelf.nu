@@ -23,7 +23,7 @@ export const OrganizationSelect = ({
     useLoaderData<typeof loader>();
   return (
     <Select name="organizationId" defaultValue={currentOrganizationId}>
-      <SelectTrigger className="w-full px-3 py-2">
+      <SelectTrigger className="w-full px-2 py-1">
         <SelectValue />
       </SelectTrigger>
       <SelectContent position="popper" className="w-full" align="start">
