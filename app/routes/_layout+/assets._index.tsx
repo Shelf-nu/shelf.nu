@@ -210,7 +210,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         searchFieldLabel: "Search assets",
         searchFieldTooltip: {
           title: "Search your asset database",
-          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+          text: "Search assets based on asset name, property ID or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
         },
         totalCategories,
         totalTags,
@@ -469,6 +469,7 @@ export default function AssetIndexPage() {
           headerChildren={
             <>
               <Th className="hidden md:table-cell">Category</Th>
+              <Th className="hidden md:table-cell">Property</Th>
               <Th className="hidden md:table-cell">Tags</Th>
               {!isSelfService ? (
                 <Th className="hidden md:table-cell">Custodian</Th>
@@ -505,7 +506,7 @@ const ListAssetContent = ({
     };
   };
 }) => {
-  const { category, tags, custody, location, kit } = item;
+  const { category, tags, custody, location, kit, propertyId } = item;
   const isSelfService = useUserIsSelfService();
   return (
     <>
@@ -570,6 +571,11 @@ const ListAssetContent = ({
             {"Uncategorized"}
           </Badge>
         )}
+      </Td>
+
+      {/* Property */}
+      <Td className="hidden md:table-cell">
+        {propertyId ? <GrayBadge>{propertyId}</GrayBadge> : null}
       </Td>
 
       {/* Tags */}
