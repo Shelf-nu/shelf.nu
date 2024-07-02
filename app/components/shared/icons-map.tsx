@@ -81,8 +81,8 @@ export type IconType =
   | "switch"
   | "kit"
   | "bookings"
-  | "check-out"
-  | "check-in"
+  | "assign-custody"
+  | "release-custody"
   | "partial-checkbox"
   | "asset-label"
   | "lock";
@@ -128,8 +128,8 @@ export const iconsMap: IconsMap = {
   scanQR: <ScanQRIcon />,
   switch: <SwitchIcon />,
   kit: <KitIcon />,
-  "check-out": <CheckOutIcon />,
-  "check-in": <CheckInIcon />,
+  "assign-custody": <CheckOutIcon />,
+  "release-custody": <CheckInIcon />,
   "partial-checkbox": <PartialCheckboxIcon />,
   "asset-label": <AssetLabel />,
   lock: <LockIcon />,

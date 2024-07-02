@@ -6,23 +6,23 @@ import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialo
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
 
-export const BulkCheckoutAssetsSchema = z.object({
+export const BulkAssignCustodySchema = z.object({
   assetIds: z.array(z.string()).min(1),
   custodian: stringToJSONSchema.pipe(
     z.object({ id: z.string(), name: z.string() })
   ),
 });
 
-export default function BulkCheckoutDialog() {
-  const zo = useZorm("BulkCheckoutAsset", BulkCheckoutAssetsSchema);
+export default function BulkAssignCustodyDialog() {
+  const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
-      type="check-out"
-      title="Check out assets"
+      type="assign-custody"
+      title="Assign custody of assets"
       description="These assets are currently available. You're about to assign custody to one of your team members."
-      actionUrl="/api/assets/bulk-check-out"
+      actionUrl="/api/assets/bulk-assign-custody"
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">

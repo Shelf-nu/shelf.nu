@@ -25,8 +25,8 @@ import { Button } from "../shared/button";
 type BulkDialogType =
   | "location"
   | "category"
-  | "check-out"
-  | "check-in"
+  | "assign-custody"
+  | "release-custody"
   | "trash";
 
 type CommonBulkDialogProps = {

@@ -101,7 +101,7 @@ const ConditionalActionsDropdown = () => {
             >
               {assetCanBeReleased ? (
                 <Button
-                  to="overview/check-in"
+                  to="overview/release-custody"
                   role="link"
                   variant="link"
                   className={tw(
@@ -115,12 +115,12 @@ const ConditionalActionsDropdown = () => {
                   disabled={assetIsPartOfUnavailableKit}
                 >
                   <span className="flex items-center gap-1">
-                    <Icon icon="check-in" /> Check in
+                    <Icon icon="release-custody" /> Release custody
                   </span>
                 </Button>
               ) : (
                 <Button
-                  to="overview/check-out"
+                  to="overview/assign-custody"
                   role="link"
                   variant="link"
                   className="justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
@@ -128,7 +128,7 @@ const ConditionalActionsDropdown = () => {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon icon="check-out" /> Check out
+                    <Icon icon="assign-custody" /> Assign custody
                   </span>
                 </Button>
               )}

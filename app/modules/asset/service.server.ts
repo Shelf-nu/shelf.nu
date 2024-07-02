@@ -2507,7 +2507,7 @@ export async function bulkCheckOutAssets({
 
     /**
      * updateMany does not allow to create nested relationship rows
-     * so we have to make two queries to bulk check-out assets
+     * so we have to make two queries to bulk assign custody of assets
      * 1. Create custodies for all assets
      * 2. Update status of all assets to IN_CUSTODY
      */
@@ -2602,7 +2602,7 @@ export async function bulkCheckInAssets({
 
     /**
      * updateMany does not allow to update nested relationship rows
-     * so we have to make two queries to bulk check-in assets
+     * so we have to make two queries to bulk release custody of assets
      * 1. Delete all custodies for all assets
      * 2. Update status of all assets to AVAILABLE
      */

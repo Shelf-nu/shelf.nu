@@ -1,7 +1,5 @@
 import type { Asset, AssetStatus, Location, Prisma } from "@prisma/client";
-import type { ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
-import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 
 export function getLocationUpdateNoteContent({

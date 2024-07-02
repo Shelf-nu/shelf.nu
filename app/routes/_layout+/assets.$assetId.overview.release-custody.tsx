@@ -174,7 +174,7 @@ export default function Custody() {
           <UserXIcon />
         </div>
         <div className="mb-5">
-          <h4>Check in asset</h4>
+          <h4>Release custody of asset</h4>
           <p>
             Are you sure you want to release{" "}
             <span className="font-medium">

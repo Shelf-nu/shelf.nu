@@ -3,20 +3,20 @@ import { z } from "zod";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
-export const BulkCheckInAssetsSchema = z.object({
+export const BulkReleaseCustodySchema = z.object({
   assetIds: z.array(z.string()).min(1),
 });
 
-export default function BulkCheckInDialog() {
-  const zo = useZorm("BulkCheckInAssets", BulkCheckInAssetsSchema);
+export default function BulkReleaseCustodyDialog() {
+  const zo = useZorm("BulkReleaseCustody", BulkReleaseCustodySchema);
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
-      type="check-in"
-      title="Check in assets"
+      type="release-custody"
+      title="Release custody of assets"
       description="Are you sure you want to release custody of all selected assets?"
-      actionUrl="/api/assets/bulk-check-in"
+      actionUrl="/api/assets/bulk-release-custody"
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
