@@ -75,7 +75,7 @@ export const Price = ({
           <ul className="list-none p-0">
             {features.map((feature) => (
               <li key={feature} className="mb-4 flex gap-3">
-                <i>
+                <i className="text-primary">
                   <AltCheckmarkIcon />
                 </i>
                 <span className="text-base text-gray-600">{feature}</span>
@@ -83,7 +83,7 @@ export const Price = ({
             ))}
             {isTeamPlan && (
               <li className="mb-4 flex gap-3">
-                <i>
+                <i className="text-primary">
                   <AltCheckmarkIcon />
                 </i>
                 <span className="text-base text-gray-600">

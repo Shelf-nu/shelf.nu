@@ -7,6 +7,7 @@ import {
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { Form } from "~/components/custom-form";
 import { CrispButton } from "~/components/marketing/crisp";
+import { ShelfSymbolLogo } from "~/components/marketing/logos";
 import { Button } from "~/components/shared/button";
 import { PriceBox } from "~/components/subscription/price-box";
 import { getUserByID } from "~/modules/user/service.server";
@@ -91,13 +92,7 @@ export default function SelectPlan() {
 
   return (
     <div className="flex flex-col items-center p-4 sm:p-6">
-      <img
-        src="/static/images/shelf-symbol.png"
-        alt="logo"
-        className="my-4 md:mt-0"
-        width={32}
-        height={32}
-      />
+      <ShelfSymbolLogo className="my-4 size-8 md:mt-0" />
       <div className="mb-8 text-center">
         <h3>Select your payment plan</h3>
         <p>No credit card or payment required.</p>

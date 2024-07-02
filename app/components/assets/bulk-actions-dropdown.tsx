@@ -91,6 +91,7 @@ function ConditionalDropdown() {
   const isCheckInCheckOutDisabled = [
     someAssetsAvailable && someAssetsInCustody,
     someAssetCheckedOut && !assetsCanBeReleased,
+    someAssetPartOfUnavailableKit,
   ].some(Boolean);
 
   function closeMenu() {
@@ -174,7 +175,6 @@ function ConditionalDropdown() {
                   type="check-in"
                   label="Check in"
                   onClick={closeMenu}
-                  disabled={someAssetPartOfUnavailableKit}
                 />
               ) : (
                 <BulkUpdateDialogTrigger

@@ -21,6 +21,7 @@ import { ErrorContent } from "./components/errors";
 import { HomeIcon } from "./components/icons/library";
 import MaintenanceMode from "./components/layout/maintenance-mode";
 import { Clarity } from "./components/marketing/clarity";
+import { config } from "./config/shelf.config";
 import { useNprogress } from "./hooks/use-nprogress";
 import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
@@ -50,8 +51,8 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: fontsStylesheetUrl },
   { rel: "stylesheet", href: globalStylesheetUrl },
   { rel: "manifest", href: "/static/manifest.json" },
-  { rel: "apple-touch-icon", href: "/static/favicon.ico" },
-  { rel: "icon", href: "/static/favicon.ico" },
+  { rel: "apple-touch-icon", href: config.faviconPath },
+  { rel: "icon", href: config.faviconPath },
   { rel: "stylesheet", href: nProgressStyles },
   { rel: "stylesheet", href: nProgressCustomStyles },
   ...splashScreenLinks,

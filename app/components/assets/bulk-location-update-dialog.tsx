@@ -19,7 +19,7 @@ export default function BulkLocationUpdateDialog() {
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div>
           <div className="relative z-50 mb-8">
-            <LocationSelect isBulk />
+            <LocationSelect isBulk hideClearButton />
             {zo.errors.newLocationId()?.message ? (
               <p className="text-sm text-error-500">
                 {zo.errors.newLocationId()?.message}

@@ -101,7 +101,7 @@ export default function ImportNRMs() {
     <>
       <div className="modal-content-wrapper">
         <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
-          <UserIcon color="#ef6820" />
+          <UserIcon />
         </div>
         <div className="mb-5">
           <h4>Import team members</h4>

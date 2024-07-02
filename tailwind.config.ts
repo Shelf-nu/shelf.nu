@@ -91,7 +91,6 @@ export default {
       colors: {
         white: "#ffffff",
         black: "#000000",
-        "brand-orange": "#FF7809",
         gray: {
           25: "#FCFCFD",
           50: "#F9FAFB",

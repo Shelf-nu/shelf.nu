@@ -1,4 +1,5 @@
 import { Link, Outlet } from "@remix-run/react";
+import { ShelfFullLogo } from "~/components/marketing/logos";
 import { usePosition } from "~/hooks/use-position";
 
 export default function QR() {
@@ -11,11 +12,7 @@ export default function QR() {
           title="Home"
           className="logo mx-auto inline-block h-[32px]"
         >
-          <img
-            src="/static/images/logo-full-color(x2).png"
-            alt="logo"
-            className="h-full"
-          />
+          <ShelfFullLogo className="h-full" />
         </Link>
 
         <Outlet />
