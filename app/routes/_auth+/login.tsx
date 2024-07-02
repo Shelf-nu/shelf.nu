@@ -6,6 +6,7 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import {
   useActionData,
+  useLoaderData,
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
@@ -16,6 +17,7 @@ import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
+import { config } from "~/config/shelf.config";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
 
@@ -39,12 +41,13 @@ import { validEmail } from "~/utils/misc";
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
+  const { disableSignup } = config;
 
   if (context.isAuthenticated) {
     return redirect("/assets");
   }
 
-  return json(data({ title, subHeading }));
+  return json(data({ title, subHeading, disableSignup }));
 }
 
 const LoginFormSchema = z.object({
@@ -109,6 +112,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
+  const { disableSignup } = useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
@@ -198,19 +202,21 @@ export default function IndexLoginForm() {
         <div className="mt-6">
           <ContinueWithEmailForm mode="login" />
         </div>
-        <div className="mt-6 text-center text-sm text-gray-500">
-          Don't have an account?{" "}
-          <Button
-            variant="link"
-            data-test-id="signupButton"
-            to={{
-              pathname: "/join",
-              search: searchParams.toString(),
-            }}
-          >
-            Sign up
-          </Button>
-        </div>
+        {disableSignup ? null : (
+          <div className="mt-6 text-center text-sm text-gray-500">
+            Don't have an account?{" "}
+            <Button
+              variant="link"
+              data-test-id="signupButton"
+              to={{
+                pathname: "/join",
+                search: searchParams.toString(),
+              }}
+            >
+              Sign up
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

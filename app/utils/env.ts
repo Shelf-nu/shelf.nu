@@ -12,7 +12,6 @@ declare global {
       MICROSOFT_CLARITY_ID: string;
       CRISP_WEBSITE_ID: string;
       ENABLE_PREMIUM_FEATURES: string;
-      DISABLE_SIGNUP: string;
       MAINTENANCE_MODE: string;
       CHROME_EXECUTABLE_PATH: string;
     };
