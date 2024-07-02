@@ -255,6 +255,7 @@ export async function getTeamMemberForCustodianFilter({
 
     return {
       teamMembers: combinedTeamMembers,
+      rawTeamMembers: allTeamMembers,
       totalTeamMembers,
     };
   } catch (cause) {

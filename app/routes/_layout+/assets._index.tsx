@@ -1,6 +1,7 @@
 import type { Category, Asset, Tag, Custody, Kit } from "@prisma/client";
 import { OrganizationRoles, AssetStatus } from "@prisma/client";
 import type {
+  ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
@@ -9,8 +10,10 @@ import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { redirect } from "react-router";
+import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
@@ -41,15 +44,19 @@ import {
 } from "~/hooks/use-search-param-utils";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
+  bulkDeleteAssets,
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
 } from "~/modules/asset/service.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
-import { data, error } from "~/utils/http.server";
+import { data, error, parseData } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -61,6 +68,10 @@ import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
 export interface IndexResponse {
+  header: {
+    title: string;
+    subTitle?: string;
+  };
   /** Page number. Starts at 1 */
   page: number;
 
@@ -142,6 +153,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalLocations,
         teamMembers,
         totalTeamMembers,
+        rawTeamMembers,
       },
     ] = await Promise.all([
       getOrganizationTierLimit({
@@ -206,6 +218,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalLocations,
         teamMembers,
         totalTeamMembers,
+        rawTeamMembers,
       }),
       {
         headers: [setCookie(await userPrefs.serialize(cookie))],
@@ -214,6 +227,66 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     throw json(error(reason), { status: reason.status });
+  }
+}
+
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const formData = await request.formData();
+
+    const { intent } = parseData(
+      formData,
+      z.object({ intent: z.enum(["bulk-delete"]) })
+    );
+
+    const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
+      "bulk-delete": PermissionAction.delete,
+    };
+
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: intent2ActionMap[intent],
+    });
+
+    switch (intent) {
+      case "bulk-delete": {
+        const { assetIds, currentSearchParams } = parseData(
+          formData,
+          z
+            .object({ assetIds: z.array(z.string()).min(1) })
+            .and(CurrentSearchParamsSchema)
+        );
+
+        await bulkDeleteAssets({
+          assetIds,
+          organizationId,
+          userId,
+          currentSearchParams,
+        });
+
+        sendNotification({
+          title: "Assets deleted",
+          message: "Your assets has been deleted successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      default: {
+        checkExhaustiveSwitch(intent);
+        return json(data(null));
+      }
+    }
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
 }
 
@@ -388,9 +461,11 @@ export default function AssetIndexPage() {
           </div>
         </Filters>
         <List
+          title="Assets"
           ItemComponent={ListAssetContent}
           navigate={(itemId) => navigate(itemId)}
           className=" overflow-x-visible md:overflow-x-auto"
+          bulkActions={<BulkActionsDropdown />}
           headerChildren={
             <>
               <Th className="hidden md:table-cell">Category</Th>
@@ -436,7 +511,7 @@ const ListAssetContent = ({
     <>
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        <div className="flex justify-between gap-3 p-4 !pl-0 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage

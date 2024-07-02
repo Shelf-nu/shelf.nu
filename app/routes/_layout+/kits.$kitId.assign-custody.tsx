@@ -88,7 +88,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     );
     if (someUnavailableAsset) {
       sendNotification({
-        title: "Cannot check out at this time.",
+        title: "Cannot assign custody at this time.",
         message: "One of the asset in kit is not available",
         icon: { name: "trash", variant: "error" },
         senderId: userId,
@@ -239,7 +239,7 @@ export default function GiveKitCustody() {
         </div>
 
         <div className="mb-5">
-          <h4>Check out kit</h4>
+          <h4>Assign custody of kit</h4>
           <p>
             This kit is currently available. You're about to assign custody to
             one of your team members. All the assets in this kit will also be

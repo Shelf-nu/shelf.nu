@@ -121,7 +121,7 @@ export default function ReleaseKitCustody() {
           <UserXIcon />
         </div>
         <div className="mb-5">
-          <h4>Check in kit</h4>
+          <h4>Release custody of kit</h4>
           <p>
             Are you sure you want to release{" "}
             <span className="font-medium">

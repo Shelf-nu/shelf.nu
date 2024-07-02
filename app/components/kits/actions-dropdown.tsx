@@ -124,7 +124,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
             <DropdownMenuItem className="border-b  px-4 py-1 md:p-0">
               {kitCanBeReleased ? (
                 <Button
-                  to="check-in"
+                  to="release-custody"
                   role="link"
                   variant="link"
                   className="justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
@@ -132,12 +132,12 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                   onClick={() => setOpen(false)}
                 >
                   <span className="flex items-center gap-1">
-                    <Icon icon="check-in" /> Check in
+                    <Icon icon="release-custody" /> Release custody
                   </span>
                 </Button>
               ) : (
                 <Button
-                  to="check-out"
+                  to="assign-custody"
                   role="link"
                   variant="link"
                   className={tw(
@@ -149,7 +149,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                   disabled={someAssetIsNotAvailable}
                 >
                   <span className="flex items-center gap-2">
-                    <Icon icon="check-out" /> Check out
+                    <Icon icon="assign-custody" /> Assign custody
                   </span>
                 </Button>
               )}
