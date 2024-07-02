@@ -1,5 +1,6 @@
-import { isAuthApiError } from "@supabase/supabase-js";
+import { AuthError, isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "server/session";
+import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
@@ -169,7 +170,12 @@ export async function signInWithSSO(domain: string) {
 
 export async function sendOTP(email: string) {
   try {
-    const { error } = await getSupabaseAdmin().auth.signInWithOtp({ email });
+    const { error } = await getSupabaseAdmin().auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: !config.disableSignup, // If signup is disabled, don't create a new user
+      },
+    });
 
     if (error) {
       throw error;
@@ -178,7 +184,9 @@ export async function sendOTP(email: string) {
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while sending the OTP. Please try again later or contact support.",
+        cause instanceof AuthError && cause?.code === "otp_disabled"
+          ? cause.message
+          : "Something went wrong while sending the OTP. Please try again later or contact support.",
       additionalData: { email },
       label,
     });

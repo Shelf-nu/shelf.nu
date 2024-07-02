@@ -28,4 +28,9 @@ export interface Config {
    * Path to favicon
    */
   faviconPath: string;
+
+  /**
+   * Disable the signup page
+   */
+  disableSignup: boolean;
 }
