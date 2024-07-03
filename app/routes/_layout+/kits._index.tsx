@@ -6,6 +6,7 @@ import { useNavigate } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
+import BulkActionsDropdown from "~/components/kits/bulk-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import Header from "~/components/layout/header";
@@ -173,6 +174,7 @@ export default function KitsIndexPage() {
         <List
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={ListContent}
+          bulkActions={<BulkActionsDropdown />}
           navigate={(kitId) => navigate(kitId)}
           headerChildren={
             <>

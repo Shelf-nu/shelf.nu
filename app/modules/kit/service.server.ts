@@ -4,6 +4,7 @@ import type {
   Organization,
   Prisma,
   TeamMember,
+  User,
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
@@ -16,13 +17,14 @@ import type { ErrorLabel } from "~/utils/error";
 import { maybeUniqueConstraintViolation, ShelfError } from "~/utils/error";
 import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
 import { getCurrentSearchParams } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
 import { GET_KIT_STATIC_INCLUDES, KITS_INCLUDE_FIELDS } from "./types";
+import { getKitsWhereInput } from "./utils.server";
 import { createNote } from "../asset/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -660,4 +662,52 @@ export function getKitCurrentBooking(
     currentBooking = { ...ongoingBooking, from: bookingDateDisplay };
   }
   return currentBooking;
+}
+
+export async function bulkDeleteKits({
+  kitIds,
+  organizationId,
+  userId,
+  currentSearchParams,
+}: {
+  kitIds: Kit["id"][];
+  organizationId: Kit["organizationId"];
+  userId: User["id"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /**
+     * If we are selecting all kits in the list then we have to consider filters too
+     */
+    const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
+      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: kitIds }, organizationId };
+
+    /** We have to remove the images of the kits so we have to make this query */
+    const kits = await db.kit.findMany({
+      where,
+      select: { id: true, image: true },
+    });
+
+    return await db.$transaction(async (tx) => {
+      /** Deleting all kits */
+      await tx.kit.deleteMany({
+        where: { id: { in: kits.map((kit) => kit.id) } },
+      });
+
+      /** Deleting images of the kits (if any) */
+      const kitWithImages = kits.filter((kit) => !!kit.image);
+
+      await Promise.all(
+        kitWithImages.map((kit) => deleteKitImage({ url: kit.image! }))
+      );
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting kits.",
+      additionalData: { kitIds, organizationId },
+      label,
+    });
+  }
 }
