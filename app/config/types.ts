@@ -33,4 +33,9 @@ export interface Config {
    * Disable the signup page
    */
   disableSignup: boolean;
+
+  /**
+   * Disable SSO
+   */
+  disableSSO: boolean;
 }

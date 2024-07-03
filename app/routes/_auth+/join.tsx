@@ -42,16 +42,15 @@ export function loader({ context }: LoaderFunctionArgs) {
         status: 403,
       });
     }
+    if (context.isAuthenticated) {
+      return redirect("/assets");
+    }
+
+    return json(data({ title, subHeading }));
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw json(error(reason), { status: reason.status });
   }
-
-  if (context.isAuthenticated) {
-    return redirect("/assets");
-  }
-
-  return json(data({ title, subHeading }));
 }
 
 const JoinFormSchema = z

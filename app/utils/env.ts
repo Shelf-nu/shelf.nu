@@ -34,6 +34,7 @@ declare global {
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
       DISABLE_SIGNUP: string;
+      DISABLE_SSO: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
@@ -179,6 +180,12 @@ export const ENABLE_PREMIUM_FEATURES =
 
 export const DISABLE_SIGNUP =
   getEnv("DISABLE_SIGNUP", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const DISABLE_SSO =
+  getEnv("DISABLE_SSO", {
     isSecret: false,
     isRequired: false,
   }) === "true" || false;

@@ -41,13 +41,13 @@ import { validEmail } from "~/utils/misc";
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
-  const { disableSignup } = config;
+  const { disableSignup, disableSSO } = config;
 
   if (context.isAuthenticated) {
     return redirect("/assets");
   }
 
-  return json(data({ title, subHeading, disableSignup }));
+  return json(data({ title, subHeading, disableSignup, disableSSO }));
 }
 
 const LoginFormSchema = z.object({
@@ -112,7 +112,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
-  const { disableSignup } = useLoaderData<typeof loader>();
+  const { disableSignup, disableSSO } = useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
@@ -180,11 +180,14 @@ export default function IndexLoginForm() {
           </div>
         </div>
       </Form>
-      <div className="mt-6 text-center">
-        <Button variant="link" to="/sso-login">
-          Login with SSO
-        </Button>
-      </div>
+      {!disableSSO && (
+        <div className="mt-6 text-center">
+          <Button variant="link" to="/sso-login">
+            Login with SSO
+          </Button>
+        </div>
+      )}
+
       <div className="mt-6">
         <div className="relative">
           <div className="absolute inset-0 flex items-center">

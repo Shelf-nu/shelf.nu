@@ -14,9 +14,10 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { config } from "~/config/shelf.config";
 import { signInWithSSO } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { data, error, getActionMethod, parseData } from "~/utils/http.server";
 import { isValidDomain } from "~/utils/misc";
@@ -34,12 +35,29 @@ const SSOLoginFormSchema = z.object({
 export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in with SSO";
   const subHeading = "Enter your company's domain to login with SSO.";
+  const { disableSSO } = config;
 
-  if (context.isAuthenticated) {
-    return redirect("/assets");
+  try {
+    if (context.isAuthenticated) {
+      return redirect("/assets");
+    }
+
+    if (disableSSO) {
+      throw new ShelfError({
+        cause: null,
+        title: "SSO is disabled",
+        message:
+          "For more information, please contact your workspace administrator.",
+        label: "User onboarding",
+        status: 403,
+      });
+    }
+
+    return json(data({ title, subHeading }));
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw json(error(reason), { status: reason.status });
   }
-
-  return json(data({ title, subHeading }));
 }
 
 export async function action({ request }: ActionFunctionArgs) {
