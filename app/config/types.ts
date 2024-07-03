@@ -30,7 +30,9 @@ export interface Config {
   faviconPath: string;
 
   /**
-   * Disable the signup page
+   * Disable the signup functionality
+   * Set this to true to disable user registration. New users will still be possible to be added via sending invites.
+   * As a side effect of this, users will not get a personal workspace. This is because new accounts will only be possible to be created via invites.
    */
   disableSignup: boolean;
 
