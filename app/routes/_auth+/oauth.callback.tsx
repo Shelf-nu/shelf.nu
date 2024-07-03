@@ -37,6 +37,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           "For more information, please contact your workspace administrator.",
         label: "User onboarding",
         status: 403,
+        shouldBeCaptured: false,
       });
     }
 

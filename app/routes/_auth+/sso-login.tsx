@@ -50,6 +50,7 @@ export function loader({ context }: LoaderFunctionArgs) {
           "For more information, please contact your workspace administrator.",
         label: "User onboarding",
         status: 403,
+        shouldBeCaptured: false,
       });
     }
 
