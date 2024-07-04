@@ -225,3 +225,24 @@ export async function updateCategory({
     });
   }
 }
+
+export async function bulkDeleteCategories({
+  categoryIds,
+  organizationId,
+}: {
+  categoryIds: Category["id"][];
+  organizationId: Organization["id"];
+}) {
+  try {
+    return await db.category.deleteMany({
+      where: { id: { in: categoryIds }, organizationId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting categories.",
+      additionalData: { categoryIds, organizationId },
+      label,
+    });
+  }
+}
