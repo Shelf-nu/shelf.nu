@@ -2,8 +2,13 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import { BulkAssignKitCustodySchema } from "~/components/kits/bulk-assign-custody-dialog";
 import { BulkDeleteKitsSchema } from "~/components/kits/bulk-delete-dialog";
+import { BulkReleaseKitCustodySchema } from "~/components/kits/bulk-release-custody-dialog";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
-import { bulkCheckoutKits, bulkDeleteKits } from "~/modules/kit/service.server";
+import {
+  bulkAssignKitCustody,
+  bulkDeleteKits,
+  bulkReleaseKitCustody,
+} from "~/modules/kit/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -25,7 +30,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
       formData,
       z
         .object({
-          intent: z.enum(["bulk-delete", "bulk-assign-custody"]),
+          intent: z.enum([
+            "bulk-delete",
+            "bulk-assign-custody",
+            "bulk-release-custody",
+          ]),
         })
         .and(CurrentSearchParamsSchema)
     );
@@ -33,6 +42,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const intent2ActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-delete": PermissionAction.delete,
       "bulk-assign-custody": PermissionAction.checkout,
+      "bulk-release-custody": PermissionAction.checkin,
     };
 
     const { organizationId } = await requirePermission({
@@ -69,7 +79,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           BulkAssignKitCustodySchema
         );
 
-        await bulkCheckoutKits({
+        await bulkAssignKitCustody({
           kitIds,
           custodianId: custodian.id,
           custodianName: custodian.name,
@@ -82,6 +92,26 @@ export async function action({ request, context }: ActionFunctionArgs) {
           title: `Kits are now in custody of ${custodian.name}`,
           message:
             "Remember, these kits will be unavailable until it is manually checked in.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      case "bulk-release-custody": {
+        const { kitIds } = parseData(formData, BulkReleaseKitCustodySchema);
+
+        await bulkReleaseKitCustody({
+          userId,
+          kitIds,
+          organizationId,
+          currentSearchParams,
+        });
+
+        sendNotification({
+          title: "Kits are no longer in custody",
+          message: "These kits are available again.",
           icon: { name: "success", variant: "success" },
           senderId: userId,
         });

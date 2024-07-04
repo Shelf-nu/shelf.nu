@@ -8,6 +8,7 @@ import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
+import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -68,6 +69,10 @@ function ConditionalDropdown() {
     kit.assets.some((asset) => asset.status !== "AVAILABLE")
   );
 
+  const someKitsAvailable = selectedKits.some(
+    (kit) => kit.status === "AVAILABLE"
+  );
+
   const disabled = selectedKitIds.length === 0;
 
   function closeMenu() {
@@ -86,6 +91,7 @@ function ConditionalDropdown() {
 
       <BulkDeleteDialog />
       <BulkAssignCustodyDialog />
+      <BulkReleaseCustodyDialog />
 
       <DropdownMenu
         modal={false}
@@ -142,6 +148,17 @@ function ConditionalDropdown() {
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
             <DropdownMenuItem
               className="py-1 lg:p-0"
+              disabled={someKitsAvailable || isLoading}
+            >
+              <BulkUpdateDialogTrigger
+                type="release-custody"
+                label="Release custody"
+                onClick={closeMenu}
+              />
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              className="border-b py-1 lg:p-0"
               disabled={someKitsCheckedOut || someKitHaveCustody || isLoading}
             >
               <BulkUpdateDialogTrigger

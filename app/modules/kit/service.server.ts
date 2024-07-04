@@ -8,6 +8,7 @@ import type {
 } from "@prisma/client";
 import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { getDateTimeFormat } from "~/utils/client-hints";
@@ -713,7 +714,7 @@ export async function bulkDeleteKits({
   }
 }
 
-export async function bulkCheckoutKits({
+export async function bulkAssignKitCustody({
   kitIds,
   organizationId,
   custodianId,
@@ -782,7 +783,7 @@ export async function bulkCheckoutKits({
      * 1. Create custodies for kit
      * 2. Update status of all kits to IN_CUSTODY
      */
-    await db.$transaction(async (tx) => {
+    return await db.$transaction(async (tx) => {
       /** Creating custodies over kits */
       await tx.kitCustody.createMany({
         data: kits.map((kit) => ({
@@ -839,6 +840,124 @@ export async function bulkCheckoutKits({
         custodianId,
         custodianName,
       },
+      label,
+    });
+  }
+}
+
+export async function bulkReleaseKitCustody({
+  kitIds,
+  organizationId,
+  userId,
+  currentSearchParams,
+}: {
+  kitIds: Kit["id"][];
+  organizationId: Kit["organizationId"];
+  userId: User["id"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /** If we are selecting all, then we have to consider filters */
+    const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
+      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: kitIds }, organizationId };
+
+    /**
+     * To make notes and release assets of kits we have to make this query
+     */
+    const [kits, user] = await Promise.all([
+      db.kit.findMany({
+        where,
+        select: {
+          id: true,
+          status: true,
+          custody: { select: { id: true, custodian: true } },
+          assets: {
+            select: {
+              id: true,
+              status: true,
+              title: true,
+              custody: { select: { id: true } },
+            },
+          },
+        },
+      }),
+      getUserByID(userId),
+    ]);
+
+    const custodian = kits[0].custody?.custodian;
+
+    /** Kits will be released only if all the selected kits are IN_CUSTODY */
+    const allKitsInCustody = kits.every((kit) => kit.status === "IN_CUSTODY");
+    if (!allKitsInCustody) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "There are some kits which are not in custody. Please make sure you are only selecting kits in custody to release them.",
+        label,
+      });
+    }
+
+    const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
+
+    return await db.$transaction(async (tx) => {
+      /** Deleting all custodies of kits */
+      await tx.kitCustody.deleteMany({
+        where: {
+          id: {
+            in: kits.map((kit) => {
+              invariant(kit.custody, "Custody not found over kit.");
+              return kit.custody.id;
+            }),
+          },
+        },
+      });
+
+      /** Updating status of all kits to AVAILABLE */
+      await tx.kit.updateMany({
+        where: { id: { in: kits.map((kit) => kit.id) } },
+        data: { status: KitStatus.AVAILABLE },
+      });
+
+      /** Deleting all custodies of all assets of kits */
+      await tx.custody.deleteMany({
+        where: {
+          id: {
+            in: allAssetsOfAllKits.map((asset) => {
+              /** This cause should not happen */
+              invariant(asset.custody, "Custody not found over the asset");
+              return asset.custody.id;
+            }),
+          },
+        },
+      });
+
+      /** Making all the assets of the kit AVAILABLE */
+      await tx.asset.updateMany({
+        where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
+        data: { status: AssetStatus.AVAILABLE },
+      });
+
+      /** Creating notes for all the assets */
+      await tx.note.createMany({
+        data: allAssetsOfAllKits.map((asset) => ({
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${custodian?.name}'s** custody over **${asset.title.trim()}**`,
+          type: "UPDATE",
+          userId,
+          assetId: asset.id,
+        })),
+      });
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk releasing kits.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { kitIds, organizationId, userId },
       label,
     });
   }
