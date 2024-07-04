@@ -17,6 +17,7 @@ export default function BulkReleaseCustodyDialog() {
       title="Release custody of assets"
       description="Are you sure you want to release custody of all selected assets?"
       actionUrl="/api/assets/bulk-release-custody"
+      arrayFieldId="assetIds"
     >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">

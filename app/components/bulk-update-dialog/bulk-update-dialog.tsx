@@ -109,9 +109,8 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
     | ((props: DialogContentChildrenProps) => React.ReactNode);
   /**
    * Id of the array input field
-   * @default assetIds
    */
-  arrayFieldId?: string;
+  arrayFieldId: string;
 };
 
 /** This component is basically the body of the Dialog */
@@ -126,7 +125,7 @@ const BulkUpdateDialogContent = forwardRef<
     title = `Update ${type}`,
     description,
     actionUrl,
-    arrayFieldId = "assetIds",
+    arrayFieldId,
   },
   ref
 ) {

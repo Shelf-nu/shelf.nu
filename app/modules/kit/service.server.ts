@@ -26,6 +26,7 @@ import type { UpdateKitPayload } from "./types";
 import { GET_KIT_STATIC_INCLUDES, KITS_INCLUDE_FIELDS } from "./types";
 import { getKitsWhereInput } from "./utils.server";
 import { createNote } from "../asset/service.server";
+import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
 
@@ -706,7 +707,138 @@ export async function bulkDeleteKits({
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting kits.",
-      additionalData: { kitIds, organizationId },
+      additionalData: { kitIds, organizationId, userId },
+      label,
+    });
+  }
+}
+
+export async function bulkCheckoutKits({
+  kitIds,
+  organizationId,
+  custodianId,
+  custodianName,
+  userId,
+  currentSearchParams,
+}: {
+  kitIds: Kit["id"][];
+  organizationId: Kit["organizationId"];
+  custodianId: TeamMember["id"];
+  custodianName: TeamMember["name"];
+  userId: User["id"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /**
+     * If we are selecting all assets in list then we have to consider filters
+     */
+    const where: Prisma.KitWhereInput = kitIds.includes(ALL_SELECTED_KEY)
+      ? getKitsWhereInput({ organizationId, currentSearchParams })
+      : { id: { in: kitIds }, organizationId };
+
+    /**
+     * We have to make notes and assign custody to all assets of a kit so we have to make this query
+     */
+    const [kits, user] = await Promise.all([
+      db.kit.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          assets: { select: { id: true, title: true, status: true } },
+        },
+      }),
+      getUserByID(userId),
+    ]);
+
+    const someKitsNotAvailable = kits.some((kit) => kit.status !== "AVAILABLE");
+    if (someKitsNotAvailable) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "There are some unavailable kits. Please make sure you are selecting only available kits.",
+        label,
+      });
+    }
+
+    const allAssetsOfAllKits = kits.flatMap((kit) => kit.assets);
+
+    const someAssetsUnavailable = allAssetsOfAllKits.some(
+      (asset) => asset.status !== "AVAILABLE"
+    );
+    if (someAssetsUnavailable) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "There are some unavailable assets in some kits. Please make sure you have all available assets in kits.",
+        label,
+      });
+    }
+
+    /**
+     * updateMany does not allow to create nested relationship rows so we have
+     * to make two queries to assign custody over
+     * 1. Create custodies for kit
+     * 2. Update status of all kits to IN_CUSTODY
+     */
+    await db.$transaction(async (tx) => {
+      /** Creating custodies over kits */
+      await tx.kitCustody.createMany({
+        data: kits.map((kit) => ({
+          custodianId,
+          kitId: kit.id,
+        })),
+      });
+
+      /** Updating status of all kits */
+      await tx.kit.updateMany({
+        where: { id: { in: kits.map((kit) => kit.id) } },
+        data: { status: KitStatus.IN_CUSTODY },
+      });
+
+      /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
+
+      /** Creating custodies over assets of kits */
+      await tx.custody.createMany({
+        data: allAssetsOfAllKits.map((asset) => ({
+          teamMemberId: custodianId,
+          assetId: asset.id,
+        })),
+      });
+
+      /** Updating status of all assets of kits */
+      await tx.asset.updateMany({
+        where: { id: { in: allAssetsOfAllKits.map((asset) => asset.id) } },
+        data: { status: AssetStatus.IN_CUSTODY },
+      });
+
+      /** Creating notes for all the assets of the kit */
+      await tx.note.createMany({
+        data: allAssetsOfAllKits.map((asset) => ({
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          type: "UPDATE",
+          userId,
+          assetId: asset.id,
+        })),
+      });
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk checking out kits.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: {
+        kitIds,
+        organizationId,
+        userId,
+        custodianId,
+        custodianName,
+      },
       label,
     });
   }

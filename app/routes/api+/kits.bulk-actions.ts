@@ -1,8 +1,9 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
+import { BulkAssignKitCustodySchema } from "~/components/kits/bulk-assign-custody-dialog";
 import { BulkDeleteKitsSchema } from "~/components/kits/bulk-delete-dialog";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
-import { bulkDeleteKits } from "~/modules/kit/service.server";
+import { bulkCheckoutKits, bulkDeleteKits } from "~/modules/kit/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -24,13 +25,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
       formData,
       z
         .object({
-          intent: z.enum(["bulk-delete"]),
+          intent: z.enum(["bulk-delete", "bulk-assign-custody"]),
         })
         .and(CurrentSearchParamsSchema)
     );
 
     const intent2ActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-delete": PermissionAction.delete,
+      "bulk-assign-custody": PermissionAction.checkout,
     };
 
     const { organizationId } = await requirePermission({
@@ -56,6 +58,32 @@ export async function action({ request, context }: ActionFunctionArgs) {
           message: "Your kits has been deleted successfully",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      case "bulk-assign-custody": {
+        const { kitIds, custodian } = parseData(
+          formData,
+          BulkAssignKitCustodySchema
+        );
+
+        await bulkCheckoutKits({
+          kitIds,
+          custodianId: custodian.id,
+          custodianName: custodian.name,
+          organizationId,
+          userId,
+          currentSearchParams,
+        });
+
+        sendNotification({
+          title: `Kits are now in custody of ${custodian.name}`,
+          message:
+            "Remember, these kits will be unavailable until it is manually checked in.",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
         });
 
         return json(data({ success: true }));

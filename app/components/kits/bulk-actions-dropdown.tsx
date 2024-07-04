@@ -1,10 +1,12 @@
 import type { Prisma } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
@@ -49,6 +51,9 @@ function ConditionalDropdown() {
     setOpen,
   } = useControlledDropdownMenu();
 
+  const navigation = useNavigation();
+  const isLoading = isFormProcessing(navigation.state);
+
   const selectedKitIds = useAtomValue(selectedBulkItemsAtom);
 
   const selectedKits = items.filter((item) => selectedKitIds.includes(item.id));
@@ -56,6 +61,8 @@ function ConditionalDropdown() {
   const someKitsCheckedOut = selectedKits.some(
     (kit) => kit.status === "CHECKED_OUT"
   );
+
+  const someKitHaveCustody = selectedKits.some((kit) => !!kit.custody);
 
   const someAssetsNotAvailable = selectedKits.some((kit) =>
     kit.assets.some((asset) => asset.status !== "AVAILABLE")
@@ -78,6 +85,7 @@ function ConditionalDropdown() {
       )}
 
       <BulkDeleteDialog />
+      <BulkAssignCustodyDialog />
 
       <DropdownMenu
         modal={false}
@@ -132,6 +140,17 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
+            <DropdownMenuItem
+              className="py-1 lg:p-0"
+              disabled={someKitsCheckedOut || someKitHaveCustody || isLoading}
+            >
+              <BulkUpdateDialogTrigger
+                type="assign-custody"
+                label="Assign custody"
+                onClick={closeMenu}
+              />
+            </DropdownMenuItem>
+
             <DropdownMenuItem
               className="px-4 py-1 md:p-0"
               onSelect={(e) => {

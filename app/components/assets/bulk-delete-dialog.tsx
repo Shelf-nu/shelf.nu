@@ -29,6 +29,7 @@ export default function BulkDeleteDialog() {
       title={`Delete ${totalSelected} assets`}
       description={`Are you sure you want to delete all ${totalSelected} assets? This action cannot be undone.`}
       actionUrl="."
+      arrayFieldId="assetIds"
     >
       {({ fetcherError, disabled, handleCloseDialog }) => (
         <>
