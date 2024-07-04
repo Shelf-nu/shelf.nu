@@ -17,6 +17,11 @@ import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "../shared/hover-card";
 
 /**
  * Type of the dialog
@@ -36,7 +41,12 @@ type CommonBulkDialogProps = {
 type BulkUpdateDialogTriggerProps = CommonBulkDialogProps & {
   label?: string;
   onClick?: () => void;
-  disabled?: boolean;
+  /** Disabled can be a boolean  */
+  disabled?:
+    | boolean
+    | {
+        reason: string;
+      };
 };
 
 /** This component is going to trigger the open state of dialog */
@@ -46,31 +56,64 @@ function BulkUpdateDialogTrigger({
   label = `Update ${type}`,
   disabled,
 }: BulkUpdateDialogTriggerProps) {
+  const isDisabled =
+    disabled === undefined // If it is undefined, then it is not disabled
+      ? false
+      : typeof disabled === "boolean"
+      ? disabled
+      : true; // If it is an object, then it is disabled
+  const reason = typeof disabled === "object" ? disabled.reason : "";
+
   const openBulkDialog = useSetAtom(openBulkDialogAtom);
 
   function handleOpenDialog() {
     openBulkDialog(type);
   }
 
-  return (
-    <Button
-      variant="link"
-      className={tw(
-        "justify-start px-4 py-3  text-gray-700 hover:text-gray-700",
-        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-      )}
-      width="full"
-      onClick={() => {
-        onClick && onClick();
-        handleOpenDialog();
-      }}
-      disabled={disabled}
-    >
-      <span className="flex items-center gap-2">
-        <Icon icon={type} /> {label}
-      </span>
-    </Button>
-  );
+  /** The actual button */
+  function ClickMe({ disabled }: { disabled?: boolean }) {
+    return (
+      <Button
+        variant="link"
+        className={tw(
+          "w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700",
+          disabled
+            ? "pointer-events-none cursor-not-allowed opacity-30 hover:bg-white"
+            : "cursor-pointer "
+        )}
+        width="full"
+        onClick={() => {
+          onClick && onClick();
+          handleOpenDialog();
+        }}
+        disabled={disabled}
+      >
+        <span className="flex items-center gap-2">
+          <Icon icon={type} /> {label}
+        </span>
+      </Button>
+    );
+  }
+
+  if (disabled) {
+    return (
+      <HoverCard openDelay={50} closeDelay={50}>
+        <HoverCardTrigger
+          className={tw("disabled inline-flex w-full cursor-not-allowed ")}
+        >
+          <ClickMe disabled={isDisabled} />
+        </HoverCardTrigger>
+        {reason && (
+          <HoverCardContent side="left">
+            <h5 className="text-left text-[14px]">Action disabled</h5>
+            <p className="text-left text-[14px]">{reason}</p>
+          </HoverCardContent>
+        )}
+      </HoverCard>
+    );
+  }
+
+  return <ClickMe />;
 }
 
 type DialogContentChildrenProps = {
@@ -107,6 +150,10 @@ type BulkUpdateDialogContentProps = CommonBulkDialogProps & {
   children:
     | React.ReactNode
     | ((props: DialogContentChildrenProps) => React.ReactNode);
+  /**
+   * Id of the array input field
+   */
+  arrayFieldId: string;
 };
 
 /** This component is basically the body of the Dialog */
@@ -121,6 +168,7 @@ const BulkUpdateDialogContent = forwardRef<
     title = `Update ${type}`,
     description,
     actionUrl,
+    arrayFieldId,
   },
   ref
 ) {
@@ -198,7 +246,7 @@ const BulkUpdateDialogContent = forwardRef<
             <input
               key={assetId}
               type="hidden"
-              name={`assetIds[${i}]`}
+              name={`${arrayFieldId}[${i}]`}
               value={assetId}
             />
           ))}

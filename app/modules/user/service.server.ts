@@ -5,6 +5,7 @@ import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import sharp from "sharp";
 import type { AuthSession } from "server/session";
+import { config } from "~/config/shelf.config";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 
@@ -434,6 +435,12 @@ export async function createUser(
     isSSO,
   } = payload;
 
+  /**
+   * We only create a personal org for non-SSO users
+   * and if the signup is not disabled
+   * */
+  const shouldCreatePersonalOrg = !isSSO && !config.disableSignup;
+
   try {
     return await db.$transaction(
       async (tx) => {
@@ -449,7 +456,8 @@ export async function createUser(
                 name: Roles["USER"],
               },
             },
-            ...(!isSSO && {
+
+            ...(shouldCreatePersonalOrg && {
               organizations: {
                 create: [
                   {
@@ -492,7 +500,7 @@ export async function createUser(
          * 2. For the org that the user is being attached to
          */
         await Promise.all([
-          !isSSO && // We only create a personal org for non-SSO users
+          shouldCreatePersonalOrg && // We only create a personal org for non-SSO users
             createUserOrgAssociation(tx, {
               userId: user.id,
               organizationIds: [user.organizations[0].id],

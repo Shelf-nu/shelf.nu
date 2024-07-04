@@ -47,6 +47,11 @@ export function ScanDetails({
             </p>
             <p>Browser: {lastScan.ua.browser.name}</p>
             <p>Operating System: {lastScan.ua.os.name}</p>
+            <div className="flex items-center">
+              <p className="inline-block max-w-xs truncate">
+                Scanned By: {lastScan.scannedBy}
+              </p>
+            </div>
             <div>
               Source:{" "}
               {lastScan.manuallyGenerated ? "Manually updated" : "QR code scan"}{" "}

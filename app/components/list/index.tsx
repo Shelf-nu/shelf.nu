@@ -6,7 +6,6 @@ import {
   selectedBulkItemsCountAtom,
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
-import type { IndexResponse } from "~/routes/_layout+/assets._index";
 
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { tw } from "~/utils/tw";
@@ -19,6 +18,38 @@ import { ListItem } from "./list-item";
 import { Pagination } from "./pagination";
 import { Button } from "../shared/button";
 import { Table } from "../table";
+
+export interface IndexResponse {
+  header: {
+    title: string;
+    subTitle?: string;
+  };
+  /** Page number. Starts at 1 */
+  page: number;
+
+  /** Items to be loaded per page */
+  perPage: number;
+
+  /** Items to be rendered in the list */
+  items: ListItemData[];
+
+  categoriesIds?: string[];
+
+  /** Total items - before filtering */
+  totalItems: number;
+
+  /** Total pages */
+  totalPages: number;
+
+  /** Search string */
+  search: string | null;
+
+  /** Used so all the default actions can be generate such as empty state, creating and so on */
+  modelName: {
+    singular: string;
+    plural: string;
+  };
+}
 
 export type ListProps = {
   title?: string;
