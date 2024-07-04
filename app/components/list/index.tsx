@@ -142,7 +142,7 @@ export const List = ({
                   </div>
                 ) : (
                   <>
-                    <h5>{title || header.title}</h5>
+                    <h5 className="capitalize">{title || plural}</h5>
                     <div>
                       {perPage < totalItems ? (
                         <p>
