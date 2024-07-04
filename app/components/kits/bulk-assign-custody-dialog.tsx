@@ -6,28 +6,30 @@ import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialo
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import { Button } from "../shared/button";
 
-export const BulkAssignCustodySchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+export const BulkAssignKitCustodySchema = z.object({
+  kitIds: z.array(z.string()).min(1),
   custodian: stringToJSONSchema.pipe(
     z.object({ id: z.string(), name: z.string() })
   ),
 });
 
 export default function BulkAssignCustodyDialog() {
-  const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
+  const zo = useZorm("BulkAssignKitCustody", BulkAssignKitCustodySchema);
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="assign-custody"
-      title="Assign custody of assets"
-      description="These assets are currently available. You're about to assign custody to one of your team members."
-      actionUrl="/api/assets/bulk-assign-custody"
-      arrayFieldId="assetIds"
+      title="Assign custody of kit"
+      description="These kits are currently available. You're about to assign custody to one of your team members."
+      arrayFieldId="kitIds"
+      actionUrl="/api/kits/bulk-actions"
     >
-      {({ disabled, handleCloseDialog, fetcherError }) => (
+      {({ disabled, fetcherError, handleCloseDialog }) => (
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">
+            <input type="hidden" value="bulk-assign-custody" name="intent" />
+
             <DynamicSelect
               disabled={disabled}
               model={{
@@ -37,16 +39,14 @@ export default function BulkAssignCustodyDialog() {
               }}
               fieldName="custodian"
               contentLabel="Team members"
-              initialDataKey="rawTeamMembers"
+              initialDataKey="teamMembers"
               countKey="totalTeamMembers"
               placeholder="Select a team member"
-              allowClear
               closeOnSelect
               transformItem={(item) => ({
                 ...item,
                 id: JSON.stringify({
                   id: item.id,
-                  //If there is a user, we use its name, otherwise we use the name of the team member
                   name: resolveTeamMemberName(item),
                 }),
               })}

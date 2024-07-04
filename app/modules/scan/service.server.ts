@@ -119,6 +119,14 @@ export async function getScanByQrId({ qrId }: { qrId: string }) {
     return await db.scan.findFirst({
       where: { rawQrId: qrId },
       orderBy: { createdAt: "desc" },
+      include: {
+        user: {
+          include: {
+            userOrganizations: true,
+          },
+        },
+        qr: true,
+      },
       take: 1,
     });
   } catch (cause) {

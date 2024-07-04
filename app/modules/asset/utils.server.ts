@@ -54,7 +54,7 @@ export function getAssetsWhereInput({
     return where;
   }
 
-  const searchParams = new URLSearchParams(`?${currentSearchParams}`);
+  const searchParams = new URLSearchParams(currentSearchParams);
   const paramsValues = getParamsValues(searchParams);
 
   const { categoriesIds, locationIds, tagsIds, search, teamMemberIds } =
