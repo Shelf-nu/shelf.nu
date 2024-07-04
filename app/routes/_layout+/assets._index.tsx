@@ -9,7 +9,6 @@ import type {
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-import { redirect } from "react-router";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -24,7 +23,6 @@ import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import { SortBy } from "~/components/list/filters/sort-by";
-import type { ListItemData } from "~/components/list/list-item";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
@@ -67,37 +65,6 @@ import { canImportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 
-export interface IndexResponse {
-  header: {
-    title: string;
-    subTitle?: string;
-  };
-  /** Page number. Starts at 1 */
-  page: number;
-
-  /** Items to be loaded per page */
-  perPage: number;
-
-  /** Items to be rendered in the list */
-  items: ListItemData[];
-
-  categoriesIds?: string[];
-
-  /** Total items - before filtering */
-  totalItems: number;
-
-  /** Total pages */
-  totalPages: number;
-
-  /** Search string */
-  search: string | null;
-
-  /** Used so all the default actions can be generate such as empty state, creating and so on */
-  modelName: {
-    singular: string;
-    plural: string;
-  };
-}
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
 ];
@@ -165,10 +132,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
       }),
     ]);
-
-    if (totalPages !== 0 && page > totalPages) {
-      return redirect("/assets");
-    }
 
     if (role === OrganizationRoles.SELF_SERVICE) {
       /**
@@ -306,7 +269,7 @@ export function shouldRevalidate({
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.header.title) },
+  { title: appendToMetaTitle(data?.header.title) },
 ];
 
 export default function AssetIndexPage() {

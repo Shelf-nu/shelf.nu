@@ -6,6 +6,7 @@ import { useNavigate } from "@remix-run/react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
+import BulkActionsDropdown from "~/components/kits/bulk-actions-dropdown";
 import KitImage from "~/components/kits/kit-image";
 import { KitStatusBadge } from "~/components/kits/kit-status-badge";
 import Header from "~/components/layout/header";
@@ -55,7 +56,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         extraInclude: {
           assets: {
-            select: { id: true, availableToBook: true },
+            select: { id: true, availableToBook: true, status: true },
           },
         },
       }),
@@ -173,6 +174,7 @@ export default function KitsIndexPage() {
         <List
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={ListContent}
+          bulkActions={<BulkActionsDropdown />}
           navigate={(kitId) => navigate(kitId)}
           headerChildren={
             <>
@@ -226,7 +228,7 @@ function ListContent({
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        <div className="flex justify-between gap-3 p-4 !pl-0 md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="flex size-12 shrink-0 items-center justify-center">
               <KitImage

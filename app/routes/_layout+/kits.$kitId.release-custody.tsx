@@ -92,7 +92,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     sendNotification({
       title: `‘${kit.name}’ is no longer in custody of ‘${custodianName}’`,
-      message: "This asset is available again.",
+      message: "This kit is available again.",
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
