@@ -15,7 +15,11 @@ export default function BulkLocationUpdateDialog() {
   const zo = useZorm("BulkLocationUpdate", BulkLocationUpdateSchema);
 
   return (
-    <BulkUpdateDialogContent ref={zo.ref} type="location">
+    <BulkUpdateDialogContent
+      ref={zo.ref}
+      type="location"
+      arrayFieldId="assetIds"
+    >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div>
           <div className="relative z-50 mb-8">

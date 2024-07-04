@@ -2,14 +2,12 @@ import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import type { loader } from "~/routes/_layout+/assets._index";
+import type { loader } from "~/routes/_layout+/kits._index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
-import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
-import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
@@ -44,9 +42,6 @@ export default function BulkActionsDropdown() {
 function ConditionalDropdown() {
   const { items } = useLoaderData<typeof loader>();
 
-  const navigation = useNavigation();
-  const isLoading = isFormProcessing(navigation.state);
-
   const {
     ref: dropdownRef,
     defaultApplied,
@@ -55,27 +50,32 @@ function ConditionalDropdown() {
     setOpen,
   } = useControlledDropdownMenu();
 
-  const selectedAssetIds = useAtomValue(selectedBulkItemsAtom);
+  const navigation = useNavigation();
+  const isLoading = isFormProcessing(navigation.state);
 
-  const selectedAssets = items.filter((item) =>
-    selectedAssetIds.includes(item.id)
+  const selectedKitIds = useAtomValue(selectedBulkItemsAtom);
+
+  const selectedKits = items.filter((item) => selectedKitIds.includes(item.id));
+
+  const allKitsInCustody = selectedKits.every(
+    (kit) => kit.status === "IN_CUSTODY"
   );
 
-  const disabled = selectedAssetIds.length === 0;
-
-  const allAssetsAreInCustody = selectedAssets.every(
-    (asset) => asset.status === "IN_CUSTODY"
+  const allKitsAvailable = selectedKits.every(
+    (kit) => kit.status === "AVAILABLE"
   );
 
-  const allAssetsAreAvailable = selectedAssets.every(
-    (asset) => asset.status === "AVAILABLE"
+  const someKitsCheckedOut = selectedKits.some(
+    (kit) => kit.status === "CHECKED_OUT"
   );
 
-  const someAssetCheckedOut = selectedAssets.some(
-    (asset) => asset.status === "CHECKED_OUT"
+  const someAssetsInsideKitsCheckedOutOrInCustody = selectedKits.some(
+    (kit) =>
+      kit.assets.some((asset) => asset.status === "CHECKED_OUT") ||
+      kit.assets.some((asset) => asset.status === "IN_CUSTODY")
   );
 
-  const someAssetPartKit = selectedAssets.some((asset) => asset?.kit);
+  const disabled = selectedKitIds.length === 0;
 
   function closeMenu() {
     setOpen(false);
@@ -90,11 +90,10 @@ function ConditionalDropdown() {
           )}
         />
       )}
-      <BulkLocationUpdateDialog />
-      <BulkCategoryUpdateDialog />
+
+      <BulkDeleteDialog />
       <BulkAssignCustodyDialog />
       <BulkReleaseCustodyDialog />
-      <BulkDeleteDialog />
 
       <DropdownMenu
         modal={false}
@@ -155,11 +154,9 @@ function ConditionalDropdown() {
                 label="Release custody"
                 onClick={closeMenu}
                 disabled={
-                  !allAssetsAreInCustody || someAssetPartKit
+                  !allKitsInCustody
                     ? {
-                        reason: someAssetPartKit
-                          ? "Some of the selected assets are part of a kit. If you want to change their custody, please update the kit instead."
-                          : "Some of the selected assets are not in custody.",
+                        reason: "Some of the selected kits are not in custody",
                       }
                     : isLoading
                 }
@@ -172,40 +169,29 @@ function ConditionalDropdown() {
                 label="Assign custody"
                 onClick={closeMenu}
                 disabled={
-                  !allAssetsAreAvailable || someAssetPartKit
+                  !allKitsAvailable || someAssetsInsideKitsCheckedOutOrInCustody
                     ? {
-                        reason: someAssetPartKit
-                          ? "Some of the selected assets are part of a kit. If you want to change their custody, please update the kit instead."
-                          : "Some of the selected assets are not available.",
+                        reason: someAssetsInsideKitsCheckedOutOrInCustody
+                          ? "Some of the asset(s) inside this kits are either checked out or in custody. You need to resolve that before you can assign custody."
+                          : "Some of the selected kits are not available",
                       }
                     : isLoading
                 }
               />
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="location"
-                onClick={closeMenu}
-                disabled={isLoading}
-              />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem className="border-b py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="category"
-                onClick={closeMenu}
-                disabled={isLoading}
-              />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem className="py-1 lg:p-0">
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+            >
               <BulkUpdateDialogTrigger
                 type="trash"
                 label="Delete"
                 onClick={closeMenu}
                 disabled={
-                  someAssetCheckedOut
+                  someKitsCheckedOut
                     ? {
                         reason:
                           "Some of the selected kits are checked out. Please finish your booking first, before deleting them.",
@@ -221,7 +207,7 @@ function ConditionalDropdown() {
                 variant="secondary"
                 className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
                 width="full"
-                onClick={() => setOpen(false)}
+                onClick={closeMenu}
               >
                 Close
               </Button>

@@ -8,28 +8,29 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
-export const BulkDeleteAssetsSchema = z.object({
-  assetIds: z.array(z.string()).min(1),
+export const BulkDeleteKitsSchema = z.object({
+  kitIds: z.array(z.string()).min(1),
 });
 
 export default function BulkDeleteDialog() {
   const { totalItems } = useLoaderData<typeof loader>();
-  const zo = useZorm("BulkDeleteAssets", BulkDeleteAssetsSchema);
 
-  const selectedAssets = useAtomValue(selectedBulkItemsAtom);
+  const zo = useZorm("BulkDeleteKits", BulkDeleteKitsSchema);
 
-  const totalSelected = selectedAssets.includes(ALL_SELECTED_KEY)
+  const selectedKits = useAtomValue(selectedBulkItemsAtom);
+
+  const totalSelected = selectedKits.includes(ALL_SELECTED_KEY)
     ? totalItems
-    : selectedAssets.length;
+    : selectedKits.length;
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="trash"
-      title={`Delete ${totalSelected} assets`}
-      description={`Are you sure you want to delete all ${totalSelected} assets? This action cannot be undone.`}
-      actionUrl="."
-      arrayFieldId="assetIds"
+      title={`Delete ${totalSelected} kits`}
+      description={`Are you sure you want to delete all ${totalSelected} kits? This action cannot be undone.`}
+      actionUrl="/api/kits/bulk-actions"
+      arrayFieldId="kitIds"
     >
       {({ fetcherError, disabled, handleCloseDialog }) => (
         <>
