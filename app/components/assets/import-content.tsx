@@ -61,10 +61,10 @@ export const ImportContent = () => (
       </li>
       <li>Each row represents a new asset that will be created</li>
       <li>
-        Columns such as <b>category, location & custodian</b> represent just the
-        name of the related entry. As an example, if you put the category{" "}
-        <b>Laptops</b> we will look for an existing category with that name and
-        link the asset to it. If it doesn't exist, we will create it.
+        Columns such as <b>kit, category, location & custodian</b> represent
+        just the name of the related entry. As an example, if you put the
+        category <b>Laptops</b> we will look for an existing category with that
+        name and link the asset to it. If it doesn't exist, we will create it.
       </li>
       <li>
         Columns such as <b>tags</b> represent the names of a collection of
