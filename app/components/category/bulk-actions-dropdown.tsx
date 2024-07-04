@@ -1,20 +1,20 @@
+import { useLoaderData } from "@remix-run/react";
+import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
-import { Button } from "../shared/button";
-import { ChevronRight } from "../icons/library";
-import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import { selectedBulkItemsAtom } from "~/atoms/list";
+import { type loader } from "~/routes/_layout+/categories";
 import { tw } from "~/utils/tw";
+import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import BulkDeleteDialog from "./bulk-delete-dialog";
+import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
+import { ChevronRight } from "../icons/library";
+import { Button } from "../shared/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import { useAtomValue } from "jotai";
-import { selectedBulkItemsAtom } from "~/atoms/list";
-import { useLoaderData } from "@remix-run/react";
-import { type loader } from "~/routes/_layout+/categories";
-import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
-import BulkDeleteDialog from "./bulk-delete-dialog";
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();

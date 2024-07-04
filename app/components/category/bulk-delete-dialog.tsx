@@ -1,11 +1,11 @@
 import { useLoaderData } from "@remix-run/react";
-import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
-import { type loader } from "~/routes/_layout+/categories";
 import { useAtomValue } from "jotai";
-import { selectedBulkItemsAtom } from "~/atoms/list";
-import { ALL_SELECTED_KEY } from "~/utils/list";
-import { z } from "zod";
 import { useZorm } from "react-zorm";
+import { z } from "zod";
+import { selectedBulkItemsAtom } from "~/atoms/list";
+import { type loader } from "~/routes/_layout+/categories";
+import { ALL_SELECTED_KEY } from "~/utils/list";
+import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
 export const BulkDeleteCategorySchema = z.object({

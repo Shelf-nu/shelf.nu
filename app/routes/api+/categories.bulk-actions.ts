@@ -1,4 +1,5 @@
-import { ActionFunctionArgs, json } from "@remix-run/node";
+import type { ActionFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { z } from "zod";
 import { BulkDeleteCategorySchema } from "~/components/category/bulk-delete-dialog";
 import { bulkDeleteCategories } from "~/modules/category/service.server";
