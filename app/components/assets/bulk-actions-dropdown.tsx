@@ -63,31 +63,19 @@ function ConditionalDropdown() {
 
   const disabled = selectedAssetIds.length === 0;
 
+  const allAssetsAreInCustody = selectedAssets.every(
+    (asset) => asset.status === "IN_CUSTODY"
+  );
+
+  const allAssetsAreAvailable = selectedAssets.every(
+    (asset) => asset.status === "AVAILABLE"
+  );
+
   const someAssetCheckedOut = selectedAssets.some(
     (asset) => asset.status === "CHECKED_OUT"
   );
 
-  const someAssetPartOfUnavailableKit = selectedAssets.some(
-    (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
-  );
-
-  const someAssetsAvailable = selectedAssets.some(
-    (asset) => asset.status === "AVAILABLE"
-  );
-  const someAssetsInCustody = selectedAssets.some(
-    (asset) => asset.status === "IN_CUSTODY"
-  );
-
-  /**
-   * Assign and release custody are disabled for the following reasons
-   * 1. User has selected AVAILABLE and IN_CUSTODY assets at same time
-   * 2. Some assets are CHECKED_OUT and cannot be released
-   */
-  const isAssignAndReleaseCustodyDisabled = [
-    someAssetsAvailable && someAssetsInCustody,
-    someAssetCheckedOut,
-    someAssetPartOfUnavailableKit,
-  ].some(Boolean);
+  const someAssetPartKit = selectedAssets.some((asset) => asset?.kit);
 
   function closeMenu() {
     setOpen(false);
@@ -161,43 +149,69 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            <DropdownMenuItem
-              className="py-1 lg:p-0"
-              disabled={someAssetsAvailable || someAssetCheckedOut || isLoading}
-            >
+            <DropdownMenuItem className="py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="release-custody"
                 label="Release custody"
                 onClick={closeMenu}
+                disabled={
+                  !allAssetsAreInCustody || someAssetPartKit
+                    ? {
+                        reason: someAssetPartKit
+                          ? "Some of the selected assets are part of a kit. If you want to change their custody, please update the kit instead."
+                          : "Some of the selected assets are not in custody.",
+                      }
+                    : isLoading
+                }
               />
             </DropdownMenuItem>
-            <DropdownMenuItem
-              className="border-b py-1 lg:p-0"
-              disabled={someAssetsInCustody || someAssetCheckedOut || isLoading}
-            >
+
+            <DropdownMenuItem className="border-b py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="assign-custody"
                 label="Assign custody"
                 onClick={closeMenu}
+                disabled={
+                  !allAssetsAreAvailable || someAssetPartKit
+                    ? {
+                        reason: someAssetPartKit
+                          ? "Some of the selected assets are part of a kit. If you want to change their custody, please update the kit instead."
+                          : "Some of the selected assets are not available.",
+                      }
+                    : isLoading
+                }
               />
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="py-1 lg:p-0" disabled={isLoading}>
-              <BulkUpdateDialogTrigger type="location" onClick={closeMenu} />
+            <DropdownMenuItem className="py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                type="location"
+                onClick={closeMenu}
+                disabled={isLoading}
+              />
             </DropdownMenuItem>
 
-            <DropdownMenuItem
-              className="border-b py-1 lg:p-0"
-              disabled={isLoading}
-            >
-              <BulkUpdateDialogTrigger type="category" onClick={closeMenu} />
+            <DropdownMenuItem className="border-b py-1 lg:p-0">
+              <BulkUpdateDialogTrigger
+                type="category"
+                onClick={closeMenu}
+                disabled={isLoading}
+              />
             </DropdownMenuItem>
 
-            <DropdownMenuItem className="py-1 lg:p-0" disabled={isLoading}>
+            <DropdownMenuItem className="py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="trash"
                 label="Delete"
                 onClick={closeMenu}
+                disabled={
+                  someAssetCheckedOut
+                    ? {
+                        reason:
+                          "Some of the selected kits are checked out. Please finish your booking first, before deleting them.",
+                      }
+                    : isLoading
+                }
               />
             </DropdownMenuItem>
 
@@ -212,53 +226,9 @@ function ConditionalDropdown() {
                 Close
               </Button>
             </DropdownMenuItem>
-            <DisabledMessages
-              someAssetCheckedOut={someAssetCheckedOut}
-              someAssetPartOfUnavailableKit={someAssetPartOfUnavailableKit}
-              isCheckInCheckOutDisabled={isAssignAndReleaseCustodyDisabled}
-            />
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
     </>
   );
-}
-
-/**
- * Renders the disabled message.
- * Only one message at a time can be rendered and they take priority in the order of the return statements
- * */
-function DisabledMessages({
-  someAssetCheckedOut,
-  someAssetPartOfUnavailableKit,
-  isCheckInCheckOutDisabled,
-}: {
-  someAssetCheckedOut: boolean;
-  someAssetPartOfUnavailableKit: boolean;
-  isCheckInCheckOutDisabled: boolean;
-}) {
-  if (someAssetCheckedOut) {
-    return (
-      <div className=" border-t p-2 text-left text-xs">
-        Some actions are disabled due to the assets being checked out.
-      </div>
-    );
-  }
-
-  if (isCheckInCheckOutDisabled) {
-    return (
-      <div className=" border-t p-2 text-left text-xs">
-        Some actions are disabled due to the selection of available and
-        unavailable assets at same time.
-      </div>
-    );
-  }
-
-  if (someAssetPartOfUnavailableKit) {
-    return (
-      <div className=" border-t p-2 text-left text-xs">
-        Some actions are disabled due to the assets being part of a kit.
-      </div>
-    );
-  }
 }

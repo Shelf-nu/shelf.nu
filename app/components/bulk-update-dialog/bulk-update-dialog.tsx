@@ -78,7 +78,7 @@ function BulkUpdateDialogTrigger({
         className={tw(
           "w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700",
           disabled
-            ? "pointer-events-none cursor-not-allowed opacity-30"
+            ? "pointer-events-none cursor-not-allowed opacity-30 hover:bg-white"
             : "cursor-pointer "
         )}
         width="full"
@@ -97,7 +97,7 @@ function BulkUpdateDialogTrigger({
 
   if (disabled) {
     return (
-      <HoverCard openDelay={100}>
+      <HoverCard openDelay={50} closeDelay={50}>
         <HoverCardTrigger
           className={tw("disabled inline-flex w-full cursor-not-allowed ")}
         >
@@ -105,8 +105,8 @@ function BulkUpdateDialogTrigger({
         </HoverCardTrigger>
         {reason && (
           <HoverCardContent side="left">
-            <h5 className="text-left">Action disabled</h5>
-            <p className="text-left">{reason}</p>
+            <h5 className="text-left text-[14px]">Action disabled</h5>
+            <p className="text-left text-[14px]">{reason}</p>
           </HoverCardContent>
         )}
       </HoverCard>
