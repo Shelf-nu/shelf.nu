@@ -41,9 +41,9 @@ export const sendEmail = async ({
       html: html || "", // html body
       attachments: [
         {
-          filename: "symbol-logo.png",
+          filename: "logo.png",
           path: logoPath
-            ? `${process.env.SERVER_URL}${config.logoPath?.symbol}`
+            ? `${process.env.SERVER_URL}${config.logoPath?.fullLogo}`
             : `${process.env.SERVER_URL}/static/images/shelf-symbol.png`,
           cid: "shelf-logo",
         },

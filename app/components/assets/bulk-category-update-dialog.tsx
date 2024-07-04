@@ -13,7 +13,11 @@ export default function BulkCategoryUpdateDialog() {
   const zo = useZorm("BulkCategoryUpdate", BulkCategoryUpdateSchema);
 
   return (
-    <BulkUpdateDialogContent ref={zo.ref} type="category">
+    <BulkUpdateDialogContent
+      ref={zo.ref}
+      type="category"
+      arrayFieldId="assetIds"
+    >
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
           <div className="relative z-50 mb-8">

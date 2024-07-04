@@ -7,8 +7,8 @@ import {
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { PartialCheckboxIcon } from "~/components/icons/library";
 import { Th } from "~/components/table";
-import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
+import type { IndexResponse } from "..";
 
 export default function BulkListHeader() {
   const { items } = useLoaderData<IndexResponse>();

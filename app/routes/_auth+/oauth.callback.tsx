@@ -6,11 +6,12 @@ import { useFetcher, useSearchParams } from "@remix-run/react";
 import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
+import { config } from "~/config/shelf.config";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   data,
   error,
@@ -22,7 +23,24 @@ import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
 import { stringToJSONSchema } from "~/utils/zod";
 
 export async function action({ request, context }: ActionFunctionArgs) {
+  const { disableSSO } = config;
   try {
+    /**
+     * Currently the only reason to use oauth/callback is for SSO reasons.
+     * Once we start adding social login providers, this will need to be adjusted
+     */
+    if (disableSSO) {
+      throw new ShelfError({
+        cause: null,
+        title: "SSO is disabled",
+        message:
+          "For more information, please contact your workspace administrator.",
+        label: "User onboarding",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
     const method = getActionMethod(request);
 
     switch (method) {

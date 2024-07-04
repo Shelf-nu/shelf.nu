@@ -5,9 +5,9 @@ import {
 } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { usePagination } from "~/hooks/use-pagination";
-import type { IndexResponse } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 import PerPageItemsSelect from "./per-page-items-select";
+import type { IndexResponse } from "..";
 
 export const Pagination = ({ className }: { className?: string }) => {
   const { modelName } = useLoaderData<IndexResponse>();
