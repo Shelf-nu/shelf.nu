@@ -133,10 +133,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    // if (totalPages !== 0 && page > totalPages) {
-    //   return redirect("/assets");
-    // }
-
     if (role === OrganizationRoles.SELF_SERVICE) {
       /**
        * For self service users we dont return the assets that are not available to book
