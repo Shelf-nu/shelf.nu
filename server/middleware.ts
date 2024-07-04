@@ -6,6 +6,7 @@ import {
   refreshAccessToken,
   validateSession,
 } from "~/modules/auth/service.server";
+import { ShelfError } from "~/utils/error";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
 
@@ -78,16 +79,24 @@ export function refreshSession() {
     if (!auth) {
       return next();
     }
-
+    let isValidSession = true
     if (!isExpiringSoon(auth.expiresAt)) {
-      const isValidSession =
+      isValidSession =
         process.env.REFRESH_APPROACH_VERSION === "v1" ||
-        (await validateSession(auth.accessToken));
+        (await validateSession(auth.refreshToken));
       if (isValidSession) {
         return next();
       }
     }
     try {
+      //if not true. then we can throw error
+      if(!isValidSession){
+        throw new ShelfError({
+          cause:null,
+          message:"Your session has expired. Please log in again.",
+          label:"Auth"
+        })
+      }
       session.set(authSessionKey, await refreshAccessToken(auth.refreshToken));
     } catch (cause) {
       session.flash(

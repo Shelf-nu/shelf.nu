@@ -299,19 +299,22 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
   }
 }
 
+interface Session {
+  id: string;
+  revoked: boolean;
+}
+
 export async function validateSession(token:string) {
-  try{
-    const { data, error } = await getSupabaseAdmin().auth.getUser(token);
-    return !!(data && data.user);
-  }catch(err){
-    Logger.error(new ShelfError({
-      cause: null,
-      message: "Session expired. Please log in again.",
-      label,
-    }));
-  }
-  return false;
-  
+    const result = await db.$queryRaw<Partial<Session>[]>`
+      SELECT id, revoked FROM auth.refresh_tokens 
+      WHERE token = ${token} 
+      AND revoked = false
+      LIMIT 1 
+    `;
+    if(result.length===0){//logging for debug
+      Logger.error("Refresh token is invalid or has been revoked");
+    }
+    return result.length > 0;  
 }
 
 export async function refreshAccessToken(
