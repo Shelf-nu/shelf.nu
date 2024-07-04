@@ -168,7 +168,11 @@ export const buildCustomFieldValue = (
   } catch (cause) {
     throw new ShelfError({
       cause: cause,
-      message: `Failed to parse custom field value for '${def.name}' with type '${def.type}'`,
+      title:
+        cause instanceof RangeError
+          ? cause?.message
+          : "Invalid custom field value",
+      message: `Failed to read/process custom field value for '${def.name}' with type '${def.type}'. The value we found is: '${value.raw}'. Make sure to format your dates using the format: mm/dd/yyyy`,
       label: "Custom fields",
     });
   }

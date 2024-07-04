@@ -5,7 +5,7 @@ import {
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
 import chardet from "chardet";
-import { parse } from "csv-parse";
+import { CsvError, parse } from "csv-parse";
 import iconv from "iconv-lite";
 import { fetchAssetsForExport } from "~/modules/asset/service.server";
 import { ShelfError } from "./error";
@@ -25,7 +25,6 @@ export const parseCsv = (csvData: ArrayBuffer) => {
     const parser = parse({
       encoding: "utf-8", // Set encoding to utf-8
       bom: true, // Handle BOM
-      delimiter: ";", // Set delimiter to ; as this allows for commas in the data
       quote: '"', // Set quote to " as this allows for commas in the data
       escape: '"', // Set escape to \ as this allows for commas in the data
       ltrim: true, // Trim whitespace from left side of cell
@@ -64,7 +63,10 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while parsing the CSV file.",
+      message:
+        cause instanceof CsvError
+          ? cause.message
+          : "Something went wrong while parsing the CSV file.",
       label: "CSV",
     });
   }
