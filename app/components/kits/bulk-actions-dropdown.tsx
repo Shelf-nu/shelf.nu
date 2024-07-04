@@ -69,6 +69,12 @@ function ConditionalDropdown() {
     (kit) => kit.status === "CHECKED_OUT"
   );
 
+  const someAssetsInsideKitsCheckedOutOrInCustody = selectedKits.some(
+    (kit) =>
+      kit.assets.some((asset) => asset.status === "CHECKED_OUT") ||
+      kit.assets.some((asset) => asset.status === "IN_CUSTODY")
+  );
+
   const disabled = selectedKitIds.length === 0;
 
   function closeMenu() {
@@ -163,9 +169,11 @@ function ConditionalDropdown() {
                 label="Assign custody"
                 onClick={closeMenu}
                 disabled={
-                  !allKitsAvailable
+                  !allKitsAvailable || someAssetsInsideKitsCheckedOutOrInCustody
                     ? {
-                        reason: "Some of the selected kits are not available",
+                        reason: someAssetsInsideKitsCheckedOutOrInCustody
+                          ? "Some of the asset(s) inside this kits are either checked out or in custody. You need to resolve that before you can assign custody."
+                          : "Some of the selected kits are not available",
                       }
                     : isLoading
                 }
