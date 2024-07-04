@@ -79,7 +79,7 @@ export function refreshSession() {
     if (!auth) {
       return next();
     }
-    let isValidSession = true
+    let isValidSession = true;
     if (!isExpiringSoon(auth.expiresAt)) {
       isValidSession =
         process.env.REFRESH_APPROACH_VERSION === "v1" ||
@@ -90,12 +90,12 @@ export function refreshSession() {
     }
     try {
       //if not true. then we can throw error
-      if(!isValidSession){
+      if (!isValidSession) {
         throw new ShelfError({
-          cause:null,
-          message:"Your session has expired. Please log in again.",
-          label:"Auth"
-        })
+          cause: null,
+          message: "Your session has expired. Please log in again.",
+          label: "Auth",
+        });
       }
       session.set(authSessionKey, await refreshAccessToken(auth.refreshToken));
     } catch (cause) {

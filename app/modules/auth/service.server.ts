@@ -304,17 +304,18 @@ interface Session {
   revoked: boolean;
 }
 
-export async function validateSession(token:string) {
-    const result = await db.$queryRaw<Partial<Session>[]>`
+export async function validateSession(token: string) {
+  const result = await db.$queryRaw<Partial<Session>[]>`
       SELECT id, revoked FROM auth.refresh_tokens 
       WHERE token = ${token} 
       AND revoked = false
       LIMIT 1 
     `;
-    if(result.length===0){//logging for debug
-      Logger.error("Refresh token is invalid or has been revoked");
-    }
-    return result.length > 0;  
+  if (result.length === 0) {
+    //logging for debug
+    Logger.error("Refresh token is invalid or has been revoked");
+  }
+  return result.length > 0;
 }
 
 export async function refreshAccessToken(
