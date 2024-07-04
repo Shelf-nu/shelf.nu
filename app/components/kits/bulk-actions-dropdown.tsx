@@ -59,18 +59,16 @@ function ConditionalDropdown() {
 
   const selectedKits = items.filter((item) => selectedKitIds.includes(item.id));
 
+  const allKitsInCustody = selectedKits.every(
+    (kit) => kit.status === "IN_CUSTODY"
+  );
+
+  const allKitsAvailable = selectedKits.every(
+    (kit) => kit.status === "AVAILABLE"
+  );
+
   const someKitsCheckedOut = selectedKits.some(
     (kit) => kit.status === "CHECKED_OUT"
-  );
-
-  const someKitHaveCustody = selectedKits.some((kit) => !!kit.custody);
-
-  const someAssetsNotAvailable = selectedKits.some((kit) =>
-    kit.assets.some((asset) => asset.status !== "AVAILABLE")
-  );
-
-  const someKitsAvailable = selectedKits.some(
-    (kit) => kit.status === "AVAILABLE"
   );
 
   const disabled = selectedKitIds.length === 0;
@@ -146,25 +144,33 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            <DropdownMenuItem
-              className="py-1 lg:p-0"
-              disabled={someKitsAvailable || isLoading}
-            >
+            <DropdownMenuItem className="py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="release-custody"
                 label="Release custody"
                 onClick={closeMenu}
+                disabled={
+                  !allKitsInCustody
+                    ? {
+                        reason: "Some of the selected kits are not in custody",
+                      }
+                    : isLoading
+                }
               />
             </DropdownMenuItem>
 
-            <DropdownMenuItem
-              className="border-b py-1 lg:p-0"
-              disabled={someKitsCheckedOut || someKitHaveCustody || isLoading}
-            >
+            <DropdownMenuItem className="border-b py-1 lg:p-0">
               <BulkUpdateDialogTrigger
                 type="assign-custody"
                 label="Assign custody"
                 onClick={closeMenu}
+                disabled={
+                  !allKitsAvailable
+                    ? {
+                        reason: "Some of the selected kits are not available",
+                      }
+                    : isLoading
+                }
               />
             </DropdownMenuItem>
 
@@ -173,12 +179,19 @@ function ConditionalDropdown() {
               onSelect={(e) => {
                 e.preventDefault();
               }}
-              disabled={someKitsCheckedOut || someAssetsNotAvailable}
             >
               <BulkUpdateDialogTrigger
                 type="trash"
                 label="Delete"
                 onClick={closeMenu}
+                disabled={
+                  someKitsCheckedOut
+                    ? {
+                        reason:
+                          "Some of the selected kits are checked out. Please finish your booking first, before deleting them.",
+                      }
+                    : isLoading
+                }
               />
             </DropdownMenuItem>
 
@@ -193,11 +206,10 @@ function ConditionalDropdown() {
                 Close
               </Button>
             </DropdownMenuItem>
-            {someKitsCheckedOut || someAssetsNotAvailable ? (
-              <div className=" border-t p-2 text-left text-xs">
-                Some actions are disabled due to asset(s) not being Available.
-              </div>
-            ) : null}
+            {/* <DisabledMessages
+              someKitsCheckedOut={someKitsCheckedOut}
+              someAssetsNotAvailable={someAssetsNotAvailable}
+            /> */}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

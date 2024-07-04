@@ -56,7 +56,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         extraInclude: {
           assets: {
-            select: { id: true, availableToBook: true },
+            select: { id: true, availableToBook: true, status: true },
           },
         },
       }),
