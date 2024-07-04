@@ -1,8 +1,8 @@
-import type { Prisma } from "@prisma/client";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import type { loader } from "~/routes/_layout+/assets._index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
@@ -42,9 +42,7 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
-  const { items } = useLoaderData<{
-    items: Prisma.AssetGetPayload<{ include: { kit: true; custody: true } }>[];
-  }>();
+  const { items } = useLoaderData<typeof loader>();
 
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);

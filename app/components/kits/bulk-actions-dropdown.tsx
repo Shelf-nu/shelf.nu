@@ -1,8 +1,8 @@
-import type { Prisma } from "@prisma/client";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import type { loader } from "~/routes/_layout+/kits._index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
@@ -40,9 +40,7 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
-  const { items } = useLoaderData<{
-    items: Prisma.KitGetPayload<{ include: { custody: true; assets: true } }>[];
-  }>();
+  const { items } = useLoaderData<typeof loader>();
 
   const {
     ref: dropdownRef,
@@ -206,10 +204,6 @@ function ConditionalDropdown() {
                 Close
               </Button>
             </DropdownMenuItem>
-            {/* <DisabledMessages
-              someKitsCheckedOut={someKitsCheckedOut}
-              someAssetsNotAvailable={someAssetsNotAvailable}
-            /> */}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
