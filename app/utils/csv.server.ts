@@ -12,6 +12,18 @@ import { ShelfError } from "./error";
 
 export type CSVData = [string[], ...string[][]] | [];
 
+/** Guesses the delimiter of csv based on the most common delimiter found in the file */
+function guessDelimiters(csv: string, delimiters: string[]) {
+  const delimiterCounts = delimiters.map(
+    (delimiter) => csv.split(delimiter).length
+  );
+
+  const max = Math.max(...delimiterCounts);
+
+  const delimiter = delimiters[delimiterCounts.indexOf(max)];
+  return delimiter;
+}
+
 /** Parses csv Data into an array with type {@link CSVData} */
 export const parseCsv = (csvData: ArrayBuffer) => {
   const results = [] as CSVData;
@@ -20,10 +32,12 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 
   /** Convert the file to utf-8 from the detected encoding */
   const csv = iconv.decode(Buffer.from(csvData), encoding || "utf-8");
+  const delimiter = guessDelimiters(csv, [",", ";"]);
 
   return new Promise((resolve, reject) => {
     const parser = parse({
       encoding: "utf-8", // Set encoding to utf-8
+      delimiter, // Set delimiter
       bom: true, // Handle BOM
       quote: '"', // Set quote to " as this allows for commas in the data
       escape: '"', // Set escape to \ as this allows for commas in the data
@@ -57,6 +71,7 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
     );
 
     const csvFile = formData.get("file") as File;
+
     const csvData = await csvFile.arrayBuffer();
 
     return (await parseCsv(csvData)) as CSVData;

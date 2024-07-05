@@ -57,7 +57,8 @@ export const ImportContent = () => (
     <h4>Base rules and limitations</h4>
     <ul className="list-inside list-disc">
       <li>
-        You must use <b>comma</b> as a delimiter in your csv file
+        You must use <b>, (comma)</b> or <b>; (semicolon)</b> as a delimiter in
+        your csv file
       </li>
       <li>Each row represents a new asset that will be created</li>
       <li>
