@@ -76,10 +76,7 @@ function BulkUpdateDialogTrigger({
       <Button
         variant="link"
         className={tw(
-          "w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700",
-          disabled
-            ? "pointer-events-none cursor-not-allowed opacity-30 hover:bg-white"
-            : "cursor-pointer "
+          "w-full justify-start px-4  py-3 text-gray-700 hover:text-gray-700"
         )}
         width="full"
         onClick={() => {

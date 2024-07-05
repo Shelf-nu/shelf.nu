@@ -64,8 +64,7 @@ export function TeamMembersActionsDropdown({
               role: "link",
               variant: "link",
               className: tw(
-                "!hover:text-gray-700 justify-start  p-4 !text-gray-700",
-                isPersonalOrg ? "opacity-70" : ""
+                "!hover:text-gray-700 justify-start  p-4 !text-gray-700"
               ),
               width: "full",
               disabled: isPersonalOrg,

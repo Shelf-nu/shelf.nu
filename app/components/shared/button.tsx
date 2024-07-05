@@ -50,7 +50,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       ),
       secondary: tw(
         `border-gray-300 bg-white text-gray-700 hover:bg-gray-50`,
-        disabled ? "border-gray-200 text-gray-300" : ""
+        disabled ? "text-gray-500" : ""
       ),
       tertiary: tw(
         `border-b border-primary/10 pb-1 leading-none`,
@@ -73,7 +73,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     };
 
     const disabledStyles = disabled
-      ? "pointer-events-none opacity-30"
+      ? "pointer-events-none opacity-50 cursor-not-allowed"
       : undefined;
     const attachedStyles = attachToInput
       ? tw(" rounded-l-none border-l-0")
