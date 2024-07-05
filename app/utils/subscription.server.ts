@@ -55,7 +55,8 @@ export async function assertUserCanExportAssets({
     throw new ShelfError({
       cause: null,
       title: "Not allowed",
-      message: "Your user cannot export assets",
+      message:
+        "Your user cannot export assets. Please update your subscription to unlock this feature.",
       additionalData: { organizationId },
       label,
     });
