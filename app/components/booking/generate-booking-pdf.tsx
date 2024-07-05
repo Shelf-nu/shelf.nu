@@ -44,7 +44,7 @@ export const GenerateBookingPdf = ({
     <>
       <Button
         variant="link"
-        className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700 md:block"
+        className="hidden justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 md:block"
         width="full"
         name="generate pdf"
         onClick={handleOpenDialog}
@@ -101,7 +101,7 @@ export const GenerateBookingPdf = ({
       {/* Only for mobile */}
       <Button
         variant="link"
-        className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-50 md:hidden"
+        className="block justify-start rounded-sm px-2 py-1.5 text-left text-sm font-medium text-gray-700 outline-none hover:bg-slate-100 hover:text-gray-700  md:hidden"
         width="full"
         name="generate pdf"
         disabled={!totalAssets}
