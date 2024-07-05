@@ -105,6 +105,33 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
   }
 }
 
+export async function getAssetByPropertyId<T extends Prisma.AssetInclude | undefined>({
+  propertyId,
+  organizationId,
+  include,
+}: Pick<Asset, "propertyId"> & {
+  organizationId: Asset["organizationId"];
+  include?: T;
+}): Promise<AssetWithInclude<T>> {
+  try {
+    const asset = await db.asset.findFirstOrThrow({
+      where: { propertyId, organizationId },
+      include: { ...include },
+    });
+
+    return asset as AssetWithInclude<T>;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      title: "Asset not found",
+      message:
+        "The asset you are trying to access does not exist or you do not have permission to access it.",
+      additionalData: { propertyId, organizationId },
+      label,
+    });
+  }
+}
+
 /** This is used by both  getAssetsFromView & getAssets
  * Those are the statuses that are considered unavailable for booking assets
  */
@@ -666,9 +693,10 @@ export async function createAsset({
   customFieldsValues,
   organizationId,
   valuation,
+  propertyId,
 }: Pick<
   Asset,
-  "description" | "title" | "categoryId" | "userId" | "valuation"
+  "description" | "title" | "categoryId" | "userId" | "valuation" | "propertyId"
 > & {
   kitId?: Kit["id"];
   qrId?: Qr["id"];
@@ -723,6 +751,7 @@ export async function createAsset({
       qrCodes,
       valuation,
       organization,
+      propertyId,
     };
 
     /** If a categoryId is passed, link the category to the asset. */
@@ -832,6 +861,7 @@ export async function updateAsset({
   currentLocationId,
   userId,
   valuation,
+  propertyId,
   customFieldsValues: customFieldsValuesFromForm,
 }: UpdateAssetPayload) {
   try {
@@ -842,6 +872,7 @@ export async function updateAsset({
       valuation,
       mainImage,
       mainImageExpiration,
+      propertyId,
     };
 
     /** If uncategorized is passed, disconnect the category */
@@ -1311,6 +1342,7 @@ export async function duplicateAsset({
       locationId: asset.locationId ?? undefined,
       tags: { set: asset.tags.map((tag) => ({ id: tag.id })) },
       valuation: asset.valuation,
+      propertyId: null, // Property ID's are unique and cannot be duplicated.
     };
 
     const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
@@ -1848,6 +1880,7 @@ export async function createAssetsFromContentImport({
               }
             : undefined,
         valuation: asset.valuation ? +asset.valuation : null,
+        propertyId: asset.propertyId,
         customFieldsValues,
       });
     }
@@ -1899,6 +1932,7 @@ export async function createAssetsFromBackupImport({
               ],
             },
             valuation: asset.valuation ? +asset.valuation : null,
+            propertyId: asset.propertyId,
           },
         };
 
