@@ -182,7 +182,7 @@ const TagItem = ({
   item: Pick<Tag, "id" | "description" | "name">;
 }) => (
   <>
-    <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
+    <Td className="w-1/4 !pl-0 text-left" title={`Tag: ${item.name}`}>
       <TagBadge>{item.name}</TagBadge>
     </Td>
     <Td className="w-3/4 text-gray-500" title="Description">
