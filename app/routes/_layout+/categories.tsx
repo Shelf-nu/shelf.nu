@@ -7,6 +7,7 @@ import type {
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
 import { z } from "zod";
+import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
 import { DeleteCategory } from "~/components/category/delete-category";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
@@ -161,6 +162,7 @@ export default function CategoriesPage() {
         <Filters />
         <Outlet />
         <List
+          bulkActions={<BulkActionsDropdown />}
           ItemComponent={CategoryItem}
           headerChildren={
             <>
@@ -185,7 +187,7 @@ const CategoryItem = ({
   };
 }) => (
   <>
-    <Td title={`Category: ${item.name}`} className="w-1/4 ">
+    <Td title={`Category: ${item.name}`} className="w-1/4">
       <Badge color={item.color} withDot={false}>
         {item.name}
       </Badge>
