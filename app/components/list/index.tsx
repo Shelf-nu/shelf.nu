@@ -195,7 +195,9 @@ export const List = ({
             <div>{bulkActions}</div>
           </div>
 
-          <Table>
+          <Table
+            className={tw("list", bulkActions && "list-with-bulk-actions")}
+          >
             <ListHeader
               bulkActions={bulkActions}
               children={headerChildren}
