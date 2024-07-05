@@ -5,6 +5,7 @@ import {
   type Prisma,
   type Qr,
   type User,
+  type Kit,
 } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import QRCode from "qrcode-generator";
@@ -34,6 +35,21 @@ export async function getQrByAssetId({ assetId }: Pick<Qr, "assetId">) {
     });
   }
 }
+export async function getQrByKitId({ kitId }: Pick<Qr, "kitId">) {
+  try {
+    return await db.qr.findFirst({
+      where: { kitId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while fetching the QR. Please try again or contact support.",
+      additionalData: { kitId },
+      label,
+    });
+  }
+}
 
 export async function getQr(id: Qr["id"]) {
   try {
@@ -56,8 +72,12 @@ export async function getQr(id: Qr["id"]) {
 export async function createQr({
   userId,
   assetId,
+  kitId,
   organizationId,
-}: Pick<Qr, "userId" | "organizationId" | "assetId">) {
+}: Pick<Qr, "userId" | "organizationId"> & {
+  assetId?: Asset["id"];
+  kitId?: Kit["id"];
+}) {
   const data = {
     ...(userId && {
       user: {
@@ -70,6 +90,13 @@ export async function createQr({
       asset: {
         connect: {
           id: assetId,
+        },
+      },
+    }),
+    ...(kitId && {
+      kit: {
+        connect: {
+          id: kitId,
         },
       },
     }),

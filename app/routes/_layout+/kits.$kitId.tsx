@@ -40,6 +40,8 @@ import {
   getKit,
   getKitCurrentBooking,
 } from "~/modules/kit/service.server";
+
+import { generateQrObj } from "~/modules/qr/utils.server";
 import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -142,6 +144,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       };
     }
 
+    const qrObj = await generateQrObj({
+      kitId,
+      userId,
+      organizationId,
+    });
+
     const currentBooking = getKitCurrentBooking(request, {
       id: kit.id,
       assets: kit.assets,
@@ -166,6 +174,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         ...assets,
         modelName,
+        qrObj,
       })
     );
   } catch (cause) {
