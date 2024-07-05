@@ -238,3 +238,24 @@ export async function updateTag({
     });
   }
 }
+
+export async function bulkDeleteTags({
+  tagIds,
+  organizationId,
+}: {
+  tagIds: Tag["id"][];
+  organizationId: Organization["id"];
+}) {
+  try {
+    return await db.tag.deleteMany({
+      where: { id: { in: tagIds }, organizationId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting tags.",
+      additionalData: { tagIds, organizationId },
+      label,
+    });
+  }
+}
