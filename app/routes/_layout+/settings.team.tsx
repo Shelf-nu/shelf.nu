@@ -24,7 +24,10 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       action: PermissionAction.read,
     });
     return json(
-      data({ isPersonalOrg: currentOrganization.type === "PERSONAL" })
+      data({
+        isPersonalOrg: currentOrganization.type === "PERSONAL",
+        orgName: currentOrganization.name,
+      })
     );
   } catch (cause) {
     const reason = makeShelfError(cause);
@@ -39,7 +42,7 @@ export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
 };
 
 export default function TeamSettings() {
-  const { isPersonalOrg } = useLoaderData<typeof loader>();
+  const { isPersonalOrg, orgName } = useLoaderData<typeof loader>();
 
   const TABS: Item[] = [
     ...(!isPersonalOrg ? [{ to: "users", content: "Users" }] : []),
@@ -48,7 +51,9 @@ export default function TeamSettings() {
 
   return (
     <div className="h-full rounded border bg-white p-4 md:px-10 md:py-8">
-      <h1 className="text-[18px] font-semibold">Shelf’s team</h1>
+      <h1 className="text-[18px] font-semibold">
+        {isPersonalOrg ? "Team" : `${orgName}’s team`}
+      </h1>
       <p className="mb-6 text-sm text-gray-600">
         Manage your existing team and give team members custody to certain
         assets.
