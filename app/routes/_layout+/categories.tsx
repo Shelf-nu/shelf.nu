@@ -187,7 +187,7 @@ const CategoryItem = ({
   };
 }) => (
   <>
-    <Td title={`Category: ${item.name}`} className="w-1/4 ">
+    <Td title={`Category: ${item.name}`} className="w-1/4 !pl-0">
       <Badge color={item.color} withDot={false}>
         {item.name}
       </Badge>
