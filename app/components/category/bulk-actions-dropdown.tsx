@@ -1,8 +1,6 @@
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
-import { selectedBulkItemsAtom } from "~/atoms/list";
-import { type loader } from "~/routes/_layout+/categories";
+import { selectedBulkItemsCountAtom } from "~/atoms/list";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkDeleteDialog from "./bulk-delete-dialog";
@@ -37,15 +35,9 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
-  const { items } = useLoaderData<typeof loader>();
+  const selectedCategoryCount = useAtomValue(selectedBulkItemsCountAtom);
 
-  const selectedCategoryIds = useAtomValue(selectedBulkItemsAtom);
-
-  const selectedCategories = items.filter((item) =>
-    selectedCategoryIds.includes(item.id)
-  );
-
-  const disabled = selectedCategories.length === 0;
+  const disabled = selectedCategoryCount === 0;
 
   const {
     ref: dropdownRef,
