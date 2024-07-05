@@ -1,7 +1,9 @@
 import type { Prisma, User, Location, Organization } from "@prisma/client";
+import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Location";
@@ -339,6 +341,53 @@ export async function createLocationsIfNotExists({
       label,
       /** No need to capture those. They are mostly related to malformed CSV data */
       shouldBeCaptured: false,
+    });
+  }
+}
+
+export async function bulkDeleteLocations({
+  locationIds,
+  organizationId,
+}: {
+  locationIds: Location["id"][];
+  organizationId: Organization["id"];
+}) {
+  try {
+    /** We have to delete the images of locations if any */
+    const locations = await db.location.findMany({
+      where: locationIds.includes(ALL_SELECTED_KEY)
+        ? { organizationId }
+        : { id: { in: locationIds }, organizationId },
+      select: { id: true, imageId: true },
+    });
+
+    return await db.$transaction(async (tx) => {
+      /** Deleting all locations */
+      await tx.location.deleteMany({
+        where: { id: { in: locations.map((location) => location.id) } },
+      });
+
+      /** Deleting images of locations */
+      const locationWithImages = locations.filter(
+        (location) => !!location.imageId
+      );
+      await db.image.deleteMany({
+        where: {
+          id: {
+            in: locationWithImages.map((location) => {
+              invariant(location.imageId, "Image not found to delete");
+              return location.imageId;
+            }),
+          },
+        },
+      });
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting locations.",
+      additionalData: { locationIds, organizationId },
+      label,
     });
   }
 }

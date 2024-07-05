@@ -72,7 +72,9 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       full: "w-full max-w-full",
     };
 
-    const disabledStyles = disabled ? "pointer-events-none " : undefined;
+    const disabledStyles = disabled
+      ? "pointer-events-none opacity-30"
+      : undefined;
     const attachedStyles = attachToInput
       ? tw(" rounded-l-none border-l-0")
       : undefined;
