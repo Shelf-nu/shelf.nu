@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Category";
@@ -235,7 +236,9 @@ export async function bulkDeleteCategories({
 }) {
   try {
     return await db.category.deleteMany({
-      where: { id: { in: categoryIds }, organizationId },
+      where: categoryIds.includes(ALL_SELECTED_KEY)
+        ? { organizationId }
+        : { id: { in: categoryIds }, organizationId },
     });
   } catch (cause) {
     throw new ShelfError({
