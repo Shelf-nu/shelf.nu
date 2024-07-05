@@ -35,8 +35,7 @@ export const Pagination = ({ className }: { className?: string }) => {
           onClick={() => goToPage(1)}
           disabled={prevDisabled}
           className={tw(
-            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
-            prevDisabled && "opacity-50"
+            "rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent"
           )}
         >
           <ChevronLeftDoubleIcon />
@@ -48,8 +47,7 @@ export const Pagination = ({ className }: { className?: string }) => {
           onClick={() => goToPage(page - 1)}
           disabled={prevDisabled}
           className={tw(
-            "h-9 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
-            prevDisabled && "opacity-50"
+            "h-9 w-10 rotate-180 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent"
           )}
         >
           <ChevronRight />
@@ -72,8 +70,7 @@ export const Pagination = ({ className }: { className?: string }) => {
           onClick={() => goToPage(page + 1)}
           disabled={nextDisabled}
           className={tw(
-            "h-9 w-10 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
-            nextDisabled && "opacity-50"
+            "h-9 w-10 rounded-none border-y-0 border-l border-r-0 border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent"
           )}
         >
           <ChevronRight />
@@ -85,8 +82,7 @@ export const Pagination = ({ className }: { className?: string }) => {
           onClick={() => goToPage(totalPages)}
           disabled={nextDisabled}
           className={tw(
-            "rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent",
-            nextDisabled && "opacity-50"
+            "rotate-180 rounded-none border-y-0 border-l-0 border-r border-gray-300 bg-transparent px-3 py-[9px] hover:bg-transparent"
           )}
         >
           <ChevronLeftDoubleIcon />

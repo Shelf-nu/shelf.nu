@@ -29,8 +29,7 @@ export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
           data-test-id="deleteBookingButton"
           icon="trash"
           className={tw(
-            "justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700",
-            isArchived || isCompleted ? "pointer-events-none opacity-50" : ""
+            "justify-start rounded-sm px-2 py-1.5 text-sm font-medium text-gray-700 outline-none   hover:bg-slate-100 hover:text-gray-700"
           )}
           title={
             isArchived || isCompleted
@@ -38,6 +37,7 @@ export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
               : undefined
           }
           width="full"
+          disabled={isArchived || isCompleted}
         >
           Remove
         </Button>
