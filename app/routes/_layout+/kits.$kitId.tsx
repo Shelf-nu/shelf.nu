@@ -119,6 +119,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               },
             },
           },
+          qrCodes: true,
         },
       }),
       getAssetsForKits({
@@ -289,7 +290,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function KitDetails() {
   const { kit, currentBooking } = useLoaderData<typeof loader>();
-
   const isSelfService = useUserIsSelfService();
 
   /**

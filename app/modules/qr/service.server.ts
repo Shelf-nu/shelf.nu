@@ -1,10 +1,10 @@
-import type {
-  Asset,
-  Organization,
-  PrintBatch,
-  Prisma,
-  Qr,
-  User,
+import {
+  type Asset,
+  type Organization,
+  type PrintBatch,
+  type Prisma,
+  type Qr,
+  type User,
 } from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import QRCode from "qrcode-generator";

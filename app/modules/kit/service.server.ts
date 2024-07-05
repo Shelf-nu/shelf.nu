@@ -3,10 +3,16 @@ import type {
   Kit,
   Organization,
   Prisma,
+  Qr,
   TeamMember,
   User,
 } from "@prisma/client";
-import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
+import {
+  AssetStatus,
+  BookingStatus,
+  ErrorCorrection,
+  KitStatus,
+} from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
@@ -30,6 +36,7 @@ import { getKitsWhereInput } from "./utils.server";
 // eslint-disable-next-line import/no-cycle
 import { createNote } from "../asset/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import { getQr } from "../qr/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -39,15 +46,60 @@ export async function createKit({
   description,
   createdById,
   organizationId,
-}: Pick<Kit, "name" | "description" | "createdById" | "organizationId">) {
+  qrId,
+}: Pick<Kit, "name" | "description" | "createdById" | "organizationId"> & {
+  qrId?: Qr["id"];
+}) {
   try {
-    return await db.kit.create({
-      data: {
-        name,
-        description,
-        createdBy: { connect: { id: createdById } },
-        organization: { connect: { id: organizationId } },
+    /** User connection data */
+    const user = {
+      connect: {
+        id: createdById,
       },
+    };
+
+    const organization = {
+      connect: {
+        id: organizationId as string,
+      },
+    };
+
+    /**
+     * If a qr code is passed, link to that QR
+     * Otherwise, create a new one
+     * Here we also need to double check:
+     * 1. If the qr code exists
+     * 2. If the qr code belongs to the current organization
+     * 3. If the qr code is not linked to an asset
+     */
+    const qr = qrId ? await getQr(qrId) : null;
+    const qrCodes =
+      qr &&
+      qr.organizationId === organizationId &&
+      qr.assetId === null &&
+      qr.kitId === null
+        ? { connect: { id: qrId } }
+        : {
+            create: [
+              {
+                version: 0,
+                errorCorrection: ErrorCorrection["L"],
+                user,
+                organization,
+              },
+            ],
+          };
+
+    const data = {
+      name,
+      description,
+      createdBy: user,
+      organization,
+      qrCodes,
+    };
+
+    return await db.kit.create({
+      data,
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Kit", {
