@@ -8,6 +8,7 @@ import type {
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Tag";
@@ -248,7 +249,9 @@ export async function bulkDeleteTags({
 }) {
   try {
     return await db.tag.deleteMany({
-      where: { id: { in: tagIds }, organizationId },
+      where: tagIds.includes(ALL_SELECTED_KEY)
+        ? { organizationId }
+        : { id: { in: tagIds }, organizationId },
     });
   } catch (cause) {
     throw new ShelfError({
