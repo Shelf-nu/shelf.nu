@@ -8,6 +8,7 @@ import type {
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Tag";
@@ -235,6 +236,29 @@ export async function updateTag({
         id,
         organizationId,
       },
+    });
+  }
+}
+
+export async function bulkDeleteTags({
+  tagIds,
+  organizationId,
+}: {
+  tagIds: Tag["id"][];
+  organizationId: Organization["id"];
+}) {
+  try {
+    return await db.tag.deleteMany({
+      where: tagIds.includes(ALL_SELECTED_KEY)
+        ? { organizationId }
+        : { id: { in: tagIds }, organizationId },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting tags.",
+      additionalData: { tagIds, organizationId },
+      label,
     });
   }
 }

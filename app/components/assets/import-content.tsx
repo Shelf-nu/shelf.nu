@@ -21,7 +21,7 @@ import { WarningBox } from "../shared/warning-box";
 
 export const ImportBackup = () => (
   <>
-    <h3>Import backup from different workspace</h3>
+    <h2>Import backup from different workspace</h2>
     <p>
       Currently this feature is provided as a service to shelf.nu users. If you
       are interested{" "}
@@ -54,18 +54,18 @@ export const ImportContent = () => (
         get corrupted data.
       </>
     </WarningBox>
-    <p>Some important details about how this works:</p>
-    <br />
+    <h4>Base rules and limitations</h4>
     <ul className="list-inside list-disc">
       <li>
-        You must use <b>;</b> as a delimiter in your csv file
+        You must use <b>, (comma)</b> or <b>; (semicolon)</b> as a delimiter in
+        your csv file
       </li>
       <li>Each row represents a new asset that will be created</li>
       <li>
-        Columns such as <b>category, location & custodian</b> represent just the
-        name of the related entry. As an example, if you put the category{" "}
-        <b>Laptops</b> we will look for an existing category with that name and
-        link the asset to it. If it doesn't exist, we will create it.
+        Columns such as <b>kit, category, location & custodian</b> represent
+        just the name of the related entry. As an example, if you put the
+        category <b>Laptops</b> we will look for an existing category with that
+        name and link the asset to it. If it doesn't exist, we will create it.
       </li>
       <li>
         Columns such as <b>tags</b> represent the names of a collection of
@@ -76,28 +76,45 @@ export const ImportContent = () => (
         The content you are importing will <b>NOT</b> be merged with existing
         assets. A new asset will be created for each valid row in the sheet.
       </li>
+    </ul>
+
+    <h4 className="mt-2">Importing Custom fields</h4>
+    <div>
+      To import custom fields, prefix your column heading with <b>"cf: "</b>,{" "}
+      <br />
+      add the type followed by a coma from one of the allowed types:
+      <ul className="list-inside list-disc pl-4">
+        <li>
+          <b>text</b> - default if no type is passed
+        </li>
+        <li>
+          <b>boolean</b> - choose a yes or no value
+        </li>
+        <li>
+          <b>option</b> - you dont have to have the options created, we create
+          option(both the field and the option) while importing if the option
+          doesnt exisit.
+        </li>
+        <li>
+          <b>multiline text</b>
+        </li>
+        <li>
+          <b>date</b> - must be in <b>mm/dd/yyyy</b> format
+        </li>
+      </ul>
+      If no type is mentioned <b>"text"</b> is used as default type.
+    </div>
+    <div>
+      This is how a sample header looks like for custom field with name{" "}
+      <b>"purchase date"</b> and type <b>"date"</b> :{" "}
+      <b>"cf:purchase date, type:date"</b>
+    </div>
+
+    <h4 className="mt-2">Extra considerations</h4>
+    <ul className="list-inside list-disc">
       <li>
-        To import custom fields, prefix your column heading with <b>"cf: "</b>,
-        add the type followed by a coma from one of the allowed types(
-        <b>"text", "boolean", "option", "multiline text", "date"</b>).
-      </li>
-      <li>
-        this is how a sample header looks like for custom type with name{" "}
-        <b>"purchase date"</b> and type <b>"date"</b> :{" "}
-        <b>"cf:purchase date, type:date"</b>
-      </li>
-      <li>if no type is mentioned "text" is used as default type.</li>
-      <li>
-        date must be in <b>mm/dd/yyyy</b> format.
-      </li>
-      <li>
-        in case of options, you dont have to have the options created, we create
-        option(both the field and the option) while importing if the option
-        doesnt exisit.
-      </li>
-      <li>
-        <b>IMPORTANT:</b> The first row of the sheet will be ignored. Use it to
-        describe the columns.
+        The first row of the sheet will be ignored. Use it to describe the
+        columns as in the example sheet.
       </li>
       <li>
         If any of the data in the file is invalid, the whole import will fail
@@ -181,8 +198,9 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
           </AlertDialogHeader>
           {data?.error ? (
             <div>
-              <b className="text-red-500">{data.error.message}</b>
-              <p>
+              <h5 className="text-red-500">{data.error.title}</h5>
+              <p className="text-red-500">{data.error.message}</p>
+              <p className="mt-2">
                 Please fix your CSV file and try again. If the issue persists,
                 don't hesitate to get in touch with us.
               </p>

@@ -66,6 +66,9 @@ import {
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
 } from "./utils.server";
+// @TODO: Fix the circular dependency
+// eslint-disable-next-line import/no-cycle
+import { createKitsIfNotExists } from "../kit/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
@@ -654,6 +657,7 @@ export async function createAsset({
   title,
   description,
   userId,
+  kitId,
   categoryId,
   locationId,
   qrId,
@@ -666,6 +670,7 @@ export async function createAsset({
   Asset,
   "description" | "title" | "categoryId" | "userId" | "valuation"
 > & {
+  kitId?: Kit["id"];
   qrId?: Qr["id"];
   locationId?: Location["id"];
   tags?: { set: { id: string }[] };
@@ -719,6 +724,17 @@ export async function createAsset({
       valuation,
       organization,
     };
+
+    /** If a categoryId is passed, link the category to the asset. */
+    if (kitId && kitId !== "uncategorized") {
+      Object.assign(data, {
+        kit: {
+          connect: {
+            id: kitId,
+          },
+        },
+      });
+    }
 
     /** If a categoryId is passed, link the category to the asset. */
     if (categoryId && categoryId !== "uncategorized") {
@@ -1761,6 +1777,12 @@ export async function createAssetsFromContentImport({
   organizationId: Organization["id"];
 }) {
   try {
+    const kits = await createKitsIfNotExists({
+      data,
+      userId,
+      organizationId,
+    });
+
     const categories = await createCategoriesIfNotExists({
       data,
       userId,
@@ -1813,6 +1835,7 @@ export async function createAssetsFromContentImport({
         title: asset.title,
         description: asset.description || "",
         userId,
+        kitId: asset.kit ? kits?.[asset.kit] : undefined,
         categoryId: asset.category ? categories?.[asset.category] : null,
         locationId: asset.location ? locations?.[asset.location] : undefined,
         custodian: asset.custodian ? teamMembers?.[asset.custodian] : undefined,

@@ -63,8 +63,7 @@ export const DeleteBooking = ({
             <Form method="delete">
               <Button
                 className={tw(
-                  "border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800",
-                  disabled ? "pointer-events-none opacity-50" : ""
+                  "border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
                 )}
                 type="submit"
                 data-test-id="confirmDeleteBookingButton"

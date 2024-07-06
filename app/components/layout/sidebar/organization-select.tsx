@@ -32,7 +32,7 @@ export const OrganizationSelect = ({
             <SelectItem
               value={org.id}
               key={org.id}
-              className="flex cursor-pointer select-none items-center justify-between gap-4  py-2 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+              className="flex cursor-pointer select-none items-center justify-between gap-4  py-2 outline-none  hover:bg-gray-100 focus:bg-gray-100"
             >
               <div className="flex items-center gap-2">
                 {org.type === "PERSONAL" ? (

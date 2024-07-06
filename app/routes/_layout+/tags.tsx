@@ -16,6 +16,7 @@ import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
+import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
 import { DeleteTag } from "~/components/tag/delete-tag";
 
 import { deleteTag, getTags } from "~/modules/tag/service.server";
@@ -161,6 +162,7 @@ export default function CategoriesPage() {
         <Filters />
         <Outlet />
         <List
+          bulkActions={<BulkActionsDropdown />}
           ItemComponent={TagItem}
           headerChildren={
             <>
