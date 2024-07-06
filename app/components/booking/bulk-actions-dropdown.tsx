@@ -1,3 +1,4 @@
+import { BookingStatus } from "@prisma/client";
 import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -8,6 +9,7 @@ import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkArchiveDialog from "./bulk-archive-dialog";
+import BulkCancelDialog from "./bulk-cancel-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
@@ -51,8 +53,17 @@ function ConditionalDropdown() {
     (booking) => booking.status === "DRAFT"
   );
 
-  const allSelectedBookingAreCompleted = selectedBookings.every(
+  const allBookingAreCompleted = selectedBookings.every(
     (b) => b.status === "COMPLETE"
+  );
+
+  const cancelIsDisabled = selectedBookings.some((b) =>
+    [
+      BookingStatus.ARCHIVED,
+      BookingStatus.CANCELLED,
+      BookingStatus.COMPLETE,
+      BookingStatus.DRAFT,
+    ].includes(b.status as any)
   );
 
   const isSelfService = useUserIsSelfService();
@@ -86,6 +97,7 @@ function ConditionalDropdown() {
 
       <BulkDeleteDialog />
       <BulkArchiveDialog />
+      <BulkCancelDialog />
 
       <DropdownMenu
         modal={false}
@@ -145,7 +157,21 @@ function ConditionalDropdown() {
               onSelect={(e) => {
                 e.preventDefault();
               }}
-              disabled={!allSelectedBookingAreCompleted || isSelfService}
+              disabled={cancelIsDisabled}
+            >
+              <BulkUpdateDialogTrigger
+                type="cancel"
+                label="Cancel"
+                onClick={closeMenu}
+              />
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+              disabled={!allBookingAreCompleted || isSelfService}
             >
               <BulkUpdateDialogTrigger
                 type="archive"

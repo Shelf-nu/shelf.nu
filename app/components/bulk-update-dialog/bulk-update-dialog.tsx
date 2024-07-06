@@ -33,7 +33,8 @@ type BulkDialogType =
   | "assign-custody"
   | "release-custody"
   | "trash"
-  | "archive";
+  | "archive"
+  | "cancel";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
@@ -87,7 +88,7 @@ function BulkUpdateDialogTrigger({
         disabled={disabled}
       >
         <span className="flex items-center gap-2">
-          <Icon icon={type} /> {label}
+          {type !== "cancel" ? <Icon icon={type} /> : null} {label}
         </span>
       </Button>
     );
@@ -196,7 +197,7 @@ const BulkUpdateDialogContent = forwardRef<
 
       /** We have to close the dialog and remove all selected assets when update is success */
       if (fetcher.data?.success) {
-        if (type === "trash") {
+        if (type === "trash" || type === "archive" || type === "cancel") {
           setSelectedAssets([]);
         }
         handleCloseDialog();
@@ -214,10 +215,12 @@ const BulkUpdateDialogContent = forwardRef<
         className="lg:w-[400px]"
         title={
           <div className="w-full">
-            <div className="mb-2 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
-              <Icon icon={type} />
-            </div>
-            <div className="mb-5">
+            {type !== "cancel" ? (
+              <div className="mb-2 inline-flex items-center justify-center rounded-full border-8 border-solid border-primary-50 bg-primary-100 p-2 text-primary-600">
+                <Icon icon={type} />
+              </div>
+            ) : null}
+            <div className={tw("mb-5", type === "cancel" && "mt-5")}>
               <h4>{title}</h4>
               <p>
                 {description

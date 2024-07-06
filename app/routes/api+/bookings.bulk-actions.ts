@@ -2,10 +2,12 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
 import { BulkArchiveBookingsSchema } from "~/components/booking/bulk-archive-dialog";
+import { BulkCancelBookingsSchema } from "~/components/booking/bulk-cancel-dialog";
 import { BulkDeleteBookingSchema } from "~/components/booking/bulk-delete-dialog";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
   bulkArchiveBookings,
+  bulkCancelBookings,
   bulkDeleteBookings,
 } from "~/modules/booking/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
@@ -31,13 +33,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const { intent, currentSearchParams } = parseData(
       formData,
       z
-        .object({ intent: z.enum(["bulk-delete", "bulk-archive"]) })
+        .object({
+          intent: z.enum(["bulk-delete", "bulk-archive", "bulk-cancel"]),
+        })
         .and(CurrentSearchParamsSchema)
     );
 
     const intentToActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-delete": PermissionAction.delete,
       "bulk-archive": PermissionAction.update,
+      "bulk-cancel": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -83,6 +88,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
           message: "Your bookings has been archived successfully",
           icon: { name: "success", variant: "success" },
           senderId: userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      case "bulk-cancel": {
+        const { bookingIds } = parseData(formData, BulkCancelBookingsSchema);
+
+        await bulkCancelBookings({
+          bookingIds,
+          organizationId,
+          userId,
+          hints: getClientHint(request),
+          currentSearchParams,
         });
 
         return json(data({ success: true }));
