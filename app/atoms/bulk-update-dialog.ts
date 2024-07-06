@@ -11,6 +11,7 @@ export const bulkDialogAtom = atom<Record<BulkDialogType, boolean>>({
   "assign-custody": false,
   "release-custody": false,
   trash: false,
+  archive: false,
 });
 
 /**

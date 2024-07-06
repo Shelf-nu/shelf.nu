@@ -1,9 +1,13 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { z } from "zod";
+import { BulkArchiveBookingsSchema } from "~/components/booking/bulk-archive-dialog";
 import { BulkDeleteBookingSchema } from "~/components/booking/bulk-delete-dialog";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
-import { bulkDeleteBookings } from "~/modules/booking/service.server";
+import {
+  bulkArchiveBookings,
+  bulkDeleteBookings,
+} from "~/modules/booking/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -27,12 +31,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const { intent, currentSearchParams } = parseData(
       formData,
       z
-        .object({ intent: z.enum(["bulk-delete"]) })
+        .object({ intent: z.enum(["bulk-delete", "bulk-archive"]) })
         .and(CurrentSearchParamsSchema)
     );
 
     const intentToActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-delete": PermissionAction.delete,
+      "bulk-archive": PermissionAction.update,
     };
 
     const { organizationId } = await requirePermission({
@@ -58,6 +63,25 @@ export async function action({ request, context }: ActionFunctionArgs) {
           title: "Bookings deleted",
           message: "Your bookings has been deleted successfully",
           icon: { name: "trash", variant: "error" },
+          senderId: userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      case "bulk-archive": {
+        const { bookingIds } = parseData(formData, BulkArchiveBookingsSchema);
+
+        await bulkArchiveBookings({
+          bookingIds,
+          organizationId,
+          currentSearchParams,
+        });
+
+        sendNotification({
+          title: "Bookings archived",
+          message: "Your bookings has been archived successfully",
+          icon: { name: "success", variant: "success" },
           senderId: userId,
         });
 

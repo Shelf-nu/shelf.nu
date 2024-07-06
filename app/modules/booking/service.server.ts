@@ -1233,3 +1233,61 @@ export async function bulkDeleteBookings({
     });
   }
 }
+
+export async function bulkArchiveBookings({
+  bookingIds,
+  organizationId,
+  currentSearchParams,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /** If all are selected in the list, then we have to consider filter */
+    const where: Prisma.BookingWhereInput = bookingIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getBookingWhereInput({ currentSearchParams, organizationId })
+      : { id: { in: bookingIds }, organizationId };
+
+    const bookings = await db.booking.findMany({ where });
+
+    const someBookingNotComplete = bookings.some(
+      (b) => b.status !== "COMPLETE"
+    );
+
+    /** Bookings must be complete to add them in archive */
+    if (someBookingNotComplete) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some bookings are not complete. Please make sure you are selecting completed bookings to archive them.",
+        label,
+      });
+    }
+
+    return await db.$transaction(async (tx) => {
+      /** Updating status of bookings to ARCHIVED  */
+      await tx.booking.updateMany({
+        where: { id: { in: bookings.map((b) => b.id) } },
+        data: { status: BookingStatus.ARCHIVED },
+      });
+
+      /** Cancel any active schedulers */
+      await Promise.all(bookings.map((b) => cancelScheduler(b)));
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk archive booking.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { bookingIds, organizationId },
+      label,
+    });
+  }
+}

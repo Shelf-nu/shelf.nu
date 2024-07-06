@@ -7,6 +7,7 @@ import { type loader } from "~/routes/_layout+/bookings";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import BulkArchiveDialog from "./bulk-archive-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
@@ -50,6 +51,10 @@ function ConditionalDropdown() {
     (booking) => booking.status === "DRAFT"
   );
 
+  const allSelectedBookingAreCompleted = selectedBookings.every(
+    (b) => b.status === "COMPLETE"
+  );
+
   const isSelfService = useUserIsSelfService();
 
   const navigation = useNavigation();
@@ -80,6 +85,7 @@ function ConditionalDropdown() {
       )}
 
       <BulkDeleteDialog />
+      <BulkArchiveDialog />
 
       <DropdownMenu
         modal={false}
@@ -134,6 +140,20 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+              disabled={!allSelectedBookingAreCompleted || isSelfService}
+            >
+              <BulkUpdateDialogTrigger
+                type="archive"
+                label="Archive"
+                onClick={closeMenu}
+              />
+            </DropdownMenuItem>
+
             <DropdownMenuItem
               className="px-4 py-1 md:p-0"
               onSelect={(e) => {

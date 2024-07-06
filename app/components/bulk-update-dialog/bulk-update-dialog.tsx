@@ -32,7 +32,8 @@ type BulkDialogType =
   | "category"
   | "assign-custody"
   | "release-custody"
-  | "trash";
+  | "trash"
+  | "archive";
 
 type CommonBulkDialogProps = {
   type: BulkDialogType;
