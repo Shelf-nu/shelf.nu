@@ -53,6 +53,7 @@ export type IconType =
   | "search"
   | "spinner"
   | "x"
+  | "cancel"
   | "refresh"
   | "coins"
   | "barcode"
@@ -100,6 +101,7 @@ export const iconsMap: IconsMap = {
   search: <SearchIcon />,
   spinner: <Spinner />,
   x: <XIcon />,
+  cancel: <XIcon />,
   refresh: <RefreshIcon />,
   coins: <CoinsIcon />,
   barcode: <BarCodeIcon />,

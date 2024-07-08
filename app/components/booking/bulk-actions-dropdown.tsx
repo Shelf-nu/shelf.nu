@@ -157,12 +157,19 @@ function ConditionalDropdown() {
               onSelect={(e) => {
                 e.preventDefault();
               }}
-              disabled={cancelIsDisabled}
             >
               <BulkUpdateDialogTrigger
                 type="cancel"
                 label="Cancel"
                 onClick={closeMenu}
+                disabled={
+                  cancelIsDisabled
+                    ? {
+                        reason:
+                          "Some of the selected bookings are not reserved or in progress. You can only cancel bookings that are reserved or in progress.",
+                      }
+                    : isLoading
+                }
               />
             </DropdownMenuItem>
 

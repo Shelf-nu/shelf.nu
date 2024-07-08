@@ -88,7 +88,7 @@ function BulkUpdateDialogTrigger({
         disabled={disabled}
       >
         <span className="flex items-center gap-2">
-          {type !== "cancel" ? <Icon icon={type} /> : null} {label}
+          <Icon icon={type} /> {label}
         </span>
       </Button>
     );
