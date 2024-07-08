@@ -5,7 +5,6 @@ import { z } from "zod";
 import { DateS } from "~/components/shared/date";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database/db.server";
-import { useHints } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
