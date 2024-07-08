@@ -141,8 +141,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                   role="link"
                   variant="link"
                   className={tw(
-                    "justify-start px-4 py-3  text-gray-700 hover:text-gray-700",
-                    someAssetIsNotAvailable && "pointer-events-none opacity-50"
+                    "justify-start px-4 py-3  text-gray-700 hover:text-gray-700"
                   )}
                   width="full"
                   onClick={() => setOpen(false)}

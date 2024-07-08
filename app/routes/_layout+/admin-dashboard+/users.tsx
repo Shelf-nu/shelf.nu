@@ -7,7 +7,8 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Pagination } from "~/components/list/pagination";
-import { Td } from "~/components/table";
+import { DateS } from "~/components/shared/date";
+import { Td, Th } from "~/components/table";
 import { getPaginatedAndFilterableUsers } from "~/modules/user/service.server";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
@@ -68,6 +69,12 @@ export default function Area51() {
         <List
           ItemComponent={ListUserContent}
           navigate={(itemId) => navigate(`../${itemId}`)}
+          headerChildren={
+            <>
+              <Th>Email</Th>
+              <Th>Created at</Th>
+            </>
+          }
         />
       </div>
     </div>
@@ -76,10 +83,18 @@ export default function Area51() {
 
 const ListUserContent = ({ item }: { item: User }) => (
   <>
-    <Td className="w-full p-0 md:p-0">
-      <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
-        {item.email}
-      </div>
+    <Td>
+      {item.firstName} {item.lastName}
+    </Td>
+    <Td>{item.email}</Td>
+    <Td>
+      <DateS
+        date={item.createdAt}
+        options={{
+          dateStyle: "short",
+          timeStyle: "long",
+        }}
+      />
     </Td>
   </>
 );

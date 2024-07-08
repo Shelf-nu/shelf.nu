@@ -105,10 +105,7 @@ const ConditionalActionsDropdown = () => {
                   role="link"
                   variant="link"
                   className={tw(
-                    "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700",
-                    assetIsPartOfUnavailableKit
-                      ? "pointer-events-none cursor-not-allowed opacity-50"
-                      : ""
+                    "justify-start whitespace-nowrap px-4 py-3  text-gray-700 hover:text-gray-700"
                   )}
                   width="full"
                   onClick={() => setOpen(false)}

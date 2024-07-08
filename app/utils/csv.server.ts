@@ -5,12 +5,24 @@ import {
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
 import chardet from "chardet";
-import { parse } from "csv-parse";
+import { CsvError, parse } from "csv-parse";
 import iconv from "iconv-lite";
 import { fetchAssetsForExport } from "~/modules/asset/service.server";
 import { ShelfError } from "./error";
 
 export type CSVData = [string[], ...string[][]] | [];
+
+/** Guesses the delimiter of csv based on the most common delimiter found in the file */
+function guessDelimiters(csv: string, delimiters: string[]) {
+  const delimiterCounts = delimiters.map(
+    (delimiter) => csv.split(delimiter).length
+  );
+
+  const max = Math.max(...delimiterCounts);
+
+  const delimiter = delimiters[delimiterCounts.indexOf(max)];
+  return delimiter;
+}
 
 /** Parses csv Data into an array with type {@link CSVData} */
 export const parseCsv = (csvData: ArrayBuffer) => {
@@ -20,12 +32,13 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 
   /** Convert the file to utf-8 from the detected encoding */
   const csv = iconv.decode(Buffer.from(csvData), encoding || "utf-8");
+  const delimiter = guessDelimiters(csv, [",", ";"]);
 
   return new Promise((resolve, reject) => {
     const parser = parse({
       encoding: "utf-8", // Set encoding to utf-8
+      delimiter, // Set delimiter
       bom: true, // Handle BOM
-      delimiter: ";", // Set delimiter to ; as this allows for commas in the data
       quote: '"', // Set quote to " as this allows for commas in the data
       escape: '"', // Set escape to \ as this allows for commas in the data
       ltrim: true, // Trim whitespace from left side of cell
@@ -58,13 +71,17 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
     );
 
     const csvFile = formData.get("file") as File;
+
     const csvData = await csvFile.arrayBuffer();
 
     return (await parseCsv(csvData)) as CSVData;
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while parsing the CSV file.",
+      message:
+        cause instanceof CsvError
+          ? cause.message
+          : "Something went wrong while parsing the CSV file.",
       label: "CSV",
     });
   }

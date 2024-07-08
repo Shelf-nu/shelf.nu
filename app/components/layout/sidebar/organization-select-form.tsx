@@ -38,7 +38,7 @@ export const OrganizationSelectForm = () => {
                 to="/account-details/workspace"
                 icon="settings"
                 variant="link"
-                className=" w-full select-none justify-start rounded p-2 text-left font-medium text-gray-900 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-50 hover:text-gray-800 "
+                className=" w-full select-none justify-start rounded p-2 text-left font-medium text-gray-900 outline-none  hover:bg-gray-50 hover:text-gray-800 "
               >
                 Manage workspaces
               </Button>

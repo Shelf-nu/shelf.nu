@@ -40,6 +40,7 @@ export interface CreateAssetFromContentImportPayload
   title: string;
   description?: string;
   category?: string;
+  kit?: string;
   tags: string[];
   location?: string;
   custodian?: string;

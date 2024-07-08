@@ -26,7 +26,10 @@ import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
 import { GET_KIT_STATIC_INCLUDES, KITS_INCLUDE_FIELDS } from "./types";
 import { getKitsWhereInput } from "./utils.server";
+//@TODO: Fix the circular dependency
+// eslint-disable-next-line import/no-cycle
 import { createNote } from "../asset/service.server";
+import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -959,6 +962,73 @@ export async function bulkReleaseKitCustody({
       message,
       additionalData: { kitIds, organizationId, userId },
       label,
+    });
+  }
+}
+
+export async function createKitsIfNotExists({
+  data,
+  userId,
+  organizationId,
+}: {
+  data: CreateAssetFromContentImportPayload[];
+  userId: User["id"];
+  organizationId: Organization["id"];
+}): Promise<Record<string, Kit["id"]>> {
+  try {
+    // first we get all the kits from the assets and make then into an object where the category is the key and the value is an empty string
+    const kits = new Map(
+      data.filter((asset) => asset.kit !== "").map((asset) => [asset.kit, ""])
+    );
+
+    // Handle the case where there are no teamMembers
+    if (kits.has(undefined)) {
+      return {};
+    }
+
+    // now we loop through the kits and check if they exist
+    for (const [kit, _] of kits) {
+      const existingKit = await db.kit.findFirst({
+        where: {
+          name: { equals: kit, mode: "insensitive" },
+          organizationId,
+        },
+      });
+
+      if (!existingKit) {
+        // if the location doesn't exist, we create a new one
+        const newKit = await db.kit.create({
+          data: {
+            name: (kit as string).trim(),
+            createdBy: {
+              connect: {
+                id: userId,
+              },
+            },
+            organization: {
+              connect: {
+                id: organizationId,
+              },
+            },
+          },
+        });
+        kits.set(kit, newKit.id);
+      } else {
+        // if the location exists, we just update the id
+        kits.set(kit, existingKit.id);
+      }
+    }
+
+    return Object.fromEntries(Array.from(kits));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating kits. Seems like some of the location data in your import file is invalid. Please check and try again.",
+      additionalData: { userId, organizationId },
+      label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
     });
   }
 }
