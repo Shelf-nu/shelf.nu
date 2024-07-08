@@ -273,19 +273,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetIndexPage() {
-  const navigate = useNavigate();
-  const hasFiltersToClear = useSearchParamHasValue(
-    "category",
-    "tag",
-    "location",
-    "teamMember"
-  );
-  const clearFilters = useClearValueFromParams(
-    "category",
-    "tag",
-    "location",
-    "teamMember"
-  );
   const { canImportAssets } = useLoaderData<typeof loader>();
   const isSelfService = useUserIsSelfService();
 
@@ -307,143 +294,164 @@ export default function AssetIndexPage() {
           </>
         ) : null}
       </Header>
-      <ListContentWrapper>
-        <Filters
-          slots={{
-            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-            "right-of-search": <SortBy />,
-          }}
-        >
-          <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
-            {hasFiltersToClear ? (
-              <div className="hidden gap-6 md:flex">
-                <Button
-                  as="button"
-                  onClick={clearFilters}
-                  variant="link"
-                  className="block min-w-28 max-w-none font-normal text-gray-500 hover:text-gray-600"
-                  type="button"
-                >
-                  Clear all filters
-                </Button>
-                <div className="text-gray-500"> | </div>
-              </div>
-            ) : null}
-
-            <div className="flex w-full items-center justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Categories{" "}
-                    <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{ name: "category", queryKey: "name" }}
-                label="Filter by category"
-                placeholder="Search categories"
-                initialDataKey="categories"
-                countKey="totalCategories"
-                withoutValueItem={{
-                  id: "uncategorized",
-                  name: "Uncategorized",
-                }}
-              />
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Tags <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{ name: "tag", queryKey: "name" }}
-                label="Filter by tag"
-                initialDataKey="tags"
-                countKey="totalTags"
-                withoutValueItem={{
-                  id: "untagged",
-                  name: "Without tag",
-                }}
-              />
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Locations{" "}
-                    <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{ name: "location", queryKey: "name" }}
-                label="Filter by location"
-                initialDataKey="locations"
-                countKey="totalLocations"
-                withoutValueItem={{
-                  id: "without-location",
-                  name: "Without location",
-                }}
-                renderItem={({ metadata }) => (
-                  <div className="flex items-center gap-2">
-                    <Image
-                      imageId={metadata.imageId}
-                      alt="img"
-                      className={tw(
-                        "size-6 rounded-[2px] object-cover",
-                        metadata.description ? "rounded-b-none border-b-0" : ""
-                      )}
-                    />
-                    <div>{metadata.name}</div>
-                  </div>
-                )}
-              />
-              {!isSelfService && (
-                <DynamicDropdown
-                  trigger={
-                    <div className="flex cursor-pointer items-center gap-2">
-                      Custodian{" "}
-                      <ChevronRight className="hidden rotate-90 md:inline" />
-                    </div>
-                  }
-                  model={{
-                    name: "teamMember",
-                    queryKey: "name",
-                    deletedAt: null,
-                  }}
-                  transformItem={(item) => ({
-                    ...item,
-                    id: item.metadata?.userId ? item.metadata.userId : item.id,
-                  })}
-                  renderItem={(item) => resolveTeamMemberName(item)}
-                  label="Filter by custodian"
-                  placeholder="Search team members"
-                  initialDataKey="teamMembers"
-                  countKey="totalTeamMembers"
-                  withoutValueItem={{
-                    id: "without-custody",
-                    name: "Without custody",
-                  }}
-                />
-              )}
-            </div>
-          </div>
-        </Filters>
-        <List
-          title="Assets"
-          ItemComponent={ListAssetContent}
-          navigate={(itemId) => navigate(itemId)}
-          className=" overflow-x-visible md:overflow-x-auto"
-          bulkActions={<BulkActionsDropdown />}
-          headerChildren={
-            <>
-              <Th className="hidden md:table-cell">Category</Th>
-              <Th className="hidden md:table-cell">Tags</Th>
-              {!isSelfService ? (
-                <Th className="hidden md:table-cell">Custodian</Th>
-              ) : null}
-              <Th className="hidden md:table-cell">Location</Th>
-            </>
-          }
-        />
-      </ListContentWrapper>
+      <AssetsList />
     </>
   );
 }
+
+export const AssetsList = () => {
+  const navigate = useNavigate();
+  const hasFiltersToClear = useSearchParamHasValue(
+    "category",
+    "tag",
+    "location",
+    "teamMember"
+  );
+  const clearFilters = useClearValueFromParams(
+    "category",
+    "tag",
+    "location",
+    "teamMember"
+  );
+  const isSelfService = useUserIsSelfService();
+
+  return (
+    <ListContentWrapper>
+      <Filters
+        slots={{
+          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          "right-of-search": <SortBy />,
+        }}
+      >
+        <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
+          {hasFiltersToClear ? (
+            <div className="hidden gap-6 md:flex">
+              <Button
+                as="button"
+                onClick={clearFilters}
+                variant="link"
+                className="block min-w-28 max-w-none font-normal text-gray-500 hover:text-gray-600"
+                type="button"
+              >
+                Clear all filters
+              </Button>
+              <div className="text-gray-500"> | </div>
+            </div>
+          ) : null}
+
+          <div className="flex w-full items-center justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Categories{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "category", queryKey: "name" }}
+              label="Filter by category"
+              placeholder="Search categories"
+              initialDataKey="categories"
+              countKey="totalCategories"
+              withoutValueItem={{
+                id: "uncategorized",
+                name: "Uncategorized",
+              }}
+            />
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "tag", queryKey: "name" }}
+              label="Filter by tag"
+              initialDataKey="tags"
+              countKey="totalTags"
+              withoutValueItem={{
+                id: "untagged",
+                name: "Without tag",
+              }}
+            />
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Locations{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "location", queryKey: "name" }}
+              label="Filter by location"
+              initialDataKey="locations"
+              countKey="totalLocations"
+              withoutValueItem={{
+                id: "without-location",
+                name: "Without location",
+              }}
+              renderItem={({ metadata }) => (
+                <div className="flex items-center gap-2">
+                  <Image
+                    imageId={metadata.imageId}
+                    alt="img"
+                    className={tw(
+                      "size-6 rounded-[2px] object-cover",
+                      metadata.description ? "rounded-b-none border-b-0" : ""
+                    )}
+                  />
+                  <div>{metadata.name}</div>
+                </div>
+              )}
+            />
+            {!isSelfService && (
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Custodian{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{
+                  name: "teamMember",
+                  queryKey: "name",
+                  deletedAt: null,
+                }}
+                transformItem={(item) => ({
+                  ...item,
+                  id: item.metadata?.userId ? item.metadata.userId : item.id,
+                })}
+                renderItem={(item) => resolveTeamMemberName(item)}
+                label="Filter by custodian"
+                placeholder="Search team members"
+                initialDataKey="teamMembers"
+                countKey="totalTeamMembers"
+                withoutValueItem={{
+                  id: "without-custody",
+                  name: "Without custody",
+                }}
+              />
+            )}
+          </div>
+        </div>
+      </Filters>
+      <List
+        title="Assets"
+        ItemComponent={ListAssetContent}
+        navigate={(itemId) => navigate(itemId)}
+        className=" overflow-x-visible md:overflow-x-auto"
+        bulkActions={<BulkActionsDropdown />}
+        headerChildren={
+          <>
+            <Th className="hidden md:table-cell">Category</Th>
+            <Th className="hidden md:table-cell">Tags</Th>
+            {!isSelfService ? (
+              <Th className="hidden md:table-cell">Custodian</Th>
+            ) : null}
+            <Th className="hidden md:table-cell">Location</Th>
+          </>
+        }
+      />
+    </ListContentWrapper>
+  );
+};
 
 const ListAssetContent = ({
   item,
