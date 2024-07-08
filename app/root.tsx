@@ -27,7 +27,7 @@ import fontsStylesheetUrl from "./styles/fonts.css?url";
 import globalStylesheetUrl from "./styles/global.css?url";
 import nProgressCustomStyles from "./styles/nprogress.css?url";
 import styles from "./tailwind.css?url";
-import { ClientHintCheck, getHints } from "./utils/client-hints";
+import { ClientHintCheck, getClientHint } from "./utils/client-hints";
 import { getBrowserEnv } from "./utils/env";
 import { data } from "./utils/http.server";
 import { useNonce } from "./utils/nonce-provider";
@@ -70,7 +70,7 @@ export const loader = ({ request }: LoaderFunctionArgs) =>
       env: getBrowserEnv(),
       maintenanceMode: false,
       requestInfo: {
-        hints: getHints(request),
+        hints: getClientHint(request),
       },
     })
   );
