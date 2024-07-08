@@ -359,7 +359,7 @@ export default function UserTeamSetting() {
             <>
               <Th className="hidden md:table-cell">Role</Th>
               <Th className="hidden md:table-cell">Status</Th>
-              <Th className="hidden md:table-cell"> </Th>
+              <Th className="hidden md:table-cell">Actions</Th>
             </>
           }
         />
@@ -397,13 +397,12 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
       <Td className="hidden md:table-cell">
         <InviteStatusBadge status={item.status} />
       </Td>
-      <Td className="hidden md:table-cell">
+      <Td className="hidden text-right md:table-cell">
         {item.role !== "Owner" ? (
           <TeamUsersActionsDropdown
             inviteStatus={item.status}
             userId={item.userId}
             name={item.name}
-            // teamMemberId={item.} @TODO: From where to get this teamMemberId ?
             email={item.email} // In this case we can assume that inviteeEmail is defined because we only render this dropdown for existing users
           />
         ) : null}

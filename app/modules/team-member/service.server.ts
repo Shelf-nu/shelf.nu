@@ -5,7 +5,7 @@ import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
@@ -276,6 +276,55 @@ export async function getTeamMember({ id }: { id: TeamMember["id"] }) {
       cause,
       message: "Team member not found",
       additionalData: { id },
+      label,
+    });
+  }
+}
+
+export async function bulkDeleteNRMs({
+  nrmIds,
+  organizationId,
+}: {
+  nrmIds: TeamMember["id"][];
+  organizationId: TeamMember["organizationId"];
+}) {
+  try {
+    const where: Prisma.TeamMemberWhereInput = nrmIds.includes(ALL_SELECTED_KEY)
+      ? { organizationId }
+      : { id: { in: nrmIds }, organizationId };
+
+    const teamMembers = await db.teamMember.findMany({
+      where,
+      select: { id: true, _count: { select: { custodies: true } } },
+    });
+
+    /** If some team members have custody, then delete is not allowed */
+    const someTeamMemberHasCustodies = teamMembers.some(
+      (tm) => tm._count.custodies > 0
+    );
+
+    if (someTeamMemberHasCustodies) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some team members has custody over some assets. Please release custody or check-in those assets before deleting the user.",
+        label,
+      });
+    }
+
+    return await db.teamMember.updateMany({
+      where: { id: { in: teamMembers.map((tm) => tm.id) } },
+      data: { deletedAt: new Date() },
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk deleting non-registered members";
+
+    throw new ShelfError({
+      cause,
+      message,
       label,
     });
   }
