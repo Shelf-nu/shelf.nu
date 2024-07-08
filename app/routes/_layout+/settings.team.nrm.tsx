@@ -167,7 +167,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 }
 
 export default function NrmSettings() {
-  const { canImportNRM, isPersonalOrg } = useLoaderData<typeof loader>();
+  const { canImportNRM } = useLoaderData<typeof loader>();
   return (
     <div>
       <p className="mb-6 text-xs text-gray-600">
@@ -191,7 +191,7 @@ export default function NrmSettings() {
         </Filters>
 
         <List
-          bulkActions={!isPersonalOrg ? <BulkActionsDropdown /> : undefined}
+          bulkActions={<BulkActionsDropdown />}
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={TeamMemberRow}
           customEmptyStateContent={{
