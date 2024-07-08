@@ -6,9 +6,10 @@ import { Button } from "~/components/shared/button";
 import { slugify } from "~/utils/slugify";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
-interface AssetType {
-  asset: {
-    title: string;
+interface ObjectType {
+  item: {
+    name: string;
+    type: "asset" | "kit";
   };
   qrObj?: {
     qr?: {
@@ -19,15 +20,15 @@ interface AssetType {
   };
 }
 
-const AssetQR = ({ qrObj, asset }: AssetType) => {
+export const QrPreview = ({ qrObj, item }: ObjectType) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
 
   const fileName = useMemo(
     () =>
-      `${slugify(asset?.title || "asset")}-${qrObj?.qr
+      `${slugify(item.name || item.type)}-${qrObj?.qr
         ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`,
-    [asset, qrObj?.qr?.id, qrObj?.qr?.size]
+    [item, qrObj?.qr?.id, qrObj?.qr?.size]
   );
 
   function downloadQr(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
@@ -68,7 +69,7 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
   return (
     <div className="">
       <div className="mb-4 flex w-auto justify-center rounded border border-solid bg-white p-6">
-        <QrLabel ref={captureDivRef} data={qrObj} title={asset.title} />
+        <QrLabel ref={captureDivRef} data={qrObj} title={item.name} />
       </div>
 
       {/* using this button to convert html to png and download image using the a tag below */}
@@ -76,7 +77,7 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
         <Button
           icon="download"
           onClick={downloadQr}
-          download={`${slugify(asset.title)}-${qrObj?.qr
+          download={`${slugify(item.name)}-${qrObj?.qr
             ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
           ref={downloadQrBtnRef}
           variant="secondary"
@@ -138,4 +139,3 @@ const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
     );
   }
 );
-export default AssetQR;

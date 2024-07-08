@@ -8,13 +8,13 @@ import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
-import AssetQR from "~/components/assets/asset-qr";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
+import { QrPreview } from "~/components/qr/qr-preview";
 
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
@@ -446,7 +446,15 @@ export default function AssetOverview() {
             isSelfService={isSelfService}
           />
 
-          {asset && <AssetQR qrObj={qrObj} asset={asset} />}
+          {asset && (
+            <QrPreview
+              qrObj={qrObj}
+              item={{
+                name: asset.title,
+                type: "asset",
+              }}
+            />
+          )}
           {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
         </div>
       </div>
