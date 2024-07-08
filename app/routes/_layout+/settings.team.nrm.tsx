@@ -202,7 +202,8 @@ export default function NrmSettings() {
           }}
           headerChildren={
             <>
-              <Th> </Th>
+              <Th>Custodies</Th>
+              <Th>Actions</Th>
             </>
           }
         />
@@ -229,7 +230,9 @@ function TeamMemberRow({
   return (
     <>
       <Td className="w-full whitespace-normal">{item.name}</Td>
-
+      <Td className="text-right">
+        {item._count.custodies ? item._count.custodies : 0}
+      </Td>
       <Td className="text-right">
         <TeamMembersActionsDropdown teamMember={item} />
       </Td>
