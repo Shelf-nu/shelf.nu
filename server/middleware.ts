@@ -80,11 +80,8 @@ export function refreshSession() {
       return next();
     }
     let isValidSession = true;
-    const refreshApproach = process.env.REFRESH_APPROACH_VERSION || 'v2';
     if (!isExpiringSoon(auth.expiresAt)) {
-      isValidSession =
-      refreshApproach === "v1" ||
-        (await validateSession(auth.refreshToken));
+      isValidSession = await validateSession(auth.refreshToken);
       if (isValidSession) {
         return next();
       }
