@@ -44,7 +44,6 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
 
 export default function AdminOrgQrCodes() {
   const { members } = useLoaderData<typeof loader>();
-  const hints = useHints();
   return (
     <>
       <div className="flex justify-between">
