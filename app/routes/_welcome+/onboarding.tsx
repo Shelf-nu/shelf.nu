@@ -18,7 +18,10 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { onboardingEmailText } from "~/emails/onboarding-email";
-import { getAuthUserById, signInWithEmail } from "~/modules/auth/service.server";
+import {
+  getAuthUserById,
+  signInWithEmail,
+} from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -133,10 +136,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * This is to make sure that we have a stripe customer for the user.
      * We have to do it at this point, as its the first time we have the user's first and last name
      */
-   
+
     if (user) {
-       //making sure new session is created.
-      const authSession = await signInWithEmail(user.email, payload?.password || '');
+      //making sure new session is created.
+      const authSession = await signInWithEmail(
+        user.email,
+        payload?.password || ""
+      );
       if (authSession) {
         context.setSession(authSession);
       }
@@ -171,7 +177,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
         setCookie(await setSelectedOrganizationIdCookie(organizationId))
       );
     }
-
 
     return redirect(organizationId ? `/assets` : `/welcome`, {
       headers,
