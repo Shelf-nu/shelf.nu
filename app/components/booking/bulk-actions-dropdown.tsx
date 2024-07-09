@@ -73,6 +73,11 @@ function ConditionalDropdown() {
 
   const disabled = selectedBookingsIds.length === 0;
 
+  const archiveDisabled = !allBookingAreCompleted || isSelfService;
+
+  const deleteDisabled =
+    (isSelfService && !someBookingInDraft) || isSelfService || isLoading;
+
   const {
     ref: dropdownRef,
     defaultApplied,
@@ -178,11 +183,18 @@ function ConditionalDropdown() {
               onSelect={(e) => {
                 e.preventDefault();
               }}
-              disabled={!allBookingAreCompleted || isSelfService}
             >
               <BulkUpdateDialogTrigger
                 type="archive"
                 label="Archive"
+                disabled={
+                  archiveDisabled
+                    ? {
+                        reason:
+                          "Some of the selected bookings are not completed. You can only archive bookings that are completed.",
+                      }
+                    : isLoading
+                }
                 onClick={closeMenu}
               />
             </DropdownMenuItem>
@@ -192,16 +204,19 @@ function ConditionalDropdown() {
               onSelect={(e) => {
                 e.preventDefault();
               }}
-              disabled={
-                (isSelfService && !someBookingInDraft) ||
-                isSelfService ||
-                isLoading
-              }
             >
               <BulkUpdateDialogTrigger
                 type="trash"
                 label="Delete"
                 onClick={closeMenu}
+                disabled={
+                  deleteDisabled
+                    ? {
+                        reason:
+                          "Some of the selected bookings are not in draft or you have self user permissions. You can only delete draft bookings.",
+                      }
+                    : isLoading
+                }
               />
             </DropdownMenuItem>
           </div>
