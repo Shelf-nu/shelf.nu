@@ -313,24 +313,29 @@ interface Session {
 }
 
 export async function validateSession(token: string) {
-  const t0 = performance.now();
+  try {
+    const t0 = performance.now();
 
-  const result = await db.$queryRaw<Partial<Session>[]>`
+    const result = await db.$queryRaw<Partial<Session>[]>`
       SELECT id, revoked FROM auth.refresh_tokens 
       WHERE token = ${token} 
       AND revoked = false
       LIMIT 1 
     `;
-  const t1 = performance.now();
+    const t1 = performance.now();
 
-  // eslint-disable-next-line no-console
-  console.log(`Call to validateSession took ${t1 - t0} milliseconds.`);
+    // eslint-disable-next-line no-console
+    console.log(`Call to validateSession took ${t1 - t0} milliseconds.`);
 
-  if (result.length === 0) {
-    //logging for debug
-    Logger.error("Refresh token is invalid or has been revoked");
+    if (result.length === 0) {
+      //logging for debug
+      Logger.error("Refresh token is invalid or has been revoked");
+    }
+    return result.length > 0;
+  } catch (err) {
+    Logger.error("Something went wrong while valdiating the session");
+    return false;
   }
-  return result.length > 0;
 }
 
 export async function refreshAccessToken(
