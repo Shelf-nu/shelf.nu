@@ -34,7 +34,7 @@ type BulkDialogType =
   | "release-custody"
   | "trash"
   | "activate"
-  | "deactivate";
+  | "deactivate"
   | "archive"
   | "cancel";
 
