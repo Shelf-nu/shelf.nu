@@ -5,6 +5,7 @@ import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { Link, Outlet, useMatches, useNavigate } from "@remix-run/react";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
+import BulkActionsDropdown from "~/components/booking/bulk-actions-dropdown";
 import { StatusFilter } from "~/components/booking/status-filter";
 import { ErrorContent } from "~/components/errors";
 
@@ -201,6 +202,7 @@ export default function BookingsIndexPage({
           }}
         />
         <List
+          bulkActions={<BulkActionsDropdown />}
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
           className=" overflow-x-visible md:overflow-x-auto"
@@ -270,7 +272,7 @@ const ListAssetContent = ({
     <>
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        <div className="flex justify-between gap-3 py-4 pr-4 md:justify-normal md:pr-6">
           <div className="flex items-center gap-3">
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
