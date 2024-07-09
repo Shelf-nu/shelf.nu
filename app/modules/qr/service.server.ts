@@ -366,6 +366,12 @@ async function getQrCodes({
               title: true,
             },
           },
+          kit: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
           organization: {
             select: {
               id: true,

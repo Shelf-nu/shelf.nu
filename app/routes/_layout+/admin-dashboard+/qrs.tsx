@@ -130,6 +130,7 @@ export default function Area51() {
             <>
               <Th className="hidden md:table-cell">QR id</Th>
               <Th className="hidden md:table-cell">Asset</Th>
+              <Th className="hidden md:table-cell">Kit</Th>
               <Th className="hidden md:table-cell">Organization ID</Th>
               <Th className="hidden md:table-cell">User ID</Th>
               <Th className="hidden md:table-cell">
@@ -154,6 +155,12 @@ const ListUserContent = ({
         select: {
           id: true;
           title: true;
+        };
+      };
+      kit: {
+        select: {
+          id: true;
+          name: true;
         };
       };
       organization: {
@@ -189,6 +196,11 @@ const ListUserContent = ({
     <Td className=" whitespace-normal p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         {item.asset ? <span>{item.asset.title}</span> : "N/A"}
+      </div>
+    </Td>
+    <Td className=" whitespace-normal p-0 md:p-0">
+      <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        {item.kit ? <span>{item.kit.name}</span> : "N/A"}
       </div>
     </Td>
     <Td className=" p-0 md:p-0">

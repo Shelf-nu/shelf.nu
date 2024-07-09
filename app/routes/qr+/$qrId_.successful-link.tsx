@@ -1,3 +1,4 @@
+import type { Asset, Kit } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -29,6 +30,12 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
               title: true,
             },
           },
+          kit: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       })
       .catch((cause) => {
@@ -46,7 +53,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
         header: {
           title: "Successfully linked asset to QR code",
         },
-        asset: qr.asset,
+        qr,
       })
     );
   } catch (cause) {
@@ -60,25 +67,27 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function QrSuccessfullLink() {
-  const { asset } = useLoaderData<typeof loader>();
-  return asset ? (
+  const { qr } = useLoaderData<typeof loader>();
+  const type = qr.asset ? "asset" : "kit";
+  const item = qr.asset || qr.kit;
+  const name = type === "asset" ? (item as Asset)?.title : (item as Kit)?.name;
+  return item ? (
     <>
       <div className="flex max-h-full flex-1 flex-col items-center justify-center ">
         <span className="mb-2.5 flex size-12 items-center justify-center rounded-full bg-success-50 p-2 text-success-600">
           <LinkIcon />
         </span>
-        <h3>Succesfully linked Item</h3>
+        <h3>Succesfully linked</h3>
         <p>
-          Your asset <b>{asset.title}</b> has been linked with this QR code.
+          Your {type} <b>{name}</b> has been linked with this QR code.
         </p>
         <div className="mt-8 flex w-full flex-col gap-3">
           <Button
-            to={`/assets/${asset.id}`}
+            to={`/${type === "asset" ? "assets" : "kits"}/${item.id}`}
             width="full"
             variant="secondary"
-            data-test-id="viewAssetButton"
           >
-            View asset
+            View {type}
           </Button>
           <Button to={`/scanner`} width="full">
             Go to scanner

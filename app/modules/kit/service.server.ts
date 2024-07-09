@@ -1084,3 +1084,61 @@ export async function createKitsIfNotExists({
     });
   }
 }
+
+export async function updateKitQrCode({
+  kitId,
+  newQrId,
+  organizationId,
+}: {
+  organizationId: string;
+  kitId: string;
+  newQrId: string;
+}) {
+  // Disconnect all existing QR codes
+  try {
+    // Disconnect all existing QR codes
+    await db.kit
+      .update({
+        where: { id: kitId },
+        data: {
+          qrCodes: {
+            set: [],
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Couldn't disconnect existing codes",
+          label,
+          additionalData: { kitId, organizationId, newQrId },
+        });
+      });
+
+    // Connect the new QR code
+    return await db.kit
+      .update({
+        where: { id: kitId },
+        data: {
+          qrCodes: {
+            connect: { id: newQrId },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Couldn't connect the new QR code",
+          label,
+          additionalData: { kitId, organizationId, newQrId },
+        });
+      });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating asset QR code",
+      label,
+      additionalData: { kitId, organizationId, newQrId },
+    });
+  }
+}

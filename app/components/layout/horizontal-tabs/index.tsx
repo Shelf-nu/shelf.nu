@@ -1,11 +1,20 @@
 import { NavLink, useLocation } from "@remix-run/react";
+import { tw } from "~/utils/tw";
 import type { HorizontalTabsProps } from "./types";
 
-export default function HorizontalTabs({ items }: HorizontalTabsProps) {
+export default function HorizontalTabs({
+  items,
+  className,
+}: HorizontalTabsProps) {
   const location = useLocation();
   return (
     // eslint-disable-next-line tailwindcss/enforces-negative-arbitrary-values
-    <div className="horizontal-menu -mx-4 mb-5 flex overflow-scroll border-b border-b-gray-200 bg-white pl-4 ">
+    <div
+      className={tw(
+        "horizontal-menu -mx-4 mb-5 flex overflow-scroll border-b border-b-gray-200 bg-white pl-4 ",
+        className
+      )}
+    >
       {items.map((item, index) => (
         <NavLink
           to={item.to}

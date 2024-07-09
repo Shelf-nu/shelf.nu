@@ -67,8 +67,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * Does the QR code belong to any user or is it unclaimed?
      */
     if (!qr.organizationId) {
-      /** We redirect to link where we handle the rest of the logic */
-      return redirect(`link?scanId=${scan.id}`);
+      /** We redirect to claim where we handle the linking of the code to an organization */
+      return redirect(`claim?scanId=${scan.id}`);
     }
 
     /**
@@ -102,21 +102,33 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ];
 
     /**
-     * When there is no assetId that means that the asset was deleted so the QR code is orphaned.
-     * Here we redirect to a page where the user has the option to link to existing asset or create a new one.
+     * When there is no assetId or qrId that means that the asset or kit was deleted so the QR code is orphaned.
+     * Here we redirect to a page where the user has the option to link to existing asset or kit create a new one.
      */
-    if (!qr.assetId) {
+    if (!qr.assetId && !qr.kitId) {
       return redirect(`link?scanId=${scan.id}`, {
         headers,
       });
     }
 
-    return redirect(
-      `/assets/${qr.assetId}/overview?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
-      {
-        headers,
-      }
-    );
+    /** If its linked to an asset, redirect to the asset */
+    if (qr.assetId) {
+      return redirect(
+        `/assets/${qr.assetId}/overview?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
+        {
+          headers,
+        }
+      );
+    }
+    /** If its linked to a kit, redirect to the kit */
+    if (qr.kitId) {
+      return redirect(
+        `/kits/${qr.kitId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
+        {
+          headers,
+        }
+      );
+    }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
     throw json(error(reason), { status: reason.status });

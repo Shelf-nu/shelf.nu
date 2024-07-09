@@ -69,9 +69,9 @@ export const loader = async ({
 
   try {
     const qr = await getQr(qrId);
-    if (qr?.assetId) {
+    if (qr?.assetId || qr?.kitId) {
       throw new ShelfError({
-        message: "This QR code is already linked to an asset.",
+        message: "This QR code is already linked to an asset or a kit.",
         title: "QR already linked",
         label: "QR",
         status: 403,
@@ -130,7 +130,6 @@ export const loader = async ({
           title: "Link with existing asset",
           subHeading: "Choose an asset to link with this QR tag.",
         },
-        showModal: true,
         qrId,
         items: assets,
         categories,
@@ -190,7 +189,7 @@ export const action = async ({
       organizationId,
     });
 
-    return redirect(`/qr/${qrId}/successful-link`);
+    return redirect(`/qr/${qrId}/successful-link?type=asset`);
   } catch (cause) {
     const reason = makeShelfError(cause);
     return json(error(reason), { status: reason.status });
@@ -306,10 +305,10 @@ export default function QrLinkExisting() {
           customEmptyStateContent={{
             title: "You haven't added any assets yet.",
             text: "What are you waiting for? Create your first asset now!",
-            newButtonRoute: "/assets/new",
-            newButtonContent: "New asset",
+            newButtonRoute: `/assets/new?qrId=${qrId}`,
+            newButtonContent: "Create new asset and link",
           }}
-          className="border-t-0"
+          className="h-full border-t-0"
         />
       </div>
       <ConfirmLinkingAssetModal
