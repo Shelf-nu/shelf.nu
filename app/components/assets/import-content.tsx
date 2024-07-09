@@ -216,9 +216,16 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
 
           <AlertDialogFooter>
             {isSuccessful ? (
-              <Button to="/assets" width="full">
-                View your newly created assets
-              </Button>
+              <div className="flex gap-2">
+                <AlertDialogCancel asChild>
+                  <Button variant="secondary" width="full">
+                    Close
+                  </Button>
+                </AlertDialogCancel>
+                <Button to="/assets" width="full" className="whitespace-nowrap">
+                  View new assets
+                </Button>
+              </div>
             ) : (
               <>
                 <AlertDialogCancel asChild>
