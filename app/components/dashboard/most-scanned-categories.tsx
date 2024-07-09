@@ -39,11 +39,7 @@ export default function MostScannedCategories() {
             {mostScannedCategories.length < 5 &&
               Array(5 - mostScannedCategories.length)
                 .fill(null)
-                .map((_d, i) => (
-                  <Tr key={i} className="h-[72px]">
-                    {""}
-                  </Tr>
-                ))}
+                .map((_d, i) => <Tr key={i} className="h-[72px]"></Tr>)}
           </tbody>
         </Table>
       ) : (

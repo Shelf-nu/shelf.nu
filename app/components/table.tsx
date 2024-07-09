@@ -42,7 +42,7 @@ export function Tr({
   children,
   className,
 }: {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   className?: string;
 }) {
   return <tr className={tw("hover:bg-gray-50", className)}>{children}</tr>;
