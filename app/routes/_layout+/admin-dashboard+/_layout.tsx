@@ -26,7 +26,16 @@ export const handle = {
 };
 
 const items = [
-  { to: "users", content: "Users" },
+  {
+    to: "users",
+    content: "Users",
+    isActive: (pathname: string) =>
+      pathname.includes("admin-dashboard") &&
+      (pathname.includes("users") ||
+        pathname.includes("members") ||
+        pathname.includes("assets") ||
+        pathname.includes("qr-codes")),
+  },
   { to: "qrs", content: "QR codes" },
   { to: "announcements", content: "Announcements" },
 ];

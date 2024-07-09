@@ -1,5 +1,12 @@
 import { BookingStatus, AssetStatus, KitStatus } from "@prisma/client";
-import type { Booking, Prisma, Organization, Asset, Kit } from "@prisma/client";
+import type {
+  Booking,
+  Prisma,
+  Organization,
+  Asset,
+  Kit,
+  User,
+} from "@prisma/client";
 import { db } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
@@ -8,6 +15,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { sendEmail } from "~/utils/mail.server";
 import { scheduler } from "~/utils/scheduler.server";
@@ -20,8 +28,10 @@ import {
   sendCheckinReminder,
 } from "./email-helpers";
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
+import { getBookingWhereInput } from "./utils.server";
 import { createNotes } from "../asset/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
+import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Booking";
 
@@ -1074,4 +1084,378 @@ export async function getBookingFlags(
     hasAlreadyBookedAssets,
     hasAssetsInCustody,
   };
+}
+
+export async function bulkDeleteBookings({
+  bookingIds,
+  organizationId,
+  userId,
+  hints,
+  currentSearchParams,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  userId: User["id"];
+  hints: ClientHint;
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /** If all are selected in the list, then we have to consider filter */
+    const where: Prisma.BookingWhereInput = bookingIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getBookingWhereInput({ currentSearchParams, organizationId })
+      : { id: { in: bookingIds }, organizationId };
+
+    const [bookings, user] = await Promise.all([
+      db.booking.findMany({
+        where,
+        include: {
+          custodianTeamMember: true,
+          custodianUser: true,
+          organization: { include: { owner: { select: { email: true } } } },
+          _count: { select: { assets: true } },
+          assets: { select: { id: true, kitId: true } },
+        },
+      }),
+      getUserByID(userId),
+    ]);
+
+    /** We have to send mails to custodianUsers */
+    const bookingsToSendEmail = bookings.filter(
+      (booking) => !!booking.custodianUser?.email
+    );
+
+    /** If some booking was OVERDUE or ONGOING, we have to make their assets and kits available */
+    const overdueOrOngoingBookings = bookings.filter(
+      (booking) => booking.status === "OVERDUE" || booking.status === "ONGOING"
+    );
+
+    /** We have to cancel scheduler for the bookings */
+    const bookingsWithSchedulerReference = overdueOrOngoingBookings.filter(
+      (booking) => !!booking.activeSchedulerReference
+    );
+
+    return await db.$transaction(async (tx) => {
+      /** Deleting all selected bookings */
+      await tx.booking.deleteMany({
+        where: { id: { in: bookings.map((booking) => booking.id) } },
+      });
+
+      /** Sending mails to required users  */
+      await Promise.all(
+        bookingsToSendEmail.map((b) => {
+          const subject = `Booking deleted (${b.name}) - shelf.nu`;
+          const text = deletedBookingEmailContent({
+            bookingName: b.name,
+            assetsCount: b.assets.length,
+            custodian:
+              `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+              (b.custodianTeamMember?.name as string),
+            from: b.from as Date,
+            to: b.to as Date,
+            bookingId: b.id,
+            hints,
+          });
+
+          const html = bookingUpdatesTemplateString({
+            booking: b,
+            heading: `Your booking as been deleted: "${b.name}"`,
+            assetCount: b.assets.length,
+            hints,
+            hideViewButton: true,
+          });
+
+          return sendEmail({
+            to: b.custodianUser?.email ?? "",
+            subject,
+            text,
+            html,
+          });
+        })
+      );
+
+      /** Making assets and kits available */
+      if (overdueOrOngoingBookings.length > 0) {
+        const allAssets = overdueOrOngoingBookings.flatMap(
+          (booking) => booking.assets
+        );
+
+        const allKitIds = allAssets
+          .filter((asset) => !!asset.kitId)
+          .map((asset) => asset.kitId as string);
+
+        const uniqueKitIds = new Set(allKitIds);
+
+        await tx.asset.updateMany({
+          where: { id: { in: allAssets.map((asset) => asset.id) } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+
+        await tx.kit.updateMany({
+          where: { id: { in: [...uniqueKitIds] } },
+          data: { status: KitStatus.AVAILABLE },
+        });
+
+        /** Cancelling scheduler */
+        await Promise.all(
+          bookingsWithSchedulerReference.map((booking) =>
+            cancelScheduler(booking)
+          )
+        );
+      }
+
+      /** Making notes for all the assets */
+      await Promise.all(
+        bookings.map((booking) =>
+          createNotes({
+            content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** deleted booking **${
+              booking.name
+            }**.`,
+            type: "UPDATE",
+            userId,
+            assetIds: booking.assets.map((asset) => asset.id),
+          })
+        )
+      );
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk deleting bookings.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { bookingIds, organizationId },
+      label,
+    });
+  }
+}
+
+export async function bulkArchiveBookings({
+  bookingIds,
+  organizationId,
+  currentSearchParams,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /** If all are selected in the list, then we have to consider filter */
+    const where: Prisma.BookingWhereInput = bookingIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getBookingWhereInput({ currentSearchParams, organizationId })
+      : { id: { in: bookingIds }, organizationId };
+
+    const bookings = await db.booking.findMany({ where });
+
+    const someBookingNotComplete = bookings.some(
+      (b) => b.status !== "COMPLETE"
+    );
+
+    /** Bookings must be complete to add them in archive */
+    if (someBookingNotComplete) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Some bookings are not complete. Please make sure you are selecting completed bookings to archive them.",
+        label,
+      });
+    }
+
+    return await db.$transaction(async (tx) => {
+      /** Updating status of bookings to ARCHIVED  */
+      await tx.booking.updateMany({
+        where: { id: { in: bookings.map((b) => b.id) } },
+        data: { status: BookingStatus.ARCHIVED },
+      });
+
+      /** Cancel any active schedulers */
+      await Promise.all(bookings.map((b) => cancelScheduler(b)));
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk archive booking.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { bookingIds, organizationId },
+      label,
+    });
+  }
+}
+
+export async function bulkCancelBookings({
+  bookingIds,
+  organizationId,
+  userId,
+  hints,
+  currentSearchParams,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  userId: User["id"];
+  hints: ClientHint;
+  currentSearchParams?: string | null;
+}) {
+  try {
+    /** If all are selected in the list, then we have to consider filter */
+    const where: Prisma.BookingWhereInput = bookingIds.includes(
+      ALL_SELECTED_KEY
+    )
+      ? getBookingWhereInput({ currentSearchParams, organizationId })
+      : { id: { in: bookingIds }, organizationId };
+
+    const [bookings, user] = await Promise.all([
+      db.booking.findMany({
+        where,
+        include: {
+          custodianTeamMember: true,
+          custodianUser: true,
+          organization: { include: { owner: { select: { email: true } } } },
+          _count: { select: { assets: true } },
+          assets: { select: { id: true, kitId: true } },
+        },
+      }),
+      getUserByID(userId),
+    ]);
+
+    /** Bookings with any of these statuses cannot be cancelled */
+    const unavailableBookingStatus: BookingStatus[] = [
+      BookingStatus.ARCHIVED,
+      BookingStatus.CANCELLED,
+      BookingStatus.COMPLETE,
+      BookingStatus.DRAFT,
+    ];
+
+    const someUnavailableToCancelBookings = bookings.some((b) =>
+      unavailableBookingStatus.includes(b.status)
+    );
+
+    if (someUnavailableToCancelBookings) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "There are some unavailable to cancel booking selected. Please make sure you are selecting the booking which are allowed to cancel.",
+        label,
+      });
+    }
+
+    /** We have to send mails to custodianUsers */
+    const bookingsToSendEmail = bookings.filter(
+      (booking) => !!booking.custodianUser?.email
+    );
+
+    /** We have to make all the assets and kits available if the booking as ongoing or overdue */
+    const ongoingOrOverdueBookings = bookings.filter(
+      (b) => b.status === "ONGOING" || b.status === "OVERDUE"
+    );
+
+    /** We have to cancel scheduler for the bookings */
+    const bookingsWithSchedulerReference = ongoingOrOverdueBookings.filter(
+      (booking) => !!booking.activeSchedulerReference
+    );
+
+    return await db.$transaction(async (tx) => {
+      /** Updating status of bookings to CANCELLED */
+      await tx.booking.updateMany({
+        where: { id: { in: bookings.map((b) => b.id) } },
+        data: { status: BookingStatus.CANCELLED },
+      });
+
+      /** Sending cancellation emails */
+      await Promise.all(
+        bookingsToSendEmail.map((b) => {
+          const subject = `Booking cancelled (${b.name}) - shelf.nu`;
+          const text = cancelledBookingEmailContent({
+            bookingName: b.name,
+            assetsCount: b._count.assets,
+            custodian:
+              `${b.custodianUser?.firstName} ${b.custodianUser?.lastName}` ||
+              (b.custodianTeamMember?.name as string),
+            from: b.from as Date, // We can safely cast here as we know the booking is overdue so it myust have a from and to date
+            to: b.to as Date,
+            bookingId: b.id,
+            hints: hints,
+          });
+
+          const html = bookingUpdatesTemplateString({
+            booking: b,
+            heading: `Your booking has been cancelled: "${b.name}".`,
+            assetCount: b._count.assets,
+            hints,
+          });
+
+          return sendEmail({
+            to: b.custodianUser?.email ?? "",
+            subject,
+            text,
+            html,
+          });
+        })
+      );
+
+      /** Updating status of assets and kits  */
+      if (ongoingOrOverdueBookings.length > 0) {
+        const allAssets = ongoingOrOverdueBookings.flatMap((b) => b.assets);
+        const allKitIds = allAssets
+          .filter((a) => !!a.kitId)
+          .map((a) => a.kitId as string);
+
+        const uniqueKitIds = new Set(allKitIds);
+
+        /** Making assets available */
+        await tx.asset.updateMany({
+          where: { id: { in: allAssets.map((a) => a.id) } },
+          data: { status: AssetStatus.AVAILABLE },
+        });
+
+        /** Making kits available */
+        await tx.kit.updateMany({
+          where: { id: { in: [...uniqueKitIds] } },
+          data: { status: KitStatus.AVAILABLE },
+        });
+
+        /** Cancelling scheduler */
+        await Promise.all(
+          bookingsWithSchedulerReference.map((booking) =>
+            cancelScheduler(booking)
+          )
+        );
+      }
+
+      /** Making notes for all the assets */
+      await Promise.all(
+        bookings.map((b) =>
+          createNotes({
+            content: `**${user?.firstName?.trim()} ${user?.lastName?.trim()}** cancelled booking **[${
+              b.name
+            }](/bookings/${b.id})**.`,
+            type: "UPDATE",
+            userId,
+            assetIds: b.assets.map((a) => a.id),
+          })
+        )
+      );
+    });
+  } catch (cause) {
+    const message =
+      cause instanceof ShelfError
+        ? cause.message
+        : "Something went wrong while bulk cancelling bookings.";
+
+    throw new ShelfError({
+      cause,
+      message,
+      additionalData: { bookingIds, organizationId, userId },
+      label,
+    });
+  }
 }

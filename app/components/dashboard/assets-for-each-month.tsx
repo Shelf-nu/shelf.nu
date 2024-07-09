@@ -14,15 +14,15 @@ export default function AssetsForEachMonth() {
         {() => (
           <>
             <Title>
-              <div className="flex justify-between">
-                <div>
+              <span className="flex justify-between">
+                <span>
                   <span className="mb-2 block text-[14px] font-medium">
                     Total inventory
                   </span>
                   <span className="block text-[30px] font-semibold text-gray-900">
                     {totalAssets} assets
                   </span>
-                </div>
+                </span>
                 <InfoTooltip
                   content={
                     <>
@@ -34,7 +34,7 @@ export default function AssetsForEachMonth() {
                     </>
                   }
                 />
-              </div>
+              </span>
             </Title>
             <AreaChart
               className="mt-4 h-72"

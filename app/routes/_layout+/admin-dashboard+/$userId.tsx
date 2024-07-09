@@ -14,6 +14,7 @@ import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 import { Spinner } from "~/components/shared/spinner";
 import { Table, Td, Tr } from "~/components/table";
 import { DeleteUser } from "~/components/user/delete-user";
@@ -258,14 +259,16 @@ export default function Area51UserPage() {
               <Tr key={org.id}>
                 <Td>
                   <Link
-                    to={`/admin-dashboard/org/${org.id}`}
+                    to={`/admin-dashboard/org/${org.id}/assets`}
                     className="underline hover:text-gray-500"
                   >
                     {org.name}
                   </Link>
                 </Td>
                 <Td>{org.type}</Td>
-                <Td>{org.createdAt}</Td>
+                <Td>
+                  <DateS date={org.createdAt} />
+                </Td>
                 <Td>{org.userId === user.id ? "yes" : "no"}</Td>
               </Tr>
             ))}
