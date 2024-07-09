@@ -7,6 +7,7 @@ import {
   validateSession,
 } from "~/modules/auth/service.server";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
 
@@ -41,7 +42,23 @@ export function protect({
 
       return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);
     }
+    let isValidSession = await validateSession(auth.refreshToken);
 
+    if (!isValidSession) {
+      session.flash(
+        "errorMessage",
+        "Session might have expired. Please log in again."
+      );
+      session.unset(authSessionKey);
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: "Session might have expired. Please log in again.",
+          label: "Auth",
+        })
+      );
+      return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);
+    }
     return next();
   });
 }
@@ -76,25 +93,11 @@ export function refreshSession() {
     const session = getSession<SessionData, FlashData>(c);
     const auth = session.get(authSessionKey);
 
-    if (!auth) {
+    if (!auth || !isExpiringSoon(auth.expiresAt)) {
       return next();
     }
-    let isValidSession = true;
-    if (!isExpiringSoon(auth.expiresAt)) {
-      isValidSession = await validateSession(auth.refreshToken);
-      if (isValidSession) {
-        return next();
-      }
-    }
+
     try {
-      //if not true. then we can throw error
-      if (!isValidSession) {
-        throw new ShelfError({
-          cause: null,
-          message: "Your session has expired. Please log in again.",
-          label: "Auth",
-        });
-      }
       session.set(authSessionKey, await refreshAccessToken(auth.refreshToken));
     } catch (cause) {
       session.flash(
