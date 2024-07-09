@@ -19,10 +19,13 @@ import { Switch } from "~/components/forms/switch";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
+import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { toggleOrganizationSso } from "~/modules/organization/service.server";
+import { csvDataFromRequest } from "~/utils/csv.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { getParams, data, error, parseData } from "~/utils/http.server";
+import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { isValidDomain } from "~/utils/misc";
 import { requireAdmin } from "~/utils/roles.server";
 
@@ -87,7 +90,7 @@ export const action = async ({
     const { intent } = parseData(
       await request.clone().formData(),
       z.object({
-        intent: z.enum(["toggleSso", "updateSsoDetails"]),
+        intent: z.enum(["toggleSso", "updateSsoDetails", "content"]),
       })
     );
 
@@ -141,6 +144,23 @@ export const action = async ({
         });
 
         return json(data({ message: "SSO details updated" }));
+      case "content":
+        const csvData = await csvDataFromRequest({ request });
+        if (csvData.length < 2) {
+          throw new ShelfError({
+            cause: null,
+            message: "CSV file is empty",
+            additionalData: { intent },
+            label: "Assets",
+          });
+        }
+        const contentData = extractCSVDataFromContentImport(csvData);
+        await createAssetsFromContentImport({
+          data: contentData,
+          userId,
+          organizationId,
+        });
+        return json(data(null));
       default:
         throw new ShelfError({
           cause: null,
@@ -327,6 +347,11 @@ export default function OrgPage() {
                 intent="backup"
                 url={`/api/admin/import-org-assets/${organization.id}`}
               />
+            </div>
+
+            <div>
+              <h3>Import content</h3>
+              <FileForm intent={"content"} />
             </div>
           </div>
         </div>
