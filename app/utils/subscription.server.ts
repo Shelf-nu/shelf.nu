@@ -162,6 +162,7 @@ export const canCreateMoreCustomFields = ({
 
   return totalCustomFields < tierLimit?.maxCustomFields;
 };
+
 export const assertUserCanCreateMoreCustomFields = async ({
   organizationId,
   organizations,
@@ -196,6 +197,29 @@ export const assertUserCanCreateMoreCustomFields = async ({
     });
   }
 };
+
+/**
+ * This function checks if the new activating custom fields will exceed the allowed limit or not
+ */
+export function willExceedCustomFieldLimit({
+  tierLimit,
+  currentCustomFields,
+  newActivatingFields,
+}: {
+  tierLimit: { maxCustomFields: number } | null | undefined;
+  currentCustomFields: number;
+  newActivatingFields: number;
+}) {
+  if (!premiumIsEnabled) {
+    return false;
+  }
+
+  if (!tierLimit?.maxCustomFields) {
+    return true;
+  }
+
+  return currentCustomFields + newActivatingFields > tierLimit.maxCustomFields;
+}
 /** End Custom Fields */
 
 /** Organizations */

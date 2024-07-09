@@ -41,6 +41,7 @@ import {
   PartialCheckboxIcon,
   AssetLabel,
   LockIcon,
+  ActiveSwitchIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
@@ -85,7 +86,9 @@ export type IconType =
   | "release-custody"
   | "partial-checkbox"
   | "asset-label"
-  | "lock";
+  | "lock"
+  | "activate"
+  | "deactivate";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -133,6 +136,8 @@ export const iconsMap: IconsMap = {
   "partial-checkbox": <PartialCheckboxIcon />,
   "asset-label": <AssetLabel />,
   lock: <LockIcon />,
+  activate: <ActiveSwitchIcon />,
+  deactivate: <XIcon />,
 };
 
 export default iconsMap;

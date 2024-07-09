@@ -7,6 +7,7 @@ import {
   isLikeShelfError,
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CustomFieldDraftPayload } from "./types";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -332,6 +333,34 @@ export async function countActiveCustomFields({
       message:
         "Something went wrong while fetching active custom fields. Please try again or contact support.",
       additionalData: { organizationId },
+      label,
+    });
+  }
+}
+
+export async function bulkActivateOrDeactivateCustomFields({
+  customFieldIds,
+  organizationId,
+  userId,
+  active,
+}: {
+  customFieldIds: CustomField["id"][];
+  organizationId: CustomField["organizationId"];
+  userId: CustomField["userId"];
+  active: boolean;
+}) {
+  try {
+    return await db.customField.updateMany({
+      where: customFieldIds.includes(ALL_SELECTED_KEY)
+        ? { organizationId }
+        : { id: { in: customFieldIds } },
+      data: { active },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk activating custom fields.",
+      additionalData: { customFieldIds, organizationId, userId },
       label,
     });
   }
