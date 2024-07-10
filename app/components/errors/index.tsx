@@ -18,6 +18,9 @@ export const ErrorContent = () => {
     traceId = response.data.error.traceId;
   }
 
+  // Creating a string with <br/> tags for line breaks
+  const messageHtml = { __html: message.split("\n").join("<br/>") };
+
   return (
     <div className="flex size-full items-center justify-center">
       <div className="flex flex-col items-center text-center">
@@ -25,7 +28,7 @@ export const ErrorContent = () => {
           <ErrorIcon />
         </span>
         <h2 className="mb-2">{title}</h2>
-        <p className="max-w-[550px]">{message}</p>
+        <p className="max-w-[550px]" dangerouslySetInnerHTML={messageHtml} />
         {traceId && <p className="text-gray-400">(Trace id: {traceId})</p>}
         <div className=" mt-8 flex gap-3">
           <Button to="/" variant="secondary" icon="home">
@@ -42,8 +45,8 @@ export const ErrorContent = () => {
 
 export const ErrorIcon = () => (
   <svg
-    width="100%"
-    height="100%"
+    width="56px"
+    height="56px"
     viewBox="0 0 56 56"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"

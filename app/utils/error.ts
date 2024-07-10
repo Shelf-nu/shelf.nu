@@ -1,4 +1,3 @@
-import { createId } from "@paralleldrive/cuid2";
 import { Prisma } from "@prisma/client";
 import type { ValidationError } from "./http";
 
@@ -86,7 +85,7 @@ export type FailureReason = {
     | "Dev error" // Error that should never happen in production because it's a developer mistake
     | "Environment"; // Related to the environment setup
   /**
-   * The message intended for the user.
+   * The message intended for the user. You can add new lines using \n which will be parsed into paragraphs in the html
    */
   message: string;
   /**
@@ -169,7 +168,7 @@ export class ShelfError extends Error {
     this.status = isLikeShelfError(cause)
       ? status || cause.status || 500
       : status || 500;
-    this.traceId = traceId || createId();
+    this.traceId = traceId || crypto.randomUUID();
   }
 }
 

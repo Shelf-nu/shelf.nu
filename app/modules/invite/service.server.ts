@@ -226,20 +226,45 @@ export async function updateInviteStatus({
     const invite = await db.invite.findFirst({
       where: {
         id,
-        status: InviteStatuses.PENDING,
-        expiresAt: { gt: new Date() },
       },
       include: {
         inviteeTeamMember: true,
       },
     });
 
-    if (!invite) {
+    if (!invite || invite.status !== InviteStatuses.PENDING) {
+      let title = "Invite not found";
+      let message =
+        "The invitation you are trying to accept is either not found or expired";
+
+      if (invite?.status === InviteStatuses.ACCEPTED) {
+        title = "Invite already accepted";
+        message =
+          "Please login to your account to access the organization. \n If you have not set a password yet,\n you must use the OTP login the first time you access your account.";
+      }
+
+      if (invite?.status === InviteStatuses.REJECTED) {
+        title = "Invite is rejected";
+        message =
+          "The invitation you are trying to accept is already rejected. If you think this is a mistake, please ask your administrator to send you a new invite.";
+      }
+
+      if (invite?.status === InviteStatuses.INVALIDATED) {
+        title = "Invite is invalidated";
+        message =
+          "The invitation you are trying to accept is already invalidated. If you think this is a mistake, please ask your administrator to send you a new invite.";
+      }
+
+      if (invite?.expiresAt && invite.expiresAt < new Date()) {
+        title = "Invite expired";
+        message =
+          "The invitation you are trying to accept is expired. Please ask your administrator to send you a new invite.";
+      }
+
       throw new ShelfError({
         cause: null,
-        message:
-          "The invitation you are trying to accept is either not found or expired",
-        title: "Invite not found",
+        message,
+        title,
         label,
       });
     }
