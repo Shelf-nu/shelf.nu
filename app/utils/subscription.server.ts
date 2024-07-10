@@ -162,6 +162,7 @@ export const canCreateMoreCustomFields = ({
 
   return totalCustomFields < tierLimit?.maxCustomFields;
 };
+
 export const assertUserCanCreateMoreCustomFields = async ({
   organizationId,
   organizations,
@@ -196,6 +197,65 @@ export const assertUserCanCreateMoreCustomFields = async ({
     });
   }
 };
+
+/**
+ * This function checks if the new activating custom fields will exceed the allowed limit or not
+ */
+export function willExceedCustomFieldLimit({
+  tierLimit,
+  currentCustomFields,
+  newActivatingFields,
+}: {
+  tierLimit: { maxCustomFields: number } | null | undefined;
+  currentCustomFields: number;
+  newActivatingFields: number;
+}) {
+  if (!premiumIsEnabled) {
+    return false;
+  }
+
+  if (!tierLimit?.maxCustomFields) {
+    return true;
+  }
+
+  return currentCustomFields + newActivatingFields > tierLimit.maxCustomFields;
+}
+
+export async function assertWillExceedCustomFieldLimit({
+  organizationId,
+  organizations,
+  newActivatingFields,
+}: {
+  organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
+  newActivatingFields: number;
+}) {
+  const [tierLimit, totalActiveCustomFields] = await Promise.all([
+    getOrganizationTierLimit({ organizationId, organizations }),
+    countActiveCustomFields({ organizationId }),
+  ]);
+
+  const willExceedLimit = willExceedCustomFieldLimit({
+    tierLimit,
+    currentCustomFields: totalActiveCustomFields,
+    newActivatingFields,
+  });
+
+  if (willExceedLimit) {
+    throw new ShelfError({
+      cause: null,
+      message: `Activating these fields will exceed your allowed limit(${tierLimit.maxCustomFields}) of active custom fields . Try selecting a smaller number or fields or upgrade your plan to activate more.`,
+      shouldBeCaptured: false,
+      label: "Custom fields",
+    });
+  }
+}
 /** End Custom Fields */
 
 /** Organizations */

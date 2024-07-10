@@ -8,7 +8,7 @@ import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import iconv from "iconv-lite";
 import { fetchAssetsForExport } from "~/modules/asset/service.server";
-import { ShelfError } from "./error";
+import { isLikeShelfError, ShelfError } from "./error";
 
 export type CSVData = [string[], ...string[][]] | [];
 
@@ -97,8 +97,9 @@ export const buildCsvDataFromAssets = ({
 }: {
   assets: Asset[];
   keysToSkip: string[];
-}) =>
-  assets.map((asset) => {
+}) => {
+  if (!assets.length) return [] as unknown as CSVData;
+  return assets.map((asset) => {
     const toExport: string[] = [];
 
     /** Itterate over the values to create teh export object */
@@ -150,6 +151,7 @@ export const buildCsvDataFromAssets = ({
 
     return toExport;
   });
+};
 
 /* There are some keys that need to be skipped and require special handling */
 const keysToSkip = [
@@ -175,11 +177,14 @@ export async function exportAssetsToCsv({
       keysToSkip,
     });
 
-    if (!csvData) {
+    if (!csvData || !csvData.length) {
       throw new ShelfError({
         cause: null,
-        message: "Nothing to export.",
+        title: "No assets to export",
+        message:
+          "Your workspace doesn't have any assets so there is nothing to export.",
         label: "CSV",
+        shouldBeCaptured: false,
       });
     }
 
@@ -201,7 +206,9 @@ export async function exportAssetsToCsv({
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message: "Something went wrong while exporting the assets.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while exporting the assets.",
       additionalData: { organizationId },
       label: "CSV",
     });

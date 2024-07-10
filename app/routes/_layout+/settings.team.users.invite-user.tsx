@@ -164,7 +164,7 @@ export default function InviteUser() {
   return organization ? (
     <>
       <div className="modal-content-wrapper">
-        <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
+        <div className="mb-4 mr-3 inline-flex items-center justify-center rounded-full border-[5px] border-solid border-primary-50 bg-primary-100 p-1.5 text-primary">
           <UserIcon />
         </div>
         <div className="mb-5">
