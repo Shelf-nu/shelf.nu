@@ -3,14 +3,10 @@ import { z } from "zod";
 import { BulkActivateCustomFieldSchema } from "~/components/custom-fields/bulk-activate-dialog";
 import { BulkDeactivateCustomFieldSchema } from "~/components/custom-fields/bulk-deactivate-dialog";
 import { db } from "~/database/db.server";
-import {
-  bulkActivateOrDeactivateCustomFields,
-  countActiveCustomFields,
-} from "~/modules/custom-field/service.server";
-import { getOrganizationTierLimit } from "~/modules/tier/service.server";
+import { bulkActivateOrDeactivateCustomFields } from "~/modules/custom-field/service.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import { assertIsPost, data, error, parseData } from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
@@ -19,8 +15,8 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import {
-  canCreateMoreCustomFields,
-  willExceedCustomFieldLimit,
+  assertUserCanCreateMoreCustomFields,
+  assertWillExceedCustomFieldLimit,
 } from "~/utils/subscription.server";
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -51,6 +47,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-activate": {
+        await assertUserCanCreateMoreCustomFields({
+          organizationId,
+          organizations,
+        });
+
         const { customFieldIds } = parseData(
           formData,
           BulkActivateCustomFieldSchema
@@ -62,49 +63,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
             : { id: { in: customFieldIds } },
         });
 
-        /** We have to make sure that user is not already at the limit */
-        const tierLimit = await getOrganizationTierLimit({
+        await assertWillExceedCustomFieldLimit({
           organizationId,
           organizations,
-        });
-
-        const totalActiveCustomFields = await countActiveCustomFields({
-          organizationId,
-        });
-
-        const canCreateMore = canCreateMoreCustomFields({
-          tierLimit,
-          totalCustomFields: totalActiveCustomFields,
-        });
-
-        if (!canCreateMore) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "You have reached your limit of active custom fields. Please upgrade your plan to add more.",
-            additionalData: { userId, totalActiveCustomFields, tierLimit },
-            label: "Custom fields",
-            status: 403,
-            shouldBeCaptured: false,
-          });
-        }
-
-        /** We have to make sure that the new activating fields is not exceeding the allowed limit */
-        const willExceedCustomFieldsLimit = willExceedCustomFieldLimit({
-          tierLimit,
-          currentCustomFields: totalActiveCustomFields,
           newActivatingFields,
         });
-
-        if (willExceedCustomFieldsLimit) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "Activating these fields will exceed your allowed limit of active custom fields. Try selecting small number or fields or upgrade your plan to activate more.",
-            shouldBeCaptured: false,
-            label: "Custom fields",
-          });
-        }
 
         await bulkActivateOrDeactivateCustomFields({
           customFieldIds,
