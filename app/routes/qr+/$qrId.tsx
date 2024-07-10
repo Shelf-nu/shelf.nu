@@ -8,7 +8,7 @@ import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import { createScan, updateScan } from "~/modules/scan/service.server";
 import { setCookie } from "~/utils/cookies.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   assertIsPost,
   data,
@@ -97,7 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ];
 
     /**
-     * When there is no assetId or qrId that means that the asset or kit was deleted so the QR code is orphaned.
+     * When there is no assetId or qrId that means that the asset or kit was deleted or the Qr was generated as unlinked.
      * Here we redirect to a page where the user has the option to link to existing asset or kit create a new one.
      */
     if (!qr.assetId && !qr.kitId) {
@@ -114,15 +114,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           headers,
         }
       );
-    }
-    /** If its linked to a kit, redirect to the kit */
-    if (qr.kitId) {
+    } else if (qr.kitId) {
+      /** If its linked to a kit, redirect to the kit */
       return redirect(
         `/kits/${qr.kitId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
         {
           headers,
         }
       );
+    } else {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Something went wrong with handling this QR code. This should not happen. Please try again or contact support.",
+        label: "QR",
+      });
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
