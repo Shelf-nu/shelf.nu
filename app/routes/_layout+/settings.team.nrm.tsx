@@ -13,6 +13,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
+import BulkActionsDropdown from "~/components/nrm/bulk-actions-dropdown";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { ImportNrmButton } from "~/components/workspace/import-nrm-button";
@@ -190,6 +191,7 @@ export default function NrmSettings() {
         </Filters>
 
         <List
+          bulkActions={<BulkActionsDropdown />}
           className="overflow-x-visible md:overflow-x-auto"
           ItemComponent={TeamMemberRow}
           customEmptyStateContent={{
@@ -200,7 +202,8 @@ export default function NrmSettings() {
           }}
           headerChildren={
             <>
-              <Th> </Th>
+              <Th>Custodies</Th>
+              <Th>Actions</Th>
             </>
           }
         />
@@ -227,7 +230,9 @@ function TeamMemberRow({
   return (
     <>
       <Td className="w-full whitespace-normal">{item.name}</Td>
-
+      <Td className="text-right">
+        {item._count.custodies ? item._count.custodies : 0}
+      </Td>
       <Td className="text-right">
         <TeamMembersActionsDropdown teamMember={item} />
       </Td>

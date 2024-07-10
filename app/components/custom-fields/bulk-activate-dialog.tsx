@@ -37,7 +37,7 @@ export default function BulkActivateDialog() {
           <input type="hidden" value="bulk-activate" name="intent" />
 
           {fetcherError ? (
-            <p className="text-sm text-error-500">{fetcherError}</p>
+            <p className="mb-4 text-sm text-error-500">{fetcherError}</p>
           ) : null}
 
           <div className="flex gap-3">

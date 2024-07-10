@@ -87,7 +87,7 @@ export const List = ({
   emptyStateClassName,
   bulkActions,
 }: ListProps) => {
-  const { items, totalItems, perPage, modelName, header } =
+  const { items, totalItems, perPage, modelName } =
     useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
   const totalIncomingItems = items.length;
@@ -96,6 +96,7 @@ export const List = ({
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const hasSelectedAllItems = selectedBulkItems.includes(ALL_SELECTED_KEY);
+  const hasSelectedItems = selectedBulkItems.length > 0;
 
   /**
    * We can select all the incoming items and we can add ALL_SELECTED_KEY
@@ -121,59 +122,52 @@ export const List = ({
       ) : (
         <>
           {/* The title and the total number of items. This basically acts like a fake table row */}
-          <div className="flex items-center justify-between border-b p-4">
+          <div className="flex items-center justify-between border-b p-4 pb-[8px]">
             <div>
-              <div className="">
-                {selectedBulkItemsCount > 0 ? (
-                  <div className="flex items-end gap-2">
-                    <div>
-                      <h5>{title || header.title}</h5>
-                      <div className="flex items-center gap-2">
-                        {selectedBulkItems.length && (
-                          <Button
-                            onClick={() => setSelectedBulkItems([])}
-                            variant="secondary"
-                            className="p-1 text-[14px]"
+              <div>
+                <h5 className="capitalize">{title || plural}</h5>
+                <div className="h-7">
+                  {hasSelectedItems ? (
+                    <div className="flex items-start gap-2">
+                      <Button
+                        onClick={() => setSelectedBulkItems([])}
+                        variant="secondary"
+                        className="p-1 text-[14px]"
+                      >
+                        <span className="block size-2">
+                          <svg
+                            width="100%"
+                            height="100%"
+                            viewBox="0 0 10 10"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
                           >
-                            <span className="block size-2">
-                              <svg
-                                width="100%"
-                                height="100%"
-                                viewBox="0 0 10 10"
-                                fill="none"
-                                xmlns="http://www.w3.org/2000/svg"
-                              >
-                                <path
-                                  d="M9 1 1 9m0-8 8 8"
-                                  stroke="currentColor"
-                                  strokeWidth={1.333}
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </span>
+                            <path
+                              d="M9 1 1 9m0-8 8 8"
+                              stroke="currentColor"
+                              strokeWidth={1.333}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </span>
+                      </Button>
+                      {hasSelectedAllItems
+                        ? totalItems
+                        : selectedBulkItemsCount}{" "}
+                      selected
+                      {!hasSelectedAllItems &&
+                        selectedBulkItemsCount < totalItems && (
+                          <Button
+                            onClick={handleSelectAllItems}
+                            variant="link"
+                            className="-mt-1 px-2 py-1 text-[14px] font-normal hover:bg-primary-50 hover:text-primary-600"
+                          >
+                            Select all {totalItems} entries
                           </Button>
                         )}
-                        {hasSelectedAllItems
-                          ? totalItems
-                          : selectedBulkItemsCount}{" "}
-                        selected
-                      </div>
                     </div>
-                    {!hasSelectedAllItems &&
-                      selectedBulkItemsCount < totalItems && (
-                        <Button
-                          onClick={handleSelectAllItems}
-                          variant="link"
-                          className="-mb-1 px-2 py-1 text-[14px] font-normal hover:bg-primary-50 hover:text-primary-600"
-                        >
-                          Select all {totalItems} entries
-                        </Button>
-                      )}
-                  </div>
-                ) : (
-                  <>
-                    <h5 className="capitalize">{title || plural}</h5>
+                  ) : (
                     <div>
                       {perPage < totalItems ? (
                         <p>
@@ -188,8 +182,8 @@ export const List = ({
                         </span>
                       )}
                     </div>
-                  </>
-                )}
+                  )}
+                </div>
               </div>
             </div>
             <div>{bulkActions}</div>
