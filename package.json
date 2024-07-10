@@ -44,7 +44,6 @@
     "@fullcalendar/react": "^6.1.11",
     "@hono/node-server": "1.10.1",
     "@markdoc/markdoc": "^0.4.0",
-    "@paralleldrive/cuid2": "^2.2.2",
     "@prisma/client": "^5.9.1",
     "@radix-ui/react-alert-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "2.0.6",
