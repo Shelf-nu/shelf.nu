@@ -250,8 +250,7 @@ export async function assertWillExceedCustomFieldLimit({
   if (willExceedLimit) {
     throw new ShelfError({
       cause: null,
-      message:
-        "Activating these fields will exceed your allowed limit of active custom fields. Try selecting small number or fields or upgrade your plan to activate more.",
+      message: `Activating these fields will exceed your allowed limit(${tierLimit.maxCustomFields}) of active custom fields . Try selecting a smaller number or fields or upgrade your plan to activate more.`,
       shouldBeCaptured: false,
       label: "Custom fields",
     });
