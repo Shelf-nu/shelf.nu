@@ -2,15 +2,12 @@ import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import type { loader } from "~/routes/_layout+/assets._index";
+import { type loader } from "~/routes/_layout+/settings.custom-fields.index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
-import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
-import BulkCategoryUpdateDialog from "./bulk-category-update-dialog";
-import BulkDeleteDialog from "./bulk-delete-dialog";
-import BulkLocationUpdateDialog from "./bulk-location-update-dialog";
-import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";
+import BulkActivateDialog from "./bulk-activate-dialog";
+import BulkDeactivateDialog from "./bulk-deactivate-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
 import { Button } from "../shared/button";
@@ -47,6 +44,16 @@ function ConditionalDropdown() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
+  const selectedCustomFieldIds = useAtomValue(selectedBulkItemsAtom);
+  const selectedCustomFields = items.filter((item) =>
+    selectedCustomFieldIds.includes(item.id)
+  );
+
+  const disabled = selectedCustomFieldIds.length === 0;
+
+  const someFieldsActivated = selectedCustomFields.some((cf) => cf.active);
+  const someFieldsDeactivated = selectedCustomFields.some((cf) => !cf.active);
+
   const {
     ref: dropdownRef,
     defaultApplied,
@@ -54,30 +61,6 @@ function ConditionalDropdown() {
     defaultOpen,
     setOpen,
   } = useControlledDropdownMenu();
-
-  const selectedAssetIds = useAtomValue(selectedBulkItemsAtom);
-
-  const selectedAssets = items.filter((item) =>
-    selectedAssetIds.includes(item.id)
-  );
-
-  const disabled = selectedAssetIds.length === 0;
-
-  const allAssetsAreInCustody = selectedAssets.every(
-    (asset) => asset.status === "IN_CUSTODY"
-  );
-
-  const allAssetsAreAvailable = selectedAssets.every(
-    (asset) => asset.status === "AVAILABLE"
-  );
-
-  const someAssetCheckedOut = selectedAssets.some(
-    (asset) => asset.status === "CHECKED_OUT"
-  );
-
-  const someAssetPartOfUnavailableKit = selectedAssets.some(
-    (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
-  );
 
   function closeMenu() {
     setOpen(false);
@@ -92,11 +75,9 @@ function ConditionalDropdown() {
           )}
         />
       )}
-      <BulkLocationUpdateDialog />
-      <BulkCategoryUpdateDialog />
-      <BulkAssignCustodyDialog />
-      <BulkReleaseCustodyDialog />
-      <BulkDeleteDialog />
+
+      <BulkActivateDialog />
+      <BulkDeactivateDialog />
 
       <DropdownMenu
         modal={false}
@@ -151,82 +132,45 @@ function ConditionalDropdown() {
           ref={dropdownRef}
         >
           <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[180px] md:rounded-t-[4px]">
-            <DropdownMenuItem className="py-1 lg:p-0">
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+            >
               <BulkUpdateDialogTrigger
-                type="release-custody"
-                label="Release custody"
+                type="activate"
+                label="Activate"
                 onClick={closeMenu}
                 disabled={
-                  !allAssetsAreInCustody || someAssetPartOfUnavailableKit
-                    ? {
-                        reason: someAssetPartOfUnavailableKit
-                          ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
-                          : "Some of the selected assets are not in custody.",
-                      }
-                    : isLoading
-                }
-              />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem className="border-b py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="assign-custody"
-                label="Assign custody"
-                onClick={closeMenu}
-                disabled={
-                  !allAssetsAreAvailable || someAssetPartOfUnavailableKit
-                    ? {
-                        reason: someAssetPartOfUnavailableKit
-                          ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
-                          : "Some of the selected assets are not available.",
-                      }
-                    : isLoading
-                }
-              />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem className="py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="location"
-                onClick={closeMenu}
-                disabled={isLoading}
-              />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem className="border-b py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="category"
-                onClick={closeMenu}
-                disabled={isLoading}
-              />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem className="py-1 lg:p-0">
-              <BulkUpdateDialogTrigger
-                type="trash"
-                label="Delete"
-                onClick={closeMenu}
-                disabled={
-                  someAssetCheckedOut
+                  someFieldsActivated
                     ? {
                         reason:
-                          "Some of the selected kits are checked out. Please finish your booking first, before deleting them.",
+                          "Some of the selected fields are already activated. Please make sure you are selecting deactivated fields only.",
                       }
                     : isLoading
                 }
               />
             </DropdownMenuItem>
-
-            <DropdownMenuItem className="border-t md:hidden lg:p-0">
-              <Button
-                role="button"
-                variant="secondary"
-                className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                width="full"
-                onClick={() => setOpen(false)}
-              >
-                Close
-              </Button>
+            <DropdownMenuItem
+              className="px-4 py-1 md:p-0"
+              onSelect={(e) => {
+                e.preventDefault();
+              }}
+            >
+              <BulkUpdateDialogTrigger
+                type="deactivate"
+                label="Deactivate"
+                onClick={closeMenu}
+                disabled={
+                  someFieldsDeactivated
+                    ? {
+                        reason:
+                          "Some of the selected fields are already deactivated. Please make sure you are selecting activated fields only.",
+                      }
+                    : isLoading
+                }
+              />
             </DropdownMenuItem>
           </div>
         </DropdownMenuContent>

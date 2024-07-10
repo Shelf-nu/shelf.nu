@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
 import { ActionsDropdown } from "~/components/custom-fields/actions-dropdown";
+import BulkActionsDropdown from "~/components/custom-fields/bulk-actions-dropdown";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
@@ -125,6 +126,7 @@ export default function CustomFieldsIndexPage() {
         />
       </div>
       <List
+        bulkActions={<BulkActionsDropdown />}
         ItemComponent={TeamMemberRow}
         headerChildren={
           <>
