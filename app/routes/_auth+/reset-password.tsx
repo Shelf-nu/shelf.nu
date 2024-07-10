@@ -76,13 +76,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           password,
           authSession.accessToken
         );
-        //on updating the password. it is removing the session_id from the collection. so we need to create a new session
-        const newSession = await signInWithEmail(authSession?.email, password);
-
-        // Commit the session and redirect
-        if (newSession) context.setSession({ ...newSession });
-
-        return redirect("/");
+        return redirect("/login");
       }
     }
 
