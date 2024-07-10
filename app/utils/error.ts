@@ -1,4 +1,3 @@
-import { createId } from "@paralleldrive/cuid2";
 import { Prisma } from "@prisma/client";
 import type { ValidationError } from "./http";
 
@@ -87,6 +86,8 @@ export type FailureReason = {
     | "Environment"; // Related to the environment setup
   /**
    * The message intended for the user.
+   * You can add new lines using \n which will be parsed into paragraphs in the html
+   * Moveoer, you can add html to highlight strings
    */
   message: string;
   /**
@@ -169,7 +170,7 @@ export class ShelfError extends Error {
     this.status = isLikeShelfError(cause)
       ? status || cause.status || 500
       : status || 500;
-    this.traceId = traceId || createId();
+    this.traceId = traceId || crypto.randomUUID();
   }
 }
 
