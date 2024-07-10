@@ -307,16 +307,10 @@ export async function getAuthResponseByAccessToken(accessToken: string) {
   }
 }
 
-interface Session {
-  id: string;
-  revoked: boolean;
-}
-
 export async function validateSession(token: string) {
   try {
     const t0 = performance.now();
-
-    const result = await db.$queryRaw<Partial<Session>[]>`
+    const result = await db.$queryRaw<{ id: String; revoked: boolean }[]>`
       SELECT id, revoked FROM auth.refresh_tokens 
       WHERE token = ${token} 
       AND revoked = false
@@ -329,11 +323,23 @@ export async function validateSession(token: string) {
 
     if (result.length === 0) {
       //logging for debug
-      Logger.error("Refresh token is invalid or has been revoked");
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: "Refresh token is invalid or has been revoked",
+          label,
+        })
+      );
     }
     return result.length > 0;
   } catch (err) {
-    Logger.error("Something went wrong while valdiating the session");
+    Logger.error(
+      new ShelfError({
+        cause: null,
+        message: "Something went wrong while valdiating the session",
+        label,
+      })
+    );
     return false;
   }
 }
