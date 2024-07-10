@@ -75,7 +75,9 @@ function ConditionalDropdown() {
     (asset) => asset.status === "CHECKED_OUT"
   );
 
-  const someAssetPartKit = selectedAssets.some((asset) => asset?.kit);
+  const someAssetPartOfUnavailableKit = selectedAssets.some(
+    (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
+  );
 
   function closeMenu() {
     setOpen(false);
@@ -155,9 +157,9 @@ function ConditionalDropdown() {
                 label="Release custody"
                 onClick={closeMenu}
                 disabled={
-                  !allAssetsAreInCustody || someAssetPartKit
+                  !allAssetsAreInCustody || someAssetPartOfUnavailableKit
                     ? {
-                        reason: someAssetPartKit
+                        reason: someAssetPartOfUnavailableKit
                           ? "Some of the selected assets are part of a kit. If you want to change their custody, please update the kit instead."
                           : "Some of the selected assets are not in custody.",
                       }
@@ -172,9 +174,9 @@ function ConditionalDropdown() {
                 label="Assign custody"
                 onClick={closeMenu}
                 disabled={
-                  !allAssetsAreAvailable || someAssetPartKit
+                  !allAssetsAreAvailable || someAssetPartOfUnavailableKit
                     ? {
-                        reason: someAssetPartKit
+                        reason: someAssetPartOfUnavailableKit
                           ? "Some of the selected assets are part of a kit. If you want to change their custody, please update the kit instead."
                           : "Some of the selected assets are not available.",
                       }
