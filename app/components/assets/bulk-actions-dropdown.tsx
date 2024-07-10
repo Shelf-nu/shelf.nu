@@ -160,7 +160,7 @@ function ConditionalDropdown() {
                   !allAssetsAreInCustody || someAssetPartOfUnavailableKit
                     ? {
                         reason: someAssetPartOfUnavailableKit
-                          ? "Some of the selected assets are part of a kit. If you want to change their custody, please update the kit instead."
+                          ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
                           : "Some of the selected assets are not in custody.",
                       }
                     : isLoading
@@ -177,7 +177,7 @@ function ConditionalDropdown() {
                   !allAssetsAreAvailable || someAssetPartOfUnavailableKit
                     ? {
                         reason: someAssetPartOfUnavailableKit
-                          ? "Some of the selected assets are part of a kit. If you want to change their custody, please update the kit instead."
+                          ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
                           : "Some of the selected assets are not available.",
                       }
                     : isLoading
