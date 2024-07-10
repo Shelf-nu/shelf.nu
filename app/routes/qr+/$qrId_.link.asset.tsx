@@ -219,7 +219,7 @@ export default function QrLinkExisting() {
 
   let isHydrated = useHydrated();
   const { vh } = useViewportHeight();
-  const maxHeight = isHydrated ? vh - 12 + "px" : "100%"; // We need to handle SSR and we are also substracting 12px to properly handle spacing on the bottom
+  const maxHeight = isHydrated ? vh - 12 - 45 + "px" : "100%"; // We need to handle SSR and we are also substracting 12px to properly handle spacing on the bottom and 45px to handle the horizontal tabs
 
   return (
     <div className="flex flex-1 flex-col" style={{ maxHeight }}>
@@ -402,7 +402,7 @@ export const ConfirmLinkingAssetModal = ({
             with the old QR code.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter className="items-center">
+        <AlertDialogFooter className="gap-2">
           <AlertDialogCancel asChild>
             <Button variant="secondary" disabled={disabled}>
               Cancel

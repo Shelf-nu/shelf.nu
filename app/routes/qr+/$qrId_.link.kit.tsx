@@ -124,8 +124,8 @@ export const loader = async ({
     }
 
     const modelName = {
-      singular: "asset",
-      plural: "assets",
+      singular: "kit",
+      plural: "kits",
     };
 
     return json(
@@ -353,7 +353,7 @@ export const ConfirmLinkingKitModal = ({
             the old QR code.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
+        <AlertDialogFooter className="gap-2">
           <AlertDialogCancel asChild>
             <Button variant="secondary" disabled={disabled}>
               Cancel

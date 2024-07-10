@@ -194,7 +194,7 @@ export default function QrLink() {
           </div>
         </div>
       ) : (
-        <>
+        <div className="flex flex-col">
           <HorizontalTabs
             items={[
               {
@@ -208,8 +208,10 @@ export default function QrLink() {
             ]}
             className="mb-0 justify-center pl-0 [&>a]:w-full"
           />
-          <Outlet />
-        </>
+          <div className="max-h-full">
+            <Outlet />
+          </div>
+        </div>
       )}
     </>
   );

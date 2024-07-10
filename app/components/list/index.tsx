@@ -125,7 +125,7 @@ export const List = ({
           <div className="flex items-center justify-between border-b p-4 pb-[8px]">
             <div>
               <div>
-                <h5 className="capitalize">{title || plural}</h5>
+                <h5 className="text-left capitalize">{title || plural}</h5>
                 <div className="h-7">
                   {hasSelectedItems ? (
                     <div className="flex items-start gap-2">
