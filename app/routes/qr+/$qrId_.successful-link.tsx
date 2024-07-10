@@ -1,4 +1,3 @@
-import type { Asset, Kit } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
@@ -13,6 +12,7 @@ import { db } from "~/database/db.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { data, error, getParams } from "~/utils/http.server";
+import { normalizeQrData } from "~/utils/qr";
 
 export const loader = async ({ context, params }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
@@ -23,7 +23,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
     const qr = await db.qr
       .findUniqueOrThrow({
         where: { id: qrId },
-        select: {
+        include: {
           asset: {
             select: {
               id: true,
@@ -68,10 +68,13 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function QrSuccessfullLink() {
   const { qr } = useLoaderData<typeof loader>();
-  const type = qr.asset ? "asset" : "kit";
-  const item = qr.asset || qr.kit;
-  const name = type === "asset" ? (item as Asset)?.title : (item as Kit)?.name;
-  return item ? (
+  const { item, type, normalizedName } = normalizeQrData(qr);
+
+  if (!item || !type) {
+    return null;
+  }
+
+  return (
     <>
       <div className="flex max-h-full flex-1 flex-col items-center justify-center ">
         <span className="mb-2.5 flex size-12 items-center justify-center rounded-full bg-success-50 p-2 text-success-600">
@@ -79,7 +82,7 @@ export default function QrSuccessfullLink() {
         </span>
         <h3>Succesfully linked</h3>
         <p>
-          Your {type} <b>{name}</b> has been linked with this QR code.
+          Your {type} <b>{normalizedName}</b> has been linked with this QR code.
         </p>
         <div className="mt-8 flex w-full flex-col gap-3">
           <Button
@@ -95,7 +98,7 @@ export default function QrSuccessfullLink() {
         </div>
       </div>
     </>
-  ) : null;
+  );
 }
 
 export const ErrorBoundary = () => <ErrorContent />;

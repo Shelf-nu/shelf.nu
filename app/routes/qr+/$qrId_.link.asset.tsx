@@ -402,7 +402,7 @@ export const ConfirmLinkingAssetModal = ({
             with the old QR code.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
+        <AlertDialogFooter className="items-center">
           <AlertDialogCancel asChild>
             <Button variant="secondary" disabled={disabled}>
               Cancel
@@ -412,7 +412,6 @@ export const ConfirmLinkingAssetModal = ({
           <fetcher.Form method="post">
             <input type="hidden" name="assetId" value={asset.id} />
             <Button
-              className=" mb-3"
               type="submit"
               data-test-id="confirmLinkAssetButton"
               width="full"

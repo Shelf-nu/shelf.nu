@@ -363,7 +363,6 @@ export const ConfirmLinkingKitModal = ({
           <fetcher.Form method="post">
             <input type="hidden" name="kitId" value={kit.id} />
             <Button
-              className=" mb-3"
               type="submit"
               data-test-id="confirmLinkKitButton"
               width="full"
