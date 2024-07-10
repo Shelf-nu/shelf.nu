@@ -29,12 +29,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     /* Find the QR in the database */
     const qr = await getQr(id);
-    /** If the QR doesn't exist, getQR will throw a 404
-     *
-     * AFTER MVP: Here we have to consider a deleted User which will
-     * delete all the connected QRs.
-     * However, in real life there could be a physical QR code
-     * that is still there. Will we allow someone to claim it?
+    /**
+     * If the QR doesn't exist, getQR will throw a 404
      */
 
     /** Record the scan in the DB using the QR id
@@ -78,24 +74,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     /** There could be a case when you get removed from an organization while browsing it.
      * In this case what we do is we set the current organization to the first one in the list
      */
-    const userOrganizations = (
-      await getUserOrganizations({
-        userId: authSession.userId,
-      })
-    ).map((uo) => uo.organization);
-    const userOrganizationIds = userOrganizations.map((org) => org.id);
-    const personalOrganization = userOrganizations.find(
+    const userOrganizations = await getUserOrganizations({
+      userId: authSession.userId,
+    });
+    const organizations = userOrganizations.map((uo) => uo.organization);
+    const organizationsIds = organizations.map((org) => org.id);
+    const personalOrganization = organizations.find(
       (org) => org.type === "PERSONAL"
     ) as Pick<Organization, "id">;
 
-    if (!userOrganizationIds.includes(qr.organizationId)) {
+    if (!organizationsIds.includes(qr.organizationId)) {
       return redirect(`contact-owner?scanId=${scan.id}`);
     }
 
     const headers = [
       setCookie(
         await setSelectedOrganizationIdCookie(
-          userOrganizationIds.find((orgId) => orgId === qr.organizationId) ||
+          organizationsIds.find((orgId) => orgId === qr.organizationId) ||
             personalOrganization.id
         )
       ),
