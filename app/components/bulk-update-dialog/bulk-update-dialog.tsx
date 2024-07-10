@@ -33,6 +33,8 @@ type BulkDialogType =
   | "assign-custody"
   | "release-custody"
   | "trash"
+  | "activate"
+  | "deactivate"
   | "archive"
   | "cancel";
 
