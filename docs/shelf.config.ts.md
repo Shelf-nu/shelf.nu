@@ -4,11 +4,11 @@ This file has a few configuration options, that are used to adjust and disable c
 
 ```ts
 // remix.config.ts
-import { ENABLE_PREMIUM_FEATURES } from "~/utils";
+import { ENABLE_PREMIUM_FEATURES } from "~/utils/env";
 import { Config } from "./types";
 
 export const config: Config = {
-  sendOnboardingEmail: true,
+  sendOnboardingEmail: SEND_ONBOARDING_EMAIL || false,
   enablePremiumFeatures: ENABLE_PREMIUM_FEATURES || false,
 };
 ```
@@ -16,6 +16,7 @@ export const config: Config = {
 ## sendOnboardingEmail
 
 This flag allows you to choose whether the onboarding email will be sent to new users. Email is being sent within the action of `routes/_welcome+/onboarding.tsx`
+Default value is false. If you want to override it you can use the env variable `SEND_ONBOARDING_EMAIL`
 
 ```ts
 //remix.config.ts

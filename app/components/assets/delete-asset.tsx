@@ -1,5 +1,4 @@
 import type { Asset } from "@prisma/client";
-import { Form } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -12,7 +11,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import { TrashIcon } from "../icons";
+import { Form } from "../custom-form";
+import { TrashIcon } from "../icons/library";
 
 export const DeleteAsset = ({
   asset,
@@ -56,7 +56,11 @@ export const DeleteAsset = ({
 
           <Form method="delete">
             {asset.mainImage && (
-              <input type="hidden" value={asset.mainImage} name="mainImage" />
+              <input
+                type="hidden"
+                value={asset.mainImage}
+                name="mainImageUrl"
+              />
             )}
             <input type="hidden" value="delete" name="intent" />
             <Button

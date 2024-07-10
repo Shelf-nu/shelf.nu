@@ -1,57 +1,64 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { db } from "~/database";
-import { createAssetsFromBackupImport } from "~/modules/asset";
-import { getRequiredParam } from "~/utils";
+import { z } from "zod";
+import { db } from "~/database/db.server";
+import { createAssetsFromBackupImport } from "~/modules/asset/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
-import { ShelfStackError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error, getParams } from "~/utils/http.server";
 import { extractCSVDataFromBackupImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 
-export const action = async ({
-  context,
-  request,
-  params,
-}: ActionFunctionArgs) => {
+export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  try {
-    await requireAdmin(authSession.userId);
-    const organizationId = getRequiredParam(params, "organizationId");
-    const organization = await db.organization.findUnique({
-      where: { id: organizationId },
-      include: {
-        owner: true,
-      },
-    });
-
-    if (!organization) {
-      throw new ShelfStackError({ message: "Organization not found" });
+  const { userId } = authSession;
+  const { organizationId } = getParams(
+    params,
+    z.object({ organizationId: z.string() }),
+    {
+      additionalData: { userId },
     }
+  );
+
+  try {
+    await requireAdmin(userId);
+
+    const organization = await db.organization
+      .findUniqueOrThrow({
+        where: { id: organizationId },
+        include: {
+          owner: true,
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "No organization found",
+          additionalData: { userId, organizationId },
+          label: "Organization",
+        });
+      });
 
     const csvData = await csvDataFromRequest({ request });
+
     if (csvData.length < 2) {
-      throw new ShelfStackError({ message: "CSV file is empty" });
+      throw new ShelfError({
+        cause: null,
+        message: "CSV file is empty",
+        label: "CSV",
+      });
     }
 
     const backupData = extractCSVDataFromBackupImport(csvData);
+
     await createAssetsFromBackupImport({
       data: backupData,
       userId: organization.owner.id,
       organizationId,
     });
-    return json({ success: true }, { status: 200 });
-  } catch (error) {
-    return json(
-      {
-        success: false,
-        error: {
-          // @ts-ignore
-          message: error.message,
-          details: {
-            code: null,
-          },
-        },
-      },
-      { status: 400 }
-    );
+
+    return json(data({ success: true }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, organizationId });
+    return json(error(reason), { status: reason.status });
   }
-};
+}

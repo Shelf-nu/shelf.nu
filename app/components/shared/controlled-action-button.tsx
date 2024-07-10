@@ -1,6 +1,6 @@
-import { tw } from "~/utils";
-import type { ButtonProps } from ".";
-import { Button } from ".";
+import { tw } from "~/utils/tw";
+import type { ButtonProps } from "./button";
+import { Button } from "./button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 import type { ButtonVariant } from "../layout/header/types";
 
@@ -17,7 +17,7 @@ export const ControlledActionButton = ({
   canUseFeature: boolean;
   buttonContent: {
     title: string | JSX.Element | JSX.Element[];
-    message: string;
+    message?: string;
     ctaText?: string;
   };
   buttonProps: ButtonProps;
@@ -44,7 +44,7 @@ const HoverMessage = ({
 }: {
   buttonContent: {
     title: string | JSX.Element | JSX.Element[];
-    message: string;
+    message?: string;
     variant?: ButtonVariant;
     ctaText: string;
   };
@@ -61,7 +61,7 @@ const HoverMessage = ({
   buttonProps.as = "button";
 
   return (
-    <HoverCard>
+    <HoverCard openDelay={100}>
       <HoverCardTrigger
         className={tw(
           "disabled inline-flex cursor-not-allowed items-center justify-center border-none p-0 text-left text-text-sm font-semibold text-primary-700 hover:text-primary-800",
@@ -72,20 +72,20 @@ const HoverMessage = ({
           {buttonContent.title}
         </Button>
       </HoverCardTrigger>
-      <HoverCardContent>
-        <p className="text-left">
-          {buttonContent.message}
-          {!skipCta ? (
-            <span>
-              Please consider{" "}
-              <Button to="/settings/subscription" variant={"link"}>
-                {buttonContent.ctaText}
-              </Button>
-            </span>
-          ) : null}
-          .
-        </p>
-      </HoverCardContent>
+      {buttonContent.message && (
+        <HoverCardContent>
+          <p className="text-left">
+            {buttonContent.message}
+            {!skipCta ? (
+              <span>
+                {" "}
+                Please switch to your team workspace to use this feature
+              </span>
+            ) : null}
+            .
+          </p>
+        </HoverCardContent>
+      )}
     </HoverCard>
   );
 };

@@ -1,8 +1,9 @@
 import type { RefObject } from "react";
 import { forwardRef } from "react";
 
-import { tw } from "~/utils";
-import type { Icon } from "../shared/icons-map";
+import { tw } from "~/utils/tw";
+import { InnerLabel } from "./inner-label";
+import type { IconType } from "../shared/icons-map";
 import iconsMap from "../shared/icons-map";
 
 export interface InputProps
@@ -22,7 +23,7 @@ export interface InputProps
   hideLabel?: boolean;
 
   /** name of any icon available in icons map */
-  icon?: Icon;
+  icon?: IconType;
 
   /** Add on to the input. Cannot be used together with icon  */
   addOn?: string;
@@ -67,7 +68,7 @@ const Input = forwardRef(function Input(
   ref
 ) {
   const iconClasses = tw(
-    "pointer-events-none absolute flex h-full items-center  border-gray-300  px-[14px]"
+    "pointer-events-none absolute flex h-full items-center border-gray-300 px-[14px]"
   );
 
   const addonClasses = tw(
@@ -118,18 +119,12 @@ const Input = forwardRef(function Input(
   return (
     <label className={tw("relative flex flex-col", className)}>
       {/* Label */}
-      <span
-        className={tw(
-          `mb-[6px] text-text-sm font-medium text-gray-700`,
-          hideLabel && "md:hidden",
-          required && "required-input-label"
-        )}
-      >
+      <InnerLabel hideLg={hideLabel} required={required}>
         {label}
-      </span>
+      </InnerLabel>
 
       <div className={`relative flex flex-wrap items-stretch`}>
-        {/* Icon */}
+        {/* IconType */}
         {icon && <div className={iconClasses}>{iconsMap[icon]}</div>}
         {/* Addon */}
         {addOn && <div className={addonClasses}>{addOn}</div>}

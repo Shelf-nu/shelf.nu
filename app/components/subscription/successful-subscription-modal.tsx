@@ -1,12 +1,13 @@
 import { useCallback } from "react";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
-import type { loader } from "~/routes/_layout+/settings.subscription";
+import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { Button } from "../shared/button";
 
 export default function SuccessfulSubscriptionModal() {
   const [params, setParams] = useSearchParams();
   const success = params.get("success") || false;
+  const isTeam = params.get("team") || false;
   const handleBackdropClose = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (e.target !== e.currentTarget) return;
@@ -35,15 +36,26 @@ export default function SuccessfulSubscriptionModal() {
               </video>
               <div className="mb-8 text-center">
                 <h4 className="mb-1 text-[18px] font-semibold">
-                  You are now subscribed!
+                  You are all set!
                 </h4>
                 <p className="text-gray-600">
-                  Thank you, all {activeProduct?.name} features are unlocked.
+                  {activeProduct?.name} features unlocked.{" "}
+                  {isTeam && "Now, create a team workspace."}
                 </p>
               </div>
-              <Button width="full" to="/assets" variant="primary">
-                Get started
-              </Button>
+              {isTeam ? (
+                <Button
+                  width="full"
+                  to="/account-details/workspace/new"
+                  variant="primary"
+                >
+                  Create your Team workspace
+                </Button>
+              ) : (
+                <Button width="full" to="/assets" variant="primary">
+                  Get started
+                </Button>
+              )}
             </div>
           </dialog>
         </div>

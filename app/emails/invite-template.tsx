@@ -7,6 +7,7 @@ import {
   render,
   Container,
 } from "@react-email/components";
+import { config } from "~/config/shelf.config";
 import type { InviteWithInviterAndOrg } from "~/modules/invite/types";
 import { SERVER_URL } from "~/utils/env";
 import { LogoForEmail } from "./logo";
@@ -18,6 +19,8 @@ interface Props {
 }
 
 export function InvitationEmailTemplate({ invite, token }: Props) {
+  const { emailPrimaryColor } = config;
+
   return (
     <Html>
       <Head>
@@ -47,7 +50,10 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
             Location Tracking, Collaboration, Custom fields and more. If you
             have any questions or need assistance, please don't hesitate to
             contact our support team at{" "}
-            <Link style={{ color: "#EF6820" }} href="mailto:support@shelf.nu">
+            <Link
+              style={{ color: emailPrimaryColor }}
+              href="mailto:support@shelf.nu"
+            >
               support@shelf.nu
             </Link>
             .
@@ -58,12 +64,15 @@ export function InvitationEmailTemplate({ invite, token }: Props) {
           </Text>
           <Text style={{ fontSize: "14px", color: "#344054" }}>
             This is an automatic email sent from{" "}
-            <Link style={{ color: "#EF6820" }} href="https://www.shelf.nu/">
+            <Link
+              style={{ color: emailPrimaryColor }}
+              href="https://www.shelf.nu/"
+            >
               shelf.nu
             </Link>{" "}
             to{" "}
             <Link
-              style={{ color: "#EF6820" }}
+              style={{ color: emailPrimaryColor }}
               href={`mailto:${invite.inviteeEmail}`}
             >
               {invite.inviteeEmail}

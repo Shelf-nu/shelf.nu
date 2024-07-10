@@ -1,120 +1,302 @@
+import { AuthError, isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "server/session";
-import { getSupabaseAdmin } from "~/integrations/supabase";
+import { config } from "~/config/shelf.config";
+import { db } from "~/database/db.server";
+import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
-import { ShelfStackError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { mapAuthSession } from "./mappers.server";
 
+const label: ErrorLabel = "Auth";
+
 export async function createEmailAuthAccount(email: string, password: string) {
-  const { data, error } = await getSupabaseAdmin().auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
+  try {
+    const { data, error } = await getSupabaseAdmin().auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
 
-  if (!data.user || error) return null;
+    if (error) {
+      throw error;
+    }
 
-  return data.user;
+    const { user } = data;
+
+    return user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to create email auth account",
+      additionalData: { email },
+      label,
+    });
+  }
 }
 
 export async function signUpWithEmailPass(email: string, password: string) {
-  const { data, error } = await getSupabaseAdmin().auth.signUp({
-    email: email,
-    password: password,
-    options: {
-      data: {
-        signup_method: "email-password",
+  try {
+    const { data, error } = await getSupabaseAdmin().auth.signUp({
+      email: email,
+      password: password,
+      options: {
+        data: {
+          signup_method: "email-password",
+        },
       },
-    },
-  });
+    });
 
-  if (!data || error)
-    return { status: "error", error: "Unable to create account" };
+    if (error) {
+      throw error;
+    }
 
-  return { status: "Email verification_required", user: data.user };
+    const { user } = data;
+
+    if (!user) {
+      throw new ShelfError({
+        cause: null,
+        message: "The user returned by Supabase is null",
+        label,
+      });
+    }
+
+    return user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong, refresh page and try to signup again.",
+      additionalData: { email },
+      label,
+    });
+  }
 }
 
 export async function resendVerificationEmail(email: string) {
-  const { data, error } = await getSupabaseAdmin().auth.resend({
-    type: "signup",
-    email: email,
-  });
+  try {
+    const { error } = await getSupabaseAdmin().auth.resend({
+      type: "signup",
+      email,
+    });
 
-  if (error) {
-    return { status: "error", error: error.message };
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while resending the verification email. Please try again later or contact support.",
+      additionalData: { email },
+      label,
+    });
   }
-
-  if (data) {
-    return {
-      status: "success",
-      message: "Verification email resent successfully",
-    };
-  }
-
-  return { status: "error", error: "Something went wrong please try again" };
 }
 
 export async function signInWithEmail(email: string, password: string) {
-  const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({
-    email,
-    password,
-  });
+  try {
+    const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({
+      email,
+      password,
+    });
 
-  if (error) {
-    return { status: "error", message: error.message };
+    if (error?.message === "Email not confirmed") {
+      return null;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    const { session } = data;
+
+    return mapAuthSession(session);
+  } catch (cause) {
+    let message =
+      "Something went wrong. Please try again later or contact support.";
+    let shouldBeCaptured = true;
+
+    if (
+      isAuthApiError(cause) &&
+      cause.message === "Invalid login credentials"
+    ) {
+      message = "Incorrect email or password";
+      shouldBeCaptured = false;
+    }
+
+    throw new ShelfError({
+      cause,
+      message,
+      label,
+      shouldBeCaptured,
+    });
   }
-  if (!data.session) {
-    return { status: "error", message: "something went wrong try login again" };
+}
+
+export async function signInWithSSO(domain: string) {
+  try {
+    const { data, error } = await getSupabaseAdmin().auth.signInWithSSO({
+      domain,
+      options: {
+        redirectTo: `${SERVER_URL}/oauth/callback`,
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data.url;
+  } catch (cause) {
+    let message =
+      "Something went wrong. Please try again later or contact support.";
+    let shouldBeCaptured = true;
+
+    // @ts-expect-error
+    if (cause?.code === "sso_provider_not_found") {
+      message = "No SSO provider assigned for your organization's domain";
+    }
+
+    throw new ShelfError({
+      cause,
+      message,
+      label,
+      shouldBeCaptured,
+    });
   }
-
-  const mappedSession = await mapAuthSession(data.session);
-
-  if (!mappedSession) {
-    return { status: "error", message: "something went wrong try login again" };
-  }
-
-  return { status: "success", authSession: mappedSession };
 }
 
 export async function sendOTP(email: string) {
-  return getSupabaseAdmin().auth.signInWithOtp({ email });
+  try {
+    const { error } = await getSupabaseAdmin().auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: !config.disableSignup, // If signup is disabled, don't create a new user
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        cause instanceof AuthError && cause?.code === "otp_disabled"
+          ? cause.message
+          : "Something went wrong while sending the OTP. Please try again later or contact support.",
+      additionalData: { email },
+      label,
+    });
+  }
 }
 
 export async function sendResetPasswordLink(email: string) {
-  return getSupabaseAdmin().auth.resetPasswordForEmail(email, {
-    redirectTo: `${SERVER_URL}/reset-password`,
-  });
+  try {
+    await getSupabaseAdmin().auth.resetPasswordForEmail(email, {
+      redirectTo: `${SERVER_URL}/reset-password`,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while sending the reset password link. Please try again later or contact support.",
+      additionalData: { email },
+      label,
+    });
+  }
 }
 
 export async function updateAccountPassword(id: string, password: string) {
-  const { data, error } = await getSupabaseAdmin().auth.admin.updateUserById(
-    id,
-    { password }
-  );
+  try {
+    const user = await db.user.findFirst({
+      where: { id },
+      select: {
+        sso: true,
+      },
+    });
+    if (user?.sso) {
+      throw new ShelfError({
+        cause: null,
+        message: "You cannot update the password of an SSO user.",
+        label,
+      });
+    }
 
-  if (!data.user || error) return null;
+    const { error } = await getSupabaseAdmin().auth.admin.updateUserById(id, {
+      password,
+    });
 
-  return data.user;
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while updating the password. Please try again later or contact support.",
+      additionalData: { id },
+      label,
+    });
+  }
 }
 
 export async function deleteAuthAccount(userId: string) {
-  const { error } = await getSupabaseAdmin().auth.admin.deleteUser(userId);
+  try {
+    const { error } = await getSupabaseAdmin().auth.admin.deleteUser(userId);
 
-  if (error) return null;
-
-  return true;
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Something went wrong while deleting the auth account. Please manually delete the user account in the Supabase dashboard.",
+        additionalData: { userId },
+        label,
+      })
+    );
+  }
 }
 
-export async function getAuthUserByAccessToken(accessToken: string) {
-  const { data, error } = await getSupabaseAdmin().auth.getUser(accessToken);
+export async function getAuthUserById(userId: string) {
+  try {
+    const { data, error } =
+      await getSupabaseAdmin().auth.admin.getUserById(userId);
 
-  if (!data.user || error) return null;
+    if (error) {
+      throw error;
+    }
 
-  return data.user;
+    const { user } = data;
+
+    return user;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while getting the auth user by id. Please try again later or contact support.",
+      additionalData: { userId },
+      label,
+    });
+  }
 }
 
 export async function getAuthResponseByAccessToken(accessToken: string) {
-  return await getSupabaseAdmin().auth.getUser(accessToken);
+  try {
+    return await getSupabaseAdmin().auth.getUser(accessToken);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while getting the auth response by access token. Please try again later or contact support.",
+      label,
+    });
+  }
 }
 
 export async function refreshAccessToken(
@@ -122,7 +304,11 @@ export async function refreshAccessToken(
 ): Promise<AuthSession> {
   try {
     if (!refreshToken) {
-      throw new ShelfStackError({ message: "Refresh token is required" });
+      throw new ShelfError({
+        cause: null,
+        message: "Refresh token is required",
+        label,
+      });
     }
 
     const { data, error } = await getSupabaseAdmin().auth.refreshSession({
@@ -134,56 +320,82 @@ export async function refreshAccessToken(
     }
 
     const { session } = data;
+
     if (!session) {
-      throw new ShelfStackError({
-        message: "Session returned by Supabase is null",
+      throw new ShelfError({
+        cause: null,
+        message: "The session returned by Supabase is null",
+        label,
       });
     }
 
-    return await mapAuthSession(data.session);
+    return mapAuthSession(session);
   } catch (cause) {
-    throw new ShelfStackError({
-      message: "Unable to refresh access token",
+    throw new ShelfError({
       cause,
+      message:
+        "Unable to refresh access token. Please try again. If the issue persists, contact support",
+      label,
     });
   }
 }
 
 export async function verifyAuthSession(authSession: AuthSession) {
-  const authAccount = await getAuthResponseByAccessToken(
-    authSession.accessToken
-  );
+  try {
+    const authAccount = await getAuthResponseByAccessToken(
+      authSession.accessToken
+    );
 
-  return Boolean(authAccount);
+    return Boolean(authAccount);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while verifying the auth session. Please try again later or contact support.",
+      label,
+    });
+  }
 }
 
 export async function verifyOtpAndSignin(email: string, otp: string) {
-  const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
-    email,
-    token: otp,
-    type: "email",
-  });
+  try {
+    const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
+      email,
+      token: otp,
+      type: "email",
+    });
 
-  if (error) {
-    return { status: "error", message: error.message };
-  }
-  if (!data.session) {
-    return {
-      status: "error",
-      message: "Something went wrong, please try again!",
-    };
-  }
+    if (error) {
+      throw error;
+    }
 
-  const mappedSession = await mapAuthSession(data.session);
-  if (!mappedSession) {
-    return {
-      status: "error",
-      message: "Something went wrong, please try again!",
-    };
-  }
+    const { session } = data;
 
-  return {
-    status: "success",
-    authSession: mappedSession,
-  };
+    if (!session) {
+      throw new ShelfError({
+        cause: null,
+        message: "The session returned by Supabase is null",
+        label,
+      });
+    }
+
+    return mapAuthSession(session);
+  } catch (cause) {
+    let message =
+      "Something went wrong. Please try again later or contact support.";
+    let shouldBeCaptured = true;
+
+    if (isAuthApiError(cause) && cause.message !== "") {
+      message = cause.message;
+      shouldBeCaptured = false;
+    }
+
+    throw new ShelfError({
+      cause,
+      message,
+      label,
+      shouldBeCaptured,
+      additionalData: { email },
+    });
+  }
 }

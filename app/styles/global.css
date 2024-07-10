@@ -152,8 +152,8 @@ dialog {
   }
 }
 
-.search-form label > span,
-.filters-form label > span {
+.search-form label > .inner-label,
+.filters-form label > .inner-label {
   @apply hidden;
 }
 
@@ -242,4 +242,11 @@ dialog {
 
 .word-break {
   word-break: break-word;
+}
+
+/* Disable spacing on first column of list, for lists with bulk actions */
+
+.list.list-with-bulk-actions tr td:nth-child(2),
+.list.list-with-bulk-actions tr td:nth-child(2) > div {
+  @apply !pl-0;
 }

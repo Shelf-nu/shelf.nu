@@ -6,39 +6,46 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
-  Form,
   useActionData,
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
-import { getOrganizationByUserId } from "~/modules/organization";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getUserByEmail, tryCreateUser } from "~/modules/user";
-import {
-  assertIsPost,
-  isFormProcessing,
-  randomUsernameFromEmail,
-  safeRedirect,
-  tw,
-  validEmail,
-} from "~/utils";
+import { getOrganizationByUserId } from "~/modules/organization/service.server";
+import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { isErrorResponse } from "~/utils/http";
+import {
+  data,
+  error,
+  getActionMethod,
+  parseData,
+  safeRedirect,
+} from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
 import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
+import { tw } from "~/utils/tw";
+import { randomUsernameFromEmail } from "~/utils/user";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
+export function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode") as OtpVerifyMode;
-
   const title = getOtpPageData(mode).title;
-  if (context.isAuthenticated) return redirect("/assets");
 
-  return json({ title });
+  if (context.isAuthenticated) {
+    return redirect("/assets");
+  }
+
+  return json(data({ title }));
 }
 
 const OtpSchema = z.object({
@@ -52,82 +59,49 @@ const OtpSchema = z.object({
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  assertIsPost(request);
-  const formData = await request.formData();
-  const result = await OtpSchema.safeParseAsync(parseFormAny(formData));
+  try {
+    const method = getActionMethod(request);
 
-  if (!result.success) {
-    return json(
-      {
-        error:
-          "Invalid request. Please try again. If the issue persists, contact support.",
-      },
-      { status: 400 }
-    );
-  }
+    switch (method) {
+      case "POST": {
+        const { email, otp } = parseData(await request.formData(), OtpSchema, {
+          message:
+            "Invalid request. Please try again. If the issue persists, contact support.",
+        });
 
-  const { email, otp } = result.data;
+        const authSession = await verifyOtpAndSignin(email, otp);
+        const userExists = Boolean(await findUserByEmail(email));
 
-  const otpVerifyResult = await verifyOtpAndSignin(email, otp);
-  if (otpVerifyResult.status === "error") {
-    return json({ error: otpVerifyResult.message }, { status: 400 });
-  }
+        if (!userExists) {
+          await createUser({
+            ...authSession,
+            username: randomUsernameFromEmail(authSession.email),
+          });
+        }
 
-  if (otpVerifyResult.status === "success" && otpVerifyResult.authSession) {
-    const { authSession } = otpVerifyResult;
+        const personalOrganization = await getOrganizationByUserId({
+          userId: authSession.userId,
+          orgType: "PERSONAL",
+        });
 
-    // Case 1. If the user exists, then skip creation and just commit the session
-    if (await getUserByEmail(authSession.email)) {
-      const personalOrganization = await getOrganizationByUserId({
-        userId: authSession.userId,
-        orgType: "PERSONAL",
-      });
+        // Setting the auth session and redirecting user to assets page
+        context.setSession(authSession);
 
-      // Setting the auth session and redirecting user to assets page
-      context.setSession(authSession);
-
-      return redirect(safeRedirect("/assets"), {
-        headers: [
-          setCookie(
-            await setSelectedOrganizationIdCookie(personalOrganization.id)
-          ),
-        ],
-      });
-    }
-    // Case 2. First time sign in, let's create a brand-new User in supabase
-    else {
-      const username = randomUsernameFromEmail(authSession.email);
-
-      const user = await tryCreateUser({ ...authSession, username });
-      if (!user) {
-        return json(
-          {
-            error:
-              "We had trouble while creating your account. Please try again.",
-          },
-          { status: 500 }
-        );
+        return redirect(safeRedirect("/assets"), {
+          headers: [
+            setCookie(
+              await setSelectedOrganizationIdCookie(personalOrganization.id)
+            ),
+          ],
+        });
       }
-
-      const personalOrganization = user.organizations[0];
-      // setting the session
-      context.setSession(authSession);
-
-      return redirect(safeRedirect("/assets"), {
-        headers: [
-          setCookie(
-            await setSelectedOrganizationIdCookie(personalOrganization.id)
-          ),
-        ],
-      });
     }
-  }
 
-  // handling unexpected scenarios
-  return json(
-    { error: "Something went wrong. Please try again later." },
-    { status: 500 }
-  );
+    throw notAllowedMethod(method);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -169,7 +143,9 @@ export default function OtpPage() {
       } else {
         const data = await response.json();
         setMessage({
-          message: data.error ?? "Something went wrong. Please try again!",
+          message: isErrorResponse(data)
+            ? data.error.message
+            : "Something went wrong. Please try again!",
           type: "error",
         });
       }
@@ -195,15 +171,15 @@ export default function OtpPage() {
               value={searchParams.get("email") || ""}
             />
 
-            {data?.error && (
-              <p className="text-center text-sm text-error-500">
-                {data?.error}
-              </p>
-            )}
+            {data?.error.message ? (
+              <div className="!mt-1  text-sm text-error-500">
+                {data.error.message}
+              </div>
+            ) : null}
             {message?.message && (
               <p
                 className={tw(
-                  "text-center text-sm",
+                  " text-sm",
                   message.type === "error"
                     ? "text-error-500"
                     : "text-success-500"

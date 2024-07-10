@@ -1,129 +1,135 @@
 import type { Prisma, User, Location, Organization } from "@prisma/client";
-import { db } from "~/database";
-import { handleUniqueConstraintError } from "~/utils/error";
+import invariant from "tiny-invariant";
+import { db } from "~/database/db.server";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError, maybeUniqueConstraintViolation } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
-export async function getLocation({
-  organizationId,
-  id,
-  page = 1,
-  perPage = 8,
-  search,
-}: Pick<Location, "id"> & {
-  organizationId: Organization["id"];
-  /** Page number. Starts at 1 */
-  page?: number;
+const label: ErrorLabel = "Location";
 
-  /** Assets to be loaded per page with the lcoation */
-  perPage?: number;
-
-  search?: string | null;
-}) {
-  const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
-
-  /** Build where object for querying related assets */
-  let assetsWhere: Prisma.AssetWhereInput = {};
-
-  if (search) {
-    assetsWhere.title = {
-      contains: search,
-      mode: "insensitive",
-    };
+export async function getLocation(
+  params: Pick<Location, "id"> & {
+    organizationId: Organization["id"];
+    /** Page number. Starts at 1 */
+    page?: number;
+    /** Assets to be loaded per page with the location */
+    perPage?: number;
+    search?: string | null;
   }
-  const [location, totalAssetsWithinLocation] = await db.$transaction([
-    /** Get the items */
-    db.location.findFirst({
-      where: { id, organizationId },
-      include: {
-        image: {
-          select: {
-            updatedAt: true,
+) {
+  const { organizationId, id, page = 1, perPage = 8, search } = params;
+
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
+
+    /** Build where object for querying related assets */
+    let assetsWhere: Prisma.AssetWhereInput = {};
+
+    if (search) {
+      assetsWhere.title = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    const [location, totalAssetsWithinLocation] = await Promise.all([
+      /** Get the items */
+      db.location.findFirstOrThrow({
+        where: { id, organizationId },
+        include: {
+          image: {
+            select: {
+              updatedAt: true,
+            },
+          },
+          assets: {
+            include: {
+              category: true,
+              tags: true,
+            },
+            skip,
+            take,
+            where: assetsWhere,
           },
         },
-        assets: {
-          include: {
-            category: true,
-            tags: true,
-          },
-          skip,
-          take,
-          where: assetsWhere,
+      }),
+
+      /** Count them */
+      db.asset.count({
+        where: {
+          locationId: id,
         },
-      },
-    }),
+      }),
+    ]);
 
-    /** Count them */
-    db.asset.count({
-      where: {
-        locationId: id,
-      },
-    }),
-  ]);
-
-  return { location, totalAssetsWithinLocation };
+    return { location, totalAssetsWithinLocation };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching location",
+      additionalData: { ...params },
+      label,
+    });
+  }
 }
 
-export async function getAllLocations({
-  organizationId,
-}: {
+export async function getLocations(params: {
   organizationId: Organization["id"];
-}) {
-  return await db.location.findMany({ where: { organizationId } });
-}
-
-export async function getLocations({
-  organizationId,
-  page = 1,
-  perPage = 8,
-  search,
-}: {
-  organizationId: Organization["id"];
-
   /** Page number. Starts at 1 */
   page?: number;
-
   /** Items to be loaded per page */
   perPage?: number;
-
   search?: string | null;
 }) {
-  const skip = page > 1 ? (page - 1) * perPage : 0;
-  const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
+  const { organizationId, page = 1, perPage = 8, search } = params;
 
-  /** Default value of where. Takes the items belonging to current user */
-  let where: Prisma.LocationWhereInput = { organizationId };
+  try {
+    const skip = page > 1 ? (page - 1) * perPage : 0;
+    const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-  /** If the search string exists, add it to the where object */
-  if (search) {
-    where.name = {
-      contains: search,
-      mode: "insensitive",
-    };
-  }
+    /** Default value of where. Takes the items belonging to current user */
+    let where: Prisma.LocationWhereInput = { organizationId };
 
-  const [locations, totalLocations] = await db.$transaction([
-    /** Get the items */
-    db.location.findMany({
-      skip,
-      take,
-      where,
-      orderBy: { updatedAt: "desc" },
-      include: {
-        assets: true,
-        image: {
-          select: {
-            updatedAt: true,
+    /** If the search string exists, add it to the where object */
+    if (search) {
+      where.name = {
+        contains: search,
+        mode: "insensitive",
+      };
+    }
+
+    const [locations, totalLocations] = await Promise.all([
+      /** Get the items */
+      db.location.findMany({
+        skip,
+        take,
+        where,
+        orderBy: { updatedAt: "desc" },
+        include: {
+          assets: true,
+          image: {
+            select: {
+              updatedAt: true,
+            },
           },
         },
-      },
-    }),
+      }),
 
-    /** Count them */
-    db.location.count({ where }),
-  ]);
+      /** Count them */
+      db.location.count({ where }),
+    ]);
 
-  return { locations, totalLocations };
+    return { locations, totalLocations };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching the locations",
+      additionalData: { ...params },
+      label,
+    });
+  }
 }
 
 export async function createLocation({
@@ -176,25 +182,35 @@ export async function createLocation({
       });
     }
 
-    const location = await db.location.create({ data });
-    return { location, error: null };
+    return await db.location.create({ data });
   } catch (cause) {
-    return handleUniqueConstraintError(cause, "Location");
+    throw maybeUniqueConstraintViolation(cause, "Location", {
+      additionalData: { userId, organizationId },
+    });
   }
 }
 
 export async function deleteLocation({ id }: Pick<Location, "id">) {
-  const location = await db.location.delete({
-    where: { id },
-  });
+  try {
+    const location = await db.location.delete({
+      where: { id },
+    });
 
-  if (location.imageId) {
-    await db.image.delete({
-      where: { id: location.imageId },
+    if (location.imageId) {
+      await db.image.delete({
+        where: { id: location.imageId },
+      });
+    }
+
+    return location;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while deleting the location",
+      additionalData: { id },
+      label,
     });
   }
-
-  return location;
 }
 
 export async function updateLocation(payload: {
@@ -206,9 +222,10 @@ export async function updateLocation(payload: {
   userId: User["id"];
   organizationId: Organization["id"];
 }) {
+  const { id, name, address, description, image, userId, organizationId } =
+    payload;
+
   try {
-    const { id, name, address, description, image, userId, organizationId } =
-      payload;
     const data = {
       name,
       description,
@@ -231,7 +248,7 @@ export async function updateLocation(payload: {
         },
       };
 
-      /** We do an upsert, because if a user creates a location wihtout an image,
+      /** We do an upsert, because if a user creates a location without an image,
        * we need to create an Image when the location is updated,
        * else we need to update the Image */
       Object.assign(data, {
@@ -244,13 +261,18 @@ export async function updateLocation(payload: {
       });
     }
 
-    const location = await db.location.update({
+    return await db.location.update({
       where: { id },
       data: data,
     });
-    return { location, error: null };
   } catch (cause) {
-    return handleUniqueConstraintError(cause, "Location");
+    throw maybeUniqueConstraintViolation(cause, "Location", {
+      additionalData: {
+        id,
+        userId,
+        organizationId,
+      },
+    });
   }
 }
 
@@ -263,45 +285,109 @@ export async function createLocationsIfNotExists({
   userId: User["id"];
   organizationId: Organization["id"];
 }): Promise<Record<string, Location["id"]>> {
-  // first we get all the locations from the assets and make then into an object where the category is the key and the value is an empty string
-  const locations = new Map(
-    data
-      .filter((asset) => asset.location !== "")
-      .map((asset) => [asset.location, ""])
-  );
+  try {
+    // first we get all the locations from the assets and make then into an object where the category is the key and the value is an empty string
+    const locations = new Map(
+      data
+        .filter((asset) => asset.location !== "")
+        .map((asset) => [asset.location, ""])
+    );
 
-  // now we loop through the locations and check if they exist
-  for (const [location, _] of locations) {
-    const existingCategory = await db.location.findFirst({
-      where: {
-        name: { equals: location, mode: "insensitive" },
-        organizationId,
-      },
-    });
+    // Handle the case where there are no teamMembers
+    if (locations.has(undefined)) {
+      return {};
+    }
 
-    if (!existingCategory) {
-      // if the location doesn't exist, we create a new one
-      const newLocation = await db.location.create({
-        data: {
-          name: (location as string).trim(),
-          user: {
-            connect: {
-              id: userId,
+    // now we loop through the locations and check if they exist
+    for (const [location, _] of locations) {
+      const existingLocation = await db.location.findFirst({
+        where: {
+          name: { equals: location, mode: "insensitive" },
+          organizationId,
+        },
+      });
+
+      if (!existingLocation) {
+        // if the location doesn't exist, we create a new one
+        const newLocation = await db.location.create({
+          data: {
+            name: (location as string).trim(),
+            user: {
+              connect: {
+                id: userId,
+              },
+            },
+            organization: {
+              connect: {
+                id: organizationId,
+              },
             },
           },
-          organization: {
-            connect: {
-              id: organizationId,
-            },
+        });
+        locations.set(location, newLocation.id);
+      } else {
+        // if the location exists, we just update the id
+        locations.set(location, existingLocation.id);
+      }
+    }
+
+    return Object.fromEntries(Array.from(locations));
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating locations. Seems like some of the location data in your import file is invalid. Please check and try again.",
+      additionalData: { userId, organizationId },
+      label,
+      /** No need to capture those. They are mostly related to malformed CSV data */
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+export async function bulkDeleteLocations({
+  locationIds,
+  organizationId,
+}: {
+  locationIds: Location["id"][];
+  organizationId: Organization["id"];
+}) {
+  try {
+    /** We have to delete the images of locations if any */
+    const locations = await db.location.findMany({
+      where: locationIds.includes(ALL_SELECTED_KEY)
+        ? { organizationId }
+        : { id: { in: locationIds }, organizationId },
+      select: { id: true, imageId: true },
+    });
+
+    return await db.$transaction(async (tx) => {
+      /** Deleting all locations */
+      await tx.location.deleteMany({
+        where: { id: { in: locations.map((location) => location.id) } },
+      });
+
+      /** Deleting images of locations */
+      const locationWithImages = locations.filter(
+        (location) => !!location.imageId
+      );
+      await db.image.deleteMany({
+        where: {
+          id: {
+            in: locationWithImages.map((location) => {
+              invariant(location.imageId, "Image not found to delete");
+              return location.imageId;
+            }),
           },
         },
       });
-      locations.set(location, newLocation.id);
-    } else {
-      // if the location exists, we just update the id
-      locations.set(location, existingCategory.id);
-    }
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while bulk deleting locations.",
+      additionalData: { locationIds, organizationId },
+      label,
+    });
   }
-
-  return Object.fromEntries(Array.from(locations));
 }

@@ -1,22 +1,37 @@
 import type { Location } from "@prisma/client";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom, validateFileAtom } from "~/atoms/file";
-import { isFormProcessing } from "~/utils";
+import type { action as editLocationAction } from "~/routes/_layout+/locations.$locationId_.edit";
+import type { action as newLocationAction } from "~/routes/_layout+/locations.new";
+import { isFormProcessing } from "~/utils/form";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { Form } from "../custom-form";
 import FormRow from "../forms/form-row";
 import Input from "../forms/input";
-import { Button } from "../shared";
+import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
+import { Button } from "../shared/button";
+import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../shared/tooltip";
 
 export const NewLocationFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
   description: z.string(),
   address: z.string(),
+  addAnother: z
+    .string()
+    .optional()
+    .transform((val) => val === "true"),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -34,22 +49,21 @@ export const LocationForm = ({ name, address, description }: Props) => {
   const fileError = useAtomValue(fileErrorAtom);
   const [, validateFile] = useAtom(validateFileAtom);
   const [, updateName] = useAtom(updateDynamicTitleAtom);
-  const actionData = useActionData<{
-    errors?: {
-      name?: {
-        message: string;
-      };
-    };
-  }>();
+  const actionData = useActionData<
+    typeof newLocationAction | typeof editLocationAction
+  >();
 
   return (
-    <Card className="md:w-min">
+    <Card className="w-full md:w-min">
       <Form
         ref={zo.ref}
         method="post"
         className="flex w-full flex-col gap-2"
         encType="multipart/form-data"
       >
+        <AbsolutePositionedHeaderActions className="hidden md:flex">
+          <Actions disabled={disabled} />
+        </AbsolutePositionedHeaderActions>
         <FormRow
           rowLabel={"Name"}
           className="border-b-0 pb-[10px] pt-0"
@@ -60,9 +74,7 @@ export const LocationForm = ({ name, address, description }: Props) => {
             hideLabel
             name={zo.fields.name()}
             disabled={disabled}
-            error={
-              actionData?.errors?.name?.message || zo.errors.name()?.message
-            }
+            error={actionData?.error?.message || zo.errors.name()?.message}
             autoFocus
             onChange={updateName}
             className="w-full"
@@ -134,7 +146,8 @@ export const LocationForm = ({ name, address, description }: Props) => {
           >
             <Input
               inputType="textarea"
-              label={zo.fields.description()}
+              label="Description"
+              hideLabel
               name={zo.fields.description()}
               defaultValue={description || ""}
               placeholder="Add a description for your location."
@@ -159,3 +172,39 @@ export const LocationForm = ({ name, address, description }: Props) => {
     </Card>
   );
 };
+
+const Actions = ({ disabled }: { disabled: boolean }) => (
+  <>
+    <ButtonGroup>
+      <Button to=".." variant="secondary" disabled={disabled}>
+        Cancel
+      </Button>
+      <AddAnother disabled={disabled} />
+    </ButtonGroup>
+
+    <Button type="submit" disabled={disabled}>
+      Save
+    </Button>
+  </>
+);
+
+const AddAnother = ({ disabled }: { disabled: boolean }) => (
+  <TooltipProvider delayDuration={100}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="submit"
+          variant="secondary"
+          disabled={disabled}
+          name="addAnother"
+          value="true"
+        >
+          Add another
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        <p className="text-sm">Save the location and add a new one</p>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);

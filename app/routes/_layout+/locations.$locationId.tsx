@@ -7,103 +7,117 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-import mapCss from "maplibre-gl/dist/maplibre-gl.css";
+import mapCss from "maplibre-gl/dist/maplibre-gl.css?url";
+import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
-import { ErrorBoundryComponent } from "~/components/errors";
-import { ChevronRight } from "~/components/icons";
+import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters } from "~/components/list";
-import { List } from "~/components/list/list";
-import { ActionsDopdown, MapPlaceholder } from "~/components/location";
+import { List } from "~/components/list";
+import { Filters } from "~/components/list/filters";
+import { ActionsDropdown } from "~/components/location/actions-dropdown";
 import { ShelfMap } from "~/components/location/map";
-import { Badge, Button } from "~/components/shared";
+import { MapPlaceholder } from "~/components/location/map-placeholder";
+import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
-import { deleteLocation, getLocation } from "~/modules/location";
-import assetCss from "~/styles/asset.css";
-import {
-  geolocate,
-  getCurrentSearchParams,
-  getParamsValues,
-  getRequiredParam,
-  tw,
-} from "~/utils";
+import { deleteLocation, getLocation } from "~/modules/location/service.server";
+import assetCss from "~/styles/asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { ShelfStackError } from "~/utils/error";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { makeShelfError } from "~/utils/error";
+import { geolocate } from "~/utils/geolocate.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  getParams,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.location,
-    action: PermissionAction.read,
-  });
-  const id = getRequiredParam(params, "locationId");
-
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search } = getParamsValues(searchParams);
-  const cookie = await updateCookieWithPerPage(request, perPageParam);
-  const { perPage } = cookie;
-
-  const { location, totalAssetsWithinLocation } = await getLocation({
-    organizationId,
-    id,
-    page,
-    perPage,
-    search,
-  });
-
-  if (!location) {
-    throw new ShelfStackError({ message: "Location not found", status: 404 });
-  }
-
-  const totalItems = totalAssetsWithinLocation;
-  const totalPages = totalAssetsWithinLocation / perPage;
-
-  const header: HeaderData = {
-    title: location.name,
-  };
-
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
-
-  const mapData = await geolocate(location.address);
-
-  return json(
+  const { userId } = authSession;
+  const { locationId: id } = getParams(
+    params,
+    z.object({ locationId: z.string() }),
     {
-      location,
-      header,
-      modelName,
-      items: location.assets,
-      page,
-      totalItems,
-      perPage,
-      totalPages,
-      mapData,
-    },
-    {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
+      additionalData: { userId },
     }
   );
-};
+
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.read,
+    });
+
+    const searchParams = getCurrentSearchParams(request);
+    const { page, perPageParam, search } = getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
+
+    const { location, totalAssetsWithinLocation } = await getLocation({
+      organizationId,
+      id,
+      page,
+      perPage,
+      search,
+    });
+
+    const totalItems = totalAssetsWithinLocation;
+    const totalPages = totalAssetsWithinLocation / perPage;
+
+    const header: HeaderData = {
+      title: location.name,
+    };
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    const mapData = await geolocate(location.address);
+
+    return json(
+      data({
+        location,
+        header,
+        modelName,
+        items: location.assets,
+        page,
+        totalItems,
+        perPage,
+        totalPages,
+        mapData,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
+  }
+}
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title) },
@@ -120,24 +134,37 @@ export const links: LinksFunction = () => [
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.location,
-    action: PermissionAction.delete,
-  });
-  const id = getRequiredParam(params, "locationId");
+  const { userId } = authSession;
+  const { locationId: id } = getParams(
+    params,
+    z.object({ locationId: z.string() }),
+    {
+      additionalData: { userId },
+    }
+  );
 
-  await deleteLocation({ id });
+  try {
+    await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    });
 
-  sendNotification({
-    title: "Location deleted",
-    message: "Your location has been deleted successfully",
-    icon: { name: "trash", variant: "error" },
-    senderId: authSession.userId,
-  });
+    await deleteLocation({ id });
 
-  return redirect(`/locations`);
+    sendNotification({
+      title: "Location deleted",
+      message: "Your location has been deleted successfully",
+      icon: { name: "trash", variant: "error" },
+      senderId: authSession.userId,
+    });
+
+    return redirect(`/locations`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    return json(error(reason), { status: reason.status });
+  }
 }
 
 export default function LocationPage() {
@@ -147,7 +174,7 @@ export default function LocationPage() {
   return (
     <div>
       <Header>
-        <ActionsDopdown location={location} />
+        <ActionsDropdown location={location} />
       </Header>
       <ContextualModal />
 
@@ -217,10 +244,10 @@ export default function LocationPage() {
               icon="plus"
               width="full"
             >
-              Manage Assets
+              Manage assets
             </Button>
             <div className="w-full">
-              <ActionsDopdown location={location} fullWidth />
+              <ActionsDropdown location={location} fullWidth />
             </div>
           </div>
           <div className="flex flex-col md:gap-2">
@@ -232,8 +259,9 @@ export default function LocationPage() {
                     to="add-assets"
                     variant="primary"
                     icon="plus"
+                    className="whitespace-nowrap"
                   >
-                    Manage Assets
+                    Manage assets
                   </Button>
                 </div>
               </div>
@@ -341,6 +369,4 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
   ) : null;
 };
 
-export const ErrorBoundary = () => (
-  <ErrorBoundryComponent title="Sorry, location you are looking for doesn't exist" />
-);
+// export const ErrorBoundary = () => <ErrorBoundryComponent />;

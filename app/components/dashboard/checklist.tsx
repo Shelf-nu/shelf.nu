@@ -1,6 +1,6 @@
 import { Link, useFetcher, useLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/dashboard";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import {
   AddUserIcon,
   AssetsIcon,
@@ -9,7 +9,7 @@ import {
   CustomFiedIcon,
   TagsIcon,
   UserIcon,
-} from "../icons";
+} from "../icons/library";
 import { Button } from "../shared/button";
 import Heading from "../shared/heading";
 import SubHeading from "../shared/sub-heading";
@@ -72,7 +72,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -112,7 +112,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -143,7 +143,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -194,7 +194,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -231,7 +231,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>
@@ -281,7 +281,7 @@ export default function OnboardingChecklist() {
                   </div>
                 </div>
               </div>
-              <i className="hidden">
+              <i className="hidden text-primary">
                 <CheckmarkIcon />
               </i>
             </div>

@@ -1,180 +1,90 @@
-import type { Organization, OrganizationType, User } from "@prisma/client";
-import { db } from "~/database";
-import { ShelfStackError } from "~/utils/error";
-import { isPersonalOrg } from "~/utils/organization";
-import {
-  canCreateMoreCustomFields,
-  canCreateMoreOrganizations,
-  canExportAssets,
-  canImportAssets,
-} from "~/utils/subscription";
-import { countAcviteCustomFields } from "../custom-field";
+import type { Organization, TierId, TierLimit, User } from "@prisma/client";
+import { db } from "~/database/db.server";
+import type { ErrorLabel } from "~/utils/error";
+import { ShelfError } from "~/utils/error";
+
+const label: ErrorLabel = "Tier";
+
 export async function getUserTierLimit(id: User["id"]) {
   try {
-    const { tier } = await db.user.findUniqueOrThrow({
-      where: { id },
-      select: {
-        tier: {
-          include: { tierLimit: true },
-        },
-      },
-    });
-
-    return tier?.tierLimit;
-  } catch (cause) {
-    throw new Error("Something went wrong while fetching user tier limit");
-  }
-}
-
-export async function assertUserCanImportAssets({
-  organizationId,
-  organizations,
-}: {
-  organizationId: Organization["id"];
-  organizations: {
-    id: string;
-    type: OrganizationType;
-    name: string;
-    imageId: string | null;
-    userId: string;
-  }[];
-}) {
-  /* Check the tier limit */
-  const tierLimit = await getOrganizationTierLimit({
-    organizationId,
-    organizations,
-  });
-
-  if (!canImportAssets(tierLimit)) {
-    throw new Error("Your user cannot import assets");
-  }
-}
-
-export async function assertUserCanExportAssets({
-  organizationId,
-  organizations,
-}: {
-  organizationId: Organization["id"];
-  organizations: {
-    id: string;
-    type: OrganizationType;
-    name: string;
-    imageId: string | null;
-    userId: string;
-  }[];
-}) {
-  /* Check the tier limit */
-  const tierLimit = await getOrganizationTierLimit({
-    organizationId,
-    organizations,
-  });
-
-  if (!canExportAssets(tierLimit)) {
-    throw new Error("Your user cannot export assets");
-  }
-}
-
-export const assertUserCanCreateMoreCustomFields = async ({
-  organizationId,
-  organizations,
-}: {
-  organizationId: Organization["id"];
-  organizations: {
-    id: string;
-    type: OrganizationType;
-    name: string;
-    imageId: string | null;
-    userId: string;
-  }[];
-}) => {
-  const tierLimit = await getOrganizationTierLimit({
-    organizationId,
-    organizations,
-  });
-  const totalActiveCustomFields = await countAcviteCustomFields({
-    organizationId,
-  });
-
-  const canCreateMore = canCreateMoreCustomFields({
-    tierLimit,
-    totalCustomFields: totalActiveCustomFields,
-  });
-
-  if (!canCreateMore) {
-    throw new Error("Your user cannot create more custom fields");
-  }
-};
-
-/**
- * This validates if more users can be invited to organization
- * It simply checks the organization type
- */
-export async function assertUserCanInviteUsersToWorkspace({
-  organizationId,
-}: {
-  organizationId: Organization["id"];
-}) {
-  /** Get the tier limit and check if they can export */
-  const org = await db.organization.findUnique({
-    where: { id: organizationId },
-    select: {
-      type: true,
-    },
-  });
-
-  if (!org) {
-    throw new ShelfStackError({ message: "Organization not found" });
-  }
-
-  if (isPersonalOrg(org)) {
-    throw new ShelfStackError({
-      message:
-        "You cannot invite other users to a personal workspace. Please create a Team workspace.",
-    });
-  }
-}
-
-/**
- * Fetches user and calls {@link canCreateMoreOrganizations};.
- * Throws an error if the user cannot create more organizations.
- */
-export const assertUserCanCreateMoreOrganizations = async (userId: string) => {
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    include: {
-      tier: {
-        include: { tierLimit: true },
-      },
-      userOrganizations: {
-        include: {
-          organization: {
-            select: {
-              userId: true,
-            },
+    const { tier } = await db.user
+      .findUniqueOrThrow({
+        where: { id },
+        select: {
+          tier: {
+            include: { tierLimit: true },
           },
         },
-      },
-    },
-  });
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message:
+            "User tier not found. This seems like a bug. Please contact support.",
+          additionalData: { userId: id },
+          label,
+        });
+      });
 
-  const organizations = user?.userOrganizations
-    .map((o) => o.organization)
-    .filter((o) => o.userId === userId);
+    /**
+     * If the tier is custom, we fetch the custom tier limit and return it
+     */
+    if (tier.id === "custom") {
+      return (await db.customTierLimit
+        .findUniqueOrThrow({
+          where: { userId: id },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Failed to get custom tier limit. This seems like a bug. Please contact support.",
+            additionalData: { userId: id },
+            label,
+          });
+        })) as TierLimit;
+    }
 
-  if (
-    !canCreateMoreOrganizations({
-      tierLimit: user?.tier?.tierLimit,
-      totalOrganizations: organizations?.length || 1,
-    })
-  ) {
-    throw new ShelfStackError({
-      message: "You cannot create workspaces with your current plan.",
+    return tier.tierLimit as TierLimit;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching user tier limit",
+      additionalData: { userId: id },
+      label,
     });
   }
-  return true;
-};
+}
+
+export async function updateUserTierId(id: User["id"], tierId: TierId) {
+  try {
+    return await db.user.update({
+      where: { id },
+      data: {
+        tierId,
+        /**
+         * If the user tier is being change to custom, we upsert CustomTierLimit
+         * The upsert will make sure that if there is no customTierLimit for that user its created
+         */
+        ...(tierId === "custom" && {
+          customTierLimit: {
+            upsert: {
+              create: {},
+              update: {},
+            },
+          },
+        }),
+      },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating user tier limit",
+      additionalData: { userId: id, tierId },
+      label,
+    });
+  }
+}
 
 /**
  * @returns The tier limit of the organization's owner
@@ -185,21 +95,27 @@ export async function getOrganizationTierLimit({
   organizations,
 }: {
   organizationId?: string;
-  organizations: {
-    id: string;
-    type: OrganizationType;
-    name: string;
-    imageId: string | null;
-    userId: string;
-  }[];
+  organizations: Pick<
+    Organization,
+    "id" | "type" | "name" | "imageId" | "userId"
+  >[];
 }) {
-  /** Find the current organization as we need the owner */
-  const currentOrganization = organizations.find(
-    (org) => org.id === organizationId
-  );
-  /** We get the owner ID so we can check if the organization has permissions for importing */
-  const ownerId = currentOrganization?.userId as string;
+  try {
+    /** Find the current organization as we need the owner */
+    const currentOrganization = organizations.find(
+      (org) => org.id === organizationId
+    );
+    /** We get the owner ID so we can check if the organization has permissions for importing */
+    const ownerId = currentOrganization?.userId as string;
 
-  /** Get the tier limit and check if they can export */
-  return await getUserTierLimit(ownerId);
+    /** Get the tier limit and check if they can export */
+    return await getUserTierLimit(ownerId);
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching organization tier limit",
+      additionalData: { organizationId },
+      label,
+    });
+  }
 }

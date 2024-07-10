@@ -5,11 +5,24 @@ import {
   unstable_parseMultipartFormData,
 } from "@remix-run/node";
 import chardet from "chardet";
-import { parse } from "csv-parse";
+import { CsvError, parse } from "csv-parse";
 import iconv from "iconv-lite";
-import { fetchAssetsForExport } from "~/modules/asset";
+import { fetchAssetsForExport } from "~/modules/asset/service.server";
+import { ShelfError } from "./error";
 
 export type CSVData = [string[], ...string[][]] | [];
+
+/** Guesses the delimiter of csv based on the most common delimiter found in the file */
+function guessDelimiters(csv: string, delimiters: string[]) {
+  const delimiterCounts = delimiters.map(
+    (delimiter) => csv.split(delimiter).length
+  );
+
+  const max = Math.max(...delimiterCounts);
+
+  const delimiter = delimiters[delimiterCounts.indexOf(max)];
+  return delimiter;
+}
 
 /** Parses csv Data into an array with type {@link CSVData} */
 export const parseCsv = (csvData: ArrayBuffer) => {
@@ -19,12 +32,13 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 
   /** Convert the file to utf-8 from the detected encoding */
   const csv = iconv.decode(Buffer.from(csvData), encoding || "utf-8");
+  const delimiter = guessDelimiters(csv, [",", ";"]);
 
   return new Promise((resolve, reject) => {
     const parser = parse({
       encoding: "utf-8", // Set encoding to utf-8
+      delimiter, // Set delimiter
       bom: true, // Handle BOM
-      delimiter: ";", // Set delimiter to ; as this allows for commas in the data
       quote: '"', // Set quote to " as this allows for commas in the data
       escape: '"', // Set escape to \ as this allows for commas in the data
       ltrim: true, // Trim whitespace from left side of cell
@@ -49,16 +63,28 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 
 /** Takes a request object and extracts the file from it and parses it as csvData */
 export const csvDataFromRequest = async ({ request }: { request: Request }) => {
-  // Upload handler to store file in memory
-  const formData = await unstable_parseMultipartFormData(
-    request,
-    memoryUploadHandler
-  );
+  try {
+    // Upload handler to store file in memory
+    const formData = await unstable_parseMultipartFormData(
+      request,
+      memoryUploadHandler
+    );
 
-  const csvFile = formData.get("file") as File;
-  const csvData = await csvFile.arrayBuffer();
+    const csvFile = formData.get("file") as File;
 
-  return (await parseCsv(csvData)) as CSVData;
+    const csvData = await csvFile.arrayBuffer();
+
+    return (await parseCsv(csvData)) as CSVData;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        cause instanceof CsvError
+          ? cause.message
+          : "Something went wrong while parsing the CSV file.",
+      label: "CSV",
+    });
+  }
 };
 
 export const memoryUploadHandler = unstable_composeUploadHandlers(
@@ -141,27 +167,43 @@ export async function exportAssetsToCsv({
 }: {
   organizationId: string;
 }) {
-  const assets = await fetchAssetsForExport({ organizationId });
+  try {
+    const assets = await fetchAssetsForExport({ organizationId });
 
-  const csvData = buildCsvDataFromAssets({
-    assets,
-    keysToSkip,
-  });
+    const csvData = buildCsvDataFromAssets({
+      assets,
+      keysToSkip,
+    });
 
-  if (!csvData) return null;
-  /** Get the headers from the first row and filter out the keys to skip */
-  const headers = Object.keys(assets[0]).filter(
-    (header) => !keysToSkip.includes(header)
-  );
+    if (!csvData) {
+      throw new ShelfError({
+        cause: null,
+        message: "Nothing to export.",
+        label: "CSV",
+      });
+    }
 
-  /** Add the header column */
-  csvData.unshift(headers);
+    /** Get the headers from the first row and filter out the keys to skip */
+    const headers = Object.keys(assets[0]).filter(
+      (header) => !keysToSkip.includes(header)
+    );
 
-  /** Convert the data to a string */
-  const csvRows = csvData.map((row) => row.join(";"));
+    /** Add the header column */
+    csvData.unshift(headers);
 
-  /** Join the rows with a new line */
-  const csvString = csvRows.join("\n");
+    /** Convert the data to a string */
+    const csvRows = csvData.map((row) => row.join(";"));
 
-  return csvString;
+    /** Join the rows with a new line */
+    const csvString = csvRows.join("\n");
+
+    return csvString;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while exporting the assets.",
+      additionalData: { organizationId },
+      label: "CSV",
+    });
+  }
 }

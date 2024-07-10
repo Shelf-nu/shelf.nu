@@ -5,36 +5,49 @@ import type {
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import {
-  Form,
   useActionData,
+  useLoaderData,
   useNavigation,
   useSearchParams,
 } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 
 import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
+import { config } from "~/config/shelf.config";
+import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
+import { signInWithEmail } from "~/modules/auth/service.server";
 
-import { signInWithEmail, ContinueWithEmailForm } from "~/modules/auth";
-import { getOrganizationByUserId } from "~/modules/organization";
-import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
-  assertIsPost,
-  isFormProcessing,
-  safeRedirect,
-  validEmail,
-} from "~/utils";
+  getSelectedOrganisation,
+  setSelectedOrganizationIdCookie,
+} from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { setCookie } from "~/utils/cookies.server";
+import { makeShelfError, notAllowedMethod } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import {
+  data,
+  error,
+  getActionMethod,
+  parseData,
+  safeRedirect,
+} from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
 
-export async function loader({ context }: LoaderFunctionArgs) {
+export function loader({ context }: LoaderFunctionArgs) {
   const title = "Log in";
   const subHeading = "Welcome back! Enter your details below to log in.";
-  if (context.isAuthenticated) return redirect("/assets");
+  const { disableSignup, disableSSO } = config;
 
-  return json({ title, subHeading });
+  if (context.isAuthenticated) {
+    return redirect("/assets");
+  }
+
+  return json(data({ title, subHeading, disableSignup, disableSSO }));
 }
 
 const LoginFormSchema = z.object({
@@ -49,89 +62,49 @@ const LoginFormSchema = z.object({
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
-  assertIsPost(request);
-  const formData = await request.formData();
-  /** Check the zo validations */
-  const result = await LoginFormSchema.safeParseAsync(parseFormAny(formData));
+  try {
+    const method = getActionMethod(request);
 
-  /** If there are some zo validation errors, show them */
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-      },
-      { status: 400 }
-    );
+    switch (method) {
+      case "POST": {
+        const { email, password, redirectTo } = parseData(
+          await request.formData(),
+          LoginFormSchema
+        );
+
+        const authSession = await signInWithEmail(email, password);
+
+        if (!authSession) {
+          return redirect(`/otp?email=${encodeURIComponent(email)}&mode=login`);
+        }
+        const { userId } = authSession;
+
+        /**
+         * The only reason we need to do this is because of the initial login
+         * Theoretically, the user should always have a selected organization cookie as soon as they login for the first time
+         * However we do this check to make sure they are still part of that organization
+         */
+        const { organizationId } = await getSelectedOrganisation({
+          userId,
+          request,
+        });
+
+        // Set the auth session and redirect to the assets page
+        context.setSession(authSession);
+
+        return redirect(safeRedirect(redirectTo || "/assets"), {
+          headers: [
+            setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+          ],
+        });
+      }
+    }
+
+    throw notAllowedMethod(method);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
   }
-
-  const { email, password, redirectTo } = result.data;
-
-  const signInResult = await signInWithEmail(email, password);
-
-  if (
-    signInResult.status === "error" &&
-    signInResult.message === "Email not confirmed"
-  ) {
-    return redirect(`/otp?email=${encodeURIComponent(email)}&mode=login`);
-  }
-
-  if (
-    signInResult.status === "error" &&
-    signInResult.message === "Invalid login credentials"
-  ) {
-    return json(
-      {
-        errors: {
-          email: null,
-          password: "Incorrect email or password",
-        },
-      },
-      { status: 400 }
-    );
-  }
-
-  if (signInResult.status === "error") {
-    return json(
-      {
-        errors: {
-          email: signInResult.message,
-          password: null,
-        },
-      },
-      { status: 400 }
-    );
-  }
-
-  // Ensure that user property exists before proceeding
-  if (signInResult.status === "success" && signInResult.authSession) {
-    const { authSession } = signInResult;
-    const personalOrganization = await getOrganizationByUserId({
-      userId: authSession.userId,
-      orgType: "PERSONAL",
-    });
-
-    // Set the auth session and redirect to the assets page
-    context.setSession({ ...authSession });
-
-    return redirect(safeRedirect(redirectTo || "/assets"), {
-      headers: [
-        setCookie(
-          await setSelectedOrganizationIdCookie(personalOrganization.id)
-        ),
-      ],
-    });
-  }
-
-  // Handle any unexpected scenarios
-  return json(
-    {
-      errors: {
-        email: "Something went wrong. Please try again later.",
-        password: null,
-      },
-    },
-    { status: 500 }
-  );
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -139,13 +112,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function IndexLoginForm() {
+  const { disableSignup, disableSSO } = useLoaderData<typeof loader>();
   const zo = useZorm("NewQuestionWizardScreen", LoginFormSchema);
   const [searchParams] = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
   const acceptedInvite = searchParams.get("acceptedInvite");
-  const data = useActionData<{
-    errors: { email: string; password: string };
-  }>();
+  const data = useActionData<typeof action>();
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -171,7 +143,7 @@ export default function IndexLoginForm() {
             autoComplete="email"
             disabled={disabled}
             inputClassName="w-full"
-            error={zo.errors.email()?.message || data?.errors?.email}
+            error={zo.errors.email()?.message || data?.error.message}
           />
         </div>
         <PasswordInput
@@ -182,7 +154,7 @@ export default function IndexLoginForm() {
           autoComplete="new-password"
           disabled={disabled}
           inputClassName="w-full"
-          error={zo.errors.password()?.message || data?.errors?.password}
+          error={zo.errors.password()?.message || data?.error.message}
         />
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
         <Button
@@ -208,6 +180,14 @@ export default function IndexLoginForm() {
           </div>
         </div>
       </Form>
+      {!disableSSO && (
+        <div className="mt-6 text-center">
+          <Button variant="link" to="/sso-login">
+            Login with SSO
+          </Button>
+        </div>
+      )}
+
       <div className="mt-6">
         <div className="relative">
           <div className="absolute inset-0 flex items-center">
@@ -225,19 +205,21 @@ export default function IndexLoginForm() {
         <div className="mt-6">
           <ContinueWithEmailForm mode="login" />
         </div>
-        <div className="mt-6 text-center text-sm text-gray-500">
-          Don't have an account?{" "}
-          <Button
-            variant="link"
-            data-test-id="signupButton"
-            to={{
-              pathname: "/join",
-              search: searchParams.toString(),
-            }}
-          >
-            Sign up
-          </Button>
-        </div>
+        {disableSignup ? null : (
+          <div className="mt-6 text-center text-sm text-gray-500">
+            Don't have an account?{" "}
+            <Button
+              variant="link"
+              data-test-id="signupButton"
+              to={{
+                pathname: "/join",
+                search: searchParams.toString(),
+              }}
+            >
+              Sign up
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

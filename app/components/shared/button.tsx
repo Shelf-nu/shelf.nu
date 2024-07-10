@@ -1,9 +1,8 @@
 import React from "react";
 import { Link } from "@remix-run/react";
-import { tw } from "~/utils";
-import type { Icon } from "./icons-map";
-import iconsMap from "./icons-map";
-
+import { tw } from "~/utils/tw";
+import type { IconType } from "./icons-map";
+import Icon from "../icons/icon";
 import type { ButtonVariant, ButtonWidth } from "../layout/header/types";
 
 export interface ButtonProps {
@@ -12,7 +11,7 @@ export interface ButtonProps {
   variant?: ButtonVariant;
   width?: ButtonWidth;
   size?: "sm" | "md";
-  icon?: Icon;
+  icon?: IconType;
   disabled?: boolean;
   attachToInput?: boolean;
   onlyIconOnMobile?: boolean;
@@ -28,7 +27,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       className = "",
       variant = "primary",
       width = "auto",
-      size = "md",
+      size = "sm",
       attachToInput = false,
       icon,
       disabled = undefined,
@@ -51,7 +50,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       ),
       secondary: tw(
         `border-gray-300 bg-white text-gray-700 hover:bg-gray-50`,
-        disabled ? "border-gray-200 text-gray-300" : ""
+        disabled ? "text-gray-500" : ""
       ),
       tertiary: tw(
         `border-b border-primary/10 pb-1 leading-none`,
@@ -73,7 +72,9 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       full: "w-full max-w-full",
     };
 
-    const disabledStyles = disabled ? "pointer-events-none " : undefined;
+    const disabledStyles = disabled
+      ? "pointer-events-none opacity-50 cursor-not-allowed"
+      : undefined;
     const attachedStyles = attachToInput
       ? tw(" rounded-l-none border-l-0")
       : undefined;
@@ -100,7 +101,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
           title={title}
           ref={ref}
         >
-          {icon && iconsMap[icon]}{" "}
+          {icon && <Icon icon={icon} />}{" "}
           {children ? (
             <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>
               {children}

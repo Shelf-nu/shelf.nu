@@ -1,19 +1,28 @@
-import { cloneElement } from "react";
+import { cloneElement, useState } from "react";
 import { ChevronDownIcon } from "@radix-ui/react-icons";
-import { useNavigation } from "@remix-run/react";
-import type { ModelFilterItem, ModelFilterProps } from "~/hooks";
-import { useModelFilters } from "~/hooks";
-import { isFormProcessing, tw } from "~/utils";
-import { EmptyState } from "./empty-state";
-import Input from "../forms/input";
-import { CheckIcon } from "../icons";
-import { Button } from "../shared";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "../shared/dropdown";
-import type { Icon } from "../shared/icons-map";
+  Popover,
+  PopoverContent,
+  PopoverPortal,
+  PopoverTrigger,
+} from "@radix-ui/react-popover";
+import { useNavigation } from "@remix-run/react";
+import { useModelFilters } from "~/hooks/use-model-filters";
+import type {
+  ModelFilterItem,
+  ModelFilterProps,
+} from "~/hooks/use-model-filters";
+
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
+
+import { EmptyState } from "./empty-state";
+import { MobileStyles } from "../dynamic-select/dynamic-select";
+import Input from "../forms/input";
+import { CheckIcon } from "../icons/library";
+import { Button } from "../shared/button";
+
+import type { IconType } from "../shared/icons-map";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -22,28 +31,44 @@ type Props = ModelFilterProps & {
   style?: React.CSSProperties;
   trigger: React.ReactElement;
   label?: string;
-  searchIcon?: Icon;
+  /** Overwrite the default placeholder will will be `Search ${model.name}s` */
+  placeholder?: string;
+  searchIcon?: IconType;
   showSearch?: boolean;
-  renderItem?: (options: {
-    item: ModelFilterItem;
-    checked: boolean;
-  }) => React.ReactNode;
+  renderItem?: (item: ModelFilterItem) => React.ReactNode;
+  /**
+   * A a new item will be added to the list in dropdown, this item can be used to filter items
+   * like "uncategorized" or "untagged" etc.
+   */
+  withoutValueItem?: {
+    id: string;
+    name: string;
+  };
+
+  /**
+   * If `true`, a "Select All" item will be added in dropdown which allow
+   * the user to select all items in the list
+   */
+  allowSelectAll?: boolean;
 };
 
 export default function DynamicDropdown({
   className,
   style,
   label = "Filter",
+  placeholder,
   trigger,
   searchIcon = "search",
   model,
-  initialDataKey,
-  countKey,
   showSearch = true,
   renderItem,
+  withoutValueItem,
+  allowSelectAll,
+  ...hookProps
 }: Props) {
   const navigation = useNavigation();
   const isSearching = isFormProcessing(navigation.state);
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
 
   const {
     selectedItems,
@@ -56,159 +81,211 @@ export default function DynamicDropdown({
     clearFilters,
     resetModelFiltersFetcher,
     getAllEntries,
-  } = useModelFilters({
-    model,
-    countKey,
-    initialDataKey,
-  });
+    handleSelectAll,
+  } = useModelFilters({ model, ...hookProps });
 
   return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger
-        className="inline-flex items-center gap-2 text-gray-500"
-        asChild
-      >
-        <div>
-          {cloneElement(trigger)}
-          <When truthy={selectedItems.length > 0}>
-            <div className="flex size-6 items-center justify-center rounded-full bg-primary-50 px-2 py-[2px] text-xs font-medium text-primary-700">
-              {selectedItems.length}
-            </div>
-          </When>
-        </div>
-      </DropdownMenuTrigger>
+    <div className="relative w-full text-center">
+      <MobileStyles open={isPopoverOpen} />
 
-      <DropdownMenuContent
-        align="end"
-        className={tw(
-          "w-[290px] overflow-y-hidden p-0 md:w-[350px]",
-          className
-        )}
-        style={style}
-      >
-        <div className="flex items-center justify-between p-3">
-          <div className="text-xs font-semibold text-gray-700">{label}</div>
-          <When truthy={selectedItems.length > 0 && showSearch}>
-            <Button
-              as="button"
-              variant="link"
-              className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
-              onClick={clearFilters}
-            >
-              Clear filter
-            </Button>
-          </When>
-        </div>
-
-        <When truthy={showSearch}>
-          <div className="filters-form relative border-y border-y-gray-200 p-3">
-            <Input
-              type="text"
-              label={`Search ${label}`}
-              placeholder={`Search ${label}`}
-              hideLabel
-              className="text-gray-500"
-              icon={searchIcon}
-              autoFocus
-              value={searchQuery}
-              onChange={handleSearchQueryChange}
-            />
-            <When truthy={Boolean(searchQuery)}>
-              <Button
-                icon="x"
-                variant="tertiary"
-                disabled={Boolean(searchQuery)}
-                onClick={() => {
-                  resetModelFiltersFetcher();
-                  setSearchQuery("");
-                }}
-                className="z-100 pointer-events-auto absolute right-[14px] top-0 mr-2 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
-              />
+      <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
+        <PopoverTrigger
+          className="inline-flex items-center gap-2 text-gray-500"
+          asChild
+        >
+          <div>
+            {cloneElement(trigger)}
+            <When truthy={selectedItems.length > 0}>
+              <div className="flex size-6 items-center justify-center rounded-full bg-primary-50 px-2 py-[2px] text-xs font-medium text-primary-700">
+                {selectedItems.length}
+              </div>
             </When>
           </div>
-        </When>
-
-        <div className="max-h-[320px] divide-y overflow-y-auto">
-          {searchQuery !== "" && items.length === 0 && (
-            <EmptyState searchQuery={searchQuery} modelName={model.name} />
-          )}
-          {items.map((item) => {
-            const checked = selectedItems.includes(item.id);
-            if (typeof renderItem === "function") {
-              return (
-                <label
-                  key={item.id}
-                  htmlFor={item.id}
-                  className="flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100 "
+        </PopoverTrigger>
+        <PopoverPortal>
+          <PopoverContent
+            align="end"
+            className={tw(
+              "z-[100]  overflow-y-auto rounded-md border border-gray-300 bg-white p-0",
+              className
+            )}
+            style={style}
+          >
+            <div className="flex items-center justify-between p-3">
+              <div className="text-xs font-semibold text-gray-700">{label}</div>
+              <When truthy={selectedItems.length > 0 && showSearch}>
+                <Button
+                  as="button"
+                  variant="link"
+                  className="whitespace-nowrap text-xs font-normal text-gray-500 hover:text-gray-600"
+                  onClick={clearFilters}
                 >
-                  {renderItem({ item, checked })}
-                  <input
-                    id={item.id}
-                    type="checkbox"
-                    value={item.id}
-                    className="hidden"
-                    checked={checked}
-                    onChange={(e) => {
-                      handleSelectItemChange(e.currentTarget.value);
+                  Clear filter
+                </Button>
+              </When>
+            </div>
+
+            <When truthy={showSearch}>
+              <div className="filters-form relative border-y border-y-gray-200 p-3">
+                <Input
+                  type="text"
+                  label={label}
+                  placeholder={
+                    placeholder ? placeholder : `Search ${model.name}s`
+                  }
+                  hideLabel
+                  className="text-gray-500"
+                  icon={searchIcon}
+                  autoFocus
+                  value={searchQuery}
+                  onChange={handleSearchQueryChange}
+                />
+                <When truthy={Boolean(searchQuery)}>
+                  <Button
+                    icon="x"
+                    variant="tertiary"
+                    disabled={Boolean(searchQuery)}
+                    onClick={() => {
+                      resetModelFiltersFetcher();
+                      setSearchQuery("");
                     }}
+                    className="z-100 pointer-events-auto absolute right-[14px] top-0 mr-2 h-full border-0 p-0 text-center text-gray-400 hover:text-gray-900"
                   />
-                  <When truthy={checked}>
+                </When>
+              </div>
+            </When>
+
+            <div className="max-h-[320px] divide-y overflow-y-auto">
+              {searchQuery !== "" && items.length === 0 && (
+                <EmptyState searchQuery={searchQuery} modelName={model.name} />
+              )}
+
+              {/* Top Divider */}
+              <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
+                <div className="h-2 w-full  bg-gray-50" />
+              </When>
+
+              <When truthy={!!allowSelectAll}>
+                <label
+                  key="select-all"
+                  className="flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+                  onClick={handleSelectAll}
+                >
+                  <span className="pr-2">Select all</span>
+                </label>
+              </When>
+
+              <When truthy={Boolean(withoutValueItem)}>
+                <label
+                  key={withoutValueItem?.id}
+                  htmlFor={withoutValueItem?.id}
+                  className={tw(
+                    "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                    selectedItems.includes(withoutValueItem?.id ?? "") &&
+                      "bg-gray-50"
+                  )}
+                >
+                  <span className="pr-2 normal-case">
+                    {withoutValueItem?.name}
+                    <input
+                      id={withoutValueItem?.id}
+                      type="checkbox"
+                      value={withoutValueItem?.id}
+                      className="hidden"
+                      checked={selectedItems.includes(
+                        withoutValueItem?.id ?? ""
+                      )}
+                      onChange={(e) => {
+                        handleSelectItemChange(e.currentTarget.value);
+                      }}
+                    />
+                  </span>
+
+                  <When
+                    truthy={selectedItems.includes(withoutValueItem?.id ?? "")}
+                  >
                     <CheckIcon className="text-primary" />
                   </When>
                 </label>
-              );
-            }
+              </When>
 
-            return (
-              <label
-                key={item.id}
-                htmlFor={item.id}
-                className={tw(
-                  "flex cursor-pointer select-none items-center justify-between px-6 py-4 text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
-                  checked && "bg-gray-50"
-                )}
+              {/* Bottom Divider */}
+              <When truthy={Boolean(allowSelectAll || withoutValueItem)}>
+                <div className="h-2 w-full  bg-gray-50" />
+              </When>
+
+              {items.map((item) => {
+                const checked = selectedItems.includes(item.id);
+                return (
+                  <label
+                    key={item.id}
+                    htmlFor={item.id}
+                    className={tw(
+                      "flex cursor-pointer select-none items-center justify-between px-6 py-4  text-sm font-medium outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100",
+                      checked && "bg-gray-50"
+                    )}
+                  >
+                    <span className="pr-2">
+                      {typeof renderItem === "function"
+                        ? renderItem({ ...item, metadata: item })
+                        : item.name}
+                      <input
+                        id={item.id}
+                        type="checkbox"
+                        value={item.id}
+                        className="hidden"
+                        checked={checked}
+                        onChange={(e) => {
+                          handleSelectItemChange(e.currentTarget.value);
+                        }}
+                      />
+                    </span>
+
+                    <When truthy={checked}>
+                      <CheckIcon className="text-primary" />
+                    </When>
+                  </label>
+                );
+              })}
+
+              {items.length < totalItems && searchQuery === "" && (
+                <button
+                  disabled={isSearching}
+                  onClick={getAllEntries}
+                  className="flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-gray-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
+                >
+                  Show all
+                  <span>
+                    {isSearching ? (
+                      <Spinner className="size-4" />
+                    ) : (
+                      <ChevronDownIcon className="size-4" />
+                    )}
+                  </span>
+                </button>
+              )}
+            </div>
+            <When truthy={withoutValueItem ? totalItems > 7 : totalItems > 6}>
+              <div className="border-t p-3 text-gray-500">
+                Showing {withoutValueItem ? items.length - 1 : items.length} out
+                of {totalItems}, type to search for more
+              </div>
+            </When>
+
+            <div className="flex justify-between gap-3 border-t p-3 md:hidden">
+              <Button
+                onClick={() => {
+                  setIsPopoverOpen(false);
+                }}
+                variant="secondary"
+                width="full"
               >
-                {item.name}
-                <input
-                  id={item.id}
-                  type="checkbox"
-                  value={item.id}
-                  className="hidden"
-                  checked={checked}
-                  onChange={(e) => {
-                    handleSelectItemChange(e.currentTarget.value);
-                  }}
-                />
-                <When truthy={checked}>
-                  <CheckIcon className="text-primary" />
-                </When>
-              </label>
-            );
-          })}
-
-          {items.length < totalItems && searchQuery === "" && (
-            <button
-              disabled={isSearching}
-              onClick={getAllEntries}
-              className="flex w-full cursor-pointer select-none items-center justify-between px-6 py-3 text-sm font-medium text-gray-600 outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-gray-100 focus:bg-gray-100"
-            >
-              Show all
-              <span>
-                {isSearching ? (
-                  <Spinner className="size-4" />
-                ) : (
-                  <ChevronDownIcon className="size-4" />
-                )}
-              </span>
-            </button>
-          )}
-        </div>
-        <When truthy={totalItems > 6}>
-          <div className="border-t p-3 text-gray-500">
-            Showing {items.length} out of {totalItems}, type to search for more
-          </div>
-        </When>
-      </DropdownMenuContent>
-    </DropdownMenu>
+                Done
+              </Button>
+            </div>
+          </PopoverContent>
+        </PopoverPortal>
+      </Popover>
+    </div>
   );
 }

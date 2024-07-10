@@ -1,11 +1,16 @@
-import { useLoaderData } from "@remix-run/react";
-import { Button } from "~/components/shared";
-import type { loader } from "~/routes/_layout+/assets.$assetId";
+import type { SerializeFrom } from "@remix-run/node";
+import { Button } from "~/components/shared/button";
+import type { parseScanData } from "~/modules/scan/utils.server";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
+import { HelpIcon } from "../icons/library";
+import { InfoTooltip } from "../shared/info-tooltip";
 
-export function ScanDetails() {
-  const { lastScan } = useLoaderData<typeof loader>();
+export function ScanDetails({
+  lastScan,
+}: {
+  lastScan?: SerializeFrom<ReturnType<typeof parseScanData>> | null;
+}) {
   let latitude, longitude;
 
   const hasLocation = lastScan?.coordinates !== "Unknown location";
@@ -16,7 +21,7 @@ export function ScanDetails() {
   }
 
   return (
-    <div className="mb-8 border lg:mb-0">
+    <div className="mt-4 rounded-md border lg:mb-0">
       {lastScan ? (
         <>
           {" "}
@@ -31,17 +36,49 @@ export function ScanDetails() {
             )}
           </div>
           <div className="p-4 text-text-xs text-gray-600">
-            <h5 className="mb-1">Last scan location data</h5>
+            <h5 className="mb-1">Last location data</h5>
             <p>Coordinates: {lastScan.coordinates}</p>
             <p>Date/Time: {lastScan.dateTime}</p>
             <p>
               Device:{" "}
-              {lastScan.ua.device.name
-                ? lastScan.ua.device.name
+              {lastScan.ua.device.model && lastScan.ua.device.vendor
+                ? `${lastScan.ua.device.vendor} - ${lastScan.ua.device.model}`
                 : "Unknown device"}
             </p>
             <p>Browser: {lastScan.ua.browser.name}</p>
             <p>Operating System: {lastScan.ua.os.name}</p>
+            <div className="flex items-center">
+              <p className="inline-block max-w-xs truncate">
+                Scanned By: {lastScan.scannedBy}
+              </p>
+            </div>
+            <div>
+              Source:{" "}
+              {lastScan.manuallyGenerated ? "Manually updated" : "QR code scan"}{" "}
+              <InfoTooltip
+                icon={<HelpIcon />}
+                content={
+                  <>
+                    <h6 className="mb-1 text-sm font-semibold text-gray-700">
+                      Source of location data
+                    </h6>
+                    <p className="text-xs font-medium text-gray-500">
+                      The location data can be generated in 2 different ways:
+                    </p>
+                    <ul className="text-xs font-medium text-gray-500 ">
+                      <li>
+                        <strong>1. Manually updated:</strong> User manually
+                        updated the location data.
+                      </li>
+                      <li>
+                        <strong>2. QR code scan:</strong> User scanned the QR
+                        code of the asset.
+                      </li>
+                    </ul>
+                  </>
+                }
+              />
+            </div>
             {hasLocation ? (
               <p className="mt-1">
                 <Button

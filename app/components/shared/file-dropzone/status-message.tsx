@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import type { Fetcher } from "@remix-run/react";
 import { CheckmarkIcon, ImageFileIcon } from "~/components/icons/library";
-import { isFormProcessing, tw } from "~/utils";
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
 import { Spinner } from "../spinner";
 
 export interface StatusMessageProps {
@@ -18,7 +19,7 @@ export function StatusMessage({
   fetcher: Fetcher;
   filename: string;
   message: string | null;
-  /** Indicates if tehre was a front-end error with the dropzone */
+  /** Indicates if there was a front-end error with the dropzone */
   error: boolean;
 }) {
   const { data, state } = fetcher;

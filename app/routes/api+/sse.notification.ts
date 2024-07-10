@@ -1,17 +1,21 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { eventStream } from "remix-utils/sse/server";
 import { emitter } from "~/utils/emitter/emitter.server";
+import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
+export function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
 
   return eventStream(request.signal, function setup(send) {
-    /** Notification is a strigified json object with the shape {@link Notification} */
+    /** Notification is a stringified json object with the shape {@link Notification} */
     function handle(notification: string) {
       /** We only send the notification if the logged in userId is the same as the senderId.
        * We do this to prevent other users receiving notifications
        */
-      if (authSession.userId !== JSON.parse(notification).senderId) return;
+      if (authSession.userId !== JSON.parse(notification).senderId) {
+        return;
+      }
 
       try {
         send({ event: "new-notification", data: notification });
@@ -25,9 +29,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           cause instanceof Error &&
           cause.message.match(/Controller is already closed/)
         ) {
-          // eslint-disable-next-line no-console
-          console.error("ERROR: Failed to send SSE notification");
+          return;
         }
+
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Failed to send SSE notification",
+            additionalData: { userId: authSession.userId },
+            label: "Notification",
+          })
+        );
       }
     }
     emitter.on("notification", handle);

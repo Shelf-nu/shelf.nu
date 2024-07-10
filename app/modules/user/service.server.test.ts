@@ -14,20 +14,22 @@ import {
   USER_ID,
   USER_PASSWORD,
 } from "mocks/user";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
-import { randomUsernameFromEmail } from "~/utils";
+import { INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION } from "./fields";
 import {
   createUserAccountForTesting,
   defaultUserCategories,
+  // defaultUserCategories,
 } from "./service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
 
 // mock db
-vitest.mock("~/database", () => ({
+vitest.mock("~/database/db.server", () => ({
   db: {
+    $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
     user: {
       create: vitest.fn().mockResolvedValue({}),
     },
@@ -36,8 +38,13 @@ vitest.mock("~/database", () => ({
         id: ORGANIZATION_ID,
       }),
     },
+    userOrganization: {
+      upsert: vitest.fn().mockResolvedValue({}),
+    },
   },
 }));
+
+const username = `test-user-${USER_ID}`;
 
 describe(createUserAccountForTesting.name, () => {
   it("should return null if no auth account created", async () => {
@@ -66,7 +73,7 @@ describe(createUserAccountForTesting.name, () => {
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
-      ""
+      username
     );
     server.events.removeAllListeners();
     expect(result).toBeNull();
@@ -113,7 +120,7 @@ describe(createUserAccountForTesting.name, () => {
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
-      ""
+      username
     );
     server.events.removeAllListeners();
     expect(result).toBeNull();
@@ -158,7 +165,7 @@ describe(createUserAccountForTesting.name, () => {
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
-      ""
+      username
     );
     server.events.removeAllListeners();
     expect(result).toBeNull();
@@ -192,29 +199,67 @@ describe(createUserAccountForTesting.name, () => {
       ).matches;
       if (matchesMethod && matchesUrl) fetchAuthTokenAPI.set(req.id, req);
     });
+
     //@ts-expect-error missing vitest type
-    db.user.create.mockResolvedValue({ id: USER_ID, email: USER_EMAIL });
-    const username = randomUsernameFromEmail(USER_EMAIL);
+    db.user.create.mockResolvedValue({
+      id: USER_ID,
+      email: USER_EMAIL,
+      username: username,
+      organizations: [
+        {
+          id: "org-id",
+        },
+      ],
+    });
+    // mock db transaction passing the db instance
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementationOnce((callback) => callback(db));
     const result = await createUserAccountForTesting(
       USER_EMAIL,
       USER_PASSWORD,
       username
     );
+
     // we don't want to test the implementation of the function
     result!.expiresAt = -1;
     server.events.removeAllListeners();
+
     expect(db.user.create).toBeCalledWith({
       data: {
         email: USER_EMAIL,
         id: USER_ID,
         username: username,
-        categories: { create: defaultUserCategories },
-        organizations: { create: [{ name: "Personal" }] },
+        firstName: undefined,
+        lastName: undefined,
+        // After the last changes because of SSO we dont need this anymore
+        organizations: {
+          create: [
+            {
+              name: "Personal",
+              categories: {
+                create: defaultUserCategories.map((c) => ({
+                  ...c,
+                  userId: USER_ID,
+                })),
+              },
+              members: {
+                create: {
+                  name: `${undefined} ${undefined} (Owner)`,
+                  user: { connect: { id: USER_ID } },
+                },
+              },
+            },
+          ],
+        },
         roles: {
           connect: {
             name: Roles["USER"],
           },
         },
+      },
+      include: {
+        organizations: true,
+        ...INCLUDE_SSO_DETAILS_VIA_USER_ORGANIZATION,
       },
     });
     expect(result).toEqual(authSession);

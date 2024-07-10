@@ -6,73 +6,93 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { z } from "zod";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
+import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
 import { DeleteTag } from "~/components/tag/delete-tag";
 
-import { deleteTag, getTags } from "~/modules/tag";
+import { deleteTag, getTags } from "~/modules/tag/service.server";
+import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { makeShelfError } from "~/utils/error";
 import {
   assertIsDelete,
+  data,
+  error,
   getCurrentSearchParams,
-  getParamsValues,
-} from "~/utils";
-import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
-import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+  parseData,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.tag,
-    action: PermissionAction.read,
-  });
+  const { userId } = authSession;
 
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search } = getParamsValues(searchParams);
-  const cookie = await updateCookieWithPerPage(request, perPageParam);
-  const { perPage } = cookie;
-  const { tags, totalTags } = await getTags({
-    organizationId,
-    page,
-    perPage,
-    search,
-  });
-  const totalPages = Math.ceil(totalTags / perPage);
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.tag,
+      action: PermissionAction.read,
+    });
 
-  const header: HeaderData = {
-    title: "Tags",
-  };
-  const modelName = {
-    singular: "tag",
-    plural: "tags",
-  };
-  return json(
-    {
-      header,
-      items: tags,
-      search,
+    const searchParams = getCurrentSearchParams(request);
+    const { page, perPageParam, search } = getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
+    const { tags, totalTags } = await getTags({
+      organizationId,
       page,
-      totalItems: totalTags,
-      totalPages,
       perPage,
-      modelName,
-    },
-    {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
-    }
-  );
+      search,
+    });
+    const totalPages = Math.ceil(totalTags / perPage);
+
+    const header: HeaderData = {
+      title: "Tags",
+    };
+    const modelName = {
+      singular: "tag",
+      plural: "tags",
+    };
+
+    return json(
+      data({
+        header,
+        items: tags,
+        search,
+        page,
+        totalItems: totalTags,
+        totalPages,
+        perPage,
+        modelName,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -83,32 +103,46 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId } = await requirePermision({
-    userId,
-    request,
-    entity: PermissionEntity.tag,
-    action: PermissionAction.delete,
-  });
+  try {
+    assertIsDelete(request);
 
-  assertIsDelete(request);
-  const formData = await request.formData();
-  const id = formData.get("id") as string;
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.tag,
+      action: PermissionAction.delete,
+    });
 
-  await deleteTag({ id, organizationId });
-  sendNotification({
-    title: "Tag deleted",
-    message: "Your tag has been deleted successfully",
-    icon: { name: "trash", variant: "error" },
-    senderId: userId,
-  });
+    const { id } = parseData(
+      await request.formData(),
+      z.object({
+        id: z.string(),
+      }),
+      {
+        additionalData: { userId },
+      }
+    );
 
-  return json({ success: true });
+    await deleteTag({ id, organizationId });
+
+    sendNotification({
+      title: "Tag deleted",
+      message: "Your tag has been deleted successfully",
+      icon: { name: "trash", variant: "error" },
+      senderId: userId,
+    });
+
+    return json(data({ success: true }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 }
 
 export const handle = {
   breadcrumb: () => <Link to="/tags">Tags</Link>,
 };
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
   return (
@@ -128,6 +162,7 @@ export default function CategoriesPage() {
         <Filters />
         <Outlet />
         <List
+          bulkActions={<BulkActionsDropdown />}
           ItemComponent={TagItem}
           headerChildren={
             <>

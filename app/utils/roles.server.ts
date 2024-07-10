@@ -1,19 +1,28 @@
-import { Roles } from "@prisma/client";
-import { json } from "@remix-run/node";
-import { db } from "~/database";
-import { requireOrganisationId } from "~/modules/organization/context.server";
-import type { PermissionAction, PermissionEntity } from "./permissions";
-import { validatePermission } from "./permissions";
+import type { SsoDetails } from "@prisma/client";
+import { OrganizationRoles, Roles } from "@prisma/client";
+import { db } from "~/database/db.server";
+import { getSelectedOrganisation } from "~/modules/organization/context.server";
+import { ShelfError } from "./error";
+import type {
+  PermissionAction,
+  PermissionEntity,
+} from "./permissions/permission.validator.server";
+import { validatePermission } from "./permissions/permission.validator.server";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
-  const user = await db.user.findFirst({
-    where: { id: userId, roles: { some: { name } } },
-  });
-
-  if (!user) {
-    throw json({ error: "Unauthorized", requiredRole: name }, { status: 403 });
+  try {
+    return await db.user.findFirstOrThrow({
+      where: { id: userId, roles: { some: { name } } },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "You do not have permission to access this resource",
+      additionalData: { userId, name },
+      label: "Permission",
+      status: 403,
+    });
   }
-  return user;
 }
 
 export async function requireAdmin(userId: string) {
@@ -33,7 +42,7 @@ export async function isAdmin(context: Record<string, any>) {
   return !!user;
 }
 
-export async function requirePermision({
+export async function requirePermission({
   userId,
   request,
   entity,
@@ -57,7 +66,7 @@ export async function requirePermision({
     userOrganizations,
     organizations,
     currentOrganization,
-  } = await requireOrganisationId({ userId, request });
+  } = await getSelectedOrganisation({ userId, request });
 
   const roles = userOrganizations.find(
     (o) => o.organization.id === organizationId
@@ -77,4 +86,28 @@ export async function requirePermision({
     currentOrganization,
     role: roles ? roles[0] : undefined,
   };
+}
+
+/** Gets the role needed for SSO login from the groupID returned by the SSO claims */
+export function getRoleFromGroupId(
+  ssoDetails: SsoDetails,
+  groupIds: string[]
+): OrganizationRoles {
+  // We prioritize the admin group. If for some reason the user is in both groups, they will be an admin
+  if (ssoDetails.adminGroupId && groupIds.includes(ssoDetails.adminGroupId)) {
+    return OrganizationRoles.ADMIN;
+  } else if (
+    ssoDetails.selfServiceGroupId &&
+    groupIds.includes(ssoDetails.selfServiceGroupId)
+  ) {
+    return OrganizationRoles.SELF_SERVICE;
+  } else {
+    throw new ShelfError({
+      cause: null,
+      title: "Group ID not found",
+      message:
+        "The group your user is assigned to is not connected to shelf. Please contact an administrator for more information",
+      label: "Auth",
+    });
+  }
 }

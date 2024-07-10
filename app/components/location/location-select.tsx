@@ -1,132 +1,83 @@
-import { useMemo, useState } from "react";
-import { useLoaderData } from "@remix-run/react";
-import { Button } from "~/components/shared";
-import type { loader } from "~/routes/_layout+/assets.$assetId_.edit";
-import { tw } from "~/utils";
-import { SearchInput } from "./search-input";
-import { useLocationSearch } from "./useLocationSearch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../forms";
-import { XIcon } from "../icons";
+import { useState } from "react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
+import { Button } from "~/components/shared/button";
+import type { loader } from "~/routes/_layout+/assets.$assetId.overview.update-location";
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
+import DynamicSelect from "../dynamic-select/dynamic-select";
+
+import { XIcon } from "../icons/library";
 import { Image } from "../shared/image";
 
-export const LocationSelect = () => {
-  /** This takes care of the search bar inside the dropdown */
-  const {
-    locationSearch,
-    refinedLocations,
-    isSearchingLocations,
-    handleLocationSearch,
-    clearLocationSearch,
-  } = useLocationSearch();
+export const LocationSelect = ({
+  isBulk = false,
+  hideClearButton = false,
+}: {
+  isBulk?: boolean;
+  hideClearButton?: boolean;
+}) => {
+  const navigation = useNavigation();
 
-  const hasLocations = useMemo(
-    () => refinedLocations.length > 0,
-    [refinedLocations]
-  );
-  const { asset } = useLoaderData<typeof loader>();
-  const [locationId, setLocationId] = useState(asset?.locationId || undefined);
+  const data = useLoaderData<typeof loader>();
+  const assetLocationId = isBulk
+    ? undefined
+    : data?.asset?.locationId ?? undefined;
+
+  const [locationId, setLocationId] = useState(undefined);
+  const disabled = isFormProcessing(navigation.state);
 
   return (
     <div className="relative w-full">
-      <input
-        type="hidden"
-        name="currentLocationId"
-        value={asset?.locationId || ""}
-      />
+      {!isBulk && (
+        <input type="hidden" name="currentLocationId" value={assetLocationId} />
+      )}
       <div className="flex items-center gap-2">
-        {/* setting locationId as a key if it exists else a random string to clear select, solution based on https://github.com/radix-ui/primitives/issues/1569#issuecomment-1434801848*/}
-        <Select
-          name="newLocationId"
+        <DynamicSelect
+          disabled={disabled}
+          fieldName="newLocationId"
           defaultValue={locationId}
-          value={locationId}
-          key={locationId ? locationId : "random-key"}
-          onValueChange={(value) => setLocationId(value)}
-        >
-          <SelectTrigger className="">
-            <SelectValue placeholder="Select location" />
-          </SelectTrigger>
-
-          <div>
-            <SelectContent
-              className=" max-h-[300px] w-[350px] overflow-auto"
-              position="popper"
-              align="end"
-              sideOffset={4}
-              ref={(ref) =>
-                ref?.addEventListener("touchend", (e) => e.preventDefault())
-              }
+          model={{ name: "location", queryKey: "name" }}
+          contentLabel="Locations"
+          initialDataKey="locations"
+          countKey="totalLocations"
+          closeOnSelect
+          extraContent={
+            <Button
+              to="/locations/new"
+              variant="link"
+              icon="plus"
+              className="w-full justify-start pt-4"
+              target="_blank"
             >
-              {!hasLocations && !isSearchingLocations ? (
-                <div>
-                  You don't seem to have any locations yet.{" "}
-                  <Button to={"/locations/new"} variant="link" className="">
-                    Create your first location
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <div className="relative">
-                    <SearchInput
-                      filter={locationSearch}
-                      handleFilter={handleLocationSearch}
-                    />
-                    {isSearchingLocations && (
-                      <Button
-                        icon="x"
-                        variant="tertiary"
-                        disabled={isSearchingLocations}
-                        onClick={clearLocationSearch}
-                        className="z-100 pointer-events-auto absolute  right-[14px] top-0  h-full  border-0 p-0 text-center text-gray-400 hover:text-gray-900"
-                      />
-                    )}
-                  </div>
+              Create new location
+            </Button>
+          }
+          renderItem={({ name, metadata }) => (
+            <div className="flex items-center gap-2">
+              <Image
+                imageId={metadata.imageId}
+                alt="img"
+                className={tw(
+                  "size-6 rounded-[2px] object-cover",
+                  metadata.description ? "rounded-b-none border-b-0" : ""
+                )}
+              />
+              <div>{name}</div>
+            </div>
+          )}
+        />
 
-                  <div className="border-b border-b-gray-300 py-2 ">
-                    {refinedLocations.map((c) => (
-                      <SelectItem value={c.id} key={c.id} className="p-2">
-                        <div className="flex items-center gap-2">
-                          <Image
-                            imageId={c.imageId}
-                            alt="img"
-                            className={tw(
-                              "size-6 rounded-[2px] object-cover",
-                              c.description ? "rounded-b-none border-b-0" : ""
-                            )}
-                          />
-                          <div>{c.name}</div>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </div>
-
-                  <Button
-                    to={"/locations/new"}
-                    variant="link"
-                    icon="plus"
-                    className="w-full justify-start pt-4"
-                  >
-                    Create new location
-                  </Button>
-                </>
-              )}
-            </SelectContent>
-          </div>
-        </Select>
-        <Button
-          variant="secondary"
-          type="button"
-          className="p-3.5"
-          onClick={() => setLocationId(undefined)}
-          disabled={!locationId}
-        >
-          <XIcon />
-        </Button>
+        {hideClearButton ? null : (
+          <Button
+            variant="secondary"
+            type="button"
+            className="p-3.5"
+            onClick={() => setLocationId(undefined)}
+            disabled={!locationId}
+          >
+            <XIcon />
+          </Button>
+        )}
       </div>
     </div>
   );

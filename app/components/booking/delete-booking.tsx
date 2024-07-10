@@ -1,5 +1,5 @@
 import type { Booking } from "@prisma/client";
-import { Form, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -12,8 +12,10 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import { isFormProcessing, tw } from "~/utils";
-import { TrashIcon } from "../icons";
+import { isFormProcessing } from "~/utils/form";
+import { tw } from "~/utils/tw";
+import { Form } from "../custom-form";
+import { TrashIcon } from "../icons/library";
 
 export const DeleteBooking = ({
   booking,
@@ -61,8 +63,7 @@ export const DeleteBooking = ({
             <Form method="delete">
               <Button
                 className={tw(
-                  "border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800",
-                  disabled ? "pointer-events-none opacity-50" : ""
+                  "border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
                 )}
                 type="submit"
                 data-test-id="confirmDeleteBookingButton"

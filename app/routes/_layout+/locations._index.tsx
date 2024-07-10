@@ -5,64 +5,82 @@ import { useNavigate } from "@remix-run/react";
 
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { Filters } from "~/components/list/filters";
+import BulkActionsDropdown from "~/components/location/bulk-actions-dropdown";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Td, Th } from "~/components/table";
-import { getLocations } from "~/modules/location";
-import { getCurrentSearchParams, getParamsValues, tw } from "~/utils";
+import { getLocations } from "~/modules/location/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
+import { makeShelfError } from "~/utils/error";
+import { data, error, getCurrentSearchParams } from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.location,
-    action: PermissionAction.read,
-  });
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search } = getParamsValues(searchParams);
-  const cookie = await updateCookieWithPerPage(request, perPageParam);
-  const { perPage } = cookie;
+  const { userId } = authSession;
 
-  const { locations, totalLocations } = await getLocations({
-    organizationId,
-    page,
-    perPage,
-    search,
-  });
-  const totalPages = Math.ceil(totalLocations / perPage);
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.location,
+      action: PermissionAction.read,
+    });
+    const searchParams = getCurrentSearchParams(request);
+    const { page, perPageParam, search } = getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
 
-  const header: HeaderData = {
-    title: "Locations",
-  };
-  const modelName = {
-    singular: "location",
-    plural: "locations",
-  };
-  return json(
-    {
-      header,
-      items: locations,
-      search,
+    const { locations, totalLocations } = await getLocations({
+      organizationId,
       page,
-      totalItems: totalLocations,
-      totalPages,
       perPage,
+      search,
+    });
+    const totalPages = Math.ceil(totalLocations / perPage);
 
-      modelName,
-    },
-    {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
-    }
-  );
+    const header: HeaderData = {
+      title: "Locations",
+    };
+    const modelName = {
+      singular: "location",
+      plural: "locations",
+    };
+
+    return json(
+      data({
+        header,
+        items: locations,
+        search,
+        page,
+        totalItems: totalLocations,
+        totalPages,
+        perPage,
+
+        modelName,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -81,12 +99,13 @@ export default function LocationsIndexPage() {
           icon="plus"
           data-test-id="createNewLocation"
         >
-          Add Location
+          New location
         </Button>
       </Header>
       <ListContentWrapper>
         <Filters />
         <List
+          bulkActions={<BulkActionsDropdown />}
           ItemComponent={ListItemContent}
           navigate={(itemId) => navigate(itemId)}
           headerChildren={

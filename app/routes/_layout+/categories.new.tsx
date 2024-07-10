@@ -1,24 +1,26 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import {
-  Form,
-  useActionData,
-  useLoaderData,
-  useNavigation,
-} from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import { ColorInput } from "~/components/forms/color-input";
 import Input from "~/components/forms/input";
 
 import { Button } from "~/components/shared/button";
 
-import { createCategory } from "~/modules/category";
-import { getRandomColor, isFormProcessing } from "~/utils";
+import { createCategory } from "~/modules/category/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { makeShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { getRandomColor } from "~/utils/get-random-color";
+import { data, error, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
 import { zodFieldIsRequired } from "~/utils/zod";
 
 export const NewCategoryFormSchema = z.object({
@@ -31,20 +33,27 @@ const title = "New category";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.category,
-    action: PermissionAction.create,
-  });
+  const { userId } = authSession;
 
-  const colorFromServer = getRandomColor();
+  try {
+    await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.category,
+      action: PermissionAction.create,
+    });
 
-  const header = {
-    title,
-  };
+    const colorFromServer = getRandomColor();
 
-  return json({ header, colorFromServer });
+    const header = {
+      title,
+    };
+
+    return json(data({ header, colorFromServer }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -53,53 +62,38 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function action({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.category,
-    action: PermissionAction.create,
-  });
-  const formData = await request.formData();
-  const result = await NewCategoryFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+  const { userId } = authSession;
 
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-      },
-      {
-        status: 400,
-      }
-    );
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.category,
+      action: PermissionAction.create,
+    });
+
+    const payload = parseData(await request.formData(), NewCategoryFormSchema, {
+      additionalData: { userId, organizationId },
+    });
+
+    await createCategory({
+      ...payload,
+      userId: authSession.userId,
+      organizationId,
+    });
+
+    sendNotification({
+      title: "Category created",
+      message: "Your category has been created successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect(`/categories`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
   }
-
-  const rsp = await createCategory({
-    ...result.data,
-    userId: authSession.userId,
-    organizationId,
-  });
-  // Handle response error when creating. Mostly due to duplicate name
-  if (rsp?.error) {
-    return json(
-      {
-        errors: rsp.error,
-      },
-      {
-        status: 400,
-      }
-    );
-  }
-
-  sendNotification({
-    title: "Category created",
-    message: "Your category has been created successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return redirect(`/categories`);
 }
 
 export default function NewCategory() {
@@ -162,9 +156,9 @@ export default function NewCategory() {
           </div>
         </div>
 
-        {actionData?.errors ? (
+        {actionData?.error ? (
           <div className="mt-3 text-sm text-error-500">
-            {actionData?.errors?.message}
+            {actionData?.error?.message}
           </div>
         ) : null}
       </Form>

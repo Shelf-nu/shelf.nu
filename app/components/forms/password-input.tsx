@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { InputProps } from "./input";
 import Input from "./input";
-import { EyeIcon, EyeOffIcon } from "../icons";
+import { EyeIcon, EyeOffIcon } from "../icons/library";
 
 export default function PasswordInput(props: InputProps) {
   const [showPassword, setShowPassword] = useState(false);

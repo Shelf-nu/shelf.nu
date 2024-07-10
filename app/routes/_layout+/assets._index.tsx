@@ -1,6 +1,7 @@
-import type { Category, Asset, Tag, Custody } from "@prisma/client";
+import type { Category, Asset, Tag, Custody, Kit } from "@prisma/client";
 import { OrganizationRoles, AssetStatus } from "@prisma/client";
 import type {
+  ActionFunctionArgs,
   LinksFunction,
   LoaderFunctionArgs,
   MetaFunction,
@@ -8,66 +9,62 @@ import type {
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
-import { redirect } from "react-router";
+import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
+import BulkActionsDropdown from "~/components/assets/bulk-actions-dropdown";
 import { ImportButton } from "~/components/assets/import-button";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
-import { ChevronRight } from "~/components/icons";
+import { ChevronRight, KitIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
-import type { ListItemData } from "~/components/list/list-item";
+import { Filters } from "~/components/list/filters";
+import { SortBy } from "~/components/list/filters/sort-by";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import { GrayBadge } from "~/components/shared/gray-badge";
+import { Image } from "~/components/shared/image";
 import { Tag as TagBadge } from "~/components/shared/tag";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
-import { db } from "~/database";
-import { useClearValueFromParams, useSearchParamHasValue } from "~/hooks";
+import { db } from "~/database/db.server";
+import {
+  useClearValueFromParams,
+  useSearchParamHasValue,
+} from "~/hooks/use-search-param-utils";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
+  bulkDeleteAssets,
   getPaginatedAndFilterableAssets,
   updateAssetsWithBookingCustodians,
-} from "~/modules/asset";
-import { getOrganizationTierLimit } from "~/modules/tier";
-import assetCss from "~/styles/assets.css";
+} from "~/modules/asset/service.server";
+import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
+import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { userPrefs } from "~/utils/cookies.server";
-import { ShelfStackError } from "~/utils/error";
+import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
+import { setCookie, userPrefs } from "~/utils/cookies.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { data, error, parseData } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
-import { canImportAssets } from "~/utils/subscription";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
+import { canImportAssets } from "~/utils/subscription.server";
+import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 
-export interface IndexResponse {
-  /** Page number. Starts at 1 */
-  page: number;
-
-  /** Items to be loaded per page */
-  perPage: number;
-
-  /** Items to be rendered in the list */
-  items: ListItemData[];
-
-  categoriesIds?: string[];
-
-  /** Total items - before filtering */
-  totalItems: number;
-
-  /** Total pages */
-  totalPages: number;
-
-  /** Search string */
-  search: string | null;
-
-  /** Used so all the default actions can be generate such as empty state, creating and so on */
-  modelName: {
-    singular: string;
-    plural: string;
-  };
-}
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: assetCss },
 ];
@@ -76,121 +73,184 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId, organizations, currentOrganization, role } =
-    await requirePermision({
+  try {
+    const [{ organizationId, organizations, currentOrganization, role }, user] =
+      await Promise.all([
+        requirePermission({
+          userId,
+          request,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.read,
+        }),
+        db.user
+          .findUniqueOrThrow({
+            where: {
+              id: userId,
+            },
+            select: {
+              firstName: true,
+            },
+          })
+          .catch((cause) => {
+            throw new ShelfError({
+              cause,
+              message:
+                "We can't find your user data. Please try again or contact support.",
+              additionalData: { userId },
+              label: "Assets",
+            });
+          }),
+      ]);
+
+    let [
+      tierLimit,
+      {
+        search,
+        totalAssets,
+        perPage,
+        page,
+        categories,
+        tags,
+        assets,
+        totalPages,
+        cookie,
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
+        teamMembers,
+        totalTeamMembers,
+        rawTeamMembers,
+      },
+    ] = await Promise.all([
+      getOrganizationTierLimit({
+        organizationId,
+        organizations,
+      }),
+      getPaginatedAndFilterableAssets({
+        request,
+        organizationId,
+      }),
+    ]);
+
+    if (role === OrganizationRoles.SELF_SERVICE) {
+      /**
+       * For self service users we dont return the assets that are not available to book
+       */
+      assets = assets.filter((a) => a.availableToBook);
+    }
+
+    assets = await updateAssetsWithBookingCustodians(assets);
+
+    const header: HeaderData = {
+      title: isPersonalOrg(currentOrganization)
+        ? user?.firstName
+          ? `${user.firstName}'s inventory`
+          : `Your inventory`
+        : currentOrganization?.name
+        ? `${currentOrganization?.name}'s inventory`
+        : "Your inventory",
+    };
+
+    const modelName = {
+      singular: "asset",
+      plural: "assets",
+    };
+
+    return json(
+      data({
+        header,
+        items: assets,
+        categories,
+        tags,
+        search,
+        page,
+        totalItems: totalAssets,
+        perPage,
+        totalPages,
+        modelName,
+        canImportAssets: canImportAssets(tierLimit),
+        searchFieldLabel: "Search assets",
+        searchFieldTooltip: {
+          title: "Search your asset database",
+          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+        },
+        totalCategories,
+        totalTags,
+        locations,
+        totalLocations,
+        teamMembers,
+        totalTeamMembers,
+        rawTeamMembers,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
+}
+
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  try {
+    const formData = await request.formData();
+
+    const { intent } = parseData(
+      formData,
+      z.object({ intent: z.enum(["bulk-delete"]) })
+    );
+
+    const intent2ActionMap: { [K in typeof intent]: PermissionAction } = {
+      "bulk-delete": PermissionAction.delete,
+    };
+
+    const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
-      action: PermissionAction.read,
+      action: intent2ActionMap[intent],
     });
-  // @TODO we shouldnt have to do this. We can combine it with the requirePermission
-  const user = await db.user.findUnique({
-    where: {
-      id: userId,
-    },
-    select: {
-      firstName: true,
-      tier: {
-        include: { tierLimit: true },
-      },
-      userOrganizations: {
-        where: {
+
+    switch (intent) {
+      case "bulk-delete": {
+        const { assetIds, currentSearchParams } = parseData(
+          formData,
+          z
+            .object({ assetIds: z.array(z.string()).min(1) })
+            .and(CurrentSearchParamsSchema)
+        );
+
+        await bulkDeleteAssets({
+          assetIds,
+          organizationId,
           userId,
-        },
-        select: {
-          organization: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              owner: {
-                select: {
-                  tier: {
-                    include: { tierLimit: true },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-  const tierLimit = await getOrganizationTierLimit({
-    organizationId,
-    organizations,
-  });
-  let {
-    search,
-    totalAssets,
-    perPage,
-    page,
-    categories,
-    tags,
-    assets,
-    totalPages,
-    cookie,
-    totalCategories,
-    totalTags,
-  } = await getPaginatedAndFilterableAssets({
-    request,
-    organizationId,
-  });
-  if (totalPages !== 0 && page > totalPages) {
-    return redirect("/assets");
-  }
-  if (!assets) {
-    throw new ShelfStackError({
-      title: "Hey!",
-      message: `No assets found`,
-      status: 404,
-    });
-  }
-  if (role === OrganizationRoles.SELF_SERVICE) {
-    /**
-     * For self service users we dont return the assets that are not available to book
-     */
-    assets = assets.filter((a) => a.availableToBook);
-  }
-  assets = await updateAssetsWithBookingCustodians(assets);
-  const header: HeaderData = {
-    title: isPersonalOrg(currentOrganization)
-      ? user?.firstName
-        ? `${user.firstName}'s inventory`
-        : `Your inventory`
-      : currentOrganization?.name
-      ? `${currentOrganization?.name}'s inventory`
-      : "Your inventory",
-  };
-  const modelName = {
-    singular: "asset",
-    plural: "assets",
-  };
-  return json(
-    {
-      header,
-      items: assets,
-      categories,
-      tags,
-      search,
-      page,
-      totalItems: totalAssets,
-      perPage,
-      totalPages,
-      modelName,
-      canImportAssets: canImportAssets(tierLimit),
-      searchFieldLabel: "Search assets",
-      searchFieldTooltip: {
-        title: "Search your asset database",
-        text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
-      },
-      totalCategories,
-      totalTags,
-    },
-    {
-      headers: [["Set-Cookie", await userPrefs.serialize(cookie)]],
+          currentSearchParams,
+        });
+
+        sendNotification({
+          title: "Assets deleted",
+          message: "Your assets has been deleted successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return json(data({ success: true }));
+      }
+
+      default: {
+        checkExhaustiveSwitch(intent);
+        return json(data(null));
+      }
     }
-  );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 }
 
 export function shouldRevalidate({
@@ -209,13 +269,10 @@ export function shouldRevalidate({
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: appendToMetaTitle(data.header.title) },
+  { title: appendToMetaTitle(data?.header.title) },
 ];
 
 export default function AssetIndexPage() {
-  const navigate = useNavigate();
-  const hasFiltersToClear = useSearchParamHasValue("category", "tag");
-  const clearFilters = useClearValueFromParams("category", "tag");
   const { canImportAssets } = useLoaderData<typeof loader>();
   const isSelfService = useUserIsSelfService();
 
@@ -232,91 +289,185 @@ export default function AssetIndexPage() {
               icon="asset"
               data-test-id="createNewAsset"
             >
-              New Asset
+              New asset
             </Button>
           </>
         ) : null}
       </Header>
-      <ListContentWrapper>
-        <Filters
-          slots={{
-            "left-of-search": <StatusFilter statusItems={AssetStatus} />,
-          }}
-        >
-          <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
-            {hasFiltersToClear ? (
-              <div className="hidden gap-6 md:flex">
-                <Button
-                  as="button"
-                  onClick={clearFilters}
-                  variant="link"
-                  className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
-                  type="button"
-                >
-                  Clear all filters
-                </Button>
-                <div className="text-gray-500"> | </div>
-              </div>
-            ) : null}
-
-            <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Categories{" "}
-                    <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{ name: "category", key: "name" }}
-                label="Filter by category"
-                initialDataKey="categories"
-                countKey="totalCategories"
-              />
-              <DynamicDropdown
-                trigger={
-                  <div className="flex cursor-pointer items-center gap-2">
-                    Tags <ChevronRight className="hidden rotate-90 md:inline" />
-                  </div>
-                }
-                model={{ name: "tag", key: "name" }}
-                label="Filter by tags"
-                initialDataKey="tags"
-                countKey="totalTags"
-              />
-            </div>
-          </div>
-        </Filters>
-        <List
-          ItemComponent={ListAssetContent}
-          navigate={(itemId) => navigate(itemId)}
-          className=" overflow-x-visible md:overflow-x-auto"
-          headerChildren={
-            <>
-              <Th className="hidden md:table-cell">Category</Th>
-              <Th className="hidden md:table-cell">Tags</Th>
-              {!isSelfService ? (
-                <Th className="hidden md:table-cell">Custodian</Th>
-              ) : null}
-              <Th className="hidden md:table-cell">Location</Th>
-            </>
-          }
-        />
-      </ListContentWrapper>
+      <AssetsList />
     </>
   );
 }
+
+export const AssetsList = () => {
+  const navigate = useNavigate();
+  const hasFiltersToClear = useSearchParamHasValue(
+    "category",
+    "tag",
+    "location",
+    "teamMember"
+  );
+  const clearFilters = useClearValueFromParams(
+    "category",
+    "tag",
+    "location",
+    "teamMember"
+  );
+  const isSelfService = useUserIsSelfService();
+
+  return (
+    <ListContentWrapper>
+      <Filters
+        slots={{
+          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          "right-of-search": <SortBy />,
+        }}
+      >
+        <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
+          {hasFiltersToClear ? (
+            <div className="hidden gap-6 md:flex">
+              <Button
+                as="button"
+                onClick={clearFilters}
+                variant="link"
+                className="block min-w-28 max-w-none font-normal text-gray-500 hover:text-gray-600"
+                type="button"
+              >
+                Clear all filters
+              </Button>
+              <div className="text-gray-500"> | </div>
+            </div>
+          ) : null}
+
+          <div className="flex w-full items-center justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Categories{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "category", queryKey: "name" }}
+              label="Filter by category"
+              placeholder="Search categories"
+              initialDataKey="categories"
+              countKey="totalCategories"
+              withoutValueItem={{
+                id: "uncategorized",
+                name: "Uncategorized",
+              }}
+            />
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "tag", queryKey: "name" }}
+              label="Filter by tag"
+              initialDataKey="tags"
+              countKey="totalTags"
+              withoutValueItem={{
+                id: "untagged",
+                name: "Without tag",
+              }}
+            />
+            <DynamicDropdown
+              trigger={
+                <div className="flex cursor-pointer items-center gap-2">
+                  Locations{" "}
+                  <ChevronRight className="hidden rotate-90 md:inline" />
+                </div>
+              }
+              model={{ name: "location", queryKey: "name" }}
+              label="Filter by location"
+              initialDataKey="locations"
+              countKey="totalLocations"
+              withoutValueItem={{
+                id: "without-location",
+                name: "Without location",
+              }}
+              renderItem={({ metadata }) => (
+                <div className="flex items-center gap-2">
+                  <Image
+                    imageId={metadata.imageId}
+                    alt="img"
+                    className={tw(
+                      "size-6 rounded-[2px] object-cover",
+                      metadata.description ? "rounded-b-none border-b-0" : ""
+                    )}
+                  />
+                  <div>{metadata.name}</div>
+                </div>
+              )}
+            />
+            {!isSelfService && (
+              <DynamicDropdown
+                trigger={
+                  <div className="flex cursor-pointer items-center gap-2">
+                    Custodian{" "}
+                    <ChevronRight className="hidden rotate-90 md:inline" />
+                  </div>
+                }
+                model={{
+                  name: "teamMember",
+                  queryKey: "name",
+                  deletedAt: null,
+                }}
+                transformItem={(item) => ({
+                  ...item,
+                  id: item.metadata?.userId ? item.metadata.userId : item.id,
+                })}
+                renderItem={(item) => resolveTeamMemberName(item)}
+                label="Filter by custodian"
+                placeholder="Search team members"
+                initialDataKey="teamMembers"
+                countKey="totalTeamMembers"
+                withoutValueItem={{
+                  id: "without-custody",
+                  name: "Without custody",
+                }}
+              />
+            )}
+          </div>
+        </div>
+      </Filters>
+      <List
+        title="Assets"
+        ItemComponent={ListAssetContent}
+        navigate={(itemId) => navigate(itemId)}
+        className=" overflow-x-visible md:overflow-x-auto"
+        bulkActions={<BulkActionsDropdown />}
+        headerChildren={
+          <>
+            <Th className="hidden md:table-cell">Category</Th>
+            <Th className="hidden md:table-cell">Tags</Th>
+            {!isSelfService ? (
+              <Th className="hidden md:table-cell">Custodian</Th>
+            ) : null}
+            <Th className="hidden md:table-cell">Location</Th>
+          </>
+        }
+      />
+    </ListContentWrapper>
+  );
+};
 
 const ListAssetContent = ({
   item,
 }: {
   item: Asset & {
+    kit: Kit;
     category?: Category;
     tags?: Tag[];
     custody: Custody & {
       custodian: {
         name: string;
         user?: {
+          firstName: string | null;
+          lastName: string | null;
           profilePicture: string | null;
+          email: string | null;
         };
       };
     };
@@ -325,15 +476,15 @@ const ListAssetContent = ({
     };
   };
 }) => {
-  const { category, tags, custody, location } = item;
+  const { category, tags, custody, location, kit } = item;
   const isSelfService = useUserIsSelfService();
   return (
     <>
       {/* Item */}
       <Td className="w-full whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
+        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-12 shrink-0 items-center justify-center">
+            <div className="relative flex size-12 shrink-0 items-center justify-center">
               <AssetImage
                 asset={{
                   assetId: item.id,
@@ -343,6 +494,22 @@ const ListAssetContent = ({
                 }}
                 className="size-full rounded-[4px] border object-cover"
               />
+
+              {kit?.id ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="absolute -bottom-1 -right-1 flex size-4 items-center justify-center rounded-full border-2 border-white bg-gray-200">
+                        <KitIcon className="size-2" />
+                      </div>
+                    </TooltipTrigger>
+
+                    <TooltipContent side="top">
+                      <p className="text-sm">{kit.name}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null}
             </div>
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">
@@ -397,7 +564,20 @@ const ListAssetContent = ({
                     alt=""
                   />
                 ) : null}
-                <span className="mt-[1px]">{custody.custodian.name}</span>
+                <span className="mt-px">
+                  {resolveTeamMemberName({
+                    name: custody.custodian.name,
+                    user: custody.custodian?.user
+                      ? {
+                          firstName: custody.custodian?.user?.firstName || null,
+                          lastName: custody.custodian?.user?.lastName || null,
+                          profilePicture:
+                            custody.custodian?.user?.profilePicture || null,
+                          email: custody.custodian?.user?.email || "",
+                        }
+                      : undefined,
+                  })}
+                </span>
               </>
             </GrayBadge>
           ) : null}
@@ -434,13 +614,3 @@ const ListItemTagsColumn = ({ tags }: { tags: Tag[] | undefined }) => {
     </div>
   ) : null;
 };
-
-const GrayBadge = ({
-  children,
-}: {
-  children: string | JSX.Element | JSX.Element[];
-}) => (
-  <span className="inline-flex w-max items-center justify-center rounded-2xl bg-gray-100 px-2 py-[2px] text-center text-[12px] font-medium text-gray-700">
-    {children}
-  </span>
-);

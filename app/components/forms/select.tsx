@@ -1,8 +1,6 @@
-"use client";
-
 import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import { CheckIcon, ChevronRight } from "../icons/library";
 
 const Select = SelectPrimitive.Root;
@@ -19,7 +17,7 @@ const SelectTrigger = React.forwardRef<
     <SelectPrimitive.Trigger
       ref={ref}
       className={tw(
-        "select-trigger flex w-full items-center justify-between rounded border border-gray-300 bg-white px-3 py-2 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2  disabled:opacity-50 ",
+        "select-trigger flex w-full items-center justify-between rounded border border-gray-300 bg-white px-3 py-2 text-[16px] text-gray-500 placeholder:text-gray-500 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-25 focus:ring-offset-2 disabled:opacity-50 ",
         className
       )}
       {...props}
@@ -34,13 +32,15 @@ const SelectTrigger = React.forwardRef<
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(function SelectContent({ className, children, ...props }, ref) {
+>(function SelectContent({ className, children, ...props }, _ref) {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
-        ref={ref}
+        ref={(ref) =>
+          ref?.addEventListener("touchend", (e) => e.preventDefault())
+        }
         className={tw(
-          " relative z-50 overflow-hidden rounded border border-gray-300 bg-white  p-3  shadow-md animate-in fade-in-80",
+          " relative z-50 overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in fade-in-80",
           className
         )}
         {...props}

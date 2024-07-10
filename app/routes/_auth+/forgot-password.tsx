@@ -4,16 +4,21 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useNavigation } from "@remix-run/react";
-import { parseFormAny, useZorm } from "react-zorm";
+import { useActionData, useNavigation } from "@remix-run/react";
+import { useZorm } from "react-zorm";
 import { z } from "zod";
+import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
-import { sendResetPasswordLink } from "~/modules/auth";
-import { assertIsPost, isFormProcessing, tw, validEmail } from "~/utils";
+import { sendResetPasswordLink } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
+import { data, error, getActionMethod, parseData } from "~/utils/http.server";
+import { validEmail } from "~/utils/misc";
+import { tw } from "~/utils/tw";
 
 const ForgotPasswordSchema = z.object({
   email: z
@@ -23,65 +28,66 @@ const ForgotPasswordSchema = z.object({
       message: "Please enter a valid email",
     })),
 });
-export async function loader({ context }: LoaderFunctionArgs) {
+export function loader({ context }: LoaderFunctionArgs) {
   const title = "Forgot password?";
   const subHeading = "No worries, we’ll send you reset instructions.";
-  if (context.isAuthenticated) return redirect("/assets");
 
-  return json({ title, subHeading });
+  if (context.isAuthenticated) {
+    return redirect("/assets");
+  }
+
+  return json(data({ title, subHeading }));
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  assertIsPost(request);
+  try {
+    const method = getActionMethod(request);
 
-  const formData = await request.formData();
-  const result = await ForgotPasswordSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+    switch (method) {
+      case "POST": {
+        const { email } = parseData(
+          await request.formData(),
+          ForgotPasswordSchema
+        );
 
-  if (!result.success) {
-    return json(
-      {
-        message: "Invalid request",
-        email: null,
-        success: false,
-      },
-      { status: 400 }
-    );
+        /** We are going to get the user to make sure it exists and is confirmed
+         * this will not allow the user to use the forgot password before they have confirmed their email
+         */
+        const user = await db.user.findFirst({ where: { email } });
+
+        if (!user) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "The user with this email is not confirmed yet, so you cannot reset it's password. Please confirm your user before continuing",
+            additionalData: { email },
+            shouldBeCaptured: false,
+            label: "Auth",
+          });
+        }
+
+        if (user.sso) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "This user is an SSO user and cannot reset password using email.",
+            additionalData: { email },
+            shouldBeCaptured: false,
+            label: "Auth",
+          });
+        }
+
+        await sendResetPasswordLink(email);
+
+        return json(data({ email }));
+      }
+    }
+
+    throw notAllowedMethod(method);
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    return json(error(reason), { status: reason.status });
   }
-
-  const { email } = result.data;
-
-  /** We are going to get the user to make sure it exists and is confirmed
-   * this will not allow the user to use the forgot password before they have confirmed their email
-   */
-  const user = await db.user.findFirst({ where: { email } });
-  if (!user) {
-    return json(
-      {
-        message:
-          "The user with this email is not confirmed yet, so you cannot reset it's password. Please confirm your user before continuing",
-        email: null,
-        success: false,
-      },
-      { status: 400 }
-    );
-  }
-
-  const { error } = await sendResetPasswordLink(email);
-
-  if (error) {
-    return json(
-      {
-        message: "Unable to send password reset link",
-        email: null,
-        success: false,
-      },
-      { status: 500 }
-    );
-  }
-
-  return json({ message: null, email, success: true });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -93,12 +99,12 @@ export default function ForgotPassword() {
   const actionData = useActionData<typeof action>();
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
-  const error = zo.errors.email()?.message || actionData?.message || "";
+  const error = zo.errors.email()?.message || actionData?.error?.message || "";
 
   return (
     <div className="flex min-h-full flex-col justify-center">
       <div className="mx-auto w-full max-w-md px-8">
-        {!actionData?.success ? (
+        {!actionData || actionData.error ? (
           <Form ref={zo.ref} method="post" className="space-y-6" replace>
             <div>
               <Input
@@ -125,7 +131,7 @@ export default function ForgotPassword() {
         ) : (
           <div className={tw(`mb-2 h-6 text-center text-gray-600`)}>
             We sent a password reset link to{" "}
-            <span className="font-semibold">{actionData?.email}</span>
+            <span className="font-semibold">{actionData.email}</span>
           </div>
         )}
         <div className="mt-8 text-center">

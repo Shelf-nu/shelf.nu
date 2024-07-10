@@ -2,48 +2,52 @@
 import { PassThrough } from "stream";
 
 import { createReadableStreamFromReadable } from "@remix-run/node";
-import type {
-  ActionFunctionArgs,
-  AppLoadContext,
-  EntryContext,
-  LoaderFunctionArgs,
-} from "@remix-run/node";
+import type { AppLoadContext, EntryContext } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import * as Sentry from "@sentry/remix";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
-import { registerBookingWorkers } from "./modules/booking";
-import { SENTRY_DSN } from "./utils";
+import { registerBookingWorkers } from "./modules/booking/worker.server";
+import { ShelfError } from "./utils/error";
+import { Logger } from "./utils/logger";
 import * as schedulerService from "./utils/scheduler.server";
 
-if (SENTRY_DSN) {
-  Sentry.init({
-    dsn: SENTRY_DSN,
-    tracesSampleRate: 1,
-  });
-}
 // === start: register scheduler and workers ===
 schedulerService
   .init()
-  .then(() => {
-    registerBookingWorkers();
+  .then(async () => {
+    await registerBookingWorkers().catch((cause) => {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Something went wrong while registering booking workers.",
+          label: "Scheduler",
+        })
+      );
+    });
   })
   .finally(() => {
     // eslint-disable-next-line no-console
     console.log("Scheduler and workers registration completed");
   })
-  // eslint-disable-next-line no-console
-  .catch((e) => console.error(e));
+  .catch((cause) => {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Scheduler crash",
+        label: "Scheduler",
+      })
+    );
+  });
 // === end: register scheduler and workers ===
 
-export function handleError(
-  error: unknown,
-  { request }: LoaderFunctionArgs | ActionFunctionArgs
-) {
-  if (Sentry) {
-    Sentry.captureRemixServerException(error, "remix.server", request);
-  }
-}
+/**
+ * Handle errors that are not handled by a loader or action try/catch block.
+ *
+ * If this happen, you will have Sentry logs with a `Unhandled` tag and `unhandled.remix.server` as origin.
+ *
+ */
+export const handleError = Sentry.wrapHandleErrorWithSentry;
 
 const ABORT_DELAY = 5000;
 

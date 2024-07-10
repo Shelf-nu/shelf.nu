@@ -1,5 +1,5 @@
 import type { Note as NoteType } from "@prisma/client";
-import { MarkdownViewer } from "~/components/markdown";
+import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Switch } from "~/components/shared/switch";
 import { Tag } from "~/components/shared/tag";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { InviteStatuses, User } from "@prisma/client";
 import { useFetcher } from "@remix-run/react";
 import {
@@ -6,31 +5,34 @@ import {
   RemoveUserIcon,
   UserXIcon,
   VerticalDotsIcon,
-} from "~/components/icons";
+} from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 
-import { isFormProcessing } from "~/utils";
-import { Button } from "../shared";
+import { isFormProcessing } from "~/utils/form";
+import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
 export function TeamUsersActionsDropdown({
   userId,
   inviteStatus,
   name,
+  teamMemberId,
   email,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
   name?: string;
+  teamMemberId?: string;
   email: string;
 }) {
   const fetcher = useFetcher();
   const disabled = isFormProcessing(fetcher.state);
-  const [open, setOpen] = useState(false);
+  const { ref, open, setOpen } = useControlledDropdownMenu();
 
   return (
     <>
@@ -48,6 +50,7 @@ export function TeamUsersActionsDropdown({
           align="end"
           className="order w-[180px] rounded-md bg-white p-[6px] text-right"
           asChild
+          ref={ref}
         >
           <fetcher.Form
             method="post"
@@ -60,6 +63,7 @@ export function TeamUsersActionsDropdown({
               <>
                 <input type="hidden" name="name" value={name} />
                 <input type="hidden" name="email" value={email} />
+                <input type="hidden" name="teamMemberId" value={teamMemberId} />
                 <Button
                   type="submit"
                   variant="link"

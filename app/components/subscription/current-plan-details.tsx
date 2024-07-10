@@ -1,6 +1,6 @@
 import { useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/settings.subscription";
-import { Button } from "../shared";
+import type { loader } from "~/routes/_layout+/account-details.subscription";
+import { Button } from "../shared/button";
 
 export const CurrentPlanDetails = () => {
   const { activeProduct, expiration, subscription, isTrialSubscription } =
@@ -12,6 +12,7 @@ export const CurrentPlanDetails = () => {
         You’re currently using the <b>{activeProduct?.name}</b> version of Shelf{" "}
         {isTrialSubscription ? " on a free trial" : ""}.
       </p>
+
       <div>
         {subscription?.canceled_at ? (
           <>

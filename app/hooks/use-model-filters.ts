@@ -1,13 +1,17 @@
 import type { ChangeEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { User } from "@prisma/client";
+import type { SerializeFrom } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
-import type { AllowedModelNames } from "~/routes/api+/model-filters";
+import { type loader, type ModelFilters } from "~/routes/api+/model-filters";
+import { transformItemUsingTransformer } from "~/utils/model-filters";
 import useFetcherWithReset from "./use-fetcher-with-reset";
 
 export type ModelFilterItem = {
   id: string;
   name: string;
   color?: string;
+  user?: User;
   metadata: Record<string, any>;
 };
 
@@ -17,14 +21,20 @@ export type ModelFilterProps = {
   initialDataKey: string;
   /** name of key in loader which passing the total count */
   countKey: string;
-  model: {
-    /** name of the model for which the query has to run */
-    name: AllowedModelNames;
-    /** name of key for which we have to search the value */
-    key: string;
-  };
+
+  model: ModelFilters;
+
   /** If none is passed then values will not be added in query params */
   selectionMode?: "append" | "set" | "none";
+
+  /**
+   *
+   * A function to transform an item item on basis of item data
+   *
+   * @example
+   * transformItem: (item) => ({ ...item, id: JSON.stringify({ id: item.id, name: item.name }) })
+   */
+  transformItem?: (item: ModelFilterItem) => ModelFilterItem;
 };
 
 const GET_ALL_KEY = "getAll";
@@ -35,6 +45,7 @@ export function useModelFilters({
   countKey,
   initialDataKey,
   selectionMode = "append",
+  transformItem,
 }: ModelFilterProps) {
   const initialData = useLoaderData<any>();
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -45,15 +56,17 @@ export function useModelFilters({
 
   const totalItems = initialData[countKey];
 
-  const fetcher = useFetcherWithReset<Array<ModelFilterItem>>();
+  const fetcher = useFetcherWithReset<SerializeFrom<typeof loader>>();
 
   const items = useMemo(() => {
-    if (fetcher.data) {
-      return fetcher.data;
+    if (searchQuery && fetcher.data && !fetcher.data.error) {
+      return transformItemUsingTransformer(fetcher.data.filters, transformItem);
     }
-
-    return (initialData[initialDataKey] ?? []) as Array<ModelFilterItem>;
-  }, [fetcher.data, initialData, initialDataKey]);
+    return transformItemUsingTransformer(
+      initialData[initialDataKey],
+      transformItem
+    );
+  }, [fetcher.data, initialData, initialDataKey, searchQuery, transformItem]);
 
   const handleSelectItemChange = useCallback(
     (value: string) => {
@@ -76,38 +89,45 @@ export function useModelFilters({
         } else {
           setSelectedItems((prev) => [...prev, value]);
           /** Otherwise, add the item in search params */
-          setSearchParams((prev) => {
-            if (selectionMode === "append") {
-              prev.append(model.name, value);
-            } else {
-              prev.set(model.name, value);
+          setSearchParams(
+            (prev) => {
+              if (selectionMode === "append") {
+                prev.append(model.name, value);
+              } else {
+                prev.set(model.name, value);
+              }
+              return prev;
+            },
+            {
+              // Prevent scroll reset when adding search params as this causes navigation and will send the user to the top of the page
+              preventScrollReset: true,
             }
-            return prev;
-          });
+          );
         }
       }
     },
-    [selectedItems, model.name, setSearchParams, selectionMode]
+    [selectionMode, selectedItems, setSearchParams, model.name]
   );
 
   const handleSearchQueryChange = (
     e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
-    if (!e.target.value) {
-      resetModelFiltersFetcher();
+    if (!e.currentTarget.value) {
+      clearFilters();
     } else {
       setSearchQuery(e.currentTarget.value);
-      if (e.currentTarget.value) {
-        fetcher.submit(
-          {
-            model: model.name,
-            queryKey: model.key as string,
-            queryValue: e.currentTarget.value,
-            selectedValues: selectedItems,
-          },
-          { method: "GET", action: "/api/model-filters" }
-        );
-      }
+
+      fetcher.submit(
+        {
+          ...model,
+          queryValue: e.currentTarget.value,
+          selectedValues: selectedItems,
+        },
+        {
+          method: "GET",
+          action: "/api/model-filters",
+        }
+      );
     }
   };
 
@@ -152,6 +172,26 @@ export function useModelFilters({
     }
   }
 
+  function handleSelectAll() {
+    setSelectedItems(items.map((i) => i.id));
+
+    if (selectionMode === "none") {
+      return;
+    }
+
+    setSearchParams((prev) => {
+      if (selectionMode === "append") {
+        /** Remove all previously selected items otherwise they will get duplicated */
+        prev.delete(model.name);
+        items.forEach((i) => prev.append(model.name, i.id));
+      } else {
+        prev.set(model.name, items[0].id);
+      }
+
+      return prev;
+    });
+  }
+
   return {
     searchQuery,
     setSearchQuery,
@@ -163,5 +203,6 @@ export function useModelFilters({
     resetModelFiltersFetcher,
     clearFilters,
     getAllEntries,
+    handleSelectAll,
   };
 }

@@ -1,7 +1,7 @@
 import type { CookieOptions } from "@remix-run/node";
 import { createSessionStorage } from "@remix-run/node";
 import { z } from "zod";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
 
 export type AuthSession = {
   accessToken: string;
@@ -19,6 +19,20 @@ export type SessionData = {
 };
 
 export type FlashData = { errorMessage: string };
+
+/** Creates a session storage */
+// export function createSessionStorage() {
+//   return createCookieSessionStorage({
+//     cookie: {
+//       name: "__authSession",
+//       httpOnly: true,
+//       path: "/",
+//       sameSite: "lax",
+//       secrets: [env.SESSION_SECRET],
+//       secure: env.NODE_ENV === "production",
+//     },
+//   });
+// }
 
 const sessionSchema = z
   .object({

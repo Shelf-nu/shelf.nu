@@ -1,15 +1,15 @@
 import { useLoaderData } from "@remix-run/react";
-import type { loader } from "~/routes/_layout+/assets.$assetId.give-custody";
-import { tw } from "~/utils";
+import type { loader } from "~/routes/_layout+/assets.$assetId.overview.assign-custody";
+import { tw } from "~/utils/tw";
 import {
   Select,
   SelectTrigger,
   SelectValue,
   SelectContent,
   SelectItem,
-} from "../forms";
-import { UserIcon } from "../icons";
-import { Button } from "../shared";
+} from "../forms/select";
+import { UserIcon } from "../icons/library";
+import { Button } from "../shared/button";
 
 /** Custodian select that works only for with users and doesnt support team members
  * This is used for something like bookings where the custodian can only be a team member
@@ -33,33 +33,21 @@ export default function CustodianUserSelect(
 ) {
   const { teamMembers } = useLoaderData<typeof loader>();
 
-  // In the case of team member id passed, we set that to id and find the rest in the teamMembers array
-  let defaultValue = JSON.stringify({
-    id: teamMembers.find((member) => member.userId === defaultUserId)?.id,
-    name: teamMembers.find((member) => member.userId === defaultUserId)?.name,
-    userId: defaultUserId,
-  });
   return (
     <div className="relative w-full">
-      <Select name="custodian" defaultValue={defaultValue} disabled={disabled}>
+      <Select name="custodian" defaultValue={defaultUserId}>
         <SelectTrigger
+          disabled={disabled}
           className={tw(
             disabled ? "cursor-not-allowed" : "",
-            "custodian-selector text-left",
+            "custodian-selector min-h-[38px] text-left",
             className
           )}
         >
           <SelectValue placeholder="Select a team member" />
         </SelectTrigger>
         <div>
-          <SelectContent
-            className="w-[352px]"
-            position="popper"
-            align="start"
-            ref={(ref) =>
-              ref?.addEventListener("touchend", (e) => e.preventDefault())
-            }
-          >
+          <SelectContent className="w-[352px]" position="popper" align="start">
             {teamMembers.length > 0 ? (
               <div className=" max-h-[320px] overflow-auto">
                 {teamMembers.map((member) => (
@@ -107,7 +95,7 @@ export default function CustodianUserSelect(
             ) : (
               <div>
                 No team members found.{" "}
-                <Button to={"/settings/workspace"} variant="link">
+                <Button to={"/account-details/workspace"} variant="link">
                   Create team members
                 </Button>
               </div>

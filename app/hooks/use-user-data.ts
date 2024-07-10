@@ -1,13 +1,10 @@
-import type { User } from "@prisma/client";
-
-import { useMatchesData } from "./use-matches-data";
+import { useRouteLoaderData } from "@remix-run/react";
+import type { loader } from "~/routes/_layout+/_layout";
 
 /**
  * This base hook is used to access the user data from within the _layout route
- * @param {string} id The route id
- * @returns {JSON|undefined} The router data or undefined if not found
  */
-export function useUserData(): User | undefined {
-  let user = useMatchesData<{ user: User }>("routes/_layout+/_layout")?.user;
+export function useUserData() {
+  let user = useRouteLoaderData<typeof loader>("routes/_layout+/_layout")?.user;
   return user;
 }

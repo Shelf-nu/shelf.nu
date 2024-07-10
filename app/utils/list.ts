@@ -1,8 +1,15 @@
 import type { BookingStatus } from "@prisma/client";
+import type {
+  SortingDirection,
+  SortingOptions,
+} from "~/components/list/filters/sort-by";
 
 export const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "1"),
   perPageParam: Number(searchParams.get("per_page") || 0),
+  orderBy: (searchParams.get("orderBy") || "createdAt") as SortingOptions,
+  orderDirection: (searchParams.get("orderDirection") ||
+    "desc") as SortingDirection,
   search: searchParams.get("s") || null,
   categoriesIds: searchParams.getAll("category") || [],
   tagsIds: searchParams.getAll("tag") || [],
@@ -21,4 +28,13 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
     searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
       ? null
       : (searchParams.get("status") as BookingStatus | null),
+  batch:
+    searchParams.get("batch") === "ALL" // If the value is "ALL", we just remove the param
+      ? null
+      : (searchParams.get("batch") as string | null),
+  locationIds: searchParams.getAll("location"),
+  teamMemberIds: searchParams.getAll("teamMember") || [],
+  tab: searchParams.get("tab") as "assets" | "kits",
 });
+
+export const ALL_SELECTED_KEY = "all-selected";

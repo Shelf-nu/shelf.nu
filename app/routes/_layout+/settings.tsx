@@ -1,25 +1,26 @@
 import type { MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
-import { useMatchesData } from "~/hooks";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { data } from "~/utils/http.server";
 
 export const handle = {
   breadcrumb: () => <Link to="/settings">Settings</Link>,
 };
 
-export async function loader() {
+export function loader() {
   const title = "Settings";
   const subHeading = "Manage your preferences here.";
   const header = {
     title,
     subHeading,
   };
-  return json({ header });
+
+  return json(data({ header }));
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -30,9 +31,7 @@ export const shouldRevalidate = () => false;
 
 export default function SettingsPage() {
   let items = [
-    { to: "account", content: "Account" },
     { to: "general", content: "General" },
-    { to: "workspace", content: "Workspaces" },
     { to: "custom-fields", content: "Custom fields" },
     { to: "team", content: "Team" },
   ];
@@ -45,14 +44,6 @@ export default function SettingsPage() {
     );
   }
 
-  const enablePremium = useMatchesData<{ enablePremium: boolean }>(
-    "routes/_layout+/_layout"
-  )?.enablePremium;
-
-  if (enablePremium && !userIsSelfService) {
-    items.push({ to: "subscription", content: "Subscription" });
-  }
-
   return (
     <>
       <Header hidePageDescription />
@@ -63,3 +54,5 @@ export default function SettingsPage() {
     </>
   );
 }
+
+export const ErrorBoundary = () => <ErrorContent />;

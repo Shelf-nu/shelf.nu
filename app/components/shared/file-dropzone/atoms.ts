@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { formatBytes } from "~/utils";
+import { formatBytes } from "~/utils/format-bytes";
 
 export type FileInfo = {
   filename: string;

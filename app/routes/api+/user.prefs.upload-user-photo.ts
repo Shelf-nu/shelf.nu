@@ -1,57 +1,65 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "react-router";
 import sharp from "sharp";
-import { getUserByID, updateUser } from "~/modules/user";
+import { getUserByID, updateUser } from "~/modules/user/service.server";
+import { dateTimeInUnix } from "~/utils/date-time-in-unix";
+import { makeShelfError, ShelfError } from "~/utils/error";
 
-import { assertIsPost, dateTimeInUnix } from "~/utils";
+import { assertIsPost, data, error } from "~/utils/http.server";
 import {
   deleteProfilePicture,
   getPublicFileURL,
   parseFileFormData,
 } from "~/utils/storage.server";
 
-export const action = async ({ context, request }: ActionFunctionArgs) => {
-  assertIsPost(request);
+export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const user = await getUserByID(userId);
+  try {
+    assertIsPost(request);
 
-  /** needed for deleting */
-  const previousProfilePictureUrl = user?.profilePicture || undefined;
+    const user = await getUserByID(userId);
 
-  const formData = await parseFileFormData({
-    request,
-    newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
-    resizeOptions: {
-      height: 150,
-      width: 150,
-      fit: sharp.fit.cover,
-      withoutEnlargement: true,
-    },
-  });
+    /** needed for deleting */
+    const previousProfilePictureUrl = user.profilePicture;
 
-  const profilePicture = formData.get("file") as string;
-
-  /** if profile picture is an empty string, the upload failed so we return an error */
-  if (!profilePicture || profilePicture === "") {
-    return json(
-      {
-        error: "Something went wrong. Please refresh and try again",
+    const formData = await parseFileFormData({
+      request,
+      newFileName: `${userId}/profile-${dateTimeInUnix(Date.now())}`,
+      resizeOptions: {
+        height: 150,
+        width: 150,
+        fit: sharp.fit.cover,
+        withoutEnlargement: true,
       },
-      { status: 500 }
-    );
-  }
+    });
 
-  if (previousProfilePictureUrl) {
-    /** Delete the old picture  */
-    await deleteProfilePicture({ url: previousProfilePictureUrl });
-  }
-  /** Update user with new picture */
-  const updatedUser = await updateUser({
-    id: userId,
-    profilePicture: getPublicFileURL({ filename: profilePicture }),
-  });
+    const profilePicture = formData.get("file") as string;
 
-  return json({ updatedUser });
-};
+    /** if profile picture is an empty string, the upload failed so we return an error */
+    if (!profilePicture || profilePicture === "") {
+      throw new ShelfError({
+        cause: null,
+        message: "Something went wrong. Please refresh and try again",
+        label: "File storage",
+      });
+    }
+
+    if (previousProfilePictureUrl) {
+      /** Delete the old picture  */
+      await deleteProfilePicture({ url: previousProfilePictureUrl });
+    }
+
+    /** Update user with new picture */
+    const updatedUser = await updateUser({
+      id: userId,
+      profilePicture: getPublicFileURL({ filename: profilePicture }),
+    });
+
+    return json(data({ updatedUser }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
+}

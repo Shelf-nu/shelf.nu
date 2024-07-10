@@ -1,6 +1,7 @@
 import { Link, useMatches } from "@remix-run/react";
 import { Outlet } from "react-router";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
+import { ShelfSymbolLogo } from "~/components/marketing/logos";
 import SubHeading from "~/components/shared/sub-heading";
 
 export const loader = () => null;
@@ -20,11 +21,7 @@ export default function App() {
         <div className="flex size-full flex-col items-center justify-center p-6 lg:p-10">
           <div className=" mb-8 text-center">
             <Link to="/" reloadDocument>
-              <img
-                src="/static/images/shelf-symbol.png"
-                alt="Shelf symbol"
-                className=" mx-auto mb-2 size-12"
-              />
+              <ShelfSymbolLogo />
             </Link>
 
             <h1>{title}</h1>
@@ -57,4 +54,4 @@ export default function App() {
   );
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

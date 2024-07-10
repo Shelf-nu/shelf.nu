@@ -1,0 +1,11 @@
+.button-group > * {
+  @apply rounded-none border-l-0;
+}
+
+.button-group > *:first-child {
+  @apply rounded-l border-l;
+}
+
+.button-group > *:last-child {
+  @apply rounded-r hover:rounded-r;
+}

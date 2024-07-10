@@ -1,40 +1,74 @@
-import type { Scan } from ".prisma/client";
+import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
+import parser from "ua-parser-js";
 import { getDateTimeFormat } from "~/utils/client-hints";
-var parser = require("ua-parser-js");
+import { ShelfError } from "~/utils/error";
 
-export const parseScanData = ({
+export function parseScanData({
   scan,
   userId,
   request,
 }: {
-  scan: Scan | null;
+  scan:
+    | (Scan & {
+        user: (User & { userOrganizations: UserOrganization[] | null }) | null;
+      } & { qr: Qr | null })
+    | null;
   userId: string;
   request: Request;
-}) => {
-  /**
-   * A few things we need to do to prepare the data for the client
-   * 1. Coordinates - if they are null, we don't render the map, print unknown location
-   * 2. User - Scanned by: You || Unknown
-   */
+}) {
+  try {
+    /**
+     * A few things we need to do to prepare the data for the client
+     * 1. Coordinates - if they are null, we don't render the map, print unknown location
+     * 2. User - Scanned by: You || Unknown
+     */
+    function isValidUser(
+      userOrganizations: UserOrganization[] | null | undefined,
+      organizationId: string | null | undefined
+    ) {
+      if (!userOrganizations || !organizationId) {
+        return false;
+      }
+      return userOrganizations.find(
+        (uo) => uo?.organizationId === organizationId
+      );
+    }
+    if (scan) {
+      let scannedBy = scan.userId === userId ? "You" : "Unknown";
+      const user = scan?.user;
+      scannedBy =
+        user && isValidUser(user?.userOrganizations, scan?.qr?.organizationId)
+          ? `${user.firstName} ${user.lastName}(${user.email})`
+          : "Unknown";
+      const coordinates =
+        scan.latitude && scan.longitude
+          ? `${scan.latitude}, ${scan.longitude}`
+          : "Unknown location";
 
-  if (scan) {
-    const scannedBy = scan.userId === userId ? "You" : "Unknown";
-    const coordinates =
-      scan.latitude && scan.longitude
-        ? `${scan.latitude}, ${scan.longitude}`
-        : "Unknown location";
+      const dateTime = getDateTimeFormat(request, {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(scan.createdAt);
+      const ua = parser(scan.userAgent || "");
 
-    const dateTime = getDateTimeFormat(request).format(scan.createdAt);
-    const ua = parser(scan.userAgent);
+      return {
+        scannedBy,
+        coordinates,
+        dateTime,
+        ua,
+        manuallyGenerated: scan.manuallyGenerated,
+      };
+    }
 
-    return {
-      scannedBy,
-      coordinates,
-      dateTime,
-      ua,
-    };
+    /** If there are no scans, return null */
+    return null;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while parsing the scan data. Please try again.",
+      additionalData: { userId, scan },
+      label: "QR",
+    });
   }
-
-  /** If there are no scans, return null */
-  return null;
-};
+}

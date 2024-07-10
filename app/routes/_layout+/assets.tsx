@@ -1,8 +1,8 @@
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { Link, Outlet } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 
-export async function loader() {
+export function loader() {
   return null;
 }
 
@@ -29,4 +29,4 @@ export default function AssetsPage() {
   return <Outlet />;
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

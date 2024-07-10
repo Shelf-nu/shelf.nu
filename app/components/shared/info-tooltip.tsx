@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { InfoIcon } from "~/components/icons";
+import { InfoIcon } from "~/components/icons/library";
 import {
   Tooltip,
   TooltipContent,
@@ -7,12 +7,18 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 
-export const InfoTooltip = ({ content }: { content: ReactNode }) => (
-  <TooltipProvider>
+export const InfoTooltip = ({
+  icon,
+  content,
+}: {
+  icon?: ReactNode;
+  content: ReactNode;
+}) => (
+  <TooltipProvider delayDuration={100}>
     <Tooltip>
       <TooltipTrigger asChild>
         <i className="inline-block cursor-pointer align-middle text-gray-400 hover:text-gray-700">
-          <InfoIcon />
+          {icon ? icon : <InfoIcon />}
         </i>
       </TooltipTrigger>
       <TooltipContent side="bottom">

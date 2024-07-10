@@ -1,12 +1,21 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
-import { assertIsPost } from "~/utils";
+import { makeShelfError } from "~/utils/error";
+import { assertIsPost, data, error } from "~/utils/http.server";
 import { parseMarkdownToReact } from "~/utils/md.server";
 
-export async function action({ request }: ActionFunctionArgs) {
-  assertIsPost(request);
+export async function action({ context, request }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
 
-  const formData = await request.formData();
-  const markdown = formData.get("content") as string;
+  try {
+    assertIsPost(request);
 
-  return json({ content: parseMarkdownToReact(markdown) });
+    const formData = await request.formData();
+    const markdown = formData.get("content") as string;
+
+    return json(data({ content: parseMarkdownToReact(markdown) }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 }

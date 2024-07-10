@@ -1,90 +1,140 @@
 import type { Scan } from "@prisma/client";
-import { db } from "~/database";
+import { db } from "~/database/db.server";
+import { ShelfError } from "~/utils/error";
+import type { ErrorLabel } from "~/utils/error";
 
-export async function createScan({
-  userAgent,
-  userId,
-  qrId,
-  deleted = false,
-}: {
+const label: ErrorLabel = "Scan";
+
+export async function createScan(params: {
   userAgent: string;
   userId?: Scan["userId"];
   qrId: string;
   deleted?: boolean;
+  latitude?: Scan["latitude"];
+  longitude?: Scan["longitude"];
+  manuallyGenerated?: boolean;
 }) {
-  const data = {
+  const {
     userAgent,
-    rawQrId: qrId,
-  };
+    userId,
+    qrId,
+    deleted = false,
+    latitude = null,
+    longitude = null,
+    manuallyGenerated = false,
+  } = params;
 
-  /** If user id is passed, connect to that user */
-  if (userId) {
-    Object.assign(data, {
-      user: {
-        connect: {
-          id: userId,
+  try {
+    const data = {
+      userAgent,
+      rawQrId: qrId,
+      latitude,
+      longitude,
+      manuallyGenerated,
+    };
+
+    /** If user id is passed, connect to that user */
+    if (userId) {
+      Object.assign(data, {
+        user: {
+          connect: {
+            id: userId,
+          },
         },
-      },
+      });
+    }
+
+    /** If we link it to that QR and also store the id in the rawQrId field
+     * If rawQrId is passed, we store the id of the deleted QR as a string
+     *
+     */
+
+    if (!deleted) {
+      Object.assign(data, {
+        qr: {
+          connect: {
+            id: qrId,
+          },
+        },
+      });
+    }
+
+    return await db.scan.create({
+      data,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while creating a scan. Please try again or contact support.",
+      additionalData: { params },
+      label,
     });
   }
-
-  /** If we link it to that QR and also store the id in the rawQrId field
-   * If rawQrId is passed, we store the id of the deleted QR as a string
-   *
-   */
-
-  if (!deleted) {
-    Object.assign(data, {
-      qr: {
-        connect: {
-          id: qrId,
-        },
-      },
-    });
-  }
-
-  return db.scan.create({
-    data,
-  });
 }
 
-export async function updateScan({
-  id,
-  userId,
-  latitude = null,
-  longitude = null,
-}: {
+export async function updateScan(params: {
   id: Scan["id"];
   userId?: Scan["userId"];
   latitude?: Scan["latitude"];
   longitude?: Scan["longitude"];
+  manuallyGenerated?: boolean;
 }) {
-  /** Delete the category id from the payload so we can use connect syntax from prisma */
-  let data = {
-    latitude,
-    longitude,
-  };
+  const { id, userId, latitude = null, longitude = null } = params;
 
-  if (userId) {
-    Object.assign(data, {
-      user: {
-        connect: {
-          id: userId,
+  try {
+    /** Delete the category id from the payload so we can use connect syntax from prisma */
+    let data = {
+      latitude,
+      longitude,
+    };
+
+    if (userId) {
+      Object.assign(data, {
+        user: {
+          connect: {
+            id: userId,
+          },
         },
-      },
+      });
+    }
+
+    return await db.scan.update({
+      where: { id },
+      data,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while updating the scan. Please try again or contact support.",
+      additionalData: { params },
+      label,
     });
   }
-
-  return db.scan.update({
-    where: { id },
-    data,
-  });
 }
 
 export async function getScanByQrId({ qrId }: { qrId: string }) {
-  return db.scan.findFirst({
-    where: { rawQrId: qrId },
-    orderBy: { createdAt: "desc" },
-    take: 1,
-  });
+  try {
+    return await db.scan.findFirst({
+      where: { rawQrId: qrId },
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: {
+          include: {
+            userOrganizations: true,
+          },
+        },
+        qr: true,
+      },
+      take: 1,
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while fetching the scan",
+      additionalData: { qrId },
+      label,
+    });
+  }
 }

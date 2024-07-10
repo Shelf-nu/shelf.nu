@@ -4,11 +4,11 @@ import { useSearchParams } from "@remix-run/react";
 import { useAtom, useAtomValue } from "jotai";
 
 import { useTagSearch } from "~/components/category/useTagSearch";
+import { Badge } from "~/components/shared/badge";
+import { Button } from "~/components/shared/button";
 import type { WithDateFields } from "~/modules/types";
 import Input from "../../../forms/input";
-import { CheckIcon, ChevronRight } from "../../../icons";
-
-import { Badge, Button } from "../../../shared";
+import { CheckIcon, ChevronRight } from "../../../icons/library";
 
 import {
   DropdownMenu,
@@ -21,7 +21,7 @@ import {
   clearTagFiltersAtom,
   selectedTagsAtom,
   toggleIsFilteringTagsAtom,
-} from "../atoms";
+} from "../atoms/tag";
 
 export const TagCheckboxDropdown = () => {
   const [params] = useSearchParams();

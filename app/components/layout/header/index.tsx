@@ -1,10 +1,13 @@
+import type { ReactNode } from "react";
+import React from "react";
 import { useLoaderData } from "@remix-run/react";
 import Heading from "~/components/shared/heading";
 import SubHeading from "~/components/shared/sub-heading";
-
-import { tw } from "~/utils";
+import { tw } from "~/utils/tw";
 import type { HeaderData } from "./types";
 import { Breadcrumbs } from "../breadcrumbs";
+
+type SlotKeys = "left-of-title";
 
 export default function Header({
   title = null,
@@ -13,6 +16,7 @@ export default function Header({
   hidePageDescription = false,
   hideBreadcrumbs = false,
   classNames,
+  slots,
 }: {
   /** Pass a title to replace the default route title set in the loader
    * This is very useful for interactive adjustments of the title
@@ -23,6 +27,7 @@ export default function Header({
   hidePageDescription?: boolean;
   hideBreadcrumbs?: boolean;
   classNames?: string;
+  slots?: Record<SlotKeys, ReactNode>;
 }) {
   const data = useLoaderData<{
     header?: HeaderData;
@@ -31,26 +36,27 @@ export default function Header({
 
   return header ? (
     <header className={tw("-mx-4 bg-white", classNames)}>
-      <div>
-        {!hideBreadcrumbs && (
-          <>
-            <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:min-h-[67px] md:py-3">
-              <Breadcrumbs />
-              {children && (
-                <div className="hidden shrink-0 gap-3 md:flex">{children}</div>
-              )}
-            </div>
+      {!hideBreadcrumbs && (
+        <>
+          <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:min-h-[67px] md:py-3">
+            <Breadcrumbs />
             {children && (
-              <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:hidden">
-                <div className="header-buttons flex flex-1 shrink-0 gap-3">
-                  {children}
-                </div>
-              </div>
+              <div className="hidden shrink-0 gap-3 md:flex">{children}</div>
             )}
-          </>
-        )}
-        {!hidePageDescription && (
-          <div className="border-b border-gray-200 p-4">
+          </div>
+          {children && (
+            <div className="flex w-full items-center justify-between border-b border-gray-200 px-4 py-2 md:hidden">
+              <div className="header-buttons flex flex-1 shrink-0 gap-3">
+                {children}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {!hidePageDescription && (
+        <div className={`flex items-center border-b border-gray-200 px-4 py-3`}>
+          {slots?.["left-of-title"] || null}
+          <div>
             <Heading as="h2" className="break-all text-[20px] font-semibold">
               {title || header?.title}
             </Heading>
@@ -60,8 +66,8 @@ export default function Header({
               header?.subHeading && <SubHeading>{header.subHeading}</SubHeading>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </header>
   ) : null;
 }

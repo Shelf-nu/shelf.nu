@@ -9,3 +9,6 @@ export const validEmail = (val: string) =>
 
 export const isLink = (val: string) =>
   /\b(?:https?):\/\/[-\w+&@#/%?=~|$!:,.;]*[\w+&@#/%=~|$]/.test(val);
+
+export const isValidDomain = (val: string) =>
+  /^([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.)+[a-zA-Z]{2,}$/.test(val);

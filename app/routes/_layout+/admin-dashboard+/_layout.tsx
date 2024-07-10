@@ -1,15 +1,24 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet } from "@remix-run/react";
-import { ErrorBoundryComponent } from "~/components/errors";
-import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { Link, Outlet, json } from "@remix-run/react";
+import { ErrorContent } from "~/components/errors";
 
+import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { makeShelfError } from "~/utils/error";
+import { data, error } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  await requireAdmin(authSession.userId);
+  const { userId } = authSession;
 
-  return null;
+  try {
+    await requireAdmin(userId);
+
+    return json(data(null));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const handle = {
@@ -17,7 +26,17 @@ export const handle = {
 };
 
 const items = [
-  { to: "users", content: "Users" },
+  {
+    to: "users",
+    content: "Users",
+    isActive: (pathname: string) =>
+      pathname.includes("admin-dashboard") &&
+      (pathname.includes("users") ||
+        pathname.includes("members") ||
+        pathname.includes("assets") ||
+        pathname.includes("qr-codes")),
+  },
+  { to: "qrs", content: "QR codes" },
   { to: "announcements", content: "Announcements" },
 ];
 
@@ -32,4 +51,4 @@ export default function Area51Page() {
   );
 }
 
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;

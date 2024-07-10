@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ShelfStackError } from "./error";
+import { ShelfError } from "./error";
 import { isBrowser } from "./is-browser";
 
 declare global {
@@ -13,6 +13,7 @@ declare global {
       CRISP_WEBSITE_ID: string;
       ENABLE_PREMIUM_FEATURES: string;
       MAINTENANCE_MODE: string;
+      CHROME_EXECUTABLE_PATH: string;
     };
   }
 }
@@ -32,15 +33,22 @@ declare global {
       STRIPE_SECRET_KEY: string;
       STRIPE_WEBHOOK_ENDPOINT_SECRET: string;
       ENABLE_PREMIUM_FEATURES: string;
+      DISABLE_SIGNUP: string;
+      DISABLE_SSO: string;
       INVITE_TOKEN_SECRET: string;
       SMTP_PWD: string;
       SMTP_HOST: string;
       SMTP_USER: string;
+      SMTP_FROM: string;
       MAINTENANCE_MODE: string;
       DATABASE_URL: string;
       DIRECT_URL: string;
       GEOCODE_API_KEY: string;
       SENTRY_DSN: string;
+      ADMIN_EMAIL: string;
+      ADMIN_PASSWORD: string;
+      ADMIN_USERNAME: string;
+      CHROME_EXECUTABLE_PATH: string;
     }
   }
 }
@@ -60,7 +68,11 @@ function getEnv(
   const value = source[name as keyof typeof source];
 
   if (!value && isRequired) {
-    throw new ShelfStackError({ message: `${name} is not set` });
+    throw new ShelfError({
+      message: `${name} is not set`,
+      cause: null,
+      label: "Environment",
+    });
   }
 
   return value;
@@ -101,11 +113,24 @@ export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
 export const SMTP_PWD = getEnv("SMTP_PWD");
 export const SMTP_HOST = getEnv("SMTP_HOST");
 export const SMTP_USER = getEnv("SMTP_USER");
+export const SMTP_FROM = getEnv("SMTP_FROM", {
+  isRequired: false,
+});
 export const DATABASE_URL = getEnv("DATABASE_URL");
 export const DIRECT_URL = getEnv("DIRECT_URL", {
   isRequired: false,
 });
 export const SENTRY_DSN = getEnv("SENTRY_DSN", {
+  isRequired: false,
+});
+
+export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
+  isRequired: false,
+});
+export const ADMIN_PASSWORD = getEnv("ADMIN_PASSWORD", {
+  isRequired: false,
+});
+export const ADMIN_USERNAME = getEnv("ADMIN_USERNAME", {
   isRequired: false,
 });
 
@@ -153,6 +178,29 @@ export const ENABLE_PREMIUM_FEATURES =
     isRequired: false,
   }) === "true" || false;
 
+export const DISABLE_SIGNUP =
+  getEnv("DISABLE_SIGNUP", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const DISABLE_SSO =
+  getEnv("DISABLE_SSO", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const SEND_ONBOARDING_EMAIL =
+  getEnv("SEND_ONBOARDING_EMAIL", {
+    isSecret: false,
+    isRequired: false,
+  }) === "true" || false;
+
+export const CHROME_EXECUTABLE_PATH = getEnv("CHROME_EXECUTABLE_PATH", {
+  isSecret: false,
+  isRequired: false,
+});
+
 export function getBrowserEnv() {
   return {
     NODE_ENV,
@@ -163,5 +211,6 @@ export function getBrowserEnv() {
     MICROSOFT_CLARITY_ID,
     ENABLE_PREMIUM_FEATURES,
     MAINTENANCE_MODE,
+    CHROME_EXECUTABLE_PATH,
   };
 }

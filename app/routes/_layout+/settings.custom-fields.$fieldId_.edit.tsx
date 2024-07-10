@@ -6,7 +6,7 @@ import type {
 } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
-import { parseFormAny } from "react-zorm";
+import { z } from "zod";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   CustomFieldForm,
@@ -14,44 +14,65 @@ import {
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { getAllEntriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
-  countAcviteCustomFields,
+  countActiveCustomFields,
   getCustomField,
   updateCustomField,
-} from "~/modules/custom-field";
-import { getOrganizationTierLimit } from "~/modules/tier";
-import { getRequiredParam } from "~/utils";
+} from "~/modules/custom-field/service.server";
+import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
-import { canCreateMoreCustomFields } from "~/utils/subscription";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { data, error, getParams, parseData } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
+import { canCreateMoreCustomFields } from "~/utils/subscription.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.customField,
-    action: PermissionAction.update,
+  const { userId } = authSession;
+  const { fieldId: id } = getParams(params, z.object({ fieldId: z.string() }), {
+    additionalData: { userId },
   });
 
-  const id = getRequiredParam(params, "fieldId");
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.customField,
+      action: PermissionAction.update,
+    });
 
-  const { customField } = await getCustomField({ organizationId, id });
-  if (!customField) {
-    throw new Response("Not Found", { status: 404 });
+    const customField = await getCustomField({ organizationId, id });
+
+    const { categories, totalCategories } = await getAllEntriesForCreateAndEdit(
+      {
+        organizationId,
+        request,
+        defaults: { category: customField.categories.map((c) => c.id) },
+      }
+    );
+
+    const header: HeaderData = {
+      title: `Edit | ${customField.name}`,
+    };
+
+    return json(
+      data({
+        customField,
+        header,
+        categories,
+        totalCategories,
+      })
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    throw json(error(reason), { status: reason.status });
   }
-
-  const header: HeaderData = {
-    title: `Edit | ${customField.name}`,
-  };
-
-  return json({
-    customField,
-    header,
-  });
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -64,96 +85,91 @@ export const handle = {
 
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
-
-  const { organizationId, organizations } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.customField,
-    action: PermissionAction.update,
+  const { userId } = authSession;
+  const { fieldId: id } = getParams(params, z.object({ fieldId: z.string() }), {
+    additionalData: { userId },
   });
 
-  const id = getRequiredParam(params, "fieldId");
-  const formData = await request.formData();
-  const result = await NewCustomFieldFormSchema.safeParseAsync(
-    parseFormAny(formData)
-  );
+  try {
+    const { organizationId, organizations } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.customField,
+      action: PermissionAction.update,
+    });
 
-  if (!result.success) {
-    return json(
-      {
-        errors: result.error,
-        success: false,
-      },
-      {
-        status: 400,
-      }
+    const payload = parseData(
+      await request.formData(),
+      NewCustomFieldFormSchema
     );
-  }
 
-  const { name, helpText, active, required, options } = result.data;
+    const { name, helpText, active, required, options, categories } = payload;
 
-  /** If they are activating a field, we have to make sure that they are not already at the limit */
-  if (active) {
-    /** Get the tier limit and check if they can export */
-    const tierLimit = await getOrganizationTierLimit({
-      organizationId,
-      organizations,
-    });
+    const field = await getCustomField({ organizationId, id });
 
-    const totalActiveCustomFields = await countAcviteCustomFields({
-      organizationId,
-    });
+    /** If they are activating a field, we have to make sure that they are not already at the limit */
+    const isActivatingField = !field.active && active !== field.active;
+    if (isActivatingField) {
+      /** Get the tier limit and check if they can export */
+      const tierLimit = await getOrganizationTierLimit({
+        organizationId,
+        organizations,
+      });
 
-    const canCreateMore = canCreateMoreCustomFields({
-      tierLimit,
-      totalCustomFields: totalActiveCustomFields,
-    });
-    if (!canCreateMore) {
-      return json(
-        {
-          errors: {
-            active: {
-              message: `You have reached your limit of active custom fields. Please upgrade your plan to add more.`,
+      const totalActiveCustomFields = await countActiveCustomFields({
+        organizationId,
+      });
+
+      const canCreateMore = canCreateMoreCustomFields({
+        tierLimit,
+        totalCustomFields: totalActiveCustomFields,
+      });
+
+      if (!canCreateMore) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "You have reached your limit of active custom fields. Please upgrade your plan to add more.",
+          additionalData: {
+            userId,
+            active,
+            totalActiveCustomFields,
+            tierLimit,
+            validationErrors: {
+              active: {
+                message: `You have reached your limit of active custom fields. Please upgrade your plan to add more.`,
+              },
             },
           },
-          success: false,
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-  }
-
-  const rsp = await updateCustomField({
-    id,
-    name,
-    helpText,
-    active,
-    required,
-    options,
-  });
-
-  if (rsp.error) {
-    return json(
-      {
-        errors: { name: rsp.error },
-        success: false,
-      },
-      {
-        status: 400,
+          label: "Custom fields",
+          status: 403,
+          shouldBeCaptured: false,
+        });
       }
-    );
+    }
+
+    await updateCustomField({
+      id,
+      name,
+      helpText,
+      active,
+      required,
+      options,
+      categories,
+    });
+
+    sendNotification({
+      title: "Custom field updated",
+      message: "Your custom field  has been updated successfully",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return json(data(null));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, id });
+    return json(error(reason), { status: reason.status });
   }
-
-  sendNotification({
-    title: "Custom field updated",
-    message: "Your custom field  has been updated successfully",
-    icon: { name: "success", variant: "success" },
-    senderId: authSession.userId,
-  });
-
-  return json({ success: true, errors: null });
 }
 
 export default function CustomFieldEditPage() {
@@ -177,6 +193,7 @@ export default function CustomFieldEditPage() {
           type={customField.type}
           active={customField.active}
           options={customField.options}
+          categories={customField.categories.map((c) => c.id)}
         />
       </div>
     </>

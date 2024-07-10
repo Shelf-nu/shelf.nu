@@ -6,70 +6,95 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, Outlet } from "@remix-run/react";
+import { z } from "zod";
+import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
 import { DeleteCategory } from "~/components/category/delete-category";
-import { ErrorBoundryComponent } from "~/components/errors";
+import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import { Filters, List } from "~/components/list";
+import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
-import { deleteCategory, getCategories } from "~/modules/category";
-import { getCurrentSearchParams, getParamsValues } from "~/utils";
+import {
+  deleteCategory,
+  getCategories,
+} from "~/modules/category/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { updateCookieWithPerPage, userPrefs } from "~/utils/cookies.server";
+import {
+  setCookie,
+  updateCookieWithPerPage,
+  userPrefs,
+} from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { PermissionAction, PermissionEntity } from "~/utils/permissions";
-import { requirePermision } from "~/utils/roles.server";
+import { makeShelfError } from "~/utils/error";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  parseData,
+} from "~/utils/http.server";
+import { getParamsValues } from "~/utils/list";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.validator.server";
+import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.category,
-    action: PermissionAction.read,
-  });
+  const { userId } = authSession;
 
-  const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search } = getParamsValues(searchParams);
-  const cookie = await updateCookieWithPerPage(request, perPageParam);
-  const { perPage } = cookie;
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.category,
+      action: PermissionAction.read,
+    });
 
-  const { categories, totalCategories } = await getCategories({
-    organizationId,
-    page,
-    perPage,
-    search,
-  });
-  const totalPages = Math.ceil(totalCategories / perPage);
+    const searchParams = getCurrentSearchParams(request);
+    const { page, perPageParam, search } = getParamsValues(searchParams);
+    const cookie = await updateCookieWithPerPage(request, perPageParam);
+    const { perPage } = cookie;
 
-  const header: HeaderData = {
-    title: "Categories",
-  };
-  const modelName = {
-    singular: "category",
-    plural: "categories",
-  };
-
-  return json(
-    {
-      header,
-      items: categories,
-      search,
+    const { categories, totalCategories } = await getCategories({
+      organizationId,
       page,
-      totalItems: totalCategories,
-      totalPages,
       perPage,
-      modelName,
-    },
-    {
-      headers: {
-        "Set-Cookie": await userPrefs.serialize(cookie),
-      },
-    }
-  );
+      search,
+    });
+    const totalPages = Math.ceil(totalCategories / perPage);
+
+    const header: HeaderData = {
+      title: "Categories",
+    };
+    const modelName = {
+      singular: "category",
+      plural: "categories",
+    };
+
+    return json(
+      data({
+        header,
+        items: categories,
+        search,
+        page,
+        totalItems: totalCategories,
+        totalPages,
+        perPage,
+        modelName,
+      }),
+      {
+        headers: [setCookie(await userPrefs.serialize(cookie))],
+      }
+    );
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw json(error(reason), { status: reason.status });
+  }
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -80,31 +105,44 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  const { organizationId } = await requirePermision({
-    userId: authSession.userId,
-    request,
-    entity: PermissionEntity.category,
-    action: PermissionAction.delete,
-  });
+  try {
+    const { organizationId } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.category,
+      action: PermissionAction.delete,
+    });
 
-  const formData = await request.formData();
-  const id = formData.get("id") as string;
+    const { id } = parseData(
+      await request.formData(),
+      z.object({
+        id: z.string(),
+      }),
+      {
+        additionalData: { userId },
+      }
+    );
 
-  await deleteCategory({ id, organizationId });
-  sendNotification({
-    title: "Category deleted",
-    message: "Your category has been deleted successfully",
-    icon: { name: "trash", variant: "error" },
-    senderId: userId,
-  });
+    await deleteCategory({ id, organizationId });
 
-  return json({ success: true });
+    sendNotification({
+      title: "Category deleted",
+      message: "Your category has been deleted successfully",
+      icon: { name: "trash", variant: "error" },
+      senderId: userId,
+    });
+
+    return json(data({ success: true }));
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
 }
 
 export const handle = {
   breadcrumb: () => <Link to="/categories">Categories</Link>,
 };
-export const ErrorBoundary = () => <ErrorBoundryComponent />;
+export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
   return (
@@ -117,13 +155,14 @@ export default function CategoriesPage() {
           icon="plus"
           data-test-id="createNewCategory"
         >
-          New Category
+          New category
         </Button>
       </Header>
       <ListContentWrapper>
         <Filters />
         <Outlet />
         <List
+          bulkActions={<BulkActionsDropdown />}
           ItemComponent={CategoryItem}
           headerChildren={
             <>
@@ -148,7 +187,7 @@ const CategoryItem = ({
   };
 }) => (
   <>
-    <Td title={`Category: ${item.name}`} className="w-1/4 ">
+    <Td title={`Category: ${item.name}`} className="w-1/4">
       <Badge color={item.color} withDot={false}>
         {item.name}
       </Badge>

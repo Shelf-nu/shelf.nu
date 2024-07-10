@@ -1,51 +1,55 @@
-import { ErrorCorrection } from "@prisma/client";
-import { type LoaderFunctionArgs } from "@remix-run/node";
-import JSZip from "jszip";
-import QRCode from "qrcode-generator";
-import { db } from "~/database";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { z } from "zod";
+import { db } from "~/database/db.server";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { createQrCodesZip } from "~/utils/zip-qr-codes";
 
-export const loader = async ({
-  context,
-  request,
-  params,
-}: LoaderFunctionArgs) => {
+export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
+  const { userId } = authSession;
+  const { organizationId } = getParams(
+    params,
+    z.object({ organizationId: z.string() }),
+    {
+      additionalData: { userId },
+    }
+  );
 
-  requireAdmin(authSession.userId);
-  const { organizationId } = params;
-  const url = new URL(request.url);
-  const onlyOrphaned = url.searchParams.get("orphaned");
+  try {
+    await requireAdmin(userId);
 
-  const codes = await db.qr.findMany({
-    where: {
-      organizationId,
-      assetId: onlyOrphaned
-        ? null
-        : {
-            not: null,
-          },
-    },
-  });
-  const zip = new JSZip();
+    const url = new URL(request.url);
+    const onlyOrphaned = url.searchParams.get("orphaned");
 
-  codes.forEach((c) => {
-    const code = QRCode(0, ErrorCorrection["L"]);
-    code.addData(`${process.env.SERVER_URL}/qr/${c.id}`);
-    code.make();
-    const svg = code.createSvgTag({ cellSize: 3, margin: 0, scalable: true });
+    const codes = await db.qr
+      .findMany({
+        where: {
+          organizationId,
+          assetId: onlyOrphaned
+            ? null
+            : {
+                not: null,
+              },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Something went wrong fetching the QR codes.",
+          additionalData: { userId, organizationId },
+          label: "QR",
+        });
+      });
 
-    const dateString = `${c.createdAt.getFullYear().toString()}${(
-      c.createdAt.getMonth() + 1
-    )
-      .toString()
-      .padStart(2, "0")}${c.createdAt.getDate().toString().padStart(2, "0")}`;
+    const zipBlob = await createQrCodesZip(codes);
 
-    zip.file(`${dateString} - ${c.id}.svg`, svg);
-  });
-
-  const zipBlob = await zip.generateAsync({ type: "blob" });
-  return new Response(zipBlob, {
-    headers: { "content-type": "application/zip" },
-  });
-};
+    return new Response(zipBlob, {
+      headers: { "content-type": "application/zip" },
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    return json(error(reason), { status: reason.status });
+  }
+}
