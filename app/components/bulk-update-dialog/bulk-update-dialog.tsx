@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect } from "react";
-import { useFetcher, useSearchParams } from "@remix-run/react";
+import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   bulkDialogAtom,
@@ -9,13 +9,13 @@ import {
 import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
-  setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 import type { action } from "~/routes/api+/assets.bulk-update-location";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
 import { Dialog, DialogPortal } from "../layout/dialog";
+import type { ListItemData } from "../list/list-item";
 import { Button } from "../shared/button";
 import {
   HoverCard,
@@ -173,6 +173,8 @@ const BulkUpdateDialogContent = forwardRef<
   },
   ref
 ) {
+  const { items } = useLoaderData<{ items: ListItemData[] }>();
+
   const fetcher = useFetcher<typeof action>();
   const disabled = isFormProcessing(fetcher.state);
 
@@ -181,15 +183,35 @@ const BulkUpdateDialogContent = forwardRef<
   const bulkDialogOpenState = useAtomValue(bulkDialogAtom);
   const closeBulkDialog = useSetAtom(closeBulkDialogAtom);
 
-  const selectedAssets = useAtomValue(selectedBulkItemsAtom);
-  const setSelectedAssets = useSetAtom(setSelectedBulkItemsAtom);
-  const itemsSelected = useAtomValue(selectedBulkItemsCountAtom);
+  const selectedItems = useAtomValue(selectedBulkItemsAtom);
+  const totalItemsSelected = useAtomValue(selectedBulkItemsCountAtom);
+  const setSelectedItems = useSetAtom(selectedBulkItemsAtom);
 
   const isDialogOpen = bulkDialogOpenState[type] === true;
 
   const handleCloseDialog = useCallback(() => {
     closeBulkDialog(type);
   }, [closeBulkDialog, type]);
+
+  const handleBulkActionSuccess = useCallback(() => {
+    if (type === "trash" || type === "archive" || type === "cancel") {
+      setSelectedItems([]);
+      handleCloseDialog();
+      onSuccess && onSuccess();
+      return;
+    }
+
+    /**
+     * On successful bulk action, the data becomes old as we are storing the whole object now.
+     * So we have to update the selectedItems data to new one
+     *  */
+    setSelectedItems((prev) =>
+      items.filter((item) => prev.some((i) => i.id === item.id))
+    );
+
+    handleCloseDialog();
+    onSuccess && onSuccess();
+  }, [handleCloseDialog, items, onSuccess, setSelectedItems, type]);
 
   useEffect(
     function handleOnSuccess() {
@@ -199,14 +221,10 @@ const BulkUpdateDialogContent = forwardRef<
 
       /** We have to close the dialog and remove all selected assets when update is success */
       if (fetcher.data?.success) {
-        if (type === "trash" || type === "archive" || type === "cancel") {
-          setSelectedAssets([]);
-        }
-        handleCloseDialog();
-        onSuccess && onSuccess();
+        handleBulkActionSuccess();
       }
     },
-    [fetcher, handleCloseDialog, onSuccess, setSelectedAssets, type]
+    [fetcher.data, handleBulkActionSuccess]
   );
 
   return (
@@ -227,7 +245,7 @@ const BulkUpdateDialogContent = forwardRef<
               <p>
                 {description
                   ? description
-                  : `Adjust the ${type} of selected (${itemsSelected}) assets.`}
+                  : `Adjust the ${type} of selected (${totalItemsSelected}) assets.`}
               </p>
             </div>
           </div>
@@ -245,12 +263,12 @@ const BulkUpdateDialogContent = forwardRef<
             value={searchParams.toString()}
           />
 
-          {selectedAssets.map((assetId, i) => (
+          {selectedItems.map((item, i) => (
             <input
-              key={assetId}
+              key={item.id}
               type="hidden"
               name={`${arrayFieldId}[${i}]`}
-              value={assetId}
+              value={item.id}
             />
           ))}
           <div className="modal-content-wrapper">

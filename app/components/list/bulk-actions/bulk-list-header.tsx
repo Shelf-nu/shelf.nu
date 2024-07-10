@@ -14,15 +14,15 @@ export default function BulkListHeader() {
   const { items } = useLoaderData<IndexResponse>();
 
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
-  const itemsSelected = useAtomValue(selectedBulkItemsCountAtom);
+  const totalItemsSelected = useAtomValue(selectedBulkItemsCountAtom);
 
   const partialItemsSelected =
-    itemsSelected > 0 && itemsSelected < items.length;
+    totalItemsSelected > 0 && totalItemsSelected < items.length;
 
-  const allItemsSelected = itemsSelected >= items.length;
+  const allItemsSelected = totalItemsSelected >= items.length;
 
   function handleSelectAllIncomingItems() {
-    setSelectedBulkItems(allItemsSelected ? [] : items.map((item) => item.id));
+    setSelectedBulkItems(allItemsSelected ? [] : items);
   }
 
   return (

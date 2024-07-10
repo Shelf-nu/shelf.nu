@@ -1,8 +1,7 @@
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { type loader } from "~/routes/_layout+/settings.custom-fields.index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
@@ -39,17 +38,12 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
-  const { items } = useLoaderData<typeof loader>();
-
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const selectedCustomFieldIds = useAtomValue(selectedBulkItemsAtom);
-  const selectedCustomFields = items.filter((item) =>
-    selectedCustomFieldIds.includes(item.id)
-  );
+  const selectedCustomFields = useAtomValue(selectedBulkItemsAtom);
 
-  const disabled = selectedCustomFieldIds.length === 0;
+  const disabled = selectedCustomFields.length === 0;
 
   const someFieldsActivated = selectedCustomFields.some((cf) => cf.active);
   const someFieldsDeactivated = selectedCustomFields.some((cf) => !cf.active);
