@@ -472,6 +472,7 @@ export async function releaseCustody({
     const kit = await db.kit.findUniqueOrThrow({
       where: { id: kitId },
       select: {
+        id: true,
         name: true,
         assets: true,
         createdBy: { select: { firstName: true, lastName: true } },
@@ -500,7 +501,9 @@ export async function releaseCustody({
         createNote({
           content: `**${kit.createdBy.firstName?.trim()} ${kit.createdBy.lastName?.trim()}** has released **${kit
             .custody?.custodian
-            .name}'s** custody over **${asset.title.trim()}**`,
+            .name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${
+            kit.name
+          }](/kits/${kit.id})**`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
@@ -750,7 +753,14 @@ export async function bulkAssignKitCustody({
           id: true,
           name: true,
           status: true,
-          assets: { select: { id: true, title: true, status: true } },
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              kit: { select: { id: true, name: true } }, // we need this so that we can create notes
+            },
+          },
         },
       }),
       getUserByID(userId),
@@ -820,7 +830,8 @@ export async function bulkAssignKitCustody({
       /** Creating notes for all the assets of the kit */
       await tx.note.createMany({
         data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${asset
+            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
@@ -881,6 +892,7 @@ export async function bulkReleaseKitCustody({
               status: true,
               title: true,
               custody: { select: { id: true } },
+              kit: { select: { id: true, name: true } }, // we need this so that we can create notes
             },
           },
         },
@@ -944,7 +956,8 @@ export async function bulkReleaseKitCustody({
       /** Creating notes for all the assets */
       await tx.note.createMany({
         data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${custodian?.name}'s** custody over **${asset.title.trim()}**`,
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${custodian?.name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${asset
+            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
