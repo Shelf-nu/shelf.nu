@@ -4,7 +4,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { type loader } from "~/routes/_layout+/locations._index";
-import { ALL_SELECTED_KEY } from "~/utils/list";
+import { isSelectingAllItems } from "~/utils/list";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
@@ -19,7 +19,7 @@ export default function BulkDeleteDialog() {
 
   const selectedLocations = useAtomValue(selectedBulkItemsAtom);
 
-  const totalSelected = selectedLocations.includes(ALL_SELECTED_KEY)
+  const totalSelected = isSelectingAllItems(selectedLocations)
     ? totalItems
     : selectedLocations.length;
 
