@@ -186,12 +186,24 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                 <Input
                   type="text"
                   label={"Confirmation"}
+                  autoFocus
                   name="agree"
                   value={agreed}
-                  onChange={(e) => setAgreed(e.target.value as any)}
+                  onChange={(e) =>
+                    setAgreed(e.target.value.toUpperCase() as any)
+                  }
                   placeholder="I AGREE"
                   pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
                   required
+                  onKeyDown={(e) => {
+                    if (e.key == "Enter") {
+                      e.preventDefault();
+                      // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
+                      if (!disabled) {
+                        fetcher.submit(formRef.current);
+                      }
+                    }
+                  }}
                 />
               </>
             ) : null}
