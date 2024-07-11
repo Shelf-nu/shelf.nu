@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Asset } from "@prisma/client";
+import type { Kit } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -9,15 +9,14 @@ import type {
 import { useFetcher, useLoaderData, useParams } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { z } from "zod";
-import { AssetImage } from "~/components/assets/asset-image";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ErrorContent } from "~/components/errors";
 import { ChevronRight, LinkIcon } from "~/components/icons/library";
+import KitImage from "~/components/kits/kit-image";
 import Header from "~/components/layout/header";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Button } from "~/components/shared/button";
-import { Image } from "~/components/shared/image";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -28,25 +27,24 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Td } from "~/components/table";
-import {
-  useClearValueFromParams,
-  useSearchParamHasValue,
-} from "~/hooks/use-search-param-utils";
+import { db } from "~/database/db.server";
+
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
-  getPaginatedAndFilterableAssets,
-  updateAssetQrCode,
-} from "~/modules/asset/service.server";
+  getPaginatedAndFilterableKits,
+  updateKitQrCode,
+} from "~/modules/kit/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import css from "~/styles/link-existing-asset.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
   data,
   error,
   getActionMethod,
+  getCurrentSearchParams,
   getParams,
   parseData,
 } from "~/utils/http.server";
@@ -57,6 +55,7 @@ import {
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 
 export const loader = async ({
   context,
@@ -69,9 +68,9 @@ export const loader = async ({
 
   try {
     const qr = await getQr(qrId);
-    if (qr?.assetId) {
+    if (qr?.assetId || qr?.kitId) {
       throw new ShelfError({
-        message: "This QR code is already linked to an asset.",
+        message: "This QR code is already linked to an asset or a kit.",
         title: "QR already linked",
         label: "QR",
         status: 403,
@@ -86,42 +85,47 @@ export const loader = async ({
       action: PermissionAction.update,
     });
 
-    let {
-      search,
-      totalAssets,
-      perPage,
-      page,
-      categories,
-      tags,
-      assets,
-      totalPages,
-      cookie,
-      totalCategories,
-      totalTags,
-      locations,
-      totalLocations,
-    } = await getPaginatedAndFilterableAssets({
-      request,
-      organizationId,
-    });
+    const searchParams = getCurrentSearchParams(request);
+    let [
+      { kits, totalKits, perPage, page, totalPages, search },
+      teamMembers,
+      totalTeamMembers,
+    ] = await Promise.all([
+      getPaginatedAndFilterableKits({
+        request,
+        organizationId,
+        extraInclude: {
+          assets: {
+            select: { id: true, availableToBook: true, status: true },
+          },
+        },
+      }),
+      db.teamMember
+        .findMany({
+          where: { deletedAt: null, organizationId },
+          include: { user: true },
+          orderBy: { userId: "asc" },
+          take: searchParams.get("getAll") === "teamMember" ? undefined : 12,
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message:
+              "Something went wrong while fetching team members. Please try again or contact support.",
+            additionalData: { userId, organizationId },
+            label: "Assets",
+          });
+        }),
+      db.teamMember.count({ where: { deletedAt: null, organizationId } }),
+    ]);
 
     if (totalPages !== 0 && page > totalPages) {
       return redirect(".");
     }
 
-    if (!assets) {
-      throw new ShelfError({
-        title: "Assets not found",
-        message:
-          "The assets you are trying to access do not exist or you do not have permission to access them.",
-        additionalData: { qrId, organizationId, userId },
-        cause: null,
-        label: "Assets",
-      });
-    }
     const modelName = {
-      singular: "asset",
-      plural: "assets",
+      singular: "kit",
+      plural: "kits",
     };
 
     return json(
@@ -130,30 +134,22 @@ export const loader = async ({
           title: "Link with existing asset",
           subHeading: "Choose an asset to link with this QR tag.",
         },
-        showModal: true,
         qrId,
-        items: assets,
-        categories,
-        tags,
-        locations,
-        totalLocations,
+        items: kits,
         search,
         page,
-        totalItems: totalAssets,
+        totalItems: totalKits,
         perPage,
         totalPages,
         modelName,
-        searchFieldLabel: "Search assets",
+        searchFieldLabel: "Search kits",
         searchFieldTooltip: {
-          title: "Search your asset database",
-          text: "Search assets based on asset name or description, category, tag, location, custodian name. Simply separate your keywords by a space: 'Laptop lenovo 2020'.",
+          title: "Search your kits database",
+          text: "Search kits based on name or description.",
         },
-        totalCategories,
-        totalTags,
-      }),
-      {
-        headers: [setCookie(await userPrefs.serialize(cookie))],
-      }
+        teamMembers,
+        totalTeamMembers,
+      })
     );
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, qrId });
@@ -179,18 +175,18 @@ export const action = async ({
       entity: PermissionEntity.qr,
       action: PermissionAction.update,
     });
-    const { assetId } = parseData(
+    const { kitId } = parseData(
       await request.formData(),
-      z.object({ assetId: z.string() })
+      z.object({ kitId: z.string() })
     );
 
-    await updateAssetQrCode({
+    await updateKitQrCode({
       newQrId: qrId,
-      assetId,
+      kitId,
       organizationId,
     });
 
-    return redirect(`/qr/${qrId}/successful-link`);
+    return redirect(`/qr/${qrId}/successful-link?type=kit`);
   } catch (cause) {
     const reason = makeShelfError(cause);
     return json(error(reason), { status: reason.status });
@@ -206,16 +202,15 @@ export const links: LinksFunction = () => [{ rel: "stylesheet", href: css }];
 export default function QrLinkExisting() {
   const { header } = useLoaderData<typeof loader>();
   const { qrId } = useParams();
-  const hasFiltersToClear = useSearchParamHasValue("category", "tag");
-  const clearFilters = useClearValueFromParams("category", "tag");
   const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
+  const isSelfService = useUserIsSelfService();
 
   /** The id of the asset the user selected to update */
-  const [selectedAssetId, setSelectedAssetId] = useState<string>("");
+  const [selectedKitId, setSelectedKitId] = useState<string>("");
 
-  function handleSelectAsset(assetId: string) {
+  function handleSelectKit(kitId: string) {
     setConfirmOpen(true);
-    setSelectedAssetId(assetId);
+    setSelectedKitId(kitId);
   }
 
   let isHydrated = useHydrated();
@@ -227,72 +222,27 @@ export default function QrLinkExisting() {
       <Header {...header} hideBreadcrumbs={true} classNames="text-left" />
 
       <Filters className="-mx-4 border-b px-4 py-3">
-        <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
-          {hasFiltersToClear ? (
-            <div className="hidden gap-6 md:flex">
-              <Button
-                as="button"
-                onClick={clearFilters}
-                variant="link"
-                className="block max-w-none font-normal  text-gray-500 hover:text-gray-600"
-                type="button"
-              >
-                Clear all filters
-              </Button>
-              <div className="text-gray-500"> | </div>
-            </div>
-          ) : null}
-
-          <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
+        <div className="flex flex-1 justify-center pt-3">
+          {!isSelfService && (
             <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">
-                  Categories{" "}
+                  Custodian{" "}
                   <ChevronRight className="hidden rotate-90 md:inline" />
                 </div>
               }
-              model={{ name: "category", queryKey: "name" }}
-              label="Filter by category"
-              initialDataKey="categories"
-              countKey="totalCategories"
+              model={{ name: "teamMember", queryKey: "name", deletedAt: null }}
+              label="Filter by custodian"
+              placeholder="Search team members"
+              countKey="totalTeamMembers"
+              initialDataKey="teamMembers"
+              transformItem={(item) => ({
+                ...item,
+                id: item.metadata?.userId ? item.metadata.userId : item.id,
+              })}
+              renderItem={(item) => resolveTeamMemberName(item)}
             />
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Tags <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "tag", queryKey: "name" }}
-              label="Filter by tags"
-              initialDataKey="tags"
-              countKey="totalTags"
-            />
-            <DynamicDropdown
-              trigger={
-                <div className="flex cursor-pointer items-center gap-2">
-                  Locations{" "}
-                  <ChevronRight className="hidden rotate-90 md:inline" />
-                </div>
-              }
-              model={{ name: "location", queryKey: "name" }}
-              label="Filter by Location"
-              initialDataKey="locations"
-              countKey="totalLocations"
-              renderItem={({ metadata }) => (
-                <div className="flex items-center gap-2">
-                  <Image
-                    imageId={metadata.imageId}
-                    alt="img"
-                    className={tw(
-                      "size-6 rounded-[2px] object-cover",
-                      metadata.description ? "rounded-b-none border-b-0" : ""
-                    )}
-                  />
-                  <div>{metadata.name}</div>
-                </div>
-              )}
-            />
-          </div>
+          )}
         </div>
       </Filters>
 
@@ -302,22 +252,22 @@ export default function QrLinkExisting() {
         <List
           ItemComponent={RowComponent}
           /** Clicking on the row will add the current asset to the atom of selected assets */
-          navigate={handleSelectAsset}
+          navigate={handleSelectKit}
           customEmptyStateContent={{
-            title: "You haven't added any assets yet.",
-            text: "What are you waiting for? Create your first asset now!",
-            newButtonRoute: "/assets/new",
-            newButtonContent: "New asset",
+            title: "You haven't added any kits yet.",
+            text: "What are you waiting for? Create your first kit now!",
+            newButtonRoute: `/kits/new?qrId=${qrId}`,
+            newButtonContent: "Create new kit and link",
           }}
-          className="border-t-0"
+          className="h-full border-t-0"
         />
       </div>
-      <ConfirmLinkingAssetModal
+      <ConfirmLinkingKitModal
         open={confirmOpen}
-        assetId={selectedAssetId}
+        kitId={selectedKitId}
         onCancel={() => {
-          // Reset the selected asset id and close the modal
-          setSelectedAssetId("");
+          // Reset the selected kit id and close the modal
+          setSelectedKitId("");
           setConfirmOpen(false);
         }}
       />
@@ -332,25 +282,25 @@ export default function QrLinkExisting() {
   );
 }
 
-const RowComponent = ({ item }: { item: Asset }) => (
+const RowComponent = ({ item }: { item: Kit }) => (
   <>
     <Td className="w-full p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:px-6">
         <div className="flex items-center gap-3">
           <div className="flex size-12 shrink-0 items-center justify-center">
-            <AssetImage
-              asset={{
-                assetId: item.id,
-                mainImage: item.mainImage,
-                mainImageExpiration: item.mainImageExpiration,
-                alt: item.title,
+            <KitImage
+              kit={{
+                kitId: item.id,
+                image: item.image,
+                imageExpiration: item.imageExpiration,
+                alt: item.name,
               }}
               className="size-full rounded-[4px] border object-cover"
             />
           </div>
           <div className="flex flex-col">
             <p className="word-break whitespace-break-spaces text-left font-medium">
-              {item.title}
+              {item.name}
             </p>
           </div>
         </div>
@@ -363,25 +313,25 @@ const RowComponent = ({ item }: { item: Asset }) => (
   </>
 );
 
-export const ConfirmLinkingAssetModal = ({
-  assetId,
+export const ConfirmLinkingKitModal = ({
+  kitId,
   open = false,
   onCancel,
 }: {
-  assetId: string;
+  kitId: string;
   open: boolean;
   /**
    * Runs when the modal is closed
    */
   onCancel: () => void;
 }) => {
-  const { items: assets } = useLoaderData<typeof loader>();
-  const asset = assets.find((a) => a.id === assetId);
+  const { items: kits } = useLoaderData<typeof loader>();
+  const kit = kits.find((a) => a.id === kitId);
   const fetcher = useFetcher<typeof action>();
   const { data, state } = fetcher;
   const disabled = isFormProcessing(state);
 
-  return asset ? (
+  return kit ? (
     <AlertDialog
       open={open}
       /**
@@ -395,15 +345,15 @@ export const ConfirmLinkingAssetModal = ({
             <LinkIcon />
           </span>
           <AlertDialogTitle className="text-left">
-            Link QR code with ‘{asset.title}’
+            Link QR code with ‘{kit.name}’
           </AlertDialogTitle>
           <AlertDialogDescription className="text-left">
             Are you sure that you want to do this? The current QR code that is
-            linked to this asset will be unlinked. You can always re-link it
-            with the old QR code.
+            linked to this kit will be unlinked. You can always re-link it with
+            the old QR code.
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
+        <AlertDialogFooter className="gap-2">
           <AlertDialogCancel asChild>
             <Button variant="secondary" disabled={disabled}>
               Cancel
@@ -411,11 +361,10 @@ export const ConfirmLinkingAssetModal = ({
           </AlertDialogCancel>
 
           <fetcher.Form method="post">
-            <input type="hidden" name="assetId" value={asset.id} />
+            <input type="hidden" name="kitId" value={kit.id} />
             <Button
-              className=" mb-3"
               type="submit"
-              data-test-id="confirmLinkAssetButton"
+              data-test-id="confirmLinkKitButton"
               width="full"
               disabled={disabled}
             >

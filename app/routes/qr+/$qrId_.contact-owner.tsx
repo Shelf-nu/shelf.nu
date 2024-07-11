@@ -44,10 +44,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
         where: {
           id: qrId,
         },
-        select: {
+        include: {
           asset: true,
-          userId: true,
-          organizationId: true,
+          kit: true,
         },
       })
       .catch((cause) => {
@@ -60,16 +59,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
         });
       });
 
-    if (!qr || !qr.asset || !qr.asset.id) {
-      throw new ShelfError({
-        cause: null,
-        message: "QR code doesn't exist.",
-        additionalData: { qrId },
-        label: "QR",
-        status: 400,
-      });
-    }
-
     /**
      * This should not happen as the user will be redirected to claim the code before they ever land on this page.
      * We still handle it just in case also to keep TS happy.
@@ -77,9 +66,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!qr.organizationId || !qr?.userId) {
       throw new ShelfError({
         cause: null,
+        title: "Unclaimed QR code",
         message:
-          "This QR doesn't belong to any user or organization so it cannot be reported as found. If this issue persists, please contact support.",
-        title: "QR is not claimed",
+          "This QR doesn't belong to any user or organization so it cannot be reported as found. If you think this is a mistake, please contact support.",
         label: "QR",
       });
     }
@@ -92,7 +81,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const report = await createReport({
       email,
       content,
-      assetId: qr.asset.id,
+      assetId: qr?.asset?.id,
+      kitId: qr?.kit?.id,
     });
 
     /**
@@ -102,7 +92,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
      */
     await sendReportEmails({
       owner,
-      asset: qr.asset,
+      qr,
       message: report.content,
       reporterEmail: report.email,
     });

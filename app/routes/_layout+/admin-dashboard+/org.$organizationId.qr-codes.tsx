@@ -4,6 +4,7 @@ import { Link, useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
+import { DateS } from "~/components/shared/date";
 import { Table, Td, Tr } from "~/components/table";
 import { db } from "~/database/db.server";
 import { generateOrphanedCodes } from "~/modules/qr/service.server";
@@ -30,6 +31,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
           qrCodes: {
             include: {
               asset: true,
+              kit: true,
             },
           },
           owner: true,
@@ -109,12 +111,44 @@ export const action = async ({
 
 export default function AdminOrgQrCodes() {
   const { organization } = useLoaderData<typeof loader>();
+  const codes = organization?.qrCodes.sort((a, b) => {
+    const aHasKitId = a.kitId !== null;
+    const bHasKitId = b.kitId !== null;
+
+    // Check if both or neither have assetId/kitId, in which case we don't change the order
+    const aHasAssetOrKit = a.assetId !== null || aHasKitId;
+    const bHasAssetOrKit = b.assetId !== null || bHasKitId;
+    if (aHasAssetOrKit && !bHasAssetOrKit) {
+      return 1; // b comes first because it has neither assetId nor kitId
+    } else if (!aHasAssetOrKit && bHasAssetOrKit) {
+      return -1; // a comes first because it has neither assetId nor kitId
+    }
+
+    // Among the rest, prioritize codes with a kitId
+
+    if (aHasKitId && !bHasKitId) {
+      return 1; // b comes first because it does not have a kitId but might have an assetId
+    } else if (!aHasKitId && bHasKitId) {
+      return -1; // a comes first because it does not have a kitId but might have an assetId
+    }
+
+    // If both have or don't have kitId, you might want to further sort them based on another criteria
+    // For simplicity, let's not change the order in this case
+    return 0;
+  });
+
+  const unlinkedCodes = codes.filter(
+    (code) => code.assetId === null && code.kitId === null
+  );
   return (
     <>
       <div className="flex justify-between">
         <div className="flex items-end gap-3">
           <h2>QR Codes</h2>
-          <span>{organization?.qrCodes.length} total codes</span>
+          <span>
+            {organization?.qrCodes.length} total codes ({unlinkedCodes.length}{" "}
+            unlinked)
+          </span>
         </div>
         <div className="flex flex-col justify-end gap-3">
           <Form method="post">
@@ -134,7 +168,7 @@ export default function AdminOrgQrCodes() {
               name="intent"
               value="createOrphans"
             >
-              Generate Orphaned QR codes
+              Generate Unlinkned QR codes
             </Button>
           </Form>
           <div className="flex justify-end gap-3">
@@ -146,7 +180,7 @@ export default function AdminOrgQrCodes() {
               className="whitespace-nowrap"
               variant="secondary"
             >
-              Print orphaned codes
+              Print unlinkned codes
             </Button>
             <Button
               to={`/api/${organization.id}/qr-codes.zip`}
@@ -154,51 +188,65 @@ export default function AdminOrgQrCodes() {
               className="whitespace-nowrap"
               variant="secondary"
             >
-              Print non-orphaned codes
+              Print linked codes
             </Button>
           </div>
         </div>
       </div>
-      <Table className="mt-5">
-        <thead className="bg-gray-100">
-          <tr className="font-semibold">
-            <th className="border-b p-4 text-left text-gray-600 md:px-6" />
-            <th className="border-b p-4 text-left text-gray-600 md:px-6">
-              QR code id
-            </th>
-            <th className="border-b p-4 text-left text-gray-600 md:px-6">
-              Asset id
-            </th>
-            <th className="border-b p-4 text-left text-gray-600 md:px-6">
-              Asset name
-            </th>
-            <th className="border-b p-4 text-left text-gray-600 md:px-6">
-              Created At
-            </th>
-          </tr>
-        </thead>
+      <div className="w-full max-w-full overflow-scroll">
+        <Table className="mt-5 max-w-full overflow-scroll">
+          <thead className="bg-gray-100">
+            <tr className="font-semibold">
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                QR code id
+              </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                Asset
+              </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                Kit
+              </th>
+              <th className="border-b p-4 text-left text-gray-600 md:px-6">
+                Created At
+              </th>
+            </tr>
+          </thead>
 
-        <tbody>
-          {organization?.qrCodes.map((qrCode) => (
-            <Tr key={qrCode.id}>
-              <Td className="w-1">
-                <input type="checkbox" name="qrId" value={qrCode.id} />
-              </Td>
-              <Td>
-                <Link
-                  to={`/qr/${qrCode.id}`}
-                  className="underline hover:text-gray-500"
-                >
-                  {qrCode.id}
-                </Link>
-              </Td>
-              <Td>{qrCode?.assetId || "Orphaned"}</Td>
-              <Td>{qrCode?.asset?.title || "Orphaned"}</Td>
-              <Td>{qrCode.createdAt}</Td>
-            </Tr>
-          ))}
-        </tbody>
-      </Table>
+          <tbody>
+            {codes.map((qrCode) => (
+              <Tr key={qrCode.id}>
+                <Td>
+                  <Link
+                    to={`/qr/${qrCode.id}`}
+                    className="underline hover:text-gray-500"
+                  >
+                    {qrCode.id}
+                  </Link>
+                </Td>
+                <Td className="whitespace-normal">
+                  {!qrCode?.assetId
+                    ? "N/A"
+                    : `${qrCode?.asset?.title} (${qrCode?.asset?.id})`}
+                </Td>
+                <Td className="whitespace-normal">
+                  {!qrCode?.kitId
+                    ? "N/A"
+                    : `${qrCode?.kit?.name} (${qrCode?.kit?.id})`}
+                </Td>
+                <Td>
+                  <DateS
+                    date={qrCode.createdAt}
+                    options={{
+                      timeStyle: "short",
+                      dateStyle: "short",
+                    }}
+                  />
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </Table>
+      </div>
     </>
   );
 }

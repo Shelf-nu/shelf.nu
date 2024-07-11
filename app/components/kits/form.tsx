@@ -24,6 +24,7 @@ export const NewKitFormSchema = z.object({
     .string()
     .optional()
     .transform((value) => value?.trim()),
+  qrId: z.string().optional(),
 });
 
 type KitFormProps = {
@@ -31,6 +32,7 @@ type KitFormProps = {
   name?: Kit["name"];
   description?: Kit["description"];
   saveButtonLabel?: string;
+  qrId?: string | null;
 };
 
 export default function KitsForm({
@@ -38,6 +40,7 @@ export default function KitsForm({
   name,
   description,
   saveButtonLabel = "Add",
+  qrId,
 }: KitFormProps) {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -68,6 +71,9 @@ export default function KitsForm({
             {saveButtonLabel}
           </Button>
         </AbsolutePositionedHeaderActions>
+        {qrId ? (
+          <input type="hidden" name={zo.fields.qrId()} value={qrId} />
+        ) : null}
 
         <FormRow rowLabel="Name" className="border-b-0 pb-[10px]" required>
           <Input
