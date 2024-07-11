@@ -6,7 +6,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { mapAuthSession } from "./mappers.server";
 
@@ -184,7 +184,7 @@ export async function sendOTP(email: string) {
     throw new ShelfError({
       cause,
       message:
-        cause instanceof AuthError && cause?.code === "otp_disabled"
+        cause instanceof AuthError || isLikeShelfError(cause)
           ? cause.message
           : "Something went wrong while sending the OTP. Please try again later or contact support.",
       additionalData: { email },
