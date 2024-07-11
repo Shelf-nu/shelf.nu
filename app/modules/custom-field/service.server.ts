@@ -250,6 +250,7 @@ export async function createCustomFieldsIfNotExists({
     const optionMap: Record<string, string[]> = {};
     //{CF header: definition to create}
     const fieldToDefDraftMap: Record<string, CustomFieldDraftPayload> = {};
+
     for (let item of data) {
       for (let k of Object.keys(item)) {
         if (k.startsWith("cf:")) {
@@ -257,7 +258,8 @@ export async function createCustomFieldsIfNotExists({
           if (!fieldToDefDraftMap[k]) {
             fieldToDefDraftMap[k] = { ...def, userId, organizationId };
           }
-          if (def.type === "OPTION") {
+          /** Only add the options if they have a value */
+          if (def.type === "OPTION" && item[k] !== "") {
             optionMap[k] = (optionMap[k] || []).concat([item[k]]);
           }
         }
