@@ -181,6 +181,8 @@ export async function sendOTP(email: string) {
       throw error;
     }
   } catch (cause) {
+    const isRateLimitError =
+      cause instanceof AuthError && cause.code === "over_email_send_rate_limit";
     throw new ShelfError({
       cause,
       message:
@@ -189,6 +191,7 @@ export async function sendOTP(email: string) {
           : "Something went wrong while sending the OTP. Please try again later or contact support.",
       additionalData: { email },
       label,
+      shouldBeCaptured: !isRateLimitError,
     });
   }
 }
