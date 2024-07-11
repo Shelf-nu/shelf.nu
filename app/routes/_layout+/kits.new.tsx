@@ -1,5 +1,6 @@
 import { json, redirect } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { useSearchParams } from "@remix-run/react";
 
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
@@ -104,11 +105,12 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
 export default function CreateNewKit() {
   const title = useAtomValue(dynamicTitleAtom);
-
+  const [searchParams] = useSearchParams();
+  const qrId = searchParams.get("qrId");
   return (
     <>
       <Header title={title ?? "Untitled kit"} />
-      <KitsForm />
+      <KitsForm qrId={qrId} />
     </>
   );
 }

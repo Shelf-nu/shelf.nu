@@ -16,8 +16,11 @@ type SlotKeys = "after-select";
 
 export const OrganizationSelect = ({
   slots,
+  className,
 }: {
   slots?: Record<SlotKeys, ReactNode>;
+  /** Class applied inside the SelectContent */
+  className?: string;
 }) => {
   const { organizations, currentOrganizationId } =
     useLoaderData<typeof loader>();
@@ -27,7 +30,7 @@ export const OrganizationSelect = ({
         <SelectValue />
       </SelectTrigger>
       <SelectContent position="popper" className="w-full" align="start">
-        <div className=" max-h-[320px] w-[253px] overflow-auto">
+        <div className={tw("max-h-[320px] w-[253px] overflow-auto", className)}>
           {organizations.map((org) => (
             <SelectItem
               value={org.id}

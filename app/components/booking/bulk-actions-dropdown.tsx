@@ -1,10 +1,9 @@
 import { BookingStatus } from "@prisma/client";
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
-import { type loader } from "~/routes/_layout+/bookings";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
@@ -42,12 +41,7 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
-  const { items } = useLoaderData<typeof loader>();
-
-  const selectedBookingsIds = useAtomValue(selectedBulkItemsAtom);
-  const selectedBookings = items.filter((booking) =>
-    selectedBookingsIds.includes(booking.id)
-  );
+  const selectedBookings = useAtomValue(selectedBulkItemsAtom);
 
   const someBookingInDraft = selectedBookings.some(
     (booking) => booking.status === "DRAFT"
@@ -71,7 +65,7 @@ function ConditionalDropdown() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const disabled = selectedBookingsIds.length === 0;
+  const disabled = selectedBookings.length === 0;
 
   const archiveDisabled = !allBookingAreCompleted || isSelfService;
 

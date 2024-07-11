@@ -3,10 +3,16 @@ import type {
   Kit,
   Organization,
   Prisma,
+  Qr,
   TeamMember,
   User,
 } from "@prisma/client";
-import { AssetStatus, BookingStatus, KitStatus } from "@prisma/client";
+import {
+  AssetStatus,
+  BookingStatus,
+  ErrorCorrection,
+  KitStatus,
+} from "@prisma/client";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
@@ -30,6 +36,7 @@ import { getKitsWhereInput } from "./utils.server";
 // eslint-disable-next-line import/no-cycle
 import { createNote } from "../asset/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import { getQr } from "../qr/service.server";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -39,15 +46,60 @@ export async function createKit({
   description,
   createdById,
   organizationId,
-}: Pick<Kit, "name" | "description" | "createdById" | "organizationId">) {
+  qrId,
+}: Pick<Kit, "name" | "description" | "createdById" | "organizationId"> & {
+  qrId?: Qr["id"];
+}) {
   try {
-    return await db.kit.create({
-      data: {
-        name,
-        description,
-        createdBy: { connect: { id: createdById } },
-        organization: { connect: { id: organizationId } },
+    /** User connection data */
+    const user = {
+      connect: {
+        id: createdById,
       },
+    };
+
+    const organization = {
+      connect: {
+        id: organizationId as string,
+      },
+    };
+
+    /**
+     * If a qr code is passed, link to that QR
+     * Otherwise, create a new one
+     * Here we also need to double check:
+     * 1. If the qr code exists
+     * 2. If the qr code belongs to the current organization
+     * 3. If the qr code is not linked to an asset
+     */
+    const qr = qrId ? await getQr(qrId) : null;
+    const qrCodes =
+      qr &&
+      qr.organizationId === organizationId &&
+      qr.assetId === null &&
+      qr.kitId === null
+        ? { connect: { id: qrId } }
+        : {
+            create: [
+              {
+                version: 0,
+                errorCorrection: ErrorCorrection["L"],
+                user,
+                organization,
+              },
+            ],
+          };
+
+    const data = {
+      name,
+      description,
+      createdBy: user,
+      organization,
+      qrCodes,
+    };
+
+    return await db.kit.create({
+      data,
     });
   } catch (cause) {
     throw maybeUniqueConstraintViolation(cause, "Kit", {
@@ -472,6 +524,7 @@ export async function releaseCustody({
     const kit = await db.kit.findUniqueOrThrow({
       where: { id: kitId },
       select: {
+        id: true,
         name: true,
         assets: true,
         createdBy: { select: { firstName: true, lastName: true } },
@@ -500,7 +553,9 @@ export async function releaseCustody({
         createNote({
           content: `**${kit.createdBy.firstName?.trim()} ${kit.createdBy.lastName?.trim()}** has released **${kit
             .custody?.custodian
-            .name}'s** custody over **${asset.title.trim()}**`,
+            .name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${
+            kit.name
+          }](/kits/${kit.id})**`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
@@ -750,7 +805,14 @@ export async function bulkAssignKitCustody({
           id: true,
           name: true,
           status: true,
-          assets: { select: { id: true, title: true, status: true } },
+          assets: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              kit: { select: { id: true, name: true } }, // we need this so that we can create notes
+            },
+          },
         },
       }),
       getUserByID(userId),
@@ -820,7 +882,8 @@ export async function bulkAssignKitCustody({
       /** Creating notes for all the assets of the kit */
       await tx.note.createMany({
         data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}**`,
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${asset
+            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
@@ -881,6 +944,7 @@ export async function bulkReleaseKitCustody({
               status: true,
               title: true,
               custody: { select: { id: true } },
+              kit: { select: { id: true, name: true } }, // we need this so that we can create notes
             },
           },
         },
@@ -944,7 +1008,8 @@ export async function bulkReleaseKitCustody({
       /** Creating notes for all the assets */
       await tx.note.createMany({
         data: allAssetsOfAllKits.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${custodian?.name}'s** custody over **${asset.title.trim()}**`,
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has released **${custodian?.name}'s** custody over **${asset.title.trim()}** via Kit assignment **[${asset
+            ?.kit?.name}](/kits/${asset?.kit?.id})**`,
           type: "UPDATE",
           userId,
           assetId: asset.id,
@@ -1029,6 +1094,64 @@ export async function createKitsIfNotExists({
       label,
       /** No need to capture those. They are mostly related to malformed CSV data */
       shouldBeCaptured: false,
+    });
+  }
+}
+
+export async function updateKitQrCode({
+  kitId,
+  newQrId,
+  organizationId,
+}: {
+  organizationId: string;
+  kitId: string;
+  newQrId: string;
+}) {
+  // Disconnect all existing QR codes
+  try {
+    // Disconnect all existing QR codes
+    await db.kit
+      .update({
+        where: { id: kitId },
+        data: {
+          qrCodes: {
+            set: [],
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Couldn't disconnect existing codes",
+          label,
+          additionalData: { kitId, organizationId, newQrId },
+        });
+      });
+
+    // Connect the new QR code
+    return await db.kit
+      .update({
+        where: { id: kitId },
+        data: {
+          qrCodes: {
+            connect: { id: newQrId },
+          },
+        },
+      })
+      .catch((cause) => {
+        throw new ShelfError({
+          cause,
+          message: "Couldn't connect the new QR code",
+          label,
+          additionalData: { kitId, organizationId, newQrId },
+        });
+      });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while updating asset QR code",
+      label,
+      additionalData: { kitId, organizationId, newQrId },
     });
   }
 }

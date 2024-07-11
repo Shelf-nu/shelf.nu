@@ -6,9 +6,10 @@ import { Button } from "~/components/shared/button";
 import { slugify } from "~/utils/slugify";
 type SizeKeys = "cable" | "small" | "medium" | "large";
 
-interface AssetType {
-  asset: {
-    title: string;
+interface ObjectType {
+  item: {
+    name: string;
+    type: "asset" | "kit";
   };
   qrObj?: {
     qr?: {
@@ -19,20 +20,16 @@ interface AssetType {
   };
 }
 
-const AssetQR = ({ qrObj, asset }: AssetType) => {
+export const QrPreview = ({ qrObj, item }: ObjectType) => {
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadQrBtnRef = useRef<HTMLAnchorElement>(null);
 
   const fileName = useMemo(
     () =>
-      `${slugify(asset?.title || "asset")}-${qrObj?.qr
+      `${slugify(item.name || item.type)}-${qrObj?.qr
         ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`,
-    [asset, qrObj?.qr?.id, qrObj?.qr?.size]
+    [item, qrObj?.qr?.id, qrObj?.qr?.size]
   );
-
-  // const handleSizeChange = () => {
-  //   submit(formRef.current);
-  // };
 
   function downloadQr(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
     const captureDiv = captureDivRef.current;
@@ -72,49 +69,15 @@ const AssetQR = ({ qrObj, asset }: AssetType) => {
   return (
     <div className="">
       <div className="mb-4 flex w-auto justify-center rounded border border-solid bg-white p-6">
-        <QrLabel ref={captureDivRef} data={qrObj} title={asset.title} />
+        <QrLabel ref={captureDivRef} data={qrObj} title={item.name} />
       </div>
-      <ul className="description-list">
-        {/* <li className="mb-4 flex justify-between text-gray-600">
-            <label
-              htmlFor="size"
-              className="key max-w-[120px] break-words font-medium"
-            >
-              Size
-            </label>
-            <span className="value max-w-[190px] break-words font-semibold">
-              <Form method="get" ref={formRef}>
-                <select
-                  name="size"
-                  value={data.qr.size}
-                  onChange={handleSizeChange}
-                  className=" border-none py-0 pr-6"
-                  style={{ backgroundPosition: "right center" }}
-                >
-                  {Object.keys(data.sizes).map((size) => (
-                    <option key={size} value={size}>
-                      {size}
-                    </option>
-                  ))}
-                </select>
-              </Form>
-            </span>
-          </li> */}
-        {/* <li className="mb-4 flex justify-between text-gray-600">
-            <span className="key max-w-[120px] break-words font-medium">
-              File
-            </span>
-            <span className="value max-w-[190px] break-words font-semibold">
-              PNG
-            </span>
-          </li> */}
-      </ul>
+
       {/* using this button to convert html to png and download image using the a tag below */}
       <div className="flex items-center gap-3">
         <Button
           icon="download"
           onClick={downloadQr}
-          download={`${slugify(asset.title)}-${qrObj?.qr
+          download={`${slugify(item.name)}-${qrObj?.qr
             ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
           ref={downloadQrBtnRef}
           variant="secondary"
@@ -176,4 +139,3 @@ const QrLabel = React.forwardRef<HTMLDivElement, QrLabelProps>(
     );
   }
 );
-export default AssetQR;

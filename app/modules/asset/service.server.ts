@@ -698,11 +698,14 @@ export async function createAsset({
      * Here we also need to double check:
      * 1. If the qr code exists
      * 2. If the qr code belongs to the current organization
-     * 3. If the qr code is not linked to an asset
+     * 3. If the qr code is not linked to an asset or a kit
      */
     const qr = qrId ? await getQr(qrId) : null;
     const qrCodes =
-      qr && qr.organizationId === organizationId && qr.assetId === null
+      qr &&
+      qr.organizationId === organizationId &&
+      qr.assetId === null &&
+      qr.kitId === null
         ? { connect: { id: qrId } }
         : {
             create: [

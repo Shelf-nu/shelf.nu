@@ -207,7 +207,10 @@ model Qr {
   asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
   assetId String?
 
-  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: SetNull)
+  kitId String?
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   userId String?
 
   organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
@@ -250,8 +253,11 @@ model ReportFound {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  assetId String
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String?
+
+  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kitId String?
 }
 
 enum ErrorCorrection {
@@ -663,6 +669,8 @@ model Kit {
 
   assets  Asset[]
   custody KitCustody?
+  qrCodes Qr[]
+  reports ReportFound[]
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String
