@@ -125,6 +125,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const payload = parseData(formData, OnboardingFormSchema);
 
+    console.log("userSignedUpWithPassword", userSignedUpWithPassword);
+    console.log("payload", payload);
+
     /** Update the user */
     const user = await updateUser({
       ...payload,
@@ -132,21 +135,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
       onboarded: true,
     });
 
-    /** We create the stripe customer when the user gets onboarded.
-     * This is to make sure that we have a stripe customer for the user.
-     * We have to do it at this point, as its the first time we have the user's first and last name
+    /**
+     * When setting password as part of onboarding, the session gets destroyed as part of the normal password reset flow.
+     * In this case, we need to create a new session for the user.
      */
-
-    if (user) {
+    if (user && userSignedUpWithPassword) {
       //making sure new session is created.
       const authSession = await signInWithEmail(
         user.email,
-        payload?.password || ""
+        payload.password as string
       );
       if (authSession) {
         context.setSession(authSession);
       }
     }
+
+    /** We create the stripe customer when the user gets onboarded.
+     * This is to make sure that we have a stripe customer for the user.
+     * We have to do it at this point, as its the first time we have the user's first and last name
+     */
     if (!user.customerId) {
       await createStripeCustomer({
         email: user.email,
