@@ -17,7 +17,6 @@ import { supabaseClient } from "~/integrations/supabase/client";
 
 import {
   refreshAccessToken,
-  signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
