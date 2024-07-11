@@ -18,7 +18,10 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { onboardingEmailText } from "~/emails/onboarding-email";
-import { getAuthUserById } from "~/modules/auth/service.server";
+import {
+  getAuthUserById,
+  signInWithEmail,
+} from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -122,12 +125,30 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const payload = parseData(formData, OnboardingFormSchema);
 
+    console.log("userSignedUpWithPassword", userSignedUpWithPassword);
+    console.log("payload", payload);
+
     /** Update the user */
     const user = await updateUser({
       ...payload,
       id: userId,
       onboarded: true,
     });
+
+    /**
+     * When setting password as part of onboarding, the session gets destroyed as part of the normal password reset flow.
+     * In this case, we need to create a new session for the user.
+     */
+    if (user && userSignedUpWithPassword) {
+      //making sure new session is created.
+      const authSession = await signInWithEmail(
+        user.email,
+        payload.password as string
+      );
+      if (authSession) {
+        context.setSession(authSession);
+      }
+    }
 
     /** We create the stripe customer when the user gets onboarded.
      * This is to make sure that we have a stripe customer for the user.
