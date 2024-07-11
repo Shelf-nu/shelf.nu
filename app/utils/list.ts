@@ -3,6 +3,7 @@ import type {
   SortingDirection,
   SortingOptions,
 } from "~/components/list/filters/sort-by";
+import type { ListItemData } from "~/components/list/list-item";
 
 export const getParamsValues = (searchParams: URLSearchParams) => ({
   page: Number(searchParams.get("page") || "1"),
@@ -38,3 +39,7 @@ export const getParamsValues = (searchParams: URLSearchParams) => ({
 });
 
 export const ALL_SELECTED_KEY = "all-selected";
+
+export function isSelectingAllItems(selectedItems: ListItemData[]) {
+  return !!selectedItems.find((item) => item.id === ALL_SELECTED_KEY);
+}

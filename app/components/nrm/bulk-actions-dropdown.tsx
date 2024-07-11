@@ -1,8 +1,6 @@
-import { useLoaderData } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { type loader } from "~/routes/_layout+/settings.team.nrm";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkDeleteDialog from "./bulk-delete-dialog";
@@ -37,12 +35,9 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
-  const { items } = useLoaderData<typeof loader>();
+  const selectedNRMs = useAtomValue(selectedBulkItemsAtom);
 
-  const selectedNRMIds = useAtomValue(selectedBulkItemsAtom);
-  const selectedNRMs = items.filter((item) => selectedNRMIds.includes(item.id));
-
-  const actionsButtonDisabled = selectedNRMIds.length === 0;
+  const actionsButtonDisabled = selectedNRMs.length === 0;
 
   const someNRMHasCustody = selectedNRMs.some(
     (nrm) => nrm._count.custodies > 0
