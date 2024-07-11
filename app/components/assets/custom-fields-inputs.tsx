@@ -139,17 +139,21 @@ export default function AssetCustomFields({
               style={{ width: optionTriggerRef.current?.clientWidth }}
             >
               <div className="max-h-[320px] w-full overflow-auto">
-                {field.options.map((value, index) => (
-                  <SelectItem
-                    value={value}
-                    key={value + index}
-                    className="w-full px-6 py-4"
-                  >
-                    <span className="mr-4 text-[14px] text-gray-700">
-                      {value.toLowerCase()}
-                    </span>
-                  </SelectItem>
-                ))}
+                {field.options.map(
+                  (value, index) =>
+                    value &&
+                    value !== "" && (
+                      <SelectItem
+                        value={value}
+                        key={value + index}
+                        className="w-full px-6 py-4"
+                      >
+                        <span className="mr-4 text-[14px] text-gray-700">
+                          {value.toLowerCase()}
+                        </span>
+                      </SelectItem>
+                    )
+                )}
               </div>
             </SelectContent>
           </Select>
