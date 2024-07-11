@@ -278,6 +278,7 @@ export async function updateInviteStatus({
         roles: invite.roles,
         password,
         firstName: invite.inviteeTeamMember.name,
+        createdWithInvite: true,
       });
 
       Object.assign(data, {
