@@ -125,9 +125,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const payload = parseData(formData, OnboardingFormSchema);
 
-    console.log("userSignedUpWithPassword", userSignedUpWithPassword);
-    console.log("payload", payload);
-
     /** Update the user */
     const user = await updateUser({
       ...payload,
