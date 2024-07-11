@@ -1,6 +1,7 @@
 import { atom } from "jotai";
+import type { ListItemData } from "~/components/list/list-item";
 
-export const selectedBulkItemsAtom = atom<string[]>([]);
+export const selectedBulkItemsAtom = atom<ListItemData[]>([]);
 
 /** Reset the atom when it mounts */
 selectedBulkItemsAtom.onMount = (setAtom) => {
@@ -15,7 +16,7 @@ export const selectedBulkItemsCountAtom = atom(
 /**
  * Set an item in selectedBulkItems
  */
-export const setSelectedBulkItemAtom = atom<null, string[], unknown>(
+export const setSelectedBulkItemAtom = atom<null, ListItemData[], unknown>(
   null, // it's a convention to pass `null` for the first argument
   (_, set, update) => {
     set(selectedBulkItemsAtom, (prev) => {
@@ -31,7 +32,7 @@ export const setSelectedBulkItemAtom = atom<null, string[], unknown>(
 /**
  * Set multiple items at once in selectedBulkItems
  */
-export const setSelectedBulkItemsAtom = atom<null, string[][], void>(
+export const setSelectedBulkItemsAtom = atom<null, ListItemData[][], void>(
   null,
   (_, set, update) => {
     set(selectedBulkItemsAtom, update);

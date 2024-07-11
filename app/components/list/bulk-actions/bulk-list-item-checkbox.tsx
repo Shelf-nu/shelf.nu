@@ -15,7 +15,7 @@ export default function BulkListItemCheckbox({
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const setSelectedBulkItem = useSetAtom(setSelectedBulkItemAtom);
 
-  const checked = selectedBulkItems.includes(item.id);
+  const checked = !!selectedBulkItems.find((i) => i.id === item.id);
 
   function handleBulkItemSelection(
     e: React.MouseEvent<HTMLTableCellElement, MouseEvent>
@@ -23,7 +23,7 @@ export default function BulkListItemCheckbox({
     e.preventDefault();
     e.stopPropagation();
 
-    setSelectedBulkItem(item.id);
+    setSelectedBulkItem(item);
   }
 
   return (
