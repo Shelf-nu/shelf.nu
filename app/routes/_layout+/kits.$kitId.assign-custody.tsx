@@ -196,7 +196,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        */
       db.note.createMany({
         data: kit.assets.map((asset) => ({
-          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit Assignment **[${
+          content: `**${user.firstName?.trim()} ${user.lastName?.trim()}** has given **${custodianName.trim()}** custody over **${asset.title.trim()}** via Kit assignment **[${
             kit.name
           }](/kits/${kit.id})**`,
           type: "UPDATE",
