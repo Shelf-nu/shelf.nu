@@ -30,16 +30,17 @@ model Image {
 }
 
 model User {
-  id             String  @id @default(cuid())
-  email          String  @unique
-  username       String  @unique @default(cuid())
-  firstName      String?
-  lastName       String?
-  profilePicture String?
-  usedFreeTrial  Boolean @default(false)
-  onboarded      Boolean @default(false)
-  customerId     String? @unique // Stripe customer id
-  sso            Boolean @default(false)
+  id                String  @id @default(cuid())
+  email             String  @unique
+  username          String  @unique @default(cuid())
+  firstName         String?
+  lastName          String?
+  profilePicture    String?
+  usedFreeTrial     Boolean @default(false)
+  onboarded         Boolean @default(false)
+  customerId        String? @unique // Stripe customer id
+  sso               Boolean @default(false)
+  createdWithInvite Boolean @default(false) // Set to true if the user was created by being invited to a workspace
 
   // Datetime
   createdAt DateTime @default(now())
