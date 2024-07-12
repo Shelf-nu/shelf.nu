@@ -13,6 +13,7 @@ import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import FormRow from "~/components/forms/form-row";
 import Input from "~/components/forms/input";
+import { Switch } from "~/components/forms/switch";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Spinner } from "~/components/shared/spinner";
@@ -160,10 +161,14 @@ export const action = async ({
         break;
       }
       case "updateCustomTierDetails": {
-        const { maxOrganizations } = parseData(
+        const { maxOrganizations, isEnterprise } = parseData(
           await request.formData(),
           z.object({
             maxOrganizations: z.string().transform((val) => +val),
+            isEnterprise: z
+              .string()
+              .optional()
+              .transform((val) => (val === "on" ? true : false)),
           })
         );
 
@@ -172,9 +177,11 @@ export const action = async ({
           create: {
             userId: shelfUserId,
             maxOrganizations,
+            isEnterprise,
           },
           update: {
             maxOrganizations,
+            isEnterprise,
           },
         });
 
@@ -292,6 +299,7 @@ function TierUpdateForm({ tierId }: { tierId: TierId }) {
       className="inline-flex items-center gap-2"
     >
       <input type="hidden" name="intent" value="updateTier" />
+
       <select
         style={{ all: "revert" }}
         disabled={disabled}
@@ -312,7 +320,7 @@ function TierUpdateForm({ tierId }: { tierId: TierId }) {
 function CustomTierDetailsForm({
   customTierLimit,
 }: {
-  customTierLimit: Pick<CustomTierLimit, "maxOrganizations">;
+  customTierLimit: Pick<CustomTierLimit, "maxOrganizations" | "isEnterprise">;
 }) {
   return (
     <div>
@@ -324,6 +332,18 @@ function CustomTierDetailsForm({
         <b>canExportAssets</b>, <b>maxCustomFields</b>
       </p>
       <Form method="post">
+        <FormRow
+          rowLabel="Is Enterprise?"
+          className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
+        >
+          <div className="flex items-center gap-3">
+            <Switch
+              name={"isEnterprise"}
+              defaultChecked={customTierLimit.isEnterprise}
+            />
+          </div>
+        </FormRow>
+
         <FormRow
           rowLabel={"Max workspaces (organizations)"}
           className="block border-b-0 pb-0 [&>div]:lg:basis-auto"

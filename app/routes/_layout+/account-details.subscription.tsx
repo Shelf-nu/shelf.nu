@@ -1,3 +1,4 @@
+import type { CustomTierLimit } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -196,6 +197,8 @@ export default function UserPage() {
     subscription?.items?.data[0]?.price?.metadata.legacy === "true";
 
   const isCustomTier = tier === "custom" && !!tierLimit;
+  const isEnterprise =
+    isCustomTier && (tierLimit as unknown as CustomTierLimit)?.isEnterprise;
 
   if (isCustomTier) {
     return (
@@ -205,10 +208,19 @@ export default function UserPage() {
         </div>
         <p className="text-[14px] font-medium text-gray-700">
           You’re currently using the{" "}
-          <span className="font-semibold">ENTERPRISE</span> version of Shelf.
+          {isEnterprise ? (
+            <>
+              <span className="font-semibold">ENTERPRISE</span> version
+            </>
+          ) : (
+            <>
+              <span className="font-semibold">CUSTOM</span> plan
+            </>
+          )}{" "}
+          of Shelf.
           <br />
-          That means you have a custom plan. To get more information about your
-          plan, please{" "}
+          {isEnterprise && <>That means you have a custom plan. </>}
+          To get more information about your plan, please{" "}
           <CrispButton variant="link" className="inline w-auto">
             contact support
           </CrispButton>
