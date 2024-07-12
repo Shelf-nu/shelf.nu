@@ -490,6 +490,7 @@ model CustomTierLimit {
   canImportNRM     Boolean  @default(true)
   maxCustomFields  Int      @default(1000)
   maxOrganizations Int      @default(1)
+  isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
