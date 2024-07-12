@@ -125,9 +125,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const payload = parseData(formData, OnboardingFormSchema);
 
-    console.log("userSignedUpWithPassword", userSignedUpWithPassword);
-    console.log("payload", payload);
-
     /** Update the user */
     const user = await updateUser({
       ...payload,
@@ -172,10 +169,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
+    /** If organizationId is passed, that means the user comes from an invite */
     const { organizationId } = parseData(
       formData,
       z.object({ organizationId: z.string().optional() })
     );
+
+    const createdWithInvite = !!organizationId || user.createdWithInvite;
 
     const headers = [];
 
@@ -185,7 +185,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       );
     }
 
-    return redirect(organizationId ? `/assets` : `/welcome`, {
+    return redirect(createdWithInvite ? `/assets` : `/welcome`, {
       headers,
     });
   } catch (cause) {
