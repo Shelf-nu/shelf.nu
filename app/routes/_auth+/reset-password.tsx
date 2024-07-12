@@ -77,7 +77,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           authSession.accessToken
         );
         context.destroySession();
-        return redirect("/login?password_rest=true");
+        return redirect("/login?password_reset=true");
       }
     }
 
