@@ -61,6 +61,13 @@ export function BookingAssetsColumn() {
     [items]
   );
 
+  const canManageAssets =
+    !!booking.from &&
+    !!booking.to &&
+    !isCompleted &&
+    !isArchived &&
+    !canManageAssetsAsSelfService;
+
   return (
     <div className="flex-1">
       <div className=" w-full">
@@ -74,18 +81,17 @@ export function BookingAssetsColumn() {
               <div>{totalItems} items</div>
             </div>
             <div className="flex items-center gap-3">
-              <Button icon="scan" to="scan-assets" variant="outline">
+              <Button
+                icon="scan"
+                to="scan-assets"
+                variant="outline"
+                disabled={!canManageAssets}
+              >
                 Scan
               </Button>
 
               <ControlledActionButton
-                canUseFeature={
-                  !!booking.from &&
-                  !!booking.to &&
-                  !isCompleted &&
-                  !isArchived &&
-                  !canManageAssetsAsSelfService
-                }
+                canUseFeature={canManageAssets}
                 buttonContent={{
                   title: "Manage assets",
                   message: isCompleted
