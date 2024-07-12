@@ -80,7 +80,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isSelfService,
         selfServiceUser,
         teamMembers,
-        assetIds
+        assetIds,
       }),
       {
         headers: [
@@ -159,10 +159,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const url = new URL(request.url);
     const assetIds = url.searchParams.get("assetIds");
-    if(assetIds){
+    if (assetIds) {
       return redirect(`/bookings/${booking.id}`);
-    }
-    else{
+    } else {
       const manageAssetsUrl = `/bookings/${
         booking.id
       }/add-assets?${new URLSearchParams({
@@ -172,7 +171,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         hideUnavailable: "true",
         unhideAssetsBookigIds: booking.id,
       })}`;
-  
+
       return redirect(manageAssetsUrl);
     }
   } catch (cause) {
@@ -187,7 +186,8 @@ export const handle = {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
-  const { isSelfService, selfServiceUser, assetIds } = useLoaderData<typeof loader>();
+  const { isSelfService, selfServiceUser, assetIds } =
+    useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
 
   return (

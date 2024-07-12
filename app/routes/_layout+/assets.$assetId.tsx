@@ -213,11 +213,11 @@ export default function AssetDetailsPage() {
         {!isSelfService ? <ActionsDropdown /> : null}
         {/* {!isSelfService ? <div className="border border-primary-700 py-2 px-4 cursor-pointer font-semibold text-md text-white bg-primary-700 rounded-[4px]">Book</div> : null} */}
         <Button
-            to={`/bookings/new?assetIds=${asset.id}`}
-            role="link"
-            aria-label={`new booking`}
-            data-test-id="createNewBooking"
-            prefetch="none"
+          to={`/bookings/new?assetIds=${asset.id}`}
+          role="link"
+          aria-label={`new booking`}
+          data-test-id="createNewBooking"
+          prefetch="none"
         >
           Book
         </Button>
