@@ -210,9 +210,7 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        {!isSelfService ? <ActionsDropdown /> : null}
-        {/* {!isSelfService ? <div className="border border-primary-700 py-2 px-4 cursor-pointer font-semibold text-md text-white bg-primary-700 rounded-[4px]">Book</div> : null} */}
-        <Button
+        {!isSelfService ? <><ActionsDropdown /><Button
           to={`/bookings/new?assetIds=${asset.id}`}
           role="link"
           aria-label={`new booking`}
@@ -220,7 +218,8 @@ export default function AssetDetailsPage() {
           prefetch="none"
         >
           Book
-        </Button>
+        </Button></> : null}
+        
       </Header>
       <HorizontalTabs items={items} />
       <div>
