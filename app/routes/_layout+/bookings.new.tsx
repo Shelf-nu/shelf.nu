@@ -32,6 +32,8 @@ import { requirePermission } from "~/utils/roles.server";
  * This way all actions are available and its way easier to manage so in a way this works kind of like a resource route.
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
+  const url = new URL(request.url);
+  const assetIds = url.searchParams.get("assetIds");
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -78,6 +80,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isSelfService,
         selfServiceUser,
         teamMembers,
+        assetIds
       }),
       {
         headers: [
@@ -154,17 +157,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    const manageAssetsUrl = `/bookings/${
-      booking.id
-    }/add-assets?${new URLSearchParams({
-      // We force the as Date because we know that the booking.from and booking.to are set and exist at this point.
-      bookingFrom: (booking.from as Date).toISOString(),
-      bookingTo: (booking.to as Date).toISOString(),
-      hideUnavailable: "true",
-      unhideAssetsBookigIds: booking.id,
-    })}`;
-
-    return redirect(manageAssetsUrl);
+    const url = new URL(request.url);
+    const assetIds = url.searchParams.get("assetIds");
+    if(assetIds){
+      return redirect(`/bookings/${booking.id}`);
+    }
+    else{
+      const manageAssetsUrl = `/bookings/${
+        booking.id
+      }/add-assets?${new URLSearchParams({
+        // We force the as Date because we know that the booking.from and booking.to are set and exist at this point.
+        bookingFrom: (booking.from as Date).toISOString(),
+        bookingTo: (booking.to as Date).toISOString(),
+        hideUnavailable: "true",
+        unhideAssetsBookigIds: booking.id,
+      })}`;
+  
+      return redirect(manageAssetsUrl);
+    }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
@@ -177,7 +187,7 @@ export const handle = {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
-  const { isSelfService, selfServiceUser } = useLoaderData<typeof loader>();
+  const { isSelfService, selfServiceUser, assetIds } = useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
 
   return (
@@ -194,6 +204,7 @@ export default function NewBooking() {
         <BookingForm
           startDate={startDate}
           endDate={endDate}
+          assetIds={assetIds}
           custodianUserId={
             isSelfService
               ? JSON.stringify({

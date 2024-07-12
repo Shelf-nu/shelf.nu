@@ -110,6 +110,7 @@ type BookingFormData = {
   custodianUserId?: string; // This is a stringified value for custodianUser
   bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
   bookingFlags?: BookingFlags;
+  assetIds?:string | null;
 };
 
 export function BookingForm({
@@ -120,6 +121,7 @@ export function BookingForm({
   custodianUserId,
   bookingStatus,
   bookingFlags,
+  assetIds
 }: BookingFormData) {
   const navigation = useNavigation();
 
@@ -377,7 +379,7 @@ export function BookingForm({
         </div>
         {isNewBooking ? (
           <div className="text-right">
-            <Button type="submit">Check Asset Availability</Button>
+            <Button type="submit">{assetIds ? "Create Booking" : "Check Asset Availability" }</Button>
           </div>
         ) : null}
       </Form>
