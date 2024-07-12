@@ -203,6 +203,7 @@ const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
           <tr>
             <th style={styles.tableHeader}></th>
             <th style={{ ...styles.tableHeader, width: "30%" }}>Name</th>
+            <th style={styles.tableHeader}>Kit</th>
             <th style={styles.tableHeader}>Category</th>
             <th style={styles.tableHeader}>Location</th>
             <th style={styles.tableHeader}>Code</th>
@@ -230,9 +231,10 @@ const BookingPDFPreview = ({ pdfMeta }: { pdfMeta: PdfDbResult }) => {
                   />
                 </div>
               </td>
-              <td style={styles.tableCell}>{asset?.title}</td>
-              <td style={styles.tableCell}>{asset?.category?.name}</td>
-              <td style={styles.tableCell}>{asset?.location?.name}</td>
+              <td style={styles.tableCell}>{asset?.title || ""}</td>
+              <td style={styles.tableCell}>{asset?.kit?.name || ""}</td>
+              <td style={styles.tableCell}>{asset?.category?.name || ""}</td>
+              <td style={styles.tableCell}>{asset?.location?.name || ""}</td>
               <td style={styles.tableCell}>
                 <div style={styles.qrcodeInfo}>
                   <img
