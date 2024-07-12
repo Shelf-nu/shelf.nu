@@ -1,4 +1,4 @@
-import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZxing } from "react-zxing";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { loader } from "~/routes/_layout+/scanner";
@@ -6,19 +6,22 @@ import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { Spinner } from "./shared/spinner";
 
+type ZXingScannerProps = {
+  onQrDetectionSuccess: (qrId: string) => void | Promise<void>;
+  videoMediaDevices?: MediaDeviceInfo[];
+};
+
 export const ZXingScanner = ({
   videoMediaDevices,
-}: {
-  videoMediaDevices: MediaDeviceInfo[] | undefined;
-}) => {
+  onQrDetectionSuccess,
+}: ZXingScannerProps) => {
   const [sendNotification] = useClientNotification();
-  const navigate = useNavigate();
   const fetcher = useFetcher();
   const { scannerCameraId } = useLoaderData<typeof loader>();
   const isProcessing = isFormProcessing(fetcher.state);
 
   // Function to decode the QR code
-  const decodeQRCodes = (result: string) => {
+  const decodeQRCodes = async (result: string) => {
     // console.log("QR code detected", result);
     if (result != null) {
       const regex = /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
@@ -34,13 +37,8 @@ export const ZXingScanner = ({
         return;
       }
 
-      sendNotification({
-        title: "Shelf's QR Code detected",
-        message: "Redirecting to mapped asset",
-        icon: { name: "success", variant: "success" },
-      });
       const qrId = match[4]; // Get the last segment of the URL as the QR id
-      navigate(`/qr/${qrId}`);
+      onQrDetectionSuccess && (await onQrDetectionSuccess(qrId));
     }
   };
 
@@ -48,9 +46,9 @@ export const ZXingScanner = ({
     deviceId: scannerCameraId,
     constraints: { video: true, audio: false },
     timeBetweenDecodingAttempts: 100,
-    onDecodeResult(result) {
+    async onDecodeResult(result) {
       // console.log(result.getText());
-      decodeQRCodes(result.getText());
+      await decodeQRCodes(result.getText());
     },
     onError(cause) {
       throw new ShelfError({
