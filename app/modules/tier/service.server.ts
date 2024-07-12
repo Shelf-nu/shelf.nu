@@ -1,4 +1,10 @@
-import type { Organization, TierId, TierLimit, User } from "@prisma/client";
+import type {
+  CustomTierLimit,
+  Organization,
+  TierId,
+  TierLimit,
+  User,
+} from "@prisma/client";
 import { db } from "~/database/db.server";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -42,7 +48,7 @@ export async function getUserTierLimit(id: User["id"]) {
             additionalData: { userId: id },
             label,
           });
-        })) as TierLimit;
+        })) as CustomTierLimit;
     }
 
     return tier.tierLimit as TierLimit;
