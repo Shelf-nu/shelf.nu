@@ -210,18 +210,16 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        {!isSelfService ? (
-            <ActionsDropdown />
-        ) : null}
+        {!isSelfService ? <ActionsDropdown /> : null}
         <Button
-              to={`/bookings/new?assetIds=${asset.id}`}
-              role="link"
-              aria-label={`new booking`}
-              data-test-id="createNewBooking"
-              prefetch="none"
-            >
-              Book
-            </Button>
+          to={`/bookings/new?assetIds=${asset.id}`}
+          role="link"
+          aria-label={`new booking`}
+          data-test-id="createNewBooking"
+          prefetch="none"
+        >
+          Book
+        </Button>
       </Header>
       <HorizontalTabs items={items} />
       <div>
