@@ -7,6 +7,7 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
+import { z } from "zod";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css?url";
 import { db } from "~/database/db.server";
@@ -139,6 +140,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       zone: hints.timeZone,
     }).toJSDate();
 
+    const assetIds = z
+      .array(z.string())
+      .parse(formData.getAll("assetIds"));
+
     const booking = await upsertBooking(
       {
         custodianUserId: custodian?.userId,
@@ -147,6 +152,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         name,
         from,
         to,
+        assetIds,
         creatorId: authSession.userId,
         ...(isSelfService && {
           custodianUserId: authSession.userId,
@@ -162,8 +168,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    const url = new URL(request.url);
-    const assetIds = url.searchParams.get("assetIds");
     const hasAssetIds = Boolean(assetIds);
 
     if (hasAssetIds) {
