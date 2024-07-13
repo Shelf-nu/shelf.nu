@@ -1,8 +1,8 @@
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import type { AssetStatus } from "@prisma/client";
+import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import type { loader } from "~/routes/_layout+/kits._index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
@@ -40,8 +40,6 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
-  const { items } = useLoaderData<typeof loader>();
-
   const {
     ref: dropdownRef,
     defaultApplied,
@@ -53,9 +51,7 @@ function ConditionalDropdown() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const selectedKitIds = useAtomValue(selectedBulkItemsAtom);
-
-  const selectedKits = items.filter((item) => selectedKitIds.includes(item.id));
+  const selectedKits = useAtomValue(selectedBulkItemsAtom);
 
   const allKitsInCustody = selectedKits.every(
     (kit) => kit.status === "IN_CUSTODY"
@@ -71,11 +67,15 @@ function ConditionalDropdown() {
 
   const someAssetsInsideKitsCheckedOutOrInCustody = selectedKits.some(
     (kit) =>
-      kit.assets.some((asset) => asset.status === "CHECKED_OUT") ||
-      kit.assets.some((asset) => asset.status === "IN_CUSTODY")
+      kit.assets?.some(
+        (asset: { status: AssetStatus }) => asset.status === "CHECKED_OUT"
+      ) ||
+      kit.assets?.some(
+        (asset: { status: AssetStatus }) => asset.status === "IN_CUSTODY"
+      )
   );
 
-  const disabled = selectedKitIds.length === 0;
+  const disabled = selectedKits.length === 0;
 
   function closeMenu() {
     setOpen(false);

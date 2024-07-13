@@ -7,7 +7,7 @@ import {
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 
-import { ALL_SELECTED_KEY } from "~/utils/list";
+import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
 import { EmptyState } from "./empty-state";
@@ -95,8 +95,10 @@ export const List = ({
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
-  const hasSelectedAllItems = selectedBulkItems.includes(ALL_SELECTED_KEY);
-  const hasSelectedItems = selectedBulkItems.length > 0;
+
+  const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
+
+  const hasSelectedItems = selectedBulkItemsCount > 0;
 
   /**
    * We can select all the incoming items and we can add ALL_SELECTED_KEY
@@ -104,7 +106,7 @@ export const List = ({
    * then we do operation on all items of organization
    */
   function handleSelectAllItems() {
-    setSelectedBulkItems([...items.map((item) => item.id), ALL_SELECTED_KEY]);
+    setSelectedBulkItems([...items, { id: ALL_SELECTED_KEY }]);
   }
 
   return (
@@ -125,7 +127,7 @@ export const List = ({
           <div className="flex items-center justify-between border-b p-4 pb-[8px]">
             <div>
               <div>
-                <h5 className="capitalize">{title || plural}</h5>
+                <h5 className="text-left capitalize">{title || plural}</h5>
                 <div className="h-7">
                   {hasSelectedItems ? (
                     <div className="flex items-start gap-2">

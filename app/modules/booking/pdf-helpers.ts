@@ -6,6 +6,7 @@ import type {
   Organization,
   Custody,
   Prisma,
+  Kit,
 } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import puppeteer from "puppeteer";
@@ -23,6 +24,7 @@ export interface PdfDbResult {
     category: Category | null;
     location: Location | null;
     custody: Custody | null;
+    kit: Kit | null;
   })[];
   organization: (Partial<Organization> & { image: Image | null }) | null;
   assetIdToQrCodeMap: Map<string, string>;
@@ -95,6 +97,7 @@ export async function fetchAllPdfRelatedData(
               : {}),
           },
         },
+        kit: true,
       },
     }),
     db.organization.findUnique({

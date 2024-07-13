@@ -2,7 +2,12 @@ import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
 
-import { refreshAccessToken } from "~/modules/auth/service.server";
+import {
+  refreshAccessToken,
+  validateSession,
+} from "~/modules/auth/service.server";
+import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
 
@@ -37,7 +42,23 @@ export function protect({
 
       return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);
     }
+    let isValidSession = await validateSession(auth.refreshToken);
 
+    if (!isValidSession) {
+      session.flash(
+        "errorMessage",
+        "Session might have expired. Please log in again."
+      );
+      session.unset(authSessionKey);
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message: "Session might have expired. Please log in again.",
+          label: "Auth",
+        })
+      );
+      return c.redirect(`${onFailRedirectTo}?redirectTo=${c.req.path}`);
+    }
     return next();
   });
 }

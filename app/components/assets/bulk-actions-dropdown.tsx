@@ -1,8 +1,7 @@
-import { useLoaderData, useNavigation } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import type { loader } from "~/routes/_layout+/assets._index";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
@@ -42,8 +41,6 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
-  const { items } = useLoaderData<typeof loader>();
-
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
@@ -55,13 +52,9 @@ function ConditionalDropdown() {
     setOpen,
   } = useControlledDropdownMenu();
 
-  const selectedAssetIds = useAtomValue(selectedBulkItemsAtom);
+  const selectedAssets = useAtomValue(selectedBulkItemsAtom);
 
-  const selectedAssets = items.filter((item) =>
-    selectedAssetIds.includes(item.id)
-  );
-
-  const disabled = selectedAssetIds.length === 0;
+  const disabled = selectedAssets.length === 0;
 
   const allAssetsAreInCustody = selectedAssets.every(
     (asset) => asset.status === "IN_CUSTODY"

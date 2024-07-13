@@ -1,4 +1,4 @@
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import { useFetcher, useLoaderData, useNavigation } from "@remix-run/react";
 import { useZxing } from "react-zxing";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { loader } from "~/routes/_layout+/scanner";
@@ -16,14 +16,15 @@ export const ZXingScanner = ({
   onQrDetectionSuccess,
 }: ZXingScannerProps) => {
   const [sendNotification] = useClientNotification();
+  const navigation = useNavigation();
   const fetcher = useFetcher();
   const { scannerCameraId } = useLoaderData<typeof loader>();
   const isProcessing = isFormProcessing(fetcher.state);
+  const isLoading = isFormProcessing(navigation.state);
 
   // Function to decode the QR code
   const decodeQRCodes = async (result: string) => {
-    // console.log("QR code detected", result);
-    if (result != null) {
+    if (result != null && !isLoading) {
       const regex = /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
       /** We make sure the value of the QR code matches the structure of Shelf qr codes */
       const match = result.match(regex);
@@ -38,7 +39,7 @@ export const ZXingScanner = ({
       }
 
       const qrId = match[4]; // Get the last segment of the URL as the QR id
-      onQrDetectionSuccess && (await onQrDetectionSuccess(qrId));
+      await onQrDetectionSuccess(qrId);
     }
   };
 
@@ -47,7 +48,6 @@ export const ZXingScanner = ({
     constraints: { video: true, audio: false },
     timeBetweenDecodingAttempts: 100,
     async onDecodeResult(result) {
-      // console.log(result.getText());
       await decodeQRCodes(result.getText());
     },
     onError(cause) {
