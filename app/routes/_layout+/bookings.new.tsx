@@ -140,9 +140,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       zone: hints.timeZone,
     }).toJSDate();
 
-    const assetIds = z
-      .array(z.string())
-      .parse(formData.getAll("assetIds"));
+    const assetIds = z.array(z.string()).parse(formData.getAll("assetIds"));
 
     const booking = await upsertBooking(
       {
