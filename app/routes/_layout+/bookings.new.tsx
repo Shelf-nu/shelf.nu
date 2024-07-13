@@ -18,7 +18,7 @@ import { setCookie } from "~/utils/cookies.server";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import { data, error, getCurrentSearchParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -32,8 +32,8 @@ import { requirePermission } from "~/utils/roles.server";
  * This way all actions are available and its way easier to manage so in a way this works kind of like a resource route.
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
-  const assetIds = url.searchParams.get("assetIds");
+  const searchParams = getCurrentSearchParams(request);
+  const assetIds = searchParams.get("assetIds");
   const authSession = context.getSession();
   const { userId } = authSession;
 
