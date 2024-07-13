@@ -18,7 +18,12 @@ import { setCookie } from "~/utils/cookies.server";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, getCurrentSearchParams, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -159,13 +164,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const url = new URL(request.url);
     const assetIds = url.searchParams.get("assetIds");
-    if (assetIds) {
+    const hasAssetIds = Boolean(assetIds);
+
+    if (hasAssetIds) {
       return redirect(`/bookings/${booking.id}`);
     } else {
       const manageAssetsUrl = `/bookings/${
         booking.id
       }/add-assets?${new URLSearchParams({
-        // We force the as Date because we know that the booking.from and booking.to are set and exist at this point.
         bookingFrom: (booking.from as Date).toISOString(),
         bookingTo: (booking.to as Date).toISOString(),
         hideUnavailable: "true",
