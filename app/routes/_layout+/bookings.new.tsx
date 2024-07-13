@@ -39,7 +39,7 @@ import { requirePermission } from "~/utils/roles.server";
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
-  const assetIds = searchParams.get("assetIds");
+  const assetIds = searchParams.getAll("assetIds");
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -223,6 +223,14 @@ export default function NewBooking() {
               : undefined
           }
         />
+        {assetIds.map((item, i) => (
+            <input
+              key={item}
+              type="hidden"
+              name={`assetIds[${i}]`}
+              value={item}
+            />
+          ))}
       </div>
     </div>
   );

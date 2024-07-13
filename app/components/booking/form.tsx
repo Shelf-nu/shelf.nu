@@ -110,7 +110,7 @@ type BookingFormData = {
   custodianUserId?: string; // This is a stringified value for custodianUser
   bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
   bookingFlags?: BookingFlags;
-  assetIds?: string | null;
+  assetIds?: string[] | null;
 };
 
 export function BookingForm({
