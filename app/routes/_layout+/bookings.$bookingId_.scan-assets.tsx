@@ -5,9 +5,23 @@ import { json } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import { AssetLabel } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import { ListHeader } from "~/components/list/list-header";
+import { Button } from "~/components/shared/button";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTrigger,
+} from "~/components/shared/drawer";
 import { Spinner } from "~/components/shared/spinner";
+import { Table, Th } from "~/components/table";
+import When from "~/components/when/when";
 import { ZXingScanner } from "~/components/zxing-scanner";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
@@ -135,20 +149,68 @@ export default function ScanAssetsForBookings() {
     <>
       <Header hidePageDescription />
 
-      <div
-        className={` -mx-4 flex flex-col`}
-        style={{
-          height: `${height}px`,
-        }}
-      >
-        {JSON.stringify(fetchedAssets, null, 2)}
+      <Drawer>
+        <DrawerTrigger>
+          <Button>View assets</Button>
+        </DrawerTrigger>
+
+        <DrawerContent className="min-h-[600px] max-w-[800px] overflow-y-auto md:min-h-[800px]">
+          <div className="mx-auto size-full md:max-w-4xl">
+            <DrawerHeader className="border-b text-left">
+              <DrawerDescription>
+                {fetchedAssets.length} assets scanned
+              </DrawerDescription>
+            </DrawerHeader>
+
+            <When truthy={fetchedAssets.length === 0}>
+              <div className="my-16 flex flex-col items-center px-3 text-center">
+                <div className="mb-4 rounded-full bg-primary-50  p-2">
+                  <div className=" rounded-full bg-primary-100 p-2 text-primary">
+                    <AssetLabel className="size-6" />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-base font-semibold text-gray-900">
+                    List is empty
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    Fill list by scanning codes...
+                  </p>
+                </div>
+              </div>
+            </When>
+
+            <When truthy={fetchedAssets.length > 0}>
+              <Table>
+                <ListHeader hideFirstColumn>
+                  <Th>Name</Th>
+                </ListHeader>
+              </Table>
+            </When>
+
+            <When truthy={fetchedAssets.length > 0}>
+              <DrawerFooter className="">
+                <Button className="w-full max-w-full">Submit</Button>
+                <DrawerClose asChild>
+                  <Button variant="outline" className="w-full max-w-full">
+                    Close
+                  </Button>
+                </DrawerClose>
+              </DrawerFooter>
+            </When>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         {videoMediaDevices && videoMediaDevices.length > 0 ? (
           <ZXingScanner
             videoMediaDevices={videoMediaDevices}
             onQrDetectionSuccess={handleQrDetectionSuccess}
           />
         ) : (
-          <div className="mt-4 flex flex-col items-center justify-center">
+          <div className="mt-4 flex h-full flex-col items-center justify-center">
             <Spinner /> Waiting for permission to access camera.
           </div>
         )}
