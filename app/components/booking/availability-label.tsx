@@ -25,11 +25,13 @@ export function AvailabilityLabel({
   isCheckedOut,
   showKitStatus,
   isAddedThroughKit,
+  isAlreadyAdded,
 }: {
   asset: AssetWithBooking;
   isCheckedOut: boolean;
   showKitStatus?: boolean;
   isAddedThroughKit?: boolean;
+  isAlreadyAdded?: boolean;
 }) {
   const isPartOfKit = !!asset.kitId;
 
@@ -144,6 +146,17 @@ export function AvailabilityLabel({
         badgeText="Part of kit"
         tooltipTitle="Asset is part of a kit"
         tooltipContent="Remove the asset from the kit to add it individually."
+      />
+    );
+  }
+
+  /** User scanned the asset and it is already in booking */
+  if (isAlreadyAdded) {
+    return (
+      <AvailabilityBadge
+        badgeText="Already added"
+        tooltipTitle="Asset is part of booking"
+        tooltipContent="This asset is already added to the current booking."
       />
     );
   }

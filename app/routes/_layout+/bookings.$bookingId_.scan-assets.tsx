@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import type { Asset } from "@prisma/client";
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { json } from "@remix-run/node";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
+import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AssetLabel } from "~/components/icons/library";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -20,7 +20,7 @@ import {
   DrawerTrigger,
 } from "~/components/shared/drawer";
 import { Spinner } from "~/components/shared/spinner";
-import { Table, Th } from "~/components/table";
+import { Table, Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { ZXingScanner } from "~/components/zxing-scanner";
 import { useClientNotification } from "~/hooks/use-client-notification";
@@ -31,12 +31,14 @@ import { getBooking } from "~/modules/booking/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { isFormProcessing } from "~/utils/form";
 import { data, error, getParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import type { AssetWithBooking } from "./bookings.$bookingId.add-assets";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -113,9 +115,11 @@ export const handle = {
 export default function ScanAssetsForBookings() {
   const { booking } = useLoaderData<typeof loader>();
 
-  const [fetchedAssets, setFetchedAssets] = useState<Asset[]>([]);
+  const [fetchedAssets, setFetchedAssets] = useState<AssetWithBooking[]>([]);
 
-  const fetcher = useFetcherWithReset<{ asset: Asset }>();
+  const fetcher = useFetcherWithReset<{ asset: AssetWithBooking }>();
+  const isFetchingAsset = isFormProcessing(fetcher.state);
+
   const [sendNotification] = useClientNotification();
 
   const { videoMediaDevices } = useQrScanner();
@@ -138,11 +142,23 @@ export default function ScanAssetsForBookings() {
   useEffect(
     function handleFetcherSuccess() {
       if (fetcher.data && fetcher.data?.asset) {
-        setFetchedAssets((prev) => [...prev, fetcher.data.asset]);
+        setFetchedAssets((prev) => [
+          ...prev,
+          // If asset is already added, then we will not add it again.
+          ...(prev.some((a) => a.id === fetcher.data.asset.id)
+            ? []
+            : [fetcher.data.asset]),
+        ]);
         fetcher.reset();
+
+        sendNotification({
+          title: "Asset scanned",
+          message: "Asset is scanned and successfully added to the list.",
+          icon: { name: "success", variant: "success" },
+        });
       }
     },
-    [fetcher, fetcher.data]
+    [fetcher, sendNotification]
   );
 
   return (
@@ -154,7 +170,7 @@ export default function ScanAssetsForBookings() {
           <Button>View assets</Button>
         </DrawerTrigger>
 
-        <DrawerContent className="min-h-[600px] max-w-[800px] overflow-y-auto md:min-h-[800px]">
+        <DrawerContent className="min-h-[600px] overflow-y-hidden">
           <div className="mx-auto size-full md:max-w-4xl">
             <DrawerHeader className="border-b text-left">
               <DrawerDescription>
@@ -182,21 +198,67 @@ export default function ScanAssetsForBookings() {
             </When>
 
             <When truthy={fetchedAssets.length > 0}>
-              <Table>
-                <ListHeader hideFirstColumn>
-                  <Th>Name</Th>
-                </ListHeader>
-              </Table>
+              <div className="max-h-[600px] overflow-auto">
+                <Table className="overflow-y-auto">
+                  <ListHeader hideFirstColumn>
+                    <Th> </Th>
+                    <Th> </Th>
+                  </ListHeader>
+
+                  <tbody>
+                    {fetchedAssets.map((asset) => (
+                      <Tr key={asset.id}>
+                        <Td className="w-full p-0 md:p-0">
+                          <div className="flex items-center justify-between gap-3 p-4 md:px-6">
+                            <div className="flex items-center gap-3">
+                              <div className="flex flex-col gap-y-1">
+                                <p className="word-break whitespace-break-spaces font-medium">
+                                  {asset.title}
+                                </p>
+
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                  <AvailabilityLabel
+                                    isAddedThroughKit={
+                                      booking.assets.some(
+                                        (a) => a.id === asset.id
+                                      ) && !!asset.kitId
+                                    }
+                                    isAlreadyAdded={booking.assets.some(
+                                      (a) => a.id === asset.id
+                                    )}
+                                    showKitStatus
+                                    asset={asset}
+                                    isCheckedOut={
+                                      asset.status === "CHECKED_OUT"
+                                    }
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </Td>
+                        <Td>
+                          <Button
+                            className="border-none"
+                            variant="ghost"
+                            icon="trash"
+                          />
+                        </Td>
+                      </Tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </div>
             </When>
 
             <When truthy={fetchedAssets.length > 0}>
-              <DrawerFooter className="">
-                <Button className="w-full max-w-full">Submit</Button>
+              <DrawerFooter className="flex-row">
                 <DrawerClose asChild>
                   <Button variant="outline" className="w-full max-w-full">
                     Close
                   </Button>
                 </DrawerClose>
+                <Button className="w-full max-w-full">Confirm</Button>
               </DrawerFooter>
             </When>
           </div>
@@ -206,6 +268,7 @@ export default function ScanAssetsForBookings() {
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         {videoMediaDevices && videoMediaDevices.length > 0 ? (
           <ZXingScanner
+            isLoading={isFetchingAsset}
             videoMediaDevices={videoMediaDevices}
             onQrDetectionSuccess={handleQrDetectionSuccess}
           />
@@ -216,5 +279,20 @@ export default function ScanAssetsForBookings() {
         )}
       </div>
     </>
+  );
+}
+
+function Tr({ children }: { children: React.ReactNode }) {
+  return (
+    <tr
+      className="hover:bg-gray-50"
+      style={{
+        transform: "translateZ(0)",
+        willChange: "transform",
+        backgroundAttachment: "initial",
+      }}
+    >
+      {children}
+    </tr>
   );
 }

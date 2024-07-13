@@ -9,11 +9,13 @@ import { Spinner } from "./shared/spinner";
 type ZXingScannerProps = {
   onQrDetectionSuccess: (qrId: string) => void | Promise<void>;
   videoMediaDevices?: MediaDeviceInfo[];
+  isLoading?: boolean;
 };
 
 export const ZXingScanner = ({
   videoMediaDevices,
   onQrDetectionSuccess,
+  isLoading: incomingIsLoading,
 }: ZXingScannerProps) => {
   const [sendNotification] = useClientNotification();
   const navigation = useNavigation();
@@ -24,7 +26,7 @@ export const ZXingScanner = ({
 
   // Function to decode the QR code
   const decodeQRCodes = async (result: string) => {
-    if (result != null && !isLoading) {
+    if (result != null && !isLoading && !incomingIsLoading) {
       const regex = /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
       /** We make sure the value of the QR code matches the structure of Shelf qr codes */
       const match = result.match(regex);
@@ -62,6 +64,7 @@ export const ZXingScanner = ({
 
   return (
     <div className="relative size-full min-h-[400px]">
+      {`${incomingIsLoading}`}
       {isProcessing ? (
         <div className="mt-4 flex flex-col items-center justify-center">
           <Spinner /> Switching cameras...
