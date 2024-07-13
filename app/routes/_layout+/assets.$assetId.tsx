@@ -211,9 +211,9 @@ export default function AssetDetailsPage() {
         }
       >
         {!isSelfService ? (
-          <>
             <ActionsDropdown />
-            <Button
+        ) : null}
+        <Button
               to={`/bookings/new?assetIds=${asset.id}`}
               role="link"
               aria-label={`new booking`}
@@ -222,8 +222,6 @@ export default function AssetDetailsPage() {
             >
               Book
             </Button>
-          </>
-        ) : null}
       </Header>
       <HorizontalTabs items={items} />
       <div>
