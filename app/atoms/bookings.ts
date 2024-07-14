@@ -35,3 +35,20 @@ export const setFetchedScannedAssetAtom = atom<
     ...(prev.some((a) => a.id === update.id) ? [] : [update]),
   ]);
 });
+
+/**
+ * This atom is used to remove an asset from the list using the `id` of asset.
+ */
+export const removeFetchedScannedAssetAtom = atom<null, string[], unknown>(
+  null,
+  (_, set, update) => {
+    set(fetchedScannedAssetsAtom, (prev) =>
+      prev.filter((asset) => asset.id !== update)
+    );
+  }
+);
+
+/** This atom clears all the items in fetchedScannedAssetsAtom */
+export const clearFetchedScannedAssetsAtom = atom(null, (_, set) => {
+  set(fetchedScannedAssetsAtom, []);
+});

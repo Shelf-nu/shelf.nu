@@ -1,8 +1,10 @@
 import { useLoaderData } from "@remix-run/react";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import {
+  clearFetchedScannedAssetsAtom,
   fetchedScannedAssetsAtom,
   fetchedScannedAssetsCountAtom,
+  removeFetchedScannedAssetAtom,
 } from "~/atoms/bookings";
 import { type loader } from "~/routes/_layout+/bookings.$bookingId_.scan-assets";
 import { tw } from "~/utils/tw";
@@ -35,6 +37,8 @@ export default function ScannedAssetsDrawer({
 
   const fetchedScannedAssets = useAtomValue(fetchedScannedAssetsAtom);
   const fetchedScannedAssetsCount = useAtomValue(fetchedScannedAssetsCountAtom);
+  const removeFetchedScannedAsset = useSetAtom(removeFetchedScannedAssetAtom);
+  const clearFetchedScannedAssets = useSetAtom(clearFetchedScannedAssetsAtom);
 
   return (
     <Drawer>
@@ -47,10 +51,19 @@ export default function ScannedAssetsDrawer({
         style={style}
       >
         <div className="mx-auto size-full md:max-w-4xl">
-          <DrawerHeader className="border-b text-left">
+          <DrawerHeader className="flex items-center justify-between border-b text-left">
             <DrawerDescription>
               {fetchedScannedAssetsCount} assets scanned
             </DrawerDescription>
+
+            <When truthy={fetchedScannedAssetsCount > 0}>
+              <DrawerDescription
+                className="cursor-pointer"
+                onClick={clearFetchedScannedAssets}
+              >
+                Clear list
+              </DrawerDescription>
+            </When>
           </DrawerHeader>
 
           <When truthy={fetchedScannedAssetsCount === 0}>
@@ -76,8 +89,8 @@ export default function ScannedAssetsDrawer({
             <div className="max-h-[600px] overflow-auto">
               <Table className="overflow-y-auto">
                 <ListHeader hideFirstColumn>
-                  <Th> </Th>
-                  <Th> </Th>
+                  <Th className="p-0"> </Th>
+                  <Th className="p-0"> </Th>
                 </ListHeader>
 
                 <tbody>
@@ -115,6 +128,9 @@ export default function ScannedAssetsDrawer({
                           className="border-none"
                           variant="ghost"
                           icon="trash"
+                          onClick={() => {
+                            removeFetchedScannedAsset(asset.id);
+                          }}
                         />
                       </Td>
                     </Tr>
