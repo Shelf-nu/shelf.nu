@@ -64,7 +64,6 @@ export const ZXingScanner = ({
 
   return (
     <div className="relative size-full min-h-[400px]">
-      {`${incomingIsLoading}`}
       {isProcessing ? (
         <div className="mt-4 flex flex-col items-center justify-center">
           <Spinner /> Switching cameras...
