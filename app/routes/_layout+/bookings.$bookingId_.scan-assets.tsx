@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
 import { BookingStatus, OrganizationRoles } from "@prisma/client";
-import { json } from "@remix-run/node";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { json, redirect } from "@remix-run/node";
+import type {
+  MetaFunction,
+  LoaderFunctionArgs,
+  ActionFunctionArgs,
+} from "@remix-run/node";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { useSetAtom } from "jotai";
 import { z } from "zod";
 import { setFetchedScannedAssetAtom } from "~/atoms/bookings";
-import ScannedAssetsDrawer from "~/components/booking/scanned-assets-drawer";
+import ScannedAssetsDrawer, {
+  addScannedAssetsToBookingSchema,
+} from "~/components/booking/scanned-assets-drawer";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Spinner } from "~/components/shared/spinner";
@@ -15,12 +21,22 @@ import { useClientNotification } from "~/hooks/use-client-notification";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { getBooking } from "~/modules/booking/service.server";
+import {
+  addScannedAssetsToBooking,
+  getBooking,
+} from "~/modules/booking/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { userPrefs } from "~/utils/cookies.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { data, error, getParams } from "~/utils/http.server";
+import {
+  assertIsPost,
+  data,
+  error,
+  getParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -92,6 +108,42 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   }
 }
 
+export async function action({ context, request, params }: ActionFunctionArgs) {
+  const authSession = context.getSession();
+  const { userId } = authSession;
+
+  const { bookingId } = getParams(params, z.object({ bookingId: z.string() }));
+
+  try {
+    assertIsPost(request);
+
+    const { organizationId } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
+
+    const formData = await request.formData();
+
+    const { assetIds } = parseData(formData, addScannedAssetsToBookingSchema);
+
+    await addScannedAssetsToBooking({ bookingId, assetIds, organizationId });
+
+    sendNotification({
+      title: "Assets added",
+      message: "All the scanned assets has been successfully added to booking.",
+      icon: { name: "success", variant: "success" },
+      senderId: authSession.userId,
+    });
+
+    return redirect(`/bookings/${bookingId}`);
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, bookingId });
+    return json(error(reason), { status: reason.status });
+  }
+}
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
@@ -103,6 +155,9 @@ export const handle = {
 export default function ScanAssetsForBookings() {
   const { booking } = useLoaderData<typeof loader>();
   const [fetchedQrIds, setFetchedQrIds] = useState<string[]>([]);
+
+  const navigation = useNavigation();
+  const isLoading = isFormProcessing(navigation.state);
 
   const fetcher = useFetcherWithReset<{ asset: AssetWithBooking }>();
   const isFetchingAsset = isFormProcessing(fetcher.state);
@@ -157,12 +212,12 @@ export default function ScanAssetsForBookings() {
     <>
       <Header hidePageDescription />
 
-      <ScannedAssetsDrawer />
+      <ScannedAssetsDrawer isLoading={isLoading || isFetchingAsset} />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         {videoMediaDevices && videoMediaDevices.length > 0 ? (
           <ZXingScanner
-            isLoading={isFetchingAsset}
+            isLoading={isFetchingAsset || isLoading}
             videoMediaDevices={videoMediaDevices}
             onQrDetectionSuccess={handleQrDetectionSuccess}
           />

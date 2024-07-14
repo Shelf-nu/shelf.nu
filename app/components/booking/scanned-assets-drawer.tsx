@@ -1,5 +1,7 @@
-import { useLoaderData } from "@remix-run/react";
+import { Form, useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
+import { useZorm } from "react-zorm";
+import { z } from "zod";
 import {
   clearFetchedScannedAssetsAtom,
   fetchedScannedAssetsAtom,
@@ -27,13 +29,24 @@ import When from "../when/when";
 type ScannedAssetsDrawerProps = {
   className?: string;
   style?: React.CSSProperties;
+  isLoading?: boolean;
 };
+
+export const addScannedAssetsToBookingSchema = z.object({
+  assetIds: z.array(z.string()).min(1),
+});
 
 export default function ScannedAssetsDrawer({
   className,
   style,
+  isLoading,
 }: ScannedAssetsDrawerProps) {
   const { booking } = useLoaderData<typeof loader>();
+
+  const zo = useZorm(
+    "AddScannedAssetsToBooking",
+    addScannedAssetsToBookingSchema
+  );
 
   const fetchedScannedAssets = useAtomValue(fetchedScannedAssetsAtom);
   const fetchedScannedAssetsCount = useAtomValue(fetchedScannedAssetsCountAtom);
@@ -141,14 +154,40 @@ export default function ScannedAssetsDrawer({
           </When>
 
           <When truthy={fetchedScannedAssetsCount > 0}>
-            <DrawerFooter className="flex-row">
-              <DrawerClose asChild>
-                <Button variant="outline" className="w-full max-w-full">
-                  Close
-                </Button>
-              </DrawerClose>
-              <Button className="w-full max-w-full">Confirm</Button>
-            </DrawerFooter>
+            <div>
+              <When truthy={!!zo.errors.assetIds()?.message}>
+                <p className="text-sm text-error-500">
+                  {zo.errors.assetIds()?.message}
+                </p>
+              </When>
+
+              <DrawerFooter className="flex-row px-0">
+                <DrawerClose asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full max-w-full"
+                    disabled={isLoading}
+                  >
+                    Close
+                  </Button>
+                </DrawerClose>
+
+                <Form ref={zo.ref} className="w-full" method="POST">
+                  {fetchedScannedAssets.map((asset, i) => (
+                    <input
+                      key={asset.id}
+                      type="hidden"
+                      name={`assetIds[${i}]`}
+                      value={asset.id}
+                    />
+                  ))}
+
+                  <Button className="w-full max-w-full" disabled={isLoading}>
+                    Confirm
+                  </Button>
+                </Form>
+              </DrawerFooter>
+            </div>
           </When>
         </div>
       </DrawerContent>
