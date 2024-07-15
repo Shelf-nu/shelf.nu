@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { isFormProcessing } from "~/utils/form";
+import { isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
@@ -53,16 +54,22 @@ function ConditionalDropdown() {
   } = useControlledDropdownMenu();
 
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
-
   const disabled = selectedAssets.length === 0;
 
-  const allAssetsAreInCustody = selectedAssets.every(
-    (asset) => asset.status === "IN_CUSTODY"
-  );
+  const allSelected = isSelectingAllItems(selectedAssets);
 
-  const allAssetsAreAvailable = selectedAssets.every(
-    (asset) => asset.status === "AVAILABLE"
-  );
+  /**
+   * Due to select all multi page selection,
+   * some of the checks we do cannot be completed as we dont have the data loaded from the server.
+   * As a solution for now we will handle the validation serverSide if hasSelectedAll is true
+   */
+  const allAssetsAreInCustody =
+    allSelected ||
+    selectedAssets.every((asset) => asset.status === "IN_CUSTODY");
+
+  const allAssetsAreAvailable =
+    allSelected ||
+    selectedAssets.every((asset) => asset.status === "AVAILABLE");
 
   const someAssetCheckedOut = selectedAssets.some(
     (asset) => asset.status === "CHECKED_OUT"
