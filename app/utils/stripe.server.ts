@@ -171,7 +171,10 @@ function groupPricesByInterval(prices: PriceWithProduct[]) {
   const groupedPrices: { [key: string]: PriceWithProduct[] } = {};
 
   for (const price of prices) {
-    if (price?.recurring?.interval) {
+    if (
+      price?.recurring?.interval &&
+      price.metadata?.show_on_table === "true"
+    ) {
       const interval = price?.recurring?.interval;
       if (!groupedPrices[interval]) {
         groupedPrices[interval] = [];

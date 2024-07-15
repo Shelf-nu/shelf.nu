@@ -2640,7 +2640,11 @@ export async function bulkCheckInAssets({
             in: assets.map((asset) => {
               /** This case should not happen but in case */
               if (!asset.custody) {
-                throw new Error("Could not find custody over asset.");
+                throw new ShelfError({
+                  cause: null,
+                  label: "Assets",
+                  message: "Could not find custody over asset.",
+                });
               }
 
               return asset.custody.id;

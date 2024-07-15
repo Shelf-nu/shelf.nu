@@ -4,6 +4,7 @@ import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { isFormProcessing } from "~/utils/form";
+import { isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
@@ -52,14 +53,19 @@ function ConditionalDropdown() {
   const isLoading = isFormProcessing(navigation.state);
 
   const selectedKits = useAtomValue(selectedBulkItemsAtom);
+  const allSelected = isSelectingAllItems(selectedKits);
 
-  const allKitsInCustody = selectedKits.every(
-    (kit) => kit.status === "IN_CUSTODY"
-  );
+  /**
+   * Due to select all multi page selection,
+   * some of the checks we do cannot be completed as we dont have the data loaded from the server.
+   * As a solution for now we will handle the validation serverSide if hasSelectedAll is true
+   */
 
-  const allKitsAvailable = selectedKits.every(
-    (kit) => kit.status === "AVAILABLE"
-  );
+  const allKitsInCustody =
+    allSelected || selectedKits.every((kit) => kit.status === "IN_CUSTODY");
+
+  const allKitsAvailable =
+    allSelected || selectedKits.every((kit) => kit.status === "AVAILABLE");
 
   const someKitsCheckedOut = selectedKits.some(
     (kit) => kit.status === "CHECKED_OUT"
