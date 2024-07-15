@@ -123,7 +123,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, custodian } = payload;
+    const { name, custodian, assetIds } = payload;
     const hints = getHints(request);
 
     const fmt = "yyyy-MM-dd'T'HH:mm";
@@ -139,9 +139,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const to = DateTime.fromFormat(formData.get("endDate")!.toString()!, fmt, {
       zone: hints.timeZone,
     }).toJSDate();
-
-    const assetIds = z.array(z.string()).parse(formData.getAll("assetIds"));
-
     const booking = await upsertBooking(
       {
         custodianUserId: custodian?.userId,
@@ -165,7 +162,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
-
+    
     const hasAssetIds = Boolean(assetIds);
 
     if (hasAssetIds) {
@@ -223,14 +220,6 @@ export default function NewBooking() {
               : undefined
           }
         />
-        {assetIds.map((item, i) => (
-            <input
-              key={item}
-              type="hidden"
-              name={`assetIds[${i}]`}
-              value={item}
-            />
-          ))}
       </div>
     </div>
   );

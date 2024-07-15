@@ -64,6 +64,7 @@ export const NewBookingFormSchema = (
       endDate: inputFieldIsDisabled
         ? z.coerce.date().optional()
         : z.coerce.date(),
+      assetIds: z.array(z.string()).min(1),
       custodian: z
         .string()
         .transform((val, ctx) => {
@@ -159,7 +160,7 @@ export function BookingForm({
             {bookingStatus?.isCompleted && isSelfService ? null : (
               <ActionsDropdown />
             )}
-
+            
             {/*  We show the button in all cases, unless the booking is in a final state */}
             {!(
               bookingStatus?.isCompleted ||
@@ -261,7 +262,6 @@ export function BookingForm({
             ) : null}
           </AbsolutePositionedHeaderActions>
         ) : null}
-
         <div className="-mx-4 mb-4 md:mx-0">
           <div
             className={tw(
@@ -379,6 +379,14 @@ export function BookingForm({
         </div>
         {isNewBooking ? (
           <div className="text-right">
+            {assetIds?.map((item, i)=>{
+              return <input
+                key={item}
+                type="hidden"
+                name={`assetIds[${i}]`}
+                value={item}
+              />
+            })}
             <Button type="submit">
               {assetIds ? "Create Booking" : "Check Asset Availability"}
             </Button>
