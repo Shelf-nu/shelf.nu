@@ -162,7 +162,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
-    
+
     const hasAssetIds = Boolean(assetIds);
 
     if (hasAssetIds) {

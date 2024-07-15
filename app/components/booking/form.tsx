@@ -160,7 +160,7 @@ export function BookingForm({
             {bookingStatus?.isCompleted && isSelfService ? null : (
               <ActionsDropdown />
             )}
-            
+
             {/*  We show the button in all cases, unless the booking is in a final state */}
             {!(
               bookingStatus?.isCompleted ||
@@ -379,14 +379,14 @@ export function BookingForm({
         </div>
         {isNewBooking ? (
           <div className="text-right">
-            {assetIds?.map((item, i)=>{
-              return <input
+            {assetIds?.map((item, i) => (
+              <input
                 key={item}
                 type="hidden"
                 name={`assetIds[${i}]`}
                 value={item}
               />
-            })}
+            ))}
             <Button type="submit">
               {assetIds ? "Create Booking" : "Check Asset Availability"}
             </Button>
