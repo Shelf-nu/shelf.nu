@@ -22,7 +22,7 @@ export default function BulkReleaseCustodyDialog() {
       {({ disabled, handleCloseDialog, fetcherError }) => (
         <div className="modal-content-wrapper">
           {fetcherError ? (
-            <p className="text-sm text-error-500">{fetcherError}</p>
+            <p className="mb-2 text-sm text-error-500">{fetcherError}</p>
           ) : null}
 
           <div className="flex gap-3">
