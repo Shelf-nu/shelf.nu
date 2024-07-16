@@ -5,6 +5,13 @@ import devServer, { defaultOptions } from "@hono/vite-dev-server";
 import esbuild from "esbuild";
 import { flatRoutes } from "remix-flat-routes";
 import { cjsInterop } from "vite-plugin-cjs-interop";
+import { init } from "@paralleldrive/cuid2";
+
+const createHash = init({
+  length: 8,
+});
+
+const buildHash = process.env.BUILD_HASH || createHash();
 
 export default defineConfig({
   server: {
@@ -25,6 +32,21 @@ export default defineConfig({
   // https://github.com/remix-run/remix/discussions/8917#discussioncomment-8640023
   optimizeDeps: {
     include: ["./app/routes/**/*"],
+  },
+  build: {
+    target: "ES2022",
+    assetsDir: `file-assets`,
+    rollupOptions: {
+      output: {
+        entryFileNames: `file-assets/${buildHash}/[name]-[hash].js`,
+        chunkFileNames() {
+          return `file-assets/${buildHash}/[name]-[hash].js`;
+        },
+        assetFileNames() {
+          return `file-assets/${buildHash}/[name][extname]`;
+        },
+      },
+    },
   },
   resolve: {
     alias: {

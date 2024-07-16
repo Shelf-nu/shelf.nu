@@ -1,5 +1,6 @@
 export interface HorizontalTabsProps {
   items: Item[];
+  className?: string;
 }
 
 export interface Item {

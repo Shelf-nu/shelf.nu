@@ -8,13 +8,13 @@ import { useFetcher, useLoaderData } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { CustodyCard } from "~/components/assets/asset-custody-card";
-import AssetQR from "~/components/assets/asset-qr";
 import { Switch } from "~/components/forms/switch";
 import Icon from "~/components/icons/icon";
 import ContextualModal from "~/components/layout/contextual-modal";
 import ContextualSidebar from "~/components/layout/contextual-sidebar";
 import type { HeaderData } from "~/components/layout/header/types";
 import { ScanDetails } from "~/components/location/scan-details";
+import { QrPreview } from "~/components/qr/qr-preview";
 
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
@@ -29,11 +29,8 @@ import {
   updateAssetBookingAvailability,
 } from "~/modules/asset/service.server";
 import type { ShelfAssetCustomFieldValueType } from "~/modules/asset/types";
-import {
-  createQr,
-  generateCode,
-  getQrByAssetId,
-} from "~/modules/qr/service.server";
+
+import { generateQrObj } from "~/modules/qr/utils.server";
 import { getScanByQrId } from "~/modules/scan/service.server";
 import { parseScanData } from "~/modules/scan/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -83,21 +80,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       include: ASSET_OVERVIEW_FIELDS,
     });
 
-    let qr = await getQrByAssetId({ assetId: id });
-
-    /** If for some reason there is no QR, we create one and return it */
-    if (!qr) {
-      qr = await createQr({ assetId: id, userId, organizationId });
-    }
-
-    /** Create a QR code with a URL */
-    const { sizes, code } = await generateCode({
-      version: qr.version as TypeNumber,
-      errorCorrection: qr.errorCorrection as ErrorCorrectionLevel,
-      size: "medium",
-      qr,
-    });
-
     /**
      * We get the first QR code(for now we can only have 1)
      * And using the ID of tha qr code, we find the latest scan
@@ -124,11 +106,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       };
     }
 
-    const qrObj = {
-      qr: code,
-      sizes,
-      showSidebar: true,
-    };
+    const qrObj = await generateQrObj({
+      assetId: asset.id,
+      userId,
+      organizationId,
+    });
 
     const booking = asset.bookings.length > 0 ? asset.bookings[0] : undefined;
     let currentBooking: any = null;
@@ -464,7 +446,15 @@ export default function AssetOverview() {
             isSelfService={isSelfService}
           />
 
-          {asset && <AssetQR qrObj={qrObj} asset={asset} />}
+          {asset && (
+            <QrPreview
+              qrObj={qrObj}
+              item={{
+                name: asset.title,
+                type: "asset",
+              }}
+            />
+          )}
           {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
         </div>
       </div>

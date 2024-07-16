@@ -30,16 +30,17 @@ model Image {
 }
 
 model User {
-  id             String  @id @default(cuid())
-  email          String  @unique
-  username       String  @unique @default(cuid())
-  firstName      String?
-  lastName       String?
-  profilePicture String?
-  usedFreeTrial  Boolean @default(false)
-  onboarded      Boolean @default(false)
-  customerId     String? @unique // Stripe customer id
-  sso            Boolean @default(false)
+  id                String  @id @default(cuid())
+  email             String  @unique
+  username          String  @unique @default(cuid())
+  firstName         String?
+  lastName          String?
+  profilePicture    String?
+  usedFreeTrial     Boolean @default(false)
+  onboarded         Boolean @default(false)
+  customerId        String? @unique // Stripe customer id
+  sso               Boolean @default(false)
+  createdWithInvite Boolean @default(false) // Set to true if the user was created by being invited to a workspace
 
   // Datetime
   createdAt DateTime @default(now())
@@ -207,7 +208,10 @@ model Qr {
   asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
   assetId String?
 
-  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: SetNull)
+  kitId String?
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   userId String?
 
   organization   Organization? @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
@@ -250,8 +254,11 @@ model ReportFound {
   updatedAt DateTime @updatedAt
 
   // Relationships
-  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  assetId String
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  assetId String?
+
+  kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  kitId String?
 }
 
 enum ErrorCorrection {
@@ -483,6 +490,7 @@ model CustomTierLimit {
   canImportNRM     Boolean  @default(true)
   maxCustomFields  Int      @default(1000)
   maxOrganizations Int      @default(1)
+  isEnterprise     Boolean  @default(false) // Set this to true for enterprise users. It is used to control some visuals in the app
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
@@ -663,6 +671,8 @@ model Kit {
 
   assets  Asset[]
   custody KitCustody?
+  qrCodes Qr[]
+  reports ReportFound[]
 
   organization   Organization @relation(fields: [organizationId], references: [id], onUpdate: Cascade)
   organizationId String

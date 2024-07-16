@@ -18,7 +18,10 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { onboardingEmailText } from "~/emails/onboarding-email";
-import { getAuthUserById } from "~/modules/auth/service.server";
+import {
+  getAuthUserById,
+  signInWithEmail,
+} from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID, updateUser } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -129,6 +132,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
       onboarded: true,
     });
 
+    /**
+     * When setting password as part of onboarding, the session gets destroyed as part of the normal password reset flow.
+     * In this case, we need to create a new session for the user.
+     */
+    if (user && userSignedUpWithPassword) {
+      //making sure new session is created.
+      const authSession = await signInWithEmail(
+        user.email,
+        payload.password as string
+      );
+      if (authSession) {
+        context.setSession(authSession);
+      }
+    }
+
     /** We create the stripe customer when the user gets onboarded.
      * This is to make sure that we have a stripe customer for the user.
      * We have to do it at this point, as its the first time we have the user's first and last name
@@ -151,10 +169,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     }
 
+    /** If organizationId is passed, that means the user comes from an invite */
     const { organizationId } = parseData(
       formData,
       z.object({ organizationId: z.string().optional() })
     );
+
+    const createdWithInvite = !!organizationId || user.createdWithInvite;
 
     const headers = [];
 
@@ -164,7 +185,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       );
     }
 
-    return redirect(organizationId ? `/assets` : `/welcome`, {
+    return redirect(createdWithInvite ? `/assets` : `/welcome`, {
       headers,
     });
   } catch (cause) {

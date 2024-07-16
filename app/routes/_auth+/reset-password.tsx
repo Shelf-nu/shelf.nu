@@ -70,12 +70,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         const authSession = await refreshAccessToken(refreshToken);
 
-        await updateAccountPassword(authSession.userId, password);
-
-        // Commit the session and redirect
-        context.setSession({ ...authSession });
-
-        return redirect("/");
+        await updateAccountPassword(
+          authSession.userId,
+          password,
+          authSession.accessToken
+        );
+        context.destroySession();
+        return redirect("/login?password_reset=true");
       }
     }
 

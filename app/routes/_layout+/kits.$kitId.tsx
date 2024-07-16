@@ -22,6 +22,8 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
+import { ScanDetails } from "~/components/location/scan-details";
+import { QrPreview } from "~/components/qr/qr-preview";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
@@ -40,6 +42,10 @@ import {
   getKit,
   getKitCurrentBooking,
 } from "~/modules/kit/service.server";
+
+import { generateQrObj } from "~/modules/qr/utils.server";
+import { getScanByQrId } from "~/modules/scan/service.server";
+import { parseScanData } from "~/modules/scan/utils.server";
 import { getUserByID } from "~/modules/user/service.server";
 import dropdownCss from "~/styles/actions-dropdown.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -119,6 +125,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               },
             },
           },
+          qrCodes: true,
         },
       }),
       getAssetsForKits({
@@ -141,6 +148,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       };
     }
 
+    const qrObj = await generateQrObj({
+      kitId,
+      userId,
+      organizationId,
+    });
+
+    /**
+     * We get the first QR code(for now we can only have 1)
+     * And using the ID of tha qr code, we find the latest scan
+     */
+    const lastScan = kit.qrCodes[0]?.id
+      ? parseScanData({
+          scan: (await getScanByQrId({ qrId: kit.qrCodes[0].id })) || null,
+          userId,
+          request,
+        })
+      : null;
     const currentBooking = getKitCurrentBooking(request, {
       id: kit.id,
       assets: kit.assets,
@@ -165,6 +189,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         header,
         ...assets,
         modelName,
+        qrObj,
+        lastScan,
       })
     );
   } catch (cause) {
@@ -288,10 +314,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function KitDetails() {
-  const { kit, currentBooking } = useLoaderData<typeof loader>();
-
+  const { kit, currentBooking, qrObj, lastScan } =
+    useLoaderData<typeof loader>();
   const isSelfService = useUserIsSelfService();
-
   /**
    * User can manage assets if
    * 1. Kit has AVAILABLE status
@@ -378,6 +403,14 @@ export default function KitDetails() {
             <span className="text-xs font-medium text-gray-600">ID</span>
             <div className="max-w-[250px] font-medium">{kit.id}</div>
           </Card>
+          <QrPreview
+            qrObj={qrObj}
+            item={{
+              name: kit.name,
+              type: "kit",
+            }}
+          />
+          {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
         </div>
 
         <div className="w-full lg:ml-6">
