@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "@remix-run/react";
 import { tw } from "~/utils/tw";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
 import type { IconType } from "./icons-map";
 import Icon from "../icons/icon";
 import type { ButtonVariant, ButtonWidth } from "../layout/header/types";
@@ -12,7 +13,13 @@ export interface ButtonProps {
   width?: ButtonWidth;
   size?: "sm" | "md";
   icon?: IconType;
-  disabled?: boolean;
+  /** Disabled can be a boolean  */
+  disabled?:
+    | boolean
+    | {
+        title?: string;
+        reason: string;
+      };
   attachToInput?: boolean;
   onlyIconOnMobile?: boolean;
   title?: string;
@@ -21,36 +28,32 @@ export interface ButtonProps {
 }
 
 export const Button = React.forwardRef<HTMLElement, ButtonProps>(
-  function Button(
-    {
+  function Button(props: ButtonProps, ref) {
+    let {
       as = "button",
-      className = "",
+      className,
       variant = "primary",
       width = "auto",
       size = "sm",
       attachToInput = false,
       icon,
-      disabled = undefined,
+      disabled,
       children,
-      title,
       onlyIconOnMobile,
       error,
       hideErrorText = false,
-      ...props
-    }: ButtonProps,
-    ref
-  ) {
+    } = props;
     const Component: React.ComponentType<any> | string = props?.to ? Link : as;
-    const baseButtonClasses = `inline-flex items-center justify-center rounded font-semibold text-center  gap-2  max-w-xl border text-sm box-shadow-xs`;
+    const baseButtonClasses = `inline-flex  items-center justify-center rounded font-semibold text-center  gap-2  max-w-xl border text-sm box-shadow-xs`;
 
     const variants = {
       primary: tw(
-        `border-primary-400 bg-primary-500 text-white hover:bg-primary-400 focus:ring-2`,
-        disabled ? "border-primary-300 bg-primary-300" : ""
+        `border-primary-400 bg-primary-500 text-white  focus:ring-2`,
+        disabled ? "border-primary-300 bg-primary-300" : "hover:bg-primary-400"
       ),
       secondary: tw(
-        `border-gray-300 bg-white text-gray-700 hover:bg-gray-50`,
-        disabled ? "text-gray-500" : ""
+        `border-gray-300 bg-white text-gray-700 `,
+        disabled ? "text-gray-500" : "hover:bg-gray-50"
       ),
       tertiary: tw(
         `border-b border-primary/10 pb-1 leading-none`,
@@ -73,7 +76,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     };
 
     const disabledStyles = disabled
-      ? "pointer-events-none opacity-50 cursor-not-allowed"
+      ? "opacity-50 cursor-not-allowed"
       : undefined;
     const attachedStyles = attachToInput
       ? tw(" rounded-l-none border-l-0")
@@ -92,13 +95,51 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
         : ""
     );
 
+    const isDisabled =
+      disabled === undefined // If it is undefined, then it is not disabled
+        ? false
+        : typeof disabled === "boolean"
+        ? disabled
+        : true; // If it is an object, then it is disabled
+    const reason = typeof disabled === "object" ? disabled.reason : "";
+    const disabledTitle =
+      typeof disabled === "object" ? disabled.title : undefined;
+
+    if (isDisabled) {
+      return (
+        <HoverCard openDelay={50} closeDelay={50}>
+          <HoverCardTrigger
+            className={tw("disabled  cursor-not-allowed ")}
+            asChild
+          >
+            <Component {...props} className={finalStyles}>
+              {icon && <Icon icon={icon} />}{" "}
+              {children ? (
+                <span
+                  className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}
+                >
+                  {children}
+                </span>
+              ) : null}
+            </Component>
+          </HoverCardTrigger>
+          {reason && (
+            <HoverCardContent side="left">
+              <h5 className="text-left text-[14px]">
+                {disabledTitle ? disabledTitle : "Action disabled"}
+              </h5>
+              <p className="text-left text-[14px]">{reason}</p>
+            </HoverCardContent>
+          )}
+        </HoverCard>
+      );
+    }
     return (
       <>
         <Component
+          {...props}
           className={finalStyles}
           prefetch={props.to ? (props.prefetch ? "intent" : "none") : "none"}
-          {...props}
-          title={title}
           ref={ref}
         >
           {icon && <Icon icon={icon} />}{" "}

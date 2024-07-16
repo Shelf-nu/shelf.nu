@@ -444,7 +444,7 @@ export default function KitDetails() {
               {!isSelfService ? (
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
-                    <ControlledActionButton
+                    {/* <ControlledActionButton
                       canUseFeature={canManageAssets}
                       skipCta
                       buttonContent={{
@@ -460,7 +460,24 @@ export default function KitDetails() {
                         width: "full",
                         className: "whitespace-nowrap",
                       }}
-                    />
+                    /> */}
+                    <Button
+                      to="manage-assets"
+                      variant="primary"
+                      icon="plus"
+                      width="full"
+                      className="whitespace-nowrap"
+                      disabled={
+                        !canManageAssets
+                          ? {
+                              reason:
+                                "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                            }
+                          : false
+                      }
+                    >
+                      Manage assets
+                    </Button>
                   </div>
                 </div>
               ) : null}

@@ -8,7 +8,7 @@ import {
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
 import type { SearchableIndexResponse } from "~/modules/types";
-import { isFormProcessing } from "~/utils/form";
+import { isSearching } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { SearchFieldTooltip } from "./search-field-tooltip";
 
@@ -19,7 +19,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
   const { singular } = modelName;
 
   const navigation = useNavigation();
-  const isSearching = isFormProcessing(navigation.state);
+  const disabled = isSearching(navigation);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const label = searchFieldLabel ? searchFieldLabel : `Search by ${singular}`;
@@ -65,13 +65,13 @@ export const SearchForm = ({ className }: { className?: string }) => {
           ref={searchInputRef}
           onChange={debouncedHandleChange}
         />
-        {search || isSearching ? (
+        {search || disabled ? (
           <Button
-            icon={isSearching ? "spinner" : "x"}
+            icon={disabled ? "spinner" : "x"}
             variant="tertiary"
-            disabled={isSearching}
+            disabled={disabled}
             title="Clear search"
-            className="absolute right-3.5 top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
+            className="absolute right-3.5 top-1/2 !w-auto -translate-y-1/2 cursor-pointer border-0 p-0 text-gray-400 hover:text-gray-700"
             onClick={clearSearch}
           />
         ) : (
