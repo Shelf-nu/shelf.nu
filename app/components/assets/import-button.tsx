@@ -1,20 +1,29 @@
-import { ControlledActionButton } from "../shared/controlled-action-button";
+import { UpgradeMessage } from "../marketing/upgrade-message";
+import { Button } from "../shared/button";
 
 export const ImportButton = ({
   canImportAssets,
 }: {
   canImportAssets: boolean;
 }) => (
-  <ControlledActionButton
-    canUseFeature={canImportAssets}
-    buttonContent={{
-      title: "Import",
-      message: "Importing is not available on the free tier of shelf.",
-    }}
-    buttonProps={{
-      to: `import`,
-      variant: "secondary",
-      role: "link",
-    }}
-  />
+  <Button
+    to={`import`}
+    variant="secondary"
+    role="link"
+    disabled={
+      !canImportAssets
+        ? {
+            reason: (
+              <>
+                Importing is not available on the free tier of shelf.{" "}
+                <UpgradeMessage />
+              </>
+            ),
+          }
+        : false
+    }
+    title="Import assets"
+  >
+    Import
+  </Button>
 );

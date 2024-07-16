@@ -18,7 +18,7 @@ export interface ButtonProps {
     | boolean
     | {
         title?: string;
-        reason: string;
+        reason: React.ReactNode | string;
       };
   attachToInput?: boolean;
   onlyIconOnMobile?: boolean;
