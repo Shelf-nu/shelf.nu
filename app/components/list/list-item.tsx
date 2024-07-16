@@ -17,7 +17,19 @@ export const ListItem = ({
   className?: string;
 }) => (
   <tr
-    onClick={navigate ? () => navigate(item.id, item) : undefined}
+    // onClick={navigate ? () => navigate(item.id, item) : undefined}
+    onClick={(event) => {
+      if (navigate) {
+        // Check if Ctrl or Cmd key is pressed
+        if (window && (event.ctrlKey || event.metaKey)) {
+          window.open(window.location.href + "/" + item.id);
+          return;
+        }
+
+        // Call the navigate function if it exists
+        navigate(item.id, item);
+      }
+    }}
     className={tw(
       "hover:bg-gray-50",
       navigate ? "cursor-pointer" : "",
