@@ -85,13 +85,8 @@ export const ZXingScanner = ({
             controls={false}
             muted={true}
             playsInline={true}
-            className={`pointer-events-none size-full object-cover object-center`}
+            className="pointer-events-none size-full object-cover object-center"
           />
-          <div className="absolute left-1/2 top-1/2 z-10 h-[400px] w-11/12 max-w-[600px] -translate-x-1/2 -translate-y-1/2 rounded border-4 border-white md:h-[600px]">
-            <div className="relative size-full">
-              <div className="absolute bottom-3 left-1/2 size-20 h-1 w-[calc(100%-40px)] -translate-x-1/2 rounded-full bg-white" />
-            </div>
-          </div>
 
           <fetcher.Form
             method="post"
@@ -129,6 +124,9 @@ export const ZXingScanner = ({
               </Select>
             ) : null}
           </fetcher.Form>
+
+          {/* Overlay */}
+          <div className="absolute left-1/2 top-1/2 h-[400px] w-11/12 max-w-[600px] -translate-x-1/2 -translate-y-1/2 rounded border-4 border-white shadow-camera-overlay before:absolute before:bottom-3 before:left-1/2 before:h-1 before:w-[calc(100%-40px)] before:-translate-x-1/2 before:rounded-full before:bg-white md:h-[600px]" />
         </>
       )}
     </div>

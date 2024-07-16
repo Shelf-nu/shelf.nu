@@ -99,7 +99,7 @@ export default function ScannedAssetsDrawer({
           </When>
 
           <When truthy={fetchedScannedAssetsCount > 0}>
-            <div className="max-h-[600px] overflow-auto">
+            <div className="h-[600px] overflow-auto">
               <Table className="overflow-y-auto">
                 <ListHeader hideFirstColumn>
                   <Th className="p-0"> </Th>
