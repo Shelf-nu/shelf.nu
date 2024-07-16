@@ -216,12 +216,9 @@ export default function AssetDetailsPage() {
           skipCta={true}
           canUseFeature={!asset.kit} // The button is enabled only if the asset is not part of a kit
           buttonContent={{
-            title: (
-                <span>
-                  Book
-                </span>
-            ),
-            message: "Cannot book this asset directly because it's part of a kit",
+            title: <span>Book</span>,
+            message:
+              "Cannot book this asset directly because it's part of a kit",
           }}
           buttonProps={{
             to: `/bookings/new?assetIds=${asset.id}`,
