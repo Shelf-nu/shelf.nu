@@ -4,6 +4,14 @@ import { useClientNotification } from "~/hooks/use-client-notification";
 import type { loader } from "~/routes/_layout+/scanner";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./forms/select";
+import Icon from "./icons/icon";
 import { Spinner } from "./shared/spinner";
 
 type ZXingScannerProps = {
@@ -88,24 +96,37 @@ export const ZXingScanner = ({
           <fetcher.Form
             method="post"
             action="/api/user/prefs/scanner-camera"
-            className="relative"
             onChange={(e) => {
               const form = e.currentTarget;
               fetcher.submit(form);
             }}
           >
             {videoMediaDevices && videoMediaDevices?.length > 0 ? (
-              <select
-                className="absolute bottom-3 left-3 z-10 w-[calc(100%-24px)] rounded border-0 md:left-auto md:right-3 md:w-auto"
-                name="scannerCameraId"
-                defaultValue={scannerCameraId}
-              >
-                {videoMediaDevices.map((device, index) => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.label ? device.label : `Camera ${index + 1}`}
-                  </option>
-                ))}
-              </select>
+              <Select name="scannerCameraId" defaultValue={scannerCameraId}>
+                <SelectTrigger
+                  hideArrow
+                  className="absolute right-2 top-3 z-10 size-12 justify-center overflow-hidden rounded-full pb-1"
+                >
+                  <SelectValue placeholder={<Icon icon="settings" />}>
+                    <Icon icon="settings" />
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent
+                  position="popper"
+                  alignOffset={10}
+                  className="mt-1 max-w-96 md:min-w-80"
+                >
+                  {videoMediaDevices.map((device, index) => (
+                    <SelectItem
+                      key={device.deviceId}
+                      value={device.deviceId}
+                      className="cursor-pointer"
+                    >
+                      {device.label ? device.label : `Device ${index + 1}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : null}
           </fetcher.Form>
         </>

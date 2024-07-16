@@ -2,6 +2,7 @@ import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { tw } from "~/utils/tw";
 import { CheckIcon, ChevronRight } from "../icons/library";
+import When from "../when/when";
 
 const Select = SelectPrimitive.Root;
 
@@ -11,8 +12,13 @@ const SelectValue = SelectPrimitive.Value;
 
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(function SelectTrigger({ className, children, ...props }, ref) {
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & {
+    hideArrow?: boolean;
+  }
+>(function SelectTrigger(
+  { className, children, hideArrow = false, ...props },
+  ref
+) {
   return (
     <SelectPrimitive.Trigger
       ref={ref}
@@ -24,7 +30,9 @@ const SelectTrigger = React.forwardRef<
     >
       {children}
 
-      <ChevronRight className="rotate-90" />
+      <When truthy={!hideArrow}>
+        <ChevronRight className="rotate-90" />
+      </When>
     </SelectPrimitive.Trigger>
   );
 });
