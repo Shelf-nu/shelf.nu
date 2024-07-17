@@ -85,7 +85,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isSelfService,
         selfServiceUser,
         teamMembers,
-        assetIds,
+        assetIds: assetIds.length ? assetIds : undefined,
       }),
       {
         headers: [
