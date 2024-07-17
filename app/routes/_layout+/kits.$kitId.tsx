@@ -27,7 +27,6 @@ import { QrPreview } from "~/components/qr/qr-preview";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
-import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -417,22 +416,21 @@ export default function KitDetails() {
           <TextualDivider text="Assets" className="mb-8 lg:hidden" />
           <div className="mb-3 flex gap-4 lg:hidden">
             {!isSelfService ? (
-              <ControlledActionButton
-                canUseFeature={canManageAssets}
-                skipCta
-                buttonContent={{
-                  title: "Manage assets",
-                  message:
-                    "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                }}
-                buttonProps={{
-                  as: "button",
-                  to: "manage-assets",
-                  variant: "primary",
-                  icon: "plus",
-                  width: "full",
-                }}
-              />
+              <Button
+                to="manage-assets"
+                variant="primary"
+                width="full"
+                disabled={
+                  !canManageAssets
+                    ? {
+                        reason:
+                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                      }
+                    : false
+                }
+              >
+                Manage assets
+              </Button>
             ) : null}
             <div className="w-full">
               <ActionsDropdown fullWidth />
@@ -444,23 +442,22 @@ export default function KitDetails() {
               {!isSelfService ? (
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
-                    <ControlledActionButton
-                      canUseFeature={canManageAssets}
-                      skipCta
-                      buttonContent={{
-                        title: "Manage assets",
-                        message:
-                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                      }}
-                      buttonProps={{
-                        as: "button",
-                        to: "manage-assets",
-                        variant: "primary",
-                        icon: "plus",
-                        width: "full",
-                        className: "whitespace-nowrap",
-                      }}
-                    />
+                    <Button
+                      to="manage-assets"
+                      variant="primary"
+                      width="full"
+                      className="whitespace-nowrap"
+                      disabled={
+                        !canManageAssets
+                          ? {
+                              reason:
+                                "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                            }
+                          : false
+                      }
+                    >
+                      Manage assets
+                    </Button>
                   </div>
                 </div>
               ) : null}

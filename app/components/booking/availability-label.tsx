@@ -51,6 +51,19 @@ export function AvailabilityLabel({
   }
 
   /**
+   * Asset is part of a kit
+   */
+  if (isPartOfKit && showKitStatus) {
+    return (
+      <AvailabilityBadge
+        badgeText="Part of kit"
+        tooltipTitle="Asset is part of a kit"
+        tooltipContent="Remove the asset from the kit to add it individually."
+      />
+    );
+  }
+
+  /**
    * Has custody
    */
   if (asset.custody) {
@@ -130,19 +143,6 @@ export function AvailabilityLabel({
       <AvailabilityBadge
         badgeText="Added through kit"
         tooltipTitle="Asset was added through a kit"
-        tooltipContent="Remove the asset from the kit to add it individually."
-      />
-    );
-  }
-
-  /**
-   * Asset is part of a kit
-   */
-  if (isPartOfKit && showKitStatus) {
-    return (
-      <AvailabilityBadge
-        badgeText="Part of kit"
-        tooltipTitle="Asset is part of a kit"
         tooltipContent="Remove the asset from the kit to add it individually."
       />
     );
