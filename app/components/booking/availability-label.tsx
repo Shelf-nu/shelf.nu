@@ -150,8 +150,6 @@ export function AvailabilityLabel({
     );
   }
 
-
-
   /** User scanned the asset and it is already in booking */
   if (isAlreadyAdded) {
     return (
