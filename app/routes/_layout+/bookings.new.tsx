@@ -7,7 +7,6 @@ import type {
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { DateTime } from "luxon";
-import { z } from "zod";
 import { BookingForm, NewBookingFormSchema } from "~/components/booking/form";
 import styles from "~/components/booking/styles.new.css?url";
 import { db } from "~/database/db.server";
@@ -39,7 +38,7 @@ import { requirePermission } from "~/utils/roles.server";
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const searchParams = getCurrentSearchParams(request);
-  const assetIds = searchParams.getAll("assetIds");
+  const assetIds = searchParams.getAll("assetId");
   const authSession = context.getSession();
   const { userId } = authSession;
 

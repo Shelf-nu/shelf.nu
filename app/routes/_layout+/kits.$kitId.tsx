@@ -86,6 +86,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         extraInclude: {
           assets: {
             select: {
+              id: true,
               status: true,
               custody: { select: { id: true } },
               bookings: {
@@ -340,8 +341,12 @@ export default function KitDetails() {
       )
     : kit.status === "AVAILABLE";
 
+  const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
+
   const kitBookings =
     kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
+
+  const noAssets = !kit.assets.length;
 
   const canManageAssets =
     kitIsAvailable &&
@@ -358,11 +363,33 @@ export default function KitDetails() {
         subHeading={
           <KitStatusBadge
             status={kit.status}
-            availableToBook={!kit.assets.some((a) => !a.availableToBook)}
+            availableToBook={!kitHasUnavailableAssets}
           />
         }
       >
         {!isSelfService ? <ActionsDropdown /> : null}
+        <Button
+          to={`/bookings/new?${kit.assets
+            .map((a) => `assetId=${a.id}`)
+            .join("&")}`}
+          role="link"
+          aria-label="new booking"
+          data-test-id="createNewBooking"
+          prefetch="none"
+          disabled={
+            kitHasUnavailableAssets || !kitIsAvailable || noAssets
+              ? {
+                  reason: noAssets
+                    ? "Kit has no assets. Please add some assets to be able to book this kit."
+                    : kitHasUnavailableAssets
+                    ? "Some of the assets inside the kit are not available for bookings"
+                    : "Kit is not available for bookings",
+                }
+              : false
+          }
+        >
+          Book
+        </Button>
       </Header>
 
       <ContextualModal />

@@ -16,7 +16,6 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
-import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import {
   deleteAsset,
@@ -212,22 +211,36 @@ export default function AssetDetailsPage() {
         }
       >
         {!isSelfService ? <ActionsDropdown /> : null}
-        <ControlledActionButton
-          skipCta={true}
-          canUseFeature={!asset.kit} // The button is enabled only if the asset is not part of a kit
-          buttonContent={{
-            title: <span>Book</span>,
-            message:
-              "Cannot book this asset directly because it's part of a kit",
-          }}
-          buttonProps={{
-            to: `/bookings/new?assetIds=${asset.id}`,
-            role: "link",
-            "aria-label": "new booking",
-            "data-test-id": "createNewBooking",
-            prefetch: "none",
-          }}
-        />
+
+        <Button
+          to={`/bookings/new?assetId=${asset.id}`}
+          role="link"
+          aria-label="new booking"
+          data-test-id="createNewBooking"
+          prefetch="none"
+          disabled={
+            asset.kit
+              ? {
+                  reason: (
+                    <>
+                      Cannot book this asset directly because it's part of a
+                      kit. Please book the{" "}
+                      <Button
+                        to={`/kits/${asset.kit.id}`}
+                        target="_blank"
+                        variant="link"
+                      >
+                        kit
+                      </Button>{" "}
+                      instead.
+                    </>
+                  ),
+                }
+              : false
+          }
+        >
+          Book
+        </Button>
       </Header>
       <HorizontalTabs items={items} />
       <div>
