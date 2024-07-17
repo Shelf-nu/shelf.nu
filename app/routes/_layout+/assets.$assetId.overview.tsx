@@ -315,7 +315,7 @@ export default function AssetOverview() {
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Value
                   </span>
-                  <div className="-ml-2 mb-2 w-3/5">
+                  <div className="-ml-2 w-3/5">
                     <div className="ml-2 w-3/5 text-gray-600">
                       {asset.valuation.toLocaleString(locale, {
                         currency: asset.organization.currency,
