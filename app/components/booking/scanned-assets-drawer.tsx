@@ -1,3 +1,4 @@
+import { AssetStatus } from "@prisma/client";
 import { Form, useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useZorm } from "react-zorm";
@@ -53,6 +54,10 @@ export default function ScannedAssetsDrawer({
   const removeFetchedScannedAsset = useSetAtom(removeFetchedScannedAssetAtom);
   const clearFetchedScannedAssets = useSetAtom(clearFetchedScannedAssetsAtom);
 
+  const someAssetsCheckedOut = fetchedScannedAssets.some(
+    (asset) => asset.status === AssetStatus.CHECKED_OUT
+  );
+
   return (
     <Drawer>
       <DrawerTrigger>
@@ -60,7 +65,7 @@ export default function ScannedAssetsDrawer({
       </DrawerTrigger>
 
       <DrawerContent
-        className={tw("min-h-[600px] overflow-y-hidden", className)}
+        className={tw("min-h-[700px] overflow-y-hidden", className)}
         style={style}
       >
         <div className="mx-auto size-full md:max-w-4xl">
@@ -99,7 +104,7 @@ export default function ScannedAssetsDrawer({
           </When>
 
           <When truthy={fetchedScannedAssetsCount > 0}>
-            <div className="h-[600px] overflow-auto">
+            <div className="overflow-auto">
               <Table className="overflow-y-auto">
                 <ListHeader hideFirstColumn>
                   <Th className="p-0"> </Th>
@@ -182,7 +187,10 @@ export default function ScannedAssetsDrawer({
                     />
                   ))}
 
-                  <Button className="w-full max-w-full" disabled={isLoading}>
+                  <Button
+                    className="w-full max-w-full"
+                    disabled={isLoading || someAssetsCheckedOut}
+                  >
                     Confirm
                   </Button>
                 </Form>

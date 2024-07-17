@@ -180,12 +180,6 @@ export default function ScanAssetsForBookings() {
 
     setFetchedQrIds((prev) => [...prev, qrId]);
 
-    sendNotification({
-      title: "Shelf's QR Code detected",
-      message: "Fetching mapped asset details...",
-      icon: { name: "success", variant: "success" },
-    });
-
     fetcher.submit(
       { qrId, bookingId: booking.id },
       { method: "POST", action: "/api/bookings/get-scanned-asset" }

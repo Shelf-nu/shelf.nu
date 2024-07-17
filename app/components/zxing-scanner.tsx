@@ -71,7 +71,7 @@ export const ZXingScanner = ({
   });
 
   return (
-    <div className="relative size-full min-h-[400px]">
+    <div className="relative size-full min-h-[400px] overflow-hidden">
       {isProcessing ? (
         <div className="mt-4 flex flex-col items-center justify-center">
           <Spinner /> Switching cameras...
@@ -100,7 +100,7 @@ export const ZXingScanner = ({
               <Select name="scannerCameraId" defaultValue={scannerCameraId}>
                 <SelectTrigger
                   hideArrow
-                  className="absolute right-2 top-3 z-10 size-12 justify-center overflow-hidden rounded-full pb-1"
+                  className="absolute right-2 top-3 z-10 size-12 justify-center overflow-hidden rounded-full border-none bg-transparent pb-1 text-gray-25/50"
                 >
                   <SelectValue placeholder={<Icon icon="settings" />}>
                     <Icon icon="settings" />
