@@ -63,7 +63,7 @@ export const NewBookingFormSchema = (
       endDate: inputFieldIsDisabled
         ? z.coerce.date().optional()
         : z.coerce.date(),
-      assetIds: z.array(z.string()).min(1),
+      assetIds: z.array(z.string()).optional(),
       custodian: z
         .string()
         .transform((val, ctx) => {
@@ -382,7 +382,7 @@ export function BookingForm({
                 value={item}
               />
             ))}
-            <Button type="submit">
+            <Button type="submit" disabled={disabled}>
               {assetIds ? "Create Booking" : "Check Asset Availability"}
             </Button>
           </div>
