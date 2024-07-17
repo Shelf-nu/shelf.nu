@@ -432,6 +432,7 @@ export default function AssetOverview() {
                     className={tw(
                       "justify-start text-sm font-normal text-gray-700 underline hover:text-gray-700"
                     )}
+                    target="_blank"
                   >
                     {asset.kit.name}
                   </Button>

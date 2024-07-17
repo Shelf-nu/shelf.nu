@@ -104,6 +104,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
           currentSearchParams,
         });
 
+        sendNotification({
+          title: "Bookings cancelled",
+          message: "Your bookings has been cancelled successfully",
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
         return json(data({ success: true }));
       }
 

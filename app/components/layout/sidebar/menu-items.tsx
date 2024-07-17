@@ -4,7 +4,8 @@ import { motion } from "framer-motion";
 import { useAtom } from "jotai";
 import { switchingWorkspaceAtom } from "~/atoms/switching-workspace";
 import Icon from "~/components/icons/icon";
-import { ControlledActionButton } from "~/components/shared/controlled-action-button";
+import { UpgradeMessage } from "~/components/marketing/upgrade-message";
+import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { useMainMenuItems } from "~/hooks/use-main-menu-items";
 import type { loader } from "~/routes/_layout+/_layout";
@@ -14,7 +15,7 @@ import { ChatWithAnExpert } from "./chat-with-an-expert";
 
 const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
   const [, toggleMobileNav] = useAtom(toggleMobileNavAtom);
-  const { isAdmin, minimizedSidebar, canUseBookings } =
+  const { isAdmin, minimizedSidebar, canUseBookings, subscription } =
     useLoaderData<typeof loader>();
   const { menuItemsTop, menuItemsBottom } = useMainMenuItems();
   const location = useLocation();
@@ -50,50 +51,58 @@ const MenuItems = ({ fetcher }: { fetcher: FetcherWithComponents<any> }) => {
           {menuItemsTop.map((item) =>
             item.to === "bookings" || item.to === "calendar" ? (
               <li key={item.title}>
-                <ControlledActionButton
-                  canUseFeature={canUseBookings}
-                  buttonContent={{
-                    title: (
-                      <span className="flex items-center gap-3 rounded ">
-                        <i
-                          className={tw(
-                            "icon pl-[2px] text-gray-500",
-                            !canUseBookings
-                              ? "!hover:text-gray-500 !text-gray-500"
-                              : ""
-                          )}
-                        >
-                          {item.icon}
-                        </i>
-                        <span className="text whitespace-nowrap transition duration-200 ease-linear hover:text-primary-600">
-                          {item.title}
-                        </span>
-                      </span>
-                    ),
-                    message: `${
-                      item.to[0].toUpperCase() + item.to.substring(1)
-                    } is a premium feature only available for Team workspaces.`,
-                    ctaText: "upgrading to a team plan",
-                  }}
-                  buttonProps={{
-                    to: item.to,
-                    "data-test-id": `${item.title.toLowerCase()}SidebarMenuItem`,
-                    onClick: toggleMobileNav,
-                    title: item.title,
-                    disabled: workspaceSwitching,
-                    className: tw(
-                      "my-1 flex items-center gap-3 rounded border-0 bg-transparent px-3 text-left text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
-                      canUseBookings
-                        ? "justify-start focus:ring-0"
-                        : "my-0 text-gray-500 hover:bg-gray-50 hover:text-gray-500",
-                      /** We need to do this becasue of a special way we handle the bookings link that doesnt allow us to use NavLink currently */
-                      location.pathname.includes(item.to) &&
-                        !location.pathname.includes("assets")
-                        ? "active bg-primary-50 text-primary-600"
-                        : ""
-                    ),
-                  }}
-                />
+                <Button
+                  to={item.to}
+                  data-test-id={`${item.title.toLowerCase()}SidebarMenuItem`}
+                  onClick={toggleMobileNav}
+                  title={item.title}
+                  className={tw(
+                    "my-1 flex items-center justify-start gap-3 rounded border-0 bg-transparent px-3 text-left text-[16px] font-semibold text-gray-700 transition-all duration-75 hover:bg-primary-50 hover:text-primary-600",
+                    canUseBookings
+                      ? "justify-start focus:ring-0"
+                      : "my-0 text-gray-500 hover:bg-gray-50 hover:text-gray-500",
+                    /** We need to do this becasue of a special way we handle the bookings link that doesnt allow us to use NavLink currently */
+                    location.pathname.includes(item.to) &&
+                      !location.pathname.includes("assets")
+                      ? "active bg-primary-50 text-primary-600"
+                      : ""
+                  )}
+                  disabled={
+                    !canUseBookings
+                      ? {
+                          title: "Disabled",
+                          reason: (
+                            <>
+                              {item.to[0].toUpperCase() + item.to.substring(1)}{" "}
+                              is a premium feature only available for Team
+                              workspaces.{" "}
+                              {!subscription ? (
+                                <UpgradeMessage />
+                              ) : (
+                                "Please switch to your team workspace to access this feature."
+                              )}
+                            </>
+                          ),
+                        }
+                      : false
+                  }
+                >
+                  <span className="flex items-center gap-3 rounded ">
+                    <i
+                      className={tw(
+                        "icon pl-[2px] text-gray-500",
+                        !canUseBookings
+                          ? "!hover:text-gray-500 !text-gray-500"
+                          : ""
+                      )}
+                    >
+                      {item.icon}
+                    </i>
+                    <span className="text whitespace-nowrap transition duration-200 ease-linear hover:text-primary-600">
+                      {item.title}
+                    </span>
+                  </span>
+                </Button>
               </li>
             ) : (
               <li key={item.title}>

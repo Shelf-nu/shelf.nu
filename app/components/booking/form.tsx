@@ -22,7 +22,6 @@ import Input from "../forms/input";
 import { AbsolutePositionedHeaderActions } from "../layout/header/absolute-positioned-header-actions";
 import { Button } from "../shared/button";
 import { Card } from "../shared/card";
-import { ControlledActionButton } from "../shared/controlled-action-button";
 
 /**
  * Important note is that the fields are only valudated when they are not disabled
@@ -64,6 +63,7 @@ export const NewBookingFormSchema = (
       endDate: inputFieldIsDisabled
         ? z.coerce.date().optional()
         : z.coerce.date(),
+      assetIds: z.array(z.string()).min(1),
       custodian: z
         .string()
         .transform((val, ctx) => {
@@ -110,6 +110,7 @@ type BookingFormData = {
   custodianUserId?: string; // This is a stringified value for custodianUser
   bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
   bookingFlags?: BookingFlags;
+  assetIds?: string[] | null;
 };
 
 export function BookingForm({
@@ -120,6 +121,7 @@ export function BookingForm({
   custodianUserId,
   bookingStatus,
   bookingFlags,
+  assetIds,
 }: BookingFormData) {
   const navigation = useNavigation();
 
@@ -186,62 +188,58 @@ export function BookingForm({
 
             {/* When booking is draft, we show the reserve button */}
             {bookingStatus?.isDraft ? (
-              <ControlledActionButton
-                canUseFeature={
-                  !disabled &&
-                  !!bookingFlags?.hasAssets &&
-                  !bookingFlags?.hasAlreadyBookedAssets
+              <Button
+                disabled={
+                  disabled ||
+                  !bookingFlags?.hasAssets ||
+                  bookingFlags?.hasAlreadyBookedAssets ||
+                  bookingFlags?.hasUnavailableAssets
+                    ? {
+                        reason: bookingFlags?.hasUnavailableAssets
+                          ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
+                          : bookingFlags?.hasAlreadyBookedAssets
+                          ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
+                          : isProcessing
+                          ? undefined
+                          : "You need to add assets to your booking before you can reserve it",
+                      }
+                    : false
                 }
-                buttonContent={{
-                  title: "Reserve",
-                  message: bookingFlags?.hasUnavailableAssets
-                    ? "You have some assets in your booking that are marked as unavailble. Either remove the assets from this booking or make them available again"
-                    : bookingFlags?.hasAlreadyBookedAssets
-                    ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can reserve"
-                    : isProcessing
-                    ? undefined // If we are currently submitting, we shouldnt show anything
-                    : "You need to add assets to your booking before you can reserve it",
-                }}
-                buttonProps={{
-                  disabled: disabled,
-                  type: "submit",
-                  role: "link",
-                  name: "intent",
-                  value: "reserve",
-                  className: "grow",
-                  size: "sm",
-                }}
-                skipCta={true}
-              />
+                type="submit"
+                name="intent"
+                value="reserve"
+                className="grow"
+                size="sm"
+              >
+                Reserve
+              </Button>
             ) : null}
 
             {/* When booking is reserved, we show the check-out button */}
             {bookingStatus?.isReserved && !isSelfService ? (
-              <ControlledActionButton
-                canUseFeature={
-                  !disabled &&
-                  !bookingFlags?.hasUnavailableAssets &&
-                  !bookingFlags?.hasCheckedOutAssets &&
-                  !bookingFlags?.hasAssetsInCustody
+              <Button
+                disabled={
+                  disabled ||
+                  bookingFlags?.hasUnavailableAssets ||
+                  bookingFlags?.hasCheckedOutAssets ||
+                  bookingFlags?.hasAssetsInCustody
+                    ? {
+                        reason: bookingFlags?.hasAssetsInCustody
+                          ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                          : isProcessing
+                          ? undefined
+                          : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
+                      }
+                    : false
                 }
-                buttonContent={{
-                  title: "Check-out",
-                  message: bookingFlags?.hasAssetsInCustody
-                    ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
-                    : isProcessing
-                    ? undefined
-                    : "Some assets in this booking are not Available because they’re part of an Ongoing or Overdue booking",
-                }}
-                buttonProps={{
-                  disabled: disabled,
-                  type: "submit",
-                  name: "intent",
-                  value: "checkOut",
-                  className: "grow",
-                  size: "sm",
-                }}
-                skipCta={true}
-              />
+                type="submit"
+                name="intent"
+                value="checkOut"
+                className="grow"
+                size="sm"
+              >
+                Check Out
+              </Button>
             ) : null}
 
             {(bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
@@ -259,7 +257,6 @@ export function BookingForm({
             ) : null}
           </AbsolutePositionedHeaderActions>
         ) : null}
-
         <div className="-mx-4 mb-4 md:mx-0">
           <div
             className={tw(
@@ -377,7 +374,17 @@ export function BookingForm({
         </div>
         {isNewBooking ? (
           <div className="text-right">
-            <Button type="submit">Check Asset Availability</Button>
+            {assetIds?.map((item, i) => (
+              <input
+                key={item}
+                type="hidden"
+                name={`assetIds[${i}]`}
+                value={item}
+              />
+            ))}
+            <Button type="submit">
+              {assetIds ? "Create Booking" : "Check Asset Availability"}
+            </Button>
           </div>
         ) : null}
       </Form>

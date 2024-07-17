@@ -18,7 +18,6 @@ import { ListItem, type ListItemData } from "../list/list-item";
 import { Pagination } from "../list/pagination";
 import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
-import { ControlledActionButton } from "../shared/controlled-action-button";
 import TextualDivider from "../shared/textual-divider";
 import { Table, Td, Th } from "../table";
 
@@ -30,7 +29,7 @@ export function BookingAssetsColumn() {
   }>();
   const hasItems = items?.length > 0;
   const isSelfService = useUserIsSelfService();
-  const { isDraft, isReserved, isCompleted, isArchived } =
+  const { isDraft, isReserved, isCompleted, isArchived, isCancelled } =
     useBookingStatusHelpers(booking);
 
   const manageAssetsUrl = useMemo(
@@ -47,7 +46,7 @@ export function BookingAssetsColumn() {
   );
 
   // Self service can only manage assets for bookings that are DRAFT
-  const canManageAssetsAsSelfService =
+  const cantManageAssetsAsSelfService =
     isSelfService && booking.status !== BookingStatus.DRAFT;
 
   const { assetsWithoutKits, groupedAssetsWithKits } = useMemo(
@@ -68,6 +67,20 @@ export function BookingAssetsColumn() {
     !isArchived &&
     !canManageAssetsAsSelfService;
 
+  const manageAssetsDisabled = !canManageAssets
+                  ? {
+                      reason: isCompleted
+                        ? "Booking is completed. You cannot change the assets anymore"
+                        : isArchived
+                        ? "Booking is archived. You cannot change the assets anymore"
+                        : isCancelled
+                        ? "Booking is cancelled. You cannot change the assets anymore"
+                        : cantManageAssetsAsSelfService
+                        ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+                        : "You need to select a start and end date and save your booking before you can add assets to your booking",
+                    }
+                  : false
+
   return (
     <div className="flex-1">
       <div className=" w-full">
@@ -85,30 +98,20 @@ export function BookingAssetsColumn() {
                 icon="scan"
                 to="scan-assets"
                 variant="outline"
-                disabled={!canManageAssets}
+                disabled={manageAssetsDisabled}
               >
                 Scan
               </Button>
 
-              <ControlledActionButton
-                canUseFeature={canManageAssets}
-                buttonContent={{
-                  title: "Manage assets",
-                  message: isCompleted
-                    ? "Booking is completed. You cannot change the assets anymore"
-                    : isSelfService
-                    ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-                    : "You need to select a start and end date and save your booking before you can add assets to your booking",
-                }}
-                buttonProps={{
-                  as: "button",
-                  to: manageAssetsUrl,
-                  icon: "plus",
-                  className: "whitespace-nowrap",
-                }}
-                skipCta={true}
-              />
+<Button
+              to={manageAssetsUrl}
+              className="whitespace-nowrap"
+              disabled={manageAssetsDisabled}
+            >
+              Manage assets
+            </Button>
             </div>
+            
           </div>
 
           <div className="overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">

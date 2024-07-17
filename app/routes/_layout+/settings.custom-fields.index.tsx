@@ -7,7 +7,7 @@ import BulkActionsDropdown from "~/components/custom-fields/bulk-actions-dropdow
 import type { HeaderData } from "~/components/layout/header/types";
 import { List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
-import { ControlledActionButton } from "~/components/shared/controlled-action-button";
+import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import {
   countActiveCustomFields,
@@ -108,22 +108,23 @@ export default function CustomFieldsIndexPage() {
     <>
       <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
         <h2 className=" text-lg text-gray-900">Custom Fields</h2>
-        <ControlledActionButton
-          canUseFeature={canCreateMoreCustomFields}
-          buttonContent={{
-            title: "New Custom Field",
-            message:
-              "You are not able to create more active custom fields within your current plan.",
-          }}
-          buttonProps={{
-            to: "new",
-            role: "link",
-            icon: "plus",
-            "aria-label": `new custom field`,
-            "data-test-id": "createNewCustomField",
-            variant: "primary",
-          }}
-        />
+        <Button
+          to="new"
+          role="link"
+          aria-label="new custom field"
+          data-test-id="createNewCustomField"
+          variant="primary"
+          disabled={
+            !canCreateMoreCustomFields
+              ? {
+                  reason:
+                    "You are not able to create more active custom fields within your current plan.",
+                }
+              : false
+          }
+        >
+          New custom field
+        </Button>
       </div>
       <List
         bulkActions={<BulkActionsDropdown />}

@@ -27,7 +27,6 @@ import { QrPreview } from "~/components/qr/qr-preview";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
-import { ControlledActionButton } from "~/components/shared/controlled-action-button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
@@ -87,6 +86,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         extraInclude: {
           assets: {
             select: {
+              id: true,
               status: true,
               custody: { select: { id: true } },
               bookings: {
@@ -341,8 +341,12 @@ export default function KitDetails() {
       )
     : kit.status === "AVAILABLE";
 
+  const kitHasUnavailableAssets = kit.assets.some((a) => !a.availableToBook);
+
   const kitBookings =
     kit.assets.find((a) => a.bookings.length > 0)?.bookings ?? [];
+
+  const noAssets = !kit.assets.length;
 
   const canManageAssets =
     kitIsAvailable &&
@@ -359,11 +363,33 @@ export default function KitDetails() {
         subHeading={
           <KitStatusBadge
             status={kit.status}
-            availableToBook={!kit.assets.some((a) => !a.availableToBook)}
+            availableToBook={!kitHasUnavailableAssets}
           />
         }
       >
         {!isSelfService ? <ActionsDropdown /> : null}
+        <Button
+          to={`/bookings/new?${kit.assets
+            .map((a) => `assetId=${a.id}`)
+            .join("&")}`}
+          role="link"
+          aria-label="new booking"
+          data-test-id="createNewBooking"
+          prefetch="none"
+          disabled={
+            kitHasUnavailableAssets || !kitIsAvailable || noAssets
+              ? {
+                  reason: noAssets
+                    ? "Kit has no assets. Please add some assets to be able to book this kit."
+                    : kitHasUnavailableAssets
+                    ? "Some of the assets inside the kit are not available for bookings"
+                    : "Kit is not available for bookings",
+                }
+              : false
+          }
+        >
+          Book
+        </Button>
       </Header>
 
       <ContextualModal />
@@ -417,22 +443,21 @@ export default function KitDetails() {
           <TextualDivider text="Assets" className="mb-8 lg:hidden" />
           <div className="mb-3 flex gap-4 lg:hidden">
             {!isSelfService ? (
-              <ControlledActionButton
-                canUseFeature={canManageAssets}
-                skipCta
-                buttonContent={{
-                  title: "Manage assets",
-                  message:
-                    "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                }}
-                buttonProps={{
-                  as: "button",
-                  to: "manage-assets",
-                  variant: "primary",
-                  icon: "plus",
-                  width: "full",
-                }}
-              />
+              <Button
+                to="manage-assets"
+                variant="primary"
+                width="full"
+                disabled={
+                  !canManageAssets
+                    ? {
+                        reason:
+                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                      }
+                    : false
+                }
+              >
+                Manage assets
+              </Button>
             ) : null}
             <div className="w-full">
               <ActionsDropdown fullWidth />
@@ -444,23 +469,22 @@ export default function KitDetails() {
               {!isSelfService ? (
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
-                    <ControlledActionButton
-                      canUseFeature={canManageAssets}
-                      skipCta
-                      buttonContent={{
-                        title: "Manage assets",
-                        message:
-                          "You are not allowed to manage assets for this kit because its part of an ongoing booking",
-                      }}
-                      buttonProps={{
-                        as: "button",
-                        to: "manage-assets",
-                        variant: "primary",
-                        icon: "plus",
-                        width: "full",
-                        className: "whitespace-nowrap",
-                      }}
-                    />
+                    <Button
+                      to="manage-assets"
+                      variant="primary"
+                      width="full"
+                      className="whitespace-nowrap"
+                      disabled={
+                        !canManageAssets
+                          ? {
+                              reason:
+                                "You are not allowed to manage assets for this kit because its part of an ongoing booking",
+                            }
+                          : false
+                      }
+                    >
+                      Manage assets
+                    </Button>
                   </div>
                 </div>
               ) : null}
