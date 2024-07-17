@@ -6,8 +6,10 @@ import { useLoaderData } from "@remix-run/react";
 import ContextualModal from "~/components/layout/contextual-modal";
 import { ListHeader } from "~/components/list/list-header";
 import { ListItem } from "~/components/list/list-item";
+import { CrispButton } from "~/components/marketing/crisp";
+import { UpgradeMessage } from "~/components/marketing/upgrade-message";
 import { Badge } from "~/components/shared/badge";
-import { ControlledActionButton } from "~/components/shared/controlled-action-button";
+import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { UserBadge } from "~/components/shared/user-badge";
 import { Table, Td, Th } from "~/components/table";
@@ -124,13 +126,21 @@ export default function WorkspacePage() {
   } = useLoaderData<typeof loader>();
   const user = useUserData();
 
-  let upgradeMessage = `You are currently able to create a max of ${
-    tierLimit.maxOrganizations
-  } workspaces. If you want to create more than ${
-    tierLimit.maxOrganizations - 1
-  } Team workspace, please get in touch with sales`;
+  let upgradeMessage: string | React.ReactNode = (
+    <>
+      You are currently able to have a maximum of ${tierLimit.maxOrganizations}{" "}
+      workspaces. If you want to create more than $
+      {tierLimit.maxOrganizations - 1} Team workspaces, please get in touch with{" "}
+      <CrispButton variant="link">sales</CrispButton>.
+    </>
+  );
   if (tier.id === TierId.free || tier.id === TierId.tier_1) {
-    upgradeMessage = `You cannot create a workspace on a ${tier.name} subscription. `;
+    upgradeMessage = (
+      <>
+        You cannot create a workspace on a ${tier.name} subscription.{" "}
+        <UpgradeMessage />
+      </>
+    );
   }
 
   return (
@@ -138,23 +148,23 @@ export default function WorkspacePage() {
       <div className="w-full">
         <div className="mb-2.5 flex items-center justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
           <h2 className=" text-lg text-gray-900">Workspaces</h2>
-          <ControlledActionButton
-            canUseFeature={canCreateMoreOrganizations}
-            buttonContent={{
-              title: "New workspace",
-              message: upgradeMessage,
-              ctaText: "upgrading to team plan",
-            }}
-            skipCta={tier.id === TierId.tier_2}
-            buttonProps={{
-              to: "new",
-              role: "link",
-              icon: "plus",
-              "aria-label": `new workspace`,
-              "data-test-id": "createNewWorkspaceButton",
-              variant: "primary",
-            }}
-          />
+
+          <Button
+            to="new"
+            role="link"
+            aria-label="new workspace"
+            data-test-id="createNewWorkspaceButton"
+            variant="primary"
+            disabled={
+              !canCreateMoreOrganizations
+                ? {
+                    reason: upgradeMessage,
+                  }
+                : false
+            }
+          >
+            New workspace
+          </Button>
         </div>
         <div className="flex-1 overflow-x-auto rounded border bg-white">
           <Table>

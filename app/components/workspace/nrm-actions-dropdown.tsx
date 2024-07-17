@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
-import { SendIcon, VerticalDotsIcon } from "~/components/icons/library";
+import { VerticalDotsIcon } from "~/components/icons/library";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,7 +13,6 @@ import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import { DeleteMember } from "./delete-member";
 import { Button } from "../shared/button";
-import { ControlledActionButton } from "../shared/controlled-action-button";
 
 export function TeamMembersActionsDropdown({
   teamMember,
@@ -48,29 +47,27 @@ export function TeamMembersActionsDropdown({
         ref={ref}
       >
         <DropdownMenuItem className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700">
-          <ControlledActionButton
-            canUseFeature={!isPersonalOrg}
-            buttonContent={{
-              title: (
-                <span className="flex items-center gap-2 text-gray-700">
-                  <SendIcon /> Invite user
-                </span>
-              ),
-              message:
-                "You are not able to invite users to a personal workspace. ",
-            }}
-            buttonProps={{
-              to: `/settings/team/users/invite-user?teamMemberId=${teamMember.id}`,
-              role: "link",
-              variant: "link",
-              className: tw(
-                "!hover:text-gray-700 justify-start  p-4 !text-gray-700"
-              ),
-              width: "full",
-              disabled: isPersonalOrg,
-              onClick: () => setOpen(false),
-            }}
-          />
+          <Button
+            icon="send"
+            to={`/settings/team/users/invite-user?teamMemberId=${teamMember.id}`}
+            role="link"
+            variant="link"
+            width="full"
+            className={tw(
+              "!hover:text-gray-700 justify-start  p-4 !text-gray-700"
+            )}
+            onClick={() => setOpen(false)}
+            disabled={
+              isPersonalOrg
+                ? {
+                    reason:
+                      "You are not able to invite users to a personal workspace. ",
+                  }
+                : false
+            }
+          >
+            Invite user
+          </Button>
         </DropdownMenuItem>
 
         <DropdownMenuItem className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700">
