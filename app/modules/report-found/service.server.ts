@@ -63,23 +63,30 @@ export async function sendReportEmails({
   }>;
 }) {
   const { item, type, normalizedName } = normalizeQrData(qr);
+  const isUnlinked = !qr.assetId && !qr.kitId;
+
+  const subject = isUnlinked
+    ? "Reported unlinked qr found"
+    : `Reported ${type} found`;
 
   try {
     return await Promise.all([
       /** Send email to owner */
       sendEmail({
         to: owner.email,
-        subject: `Reported ${type}`,
+        subject,
         text: item
-          ? `Your ${type} ${normalizedName} has been reported found. The reason is: \n\n| ${message} \n\n For contact use this email: ${reporterEmail}\n\nEmail sent via shelf.nu`
-          : `Your ${type} you own has been reported found. The reason is: \n\n| ${message} \n\n For contact use this email: ${reporterEmail}\n\nEmail sent via shelf.nu`,
+          ? `Your ${type} ${normalizedName} has been reported found. The reason is: \n\n| ${message} \n\n For contact use this email: ${reporterEmail}\n\nEmail sent via shelf.nu\n\n`
+          : `The QR code own (${qr.id}) has been reported found. The reason is: \n\n| ${message} \n\n For contact use this email: ${reporterEmail}\n\nEmail sent via shelf.nu\n\n`,
       }),
 
       /** Send email to reporter */
       sendEmail({
         to: reporterEmail,
-        subject: `Reported ${type}`,
-        text: `Thank you for contacting the owner of the ${type} you found. They have been notified of your message and will contact you if they are interested.\n\nEmail sent via shelf.nu`,
+        subject,
+        text: item
+          ? `Thank you for contacting the owner of the ${type} you found. They have been notified of your message and will contact you if they are interested.\n\nEmail sent via shelf.nu\n\n`
+          : `Thank you for contacting the owner of the QR code you found. They have been notified of your message and will contact you if they are interested.\n\nEmail sent via shelf.nu\n\n`,
       }),
     ]);
   } catch (cause) {
