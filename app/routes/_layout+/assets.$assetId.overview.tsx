@@ -316,14 +316,13 @@ export default function AssetOverview() {
                     Value
                   </span>
                   <div className="-ml-2 mb-2 w-3/5">
-                    <Tag key={asset.valuation} className="ml-2">
-                      <>
+                    <div className="w-3/5 text-gray-600 ml-2">
                         {asset.valuation.toLocaleString(locale, {
-                          style: "currency",
                           currency: asset.organization.currency,
-                        })}
-                      </>
-                    </Tag>
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })} {asset.organization.currency}
+                    </div>
                   </div>
                 </li>
               ) : null}
