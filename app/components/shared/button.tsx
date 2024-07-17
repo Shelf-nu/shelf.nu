@@ -1,4 +1,5 @@
 import React from "react";
+import { ExternalLinkIcon } from "@radix-ui/react-icons";
 import { Link } from "@remix-run/react";
 import { tw } from "~/utils/tw";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./hover-card";
@@ -42,6 +43,7 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
       onlyIconOnMobile,
       error,
       hideErrorText = false,
+      target,
     } = props;
     const Component: React.ComponentType<any> | string = props?.to ? Link : as;
     const baseButtonClasses = `inline-flex  items-center justify-center rounded font-semibold text-center  gap-2  max-w-xl border text-sm box-shadow-xs`;
@@ -105,6 +107,8 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
     const disabledTitle =
       typeof disabled === "object" ? disabled.title : undefined;
 
+    const newTab = target === "_blank";
+
     if (isDisabled) {
       return (
         <HoverCard openDelay={50} closeDelay={50}>
@@ -112,7 +116,16 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
             className={tw("disabled  cursor-not-allowed ")}
             asChild
           >
-            <Component {...props} className={finalStyles}>
+            <Component
+              {...props}
+              className={finalStyles}
+              onMouseDown={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.preventDefault();
+              }}
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.preventDefault();
+              }}
+            >
               {icon && <Icon icon={icon} />}{" "}
               {children ? (
                 <span
@@ -144,8 +157,14 @@ export const Button = React.forwardRef<HTMLElement, ButtonProps>(
         >
           {icon && <Icon icon={icon} />}{" "}
           {children ? (
-            <span className={onlyIconOnMobile ? "hidden lg:inline-block" : ""}>
-              {children}
+            <span
+              className={tw(
+                newTab ? "inline-flex items-center gap-[2px]" : "",
+                onlyIconOnMobile ? "hidden lg:inline-block" : ""
+              )}
+            >
+              <span>{children}</span>{" "}
+              {newTab && <ExternalLinkIcon className="mt-px" />}
             </span>
           ) : null}
         </Component>

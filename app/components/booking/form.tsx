@@ -63,6 +63,7 @@ export const NewBookingFormSchema = (
       endDate: inputFieldIsDisabled
         ? z.coerce.date().optional()
         : z.coerce.date(),
+      assetIds: z.array(z.string()).min(1),
       custodian: z
         .string()
         .transform((val, ctx) => {
@@ -109,6 +110,7 @@ type BookingFormData = {
   custodianUserId?: string; // This is a stringified value for custodianUser
   bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
   bookingFlags?: BookingFlags;
+  assetIds?: string[] | null;
 };
 
 export function BookingForm({
@@ -119,6 +121,7 @@ export function BookingForm({
   custodianUserId,
   bookingStatus,
   bookingFlags,
+  assetIds,
 }: BookingFormData) {
   const navigation = useNavigation();
 
@@ -254,7 +257,6 @@ export function BookingForm({
             ) : null}
           </AbsolutePositionedHeaderActions>
         ) : null}
-
         <div className="-mx-4 mb-4 md:mx-0">
           <div
             className={tw(
@@ -372,7 +374,17 @@ export function BookingForm({
         </div>
         {isNewBooking ? (
           <div className="text-right">
-            <Button type="submit">Check Asset Availability</Button>
+            {assetIds?.map((item, i) => (
+              <input
+                key={item}
+                type="hidden"
+                name={`assetIds[${i}]`}
+                value={item}
+              />
+            ))}
+            <Button type="submit">
+              {assetIds ? "Create Booking" : "Check Asset Availability"}
+            </Button>
           </div>
         ) : null}
       </Form>

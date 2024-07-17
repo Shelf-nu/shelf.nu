@@ -82,7 +82,6 @@ export const EmptyState = ({
                 : "new"
             }
             aria-label={`new ${singular}`}
-            icon="plus"
             {...(customContent?.buttonProps || undefined)}
           >
             {customContent?.newButtonContent

@@ -237,13 +237,7 @@ export default function LocationPage() {
         <div className=" w-full lg:ml-8 lg:w-[calc(100%-282px)]">
           <TextualDivider text="Assets" className="mb-8 lg:hidden" />
           <div className="mb-3 flex gap-4 lg:hidden">
-            <Button
-              as="button"
-              to="add-assets"
-              variant="primary"
-              icon="plus"
-              width="full"
-            >
+            <Button as="button" to="add-assets" variant="primary" width="full">
               Manage assets
             </Button>
             <div className="w-full">
@@ -258,7 +252,6 @@ export default function LocationPage() {
                     as="button"
                     to="add-assets"
                     variant="primary"
-                    icon="plus"
                     className="whitespace-nowrap"
                   >
                     Manage assets

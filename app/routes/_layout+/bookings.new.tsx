@@ -18,7 +18,12 @@ import { setCookie } from "~/utils/cookies.server";
 import { getBookingDefaultStartEndTimes } from "~/utils/date-fns";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { data, error, parseData } from "~/utils/http.server";
+import {
+  data,
+  error,
+  getCurrentSearchParams,
+  parseData,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -32,6 +37,8 @@ import { requirePermission } from "~/utils/roles.server";
  * This way all actions are available and its way easier to manage so in a way this works kind of like a resource route.
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
+  const searchParams = getCurrentSearchParams(request);
+  const assetIds = searchParams.getAll("assetId");
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -78,6 +85,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isSelfService,
         selfServiceUser,
         teamMembers,
+        assetIds,
       }),
       {
         headers: [
@@ -114,7 +122,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, custodian } = payload;
+    const { name, custodian, assetIds } = payload;
     const hints = getHints(request);
 
     const fmt = "yyyy-MM-dd'T'HH:mm";
@@ -130,7 +138,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const to = DateTime.fromFormat(formData.get("endDate")!.toString()!, fmt, {
       zone: hints.timeZone,
     }).toJSDate();
-
     const booking = await upsertBooking(
       {
         custodianUserId: custodian?.userId,
@@ -139,6 +146,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         name,
         from,
         to,
+        assetIds,
         creatorId: authSession.userId,
         ...(isSelfService && {
           custodianUserId: authSession.userId,
@@ -154,17 +162,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
       senderId: authSession.userId,
     });
 
-    const manageAssetsUrl = `/bookings/${
-      booking.id
-    }/add-assets?${new URLSearchParams({
-      // We force the as Date because we know that the booking.from and booking.to are set and exist at this point.
-      bookingFrom: (booking.from as Date).toISOString(),
-      bookingTo: (booking.to as Date).toISOString(),
-      hideUnavailable: "true",
-      unhideAssetsBookigIds: booking.id,
-    })}`;
+    const hasAssetIds = Boolean(assetIds);
 
-    return redirect(manageAssetsUrl);
+    if (hasAssetIds) {
+      return redirect(`/bookings/${booking.id}`);
+    } else {
+      const manageAssetsUrl = `/bookings/${
+        booking.id
+      }/add-assets?${new URLSearchParams({
+        bookingFrom: (booking.from as Date).toISOString(),
+        bookingTo: (booking.to as Date).toISOString(),
+        hideUnavailable: "true",
+        unhideAssetsBookigIds: booking.id,
+      })}`;
+
+      return redirect(manageAssetsUrl);
+    }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return json(error(reason), { status: reason.status });
@@ -177,7 +190,8 @@ export const handle = {
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 export default function NewBooking() {
-  const { isSelfService, selfServiceUser } = useLoaderData<typeof loader>();
+  const { isSelfService, selfServiceUser, assetIds } =
+    useLoaderData<typeof loader>();
   const { startDate, endDate } = getBookingDefaultStartEndTimes();
 
   return (
@@ -194,6 +208,7 @@ export default function NewBooking() {
         <BookingForm
           startDate={startDate}
           endDate={endDate}
+          assetIds={assetIds}
           custodianUserId={
             isSelfService
               ? JSON.stringify({

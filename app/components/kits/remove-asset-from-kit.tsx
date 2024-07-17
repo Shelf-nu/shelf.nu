@@ -1,4 +1,6 @@
 import type { Asset } from "@prisma/client";
+import { useNavigation } from "@remix-run/react";
+import { isFormProcessing } from "~/utils/form";
 import { Form } from "../custom-form";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
@@ -14,6 +16,9 @@ import {
 } from "../shared/modal";
 
 export default function RemoveAssetFromKit({ asset }: { asset: Asset }) {
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
+
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -57,7 +62,7 @@ export default function RemoveAssetFromKit({ asset }: { asset: Asset }) {
 
             <Form method="post">
               <input type="hidden" name="assetId" value={asset.id} />
-              <Button name="intent" value="removeAsset">
+              <Button name="intent" value="removeAsset" disabled={disabled}>
                 Remove
               </Button>
             </Form>
