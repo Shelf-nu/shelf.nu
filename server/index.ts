@@ -42,7 +42,7 @@ const app = new Hono();
  * Serve assets files from build/client/assets
  */
 app.use(
-  "/assets/*",
+  "/file-assets/*",
   cache(60 * 60 * 24 * 365), // 1 year
   serveStatic({ root: "./build/client" })
 );
