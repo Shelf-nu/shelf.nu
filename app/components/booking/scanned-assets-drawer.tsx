@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { AssetStatus } from "@prisma/client";
 import { Form, useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -22,7 +23,6 @@ import {
   DrawerDescription,
   DrawerFooter,
   DrawerHeader,
-  DrawerTrigger,
 } from "../shared/drawer";
 import { Table, Td, Th } from "../table";
 import When from "../when/when";
@@ -48,6 +48,7 @@ export default function ScannedAssetsDrawer({
     "AddScannedAssetsToBooking",
     addScannedAssetsToBookingSchema
   );
+  const [snap, setSnap] = useState<number | string | null>("400px");
 
   const fetchedScannedAssets = useAtomValue(fetchedScannedAssetsAtom);
   const fetchedScannedAssetsCount = useAtomValue(fetchedScannedAssetsCountAtom);
@@ -59,11 +60,13 @@ export default function ScannedAssetsDrawer({
   );
 
   return (
-    <Drawer>
-      <DrawerTrigger>
-        <Button>View assets</Button>
-      </DrawerTrigger>
-
+    <Drawer
+      open={true}
+      dismissible={false}
+      snapPoints={["400px", 1]}
+      activeSnapPoint={snap}
+      setActiveSnapPoint={setSnap}
+    >
       <DrawerContent
         className={tw("min-h-[700px] overflow-y-hidden", className)}
         style={style}
