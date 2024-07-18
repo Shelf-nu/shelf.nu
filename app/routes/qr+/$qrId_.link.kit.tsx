@@ -30,6 +30,7 @@ import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
 
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   getPaginatedAndFilterableKits,
   updateKitQrCode,
@@ -55,7 +56,6 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 
 export const loader = async ({
   context,
