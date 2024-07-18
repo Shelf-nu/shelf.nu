@@ -14,10 +14,10 @@ export const MapPlaceholder = ({
       <div
         className={tw(
           "mb-4 border text-gray-500",
-          "flex size-14 p-3 items-center justify-center rounded-md"
+          "flex size-14 items-center justify-center rounded-md p-3"
         )}
       >
-        <Icon disableWrap={true} icon="map"/>
+        <Icon disableWrap={true} icon="map" />
       </div>
       <h4>{title}</h4>
       <p>{description}</p>

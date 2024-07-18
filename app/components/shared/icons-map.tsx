@@ -99,7 +99,7 @@ type IconsMap = {
 
 export const iconsMap: IconsMap = {
   check: <CheckIcon />,
-  map: <MapIcon/>,
+  map: <MapIcon />,
   plus: <PlusIcon />,
   trash: <TrashIcon />,
   archive: <ArchiveIcon />,
