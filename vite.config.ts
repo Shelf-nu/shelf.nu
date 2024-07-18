@@ -93,6 +93,10 @@ export default defineConfig({
             packages: "external",
             bundle: true,
             logLevel: "info",
+
+            future: {
+              unstable_fogOfWar: true,
+            },
           })
           .catch((error: unknown) => {
             console.error(error);
