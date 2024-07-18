@@ -69,10 +69,10 @@ export const QrPreview = ({ qrObj, item }: ObjectType) => {
   return (
     <div className="">
       <div className="mb-4 w-auto rounded border border-solid bg-white">
-        <div className="w-full flex justify-center pt-6">
+        <div className="flex w-full justify-center pt-6">
           <QrLabel ref={captureDivRef} data={qrObj} title={item.name} />
         </div>
-        <div className="flex items-center gap-3 mt-8 p-6 border-t-[1.1px] border-[#E3E4E8]">
+        <div className="mt-8 flex items-center gap-3 border-t-[1.1px] border-[#E3E4E8] p-6">
           <Button
             icon="download"
             onClick={downloadQr}
