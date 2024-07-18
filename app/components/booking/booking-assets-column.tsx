@@ -6,6 +6,7 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import { canUserManageBookingAssets } from "~/utils/bookings";
 import { groupBy } from "~/utils/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
@@ -60,13 +61,7 @@ export function BookingAssetsColumn() {
     [items]
   );
 
-  const canManageAssets =
-    !!booking.from &&
-    !!booking.to &&
-    !isCompleted &&
-    !isArchived &&
-    !isCancelled &&
-    !cantManageAssetsAsSelfService;
+  const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
 
   const manageAssetsDisabled = !canManageAssets
     ? {

@@ -100,7 +100,7 @@ export const ZXingScanner = ({
               <Select name="scannerCameraId" defaultValue={scannerCameraId}>
                 <SelectTrigger
                   hideArrow
-                  className="absolute right-2 top-3 z-10 size-12 justify-center overflow-hidden rounded-full border-none bg-transparent pb-1 text-gray-25/50"
+                  className="absolute right-2 top-3 z-10 size-12 justify-center overflow-hidden rounded-full border-none bg-transparent pb-1 text-gray-25/50 focus:border-none focus:ring-0 focus:ring-offset-0"
                 >
                   <SelectValue placeholder={<Icon icon="settings" />}>
                     <Icon icon="settings" />

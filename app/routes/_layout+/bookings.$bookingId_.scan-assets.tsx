@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { useEffect } from "react";
+import { OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   MetaFunction,
@@ -7,9 +7,13 @@ import type {
   ActionFunctionArgs,
 } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
-import { setFetchedScannedAssetAtom } from "~/atoms/bookings";
+import {
+  addScannedQrIdAtom,
+  scannedQrIdsAtom,
+  setFetchedScannedAssetAtom,
+} from "~/atoms/bookings";
 import ScannedAssetsDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/booking/scanned-assets-drawer";
@@ -26,6 +30,7 @@ import {
   getBooking,
 } from "~/modules/booking/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { canUserManageBookingAssets } from "~/utils/bookings";
 import { userPrefs } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -67,19 +72,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId: organizationId,
     });
 
-    // Self service can only manage assets for bookings that are DRAFT
-    const canManageAssetsAsSelfService =
-      isSelfService && booking.status !== BookingStatus.DRAFT;
-
-    const isCompleted = booking.status === BookingStatus.COMPLETE;
-    const isArchived = booking.status === BookingStatus.ARCHIVED;
-
-    const canManageAssets =
-      !!booking.from &&
-      !!booking.to &&
-      !isCompleted &&
-      !isArchived &&
-      !canManageAssetsAsSelfService;
+    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
 
     if (!canManageAssets) {
       throw new ShelfError({
@@ -154,7 +147,9 @@ export const handle = {
 
 export default function ScanAssetsForBookings() {
   const { booking } = useLoaderData<typeof loader>();
-  const [fetchedQrIds, setFetchedQrIds] = useState<string[]>([]);
+
+  const fetchedQrIds = useAtomValue(scannedQrIdsAtom);
+  const addScannedQrId = useSetAtom(addScannedQrIdAtom);
 
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
@@ -168,7 +163,7 @@ export default function ScanAssetsForBookings() {
 
   const { videoMediaDevices } = useQrScanner();
   const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 140 : vh - 167;
+  const height = isMd ? vh - 140 : vh - 100;
 
   function handleQrDetectionSuccess(qrId: string) {
     /**
@@ -178,11 +173,11 @@ export default function ScanAssetsForBookings() {
       return;
     }
 
-    setFetchedQrIds((prev) => [...prev, qrId]);
+    addScannedQrId(qrId);
 
     fetcher.submit(
       { qrId, bookingId: booking.id },
-      { method: "POST", action: "/api/bookings/get-scanned-asset" }
+      { method: "GET", action: "/api/bookings/get-scanned-asset" }
     );
   }
 

@@ -10,6 +10,7 @@ import {
   fetchedScannedAssetsCountAtom,
   removeFetchedScannedAssetAtom,
 } from "~/atoms/bookings";
+import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { type loader } from "~/routes/_layout+/bookings.$bookingId_.scan-assets";
 import { tw } from "~/utils/tw";
 import { AvailabilityLabel } from "./availability-label";
@@ -37,6 +38,9 @@ export const addScannedAssetsToBookingSchema = z.object({
   assetIds: z.array(z.string()).min(1),
 });
 
+const MD_SNAP_POINT = "450px";
+const MOBILE_SNAP_POINT = "250px";
+
 export default function ScannedAssetsDrawer({
   className,
   style,
@@ -44,11 +48,15 @@ export default function ScannedAssetsDrawer({
 }: ScannedAssetsDrawerProps) {
   const { booking } = useLoaderData<typeof loader>();
 
+  const { isMd } = useViewportHeight();
+
   const zo = useZorm(
     "AddScannedAssetsToBooking",
     addScannedAssetsToBookingSchema
   );
-  const [snap, setSnap] = useState<number | string | null>("400px");
+  const [snap, setSnap] = useState<number | string | null>(
+    isMd ? MD_SNAP_POINT : MOBILE_SNAP_POINT
+  );
 
   const fetchedScannedAssets = useAtomValue(fetchedScannedAssetsAtom);
   const fetchedScannedAssetsCount = useAtomValue(fetchedScannedAssetsCountAtom);
@@ -61,9 +69,9 @@ export default function ScannedAssetsDrawer({
 
   return (
     <Drawer
-      open={true}
+      open
       dismissible={false}
-      snapPoints={["400px", 1]}
+      snapPoints={[isMd ? MD_SNAP_POINT : MOBILE_SNAP_POINT, 1]}
       activeSnapPoint={snap}
       setActiveSnapPoint={setSnap}
     >
@@ -71,7 +79,7 @@ export default function ScannedAssetsDrawer({
         className={tw("min-h-[700px] overflow-y-hidden", className)}
         style={style}
       >
-        <div className="mx-auto size-full md:max-w-4xl">
+        <div className="mx-auto size-full px-4 md:max-w-4xl md:px-0">
           <DrawerHeader className="flex items-center justify-between border-b text-left">
             <DrawerDescription>
               {fetchedScannedAssetsCount} assets scanned
@@ -88,26 +96,32 @@ export default function ScannedAssetsDrawer({
           </DrawerHeader>
 
           <When truthy={fetchedScannedAssetsCount === 0}>
-            <div className="my-16 flex flex-col items-center px-3 text-center">
-              <div className="mb-4 rounded-full bg-primary-50  p-2">
-                <div className=" rounded-full bg-primary-100 p-2 text-primary">
-                  <AssetLabel className="size-6" />
+            {snap === 1 ? (
+              <div className="my-16 flex flex-col items-center px-3 text-center">
+                <div className="mb-4 rounded-full bg-primary-50  p-2">
+                  <div className=" rounded-full bg-primary-100 p-2 text-primary">
+                    <AssetLabel className="size-6" />
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <div className="text-base font-semibold text-gray-900">
-                  List is empty
+                <div>
+                  <div className="text-base font-semibold text-gray-900">
+                    List is empty
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    Fill list by scanning codes...
+                  </p>
                 </div>
-                <p className="text-sm text-gray-600">
-                  Fill list by scanning codes...
-                </p>
               </div>
-            </div>
+            ) : (
+              <div className="px-4 py-6 text-center">
+                Fill list by scanning tags...
+              </div>
+            )}
           </When>
 
           <When truthy={fetchedScannedAssetsCount > 0}>
-            <div className="overflow-auto">
+            <div className="h-[600px] overflow-auto">
               <Table className="overflow-y-auto">
                 <ListHeader hideFirstColumn>
                   <Th className="p-0"> </Th>

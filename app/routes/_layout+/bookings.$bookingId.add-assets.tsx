@@ -464,6 +464,7 @@ export type AssetWithBooking = Asset & {
   custody: Custody | null;
   category: Category;
   kitId?: string | null;
+  qrScanned: string;
 };
 
 const RowComponent = ({ item }: { item: AssetWithBooking }) => {

@@ -1,5 +1,17 @@
 import { atom } from "jotai";
+import invariant from "tiny-invariant";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+
+/** This atom keeps track of the qrIds scanned */
+export const scannedQrIdsAtom = atom<string[]>([]);
+
+/** This atom adds a qrId into scannedQrIdsAtom */
+export const addScannedQrIdAtom = atom<null, string[], unknown>(
+  null,
+  (_, set, update) => {
+    set(scannedQrIdsAtom, (prev) => [...prev, update]);
+  }
+);
 
 /** This atom keeps track of the assets fetched after scanning.  */
 export const fetchedScannedAssetsAtom = atom<AssetWithBooking[]>([]);
@@ -41,9 +53,20 @@ export const setFetchedScannedAssetAtom = atom<
  */
 export const removeFetchedScannedAssetAtom = atom<null, string[], unknown>(
   null,
-  (_, set, update) => {
+  (get, set, update) => {
+    const removedAsset = get(fetchedScannedAssetsAtom).find(
+      (asset) => asset.id === update
+    );
+
+    invariant(removedAsset, "Asset not found"); // this should not happen in ideal case
+
     set(fetchedScannedAssetsAtom, (prev) =>
       prev.filter((asset) => asset.id !== update)
+    );
+
+    /** If an asset is removed from the list then we also have to remove the qr of that asset, so user can refetch it  */
+    set(scannedQrIdsAtom, (prev) =>
+      prev.filter((qr) => qr !== removedAsset.qrScanned)
     );
   }
 );
@@ -51,4 +74,7 @@ export const removeFetchedScannedAssetAtom = atom<null, string[], unknown>(
 /** This atom clears all the items in fetchedScannedAssetsAtom */
 export const clearFetchedScannedAssetsAtom = atom(null, (_, set) => {
   set(fetchedScannedAssetsAtom, []);
+
+  // If we are clearing the atom from list then we also have to remove scanned qrIds so that user can scan them again
+  set(scannedQrIdsAtom, []);
 });
