@@ -2,7 +2,7 @@ import type { Note as NoteType } from "@prisma/client";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Switch } from "~/components/shared/switch";
 import { Tag } from "~/components/shared/tag";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { WithDateFields } from "~/modules/types";
 import { timeAgo } from "~/utils/time-ago";
 import { ActionsDopdown } from "./actions-dropdown";
@@ -33,7 +33,7 @@ const Update = ({ note }: { note: NoteWithDate; when?: boolean }) => (
 );
 
 export const Comment = ({ note }: { note: NoteWithDate; when?: boolean }) => {
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <>
@@ -44,7 +44,7 @@ export const Comment = ({ note }: { note: NoteWithDate; when?: boolean }) => {
           </span>{" "}
           <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
         </div>
-        {!isSelfService ? <ActionsDopdown noteId={note.id} /> : null}
+        {!isBaseOrSelfService ? <ActionsDopdown noteId={note.id} /> : null}
       </header>
       <div className="message px-3.5 py-3">
         <MarkdownViewer content={note.content} />

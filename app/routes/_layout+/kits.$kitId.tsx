@@ -32,7 +32,7 @@ import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createNote } from "~/modules/asset/service.server";
 import {
   deleteKit,
@@ -316,7 +316,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 export default function KitDetails() {
   const { kit, currentBooking, qrObj, lastScan } =
     useLoaderData<typeof loader>();
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
   /**
    * User can manage assets if
    * 1. Kit has AVAILABLE status
@@ -350,7 +350,7 @@ export default function KitDetails() {
 
   const canManageAssets =
     kitIsAvailable &&
-    !isSelfService &&
+    !isBaseOrSelfService &&
     !kitBookings.some((b) =>
       (
         [BookingStatus.ONGOING, BookingStatus.OVERDUE] as BookingStatus[]
@@ -367,7 +367,7 @@ export default function KitDetails() {
           />
         }
       >
-        {!isSelfService ? <ActionsDropdown /> : null}
+        {!isBaseOrSelfService ? <ActionsDropdown /> : null}
         <Button
           to={`/bookings/new?${kit.assets
             .map((a) => `assetId=${a.id}`)
@@ -420,7 +420,7 @@ export default function KitDetails() {
           <CustodyCard
             // @ts-expect-error - we are passing the correct props
             booking={currentBooking || undefined}
-            isSelfService={isSelfService}
+            hasPermission={!isBaseOrSelfService}
             custody={kit.custody}
           />
 
@@ -436,13 +436,13 @@ export default function KitDetails() {
               type: "kit",
             }}
           />
-          {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
+          {!isBaseOrSelfService ? <ScanDetails lastScan={lastScan} /> : null}
         </div>
 
         <div className="w-full lg:ml-6">
           <TextualDivider text="Assets" className="mb-8 lg:hidden" />
           <div className="mb-3 flex gap-4 lg:hidden">
-            {!isSelfService ? (
+            {!isBaseOrSelfService ? (
               <Button
                 to="manage-assets"
                 variant="primary"
@@ -466,7 +466,7 @@ export default function KitDetails() {
 
           <div className="flex flex-col md:gap-2">
             <Filters className="responsive-filters mb-2 lg:mb-0">
-              {!isSelfService ? (
+              {!isBaseOrSelfService ? (
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
                     <Button
@@ -493,9 +493,15 @@ export default function KitDetails() {
               ItemComponent={ListContent}
               customEmptyStateContent={{
                 title: "Not assets in kit",
-                text: !isSelfService ? "Start by adding your first asset." : "",
-                newButtonContent: !isSelfService ? "Manage assets" : undefined,
-                newButtonRoute: !isSelfService ? "manage-assets" : undefined,
+                text: !isBaseOrSelfService
+                  ? "Start by adding your first asset."
+                  : "",
+                newButtonContent: !isBaseOrSelfService
+                  ? "Manage assets"
+                  : undefined,
+                newButtonRoute: !isBaseOrSelfService
+                  ? "manage-assets"
+                  : undefined,
               }}
               headerChildren={
                 <>
@@ -526,7 +532,7 @@ function ListContent({
   const { id, mainImage, mainImageExpiration, title, location, category } =
     item;
 
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -594,7 +600,7 @@ function ListContent({
           </GrayBadge>
         ) : null}
       </Td>
-      {!isSelfService && (
+      {!isBaseOrSelfService && (
         <Td className="pr-4 text-right">
           <AssetRowActionsDropdown asset={item} />
         </Td>

@@ -16,7 +16,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   deleteAsset,
   deleteOtherImages,
@@ -180,7 +180,7 @@ export default function AssetDetailsPage() {
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <>
@@ -210,7 +210,7 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        {!isSelfService ? <ActionsDropdown /> : null}
+        {!isBaseOrSelfService ? <ActionsDropdown /> : null}
 
         <Button
           to={`/bookings/new?assetId=${asset.id}`}

@@ -9,7 +9,7 @@ import { Card } from "../shared/card";
  */
 export function CustodyCard({
   booking,
-  isSelfService,
+  hasPermission,
   custody,
 }: {
   booking:
@@ -25,7 +25,7 @@ export function CustodyCard({
       }
     | null
     | undefined;
-  isSelfService: boolean;
+  hasPermission: boolean;
   custody: {
     dateDisplay: string;
     custodian: {
@@ -37,7 +37,7 @@ export function CustodyCard({
   } | null;
 }) {
   /** We return null if user is selfService */
-  if (isSelfService) {
+  if (!hasPermission) {
     return null;
   }
 

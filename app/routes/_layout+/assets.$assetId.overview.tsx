@@ -22,7 +22,7 @@ import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
 import { usePosition } from "~/hooks/use-position";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { ASSET_OVERVIEW_FIELDS } from "~/modules/asset/fields";
 import {
   getAsset,
@@ -227,7 +227,7 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <div>
@@ -379,7 +379,7 @@ export default function AssetOverview() {
         </div>
 
         <div className="w-full md:w-[360px] lg:ml-4">
-          {!isSelfService ? (
+          {!isBaseOrSelfService ? (
             <Card className="my-3">
               <fetcher.Form
                 ref={zo.ref}
@@ -397,11 +397,13 @@ export default function AssetOverview() {
                   </div>
                   <Switch
                     name={zo.fields.availableToBook()}
-                    disabled={isSelfService || isFormProcessing(fetcher.state)} // Disable for self service users
+                    disabled={
+                      isBaseOrSelfService || isFormProcessing(fetcher.state)
+                    } // Disable for self service users
                     defaultChecked={asset?.availableToBook}
                     required
                     title={
-                      isSelfService
+                      isBaseOrSelfService
                         ? "You do not have the permissions to change availability"
                         : "Toggle availability"
                     }
@@ -444,7 +446,7 @@ export default function AssetOverview() {
           <CustodyCard
             booking={booking}
             custody={asset?.custody || null}
-            isSelfService={isSelfService}
+            hasPermission={!isBaseOrSelfService}
           />
 
           {asset && (
@@ -456,7 +458,7 @@ export default function AssetOverview() {
               }}
             />
           )}
-          {!isSelfService ? <ScanDetails lastScan={lastScan} /> : null}
+          {!isBaseOrSelfService ? <ScanDetails lastScan={lastScan} /> : null}
         </div>
       </div>
       <ContextualSidebar />

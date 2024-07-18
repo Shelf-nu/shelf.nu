@@ -425,6 +425,7 @@ enum OrganizationType {
 
 enum OrganizationRoles {
   ADMIN
+  BASE
   OWNER
   SELF_SERVICE
 }

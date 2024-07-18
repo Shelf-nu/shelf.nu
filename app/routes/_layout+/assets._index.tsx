@@ -40,7 +40,7 @@ import {
   useClearValueFromParams,
   useSearchParamHasValue,
 } from "~/hooks/use-search-param-utils";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   bulkDeleteAssets,
   getPaginatedAndFilterableAssets,
@@ -274,12 +274,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function AssetIndexPage() {
   const { canImportAssets } = useLoaderData<typeof loader>();
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <>
       <Header>
-        {!isSelfService ? (
+        {!isBaseOrSelfService ? (
           <>
             <ImportButton canImportAssets={canImportAssets} />
             <Button
@@ -313,7 +313,7 @@ export const AssetsList = () => {
     "location",
     "teamMember"
   );
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <ListContentWrapper>
@@ -401,7 +401,7 @@ export const AssetsList = () => {
                 </div>
               )}
             />
-            {!isSelfService && (
+            {!isBaseOrSelfService && (
               <DynamicDropdown
                 trigger={
                   <div className="flex cursor-pointer items-center gap-2">
@@ -442,7 +442,7 @@ export const AssetsList = () => {
           <>
             <Th className="hidden md:table-cell">Category</Th>
             <Th className="hidden md:table-cell">Tags</Th>
-            {!isSelfService ? (
+            {!isBaseOrSelfService ? (
               <Th className="hidden md:table-cell">Custodian</Th>
             ) : null}
             <Th className="hidden md:table-cell">Location</Th>
@@ -477,7 +477,7 @@ const ListAssetContent = ({
   };
 }) => {
   const { category, tags, custody, location, kit } = item;
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
   return (
     <>
       {/* Item */}
@@ -549,7 +549,7 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      {!isSelfService ? (
+      {!isBaseOrSelfService ? (
         <Td className="hidden md:table-cell">
           {custody ? (
             <GrayBadge>

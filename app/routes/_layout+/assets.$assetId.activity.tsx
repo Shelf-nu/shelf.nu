@@ -5,7 +5,7 @@ import { Notes } from "~/components/assets/notes";
 import { LockIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAsset } from "~/modules/asset/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getDateTimeFormat } from "~/utils/client-hints";
@@ -81,11 +81,11 @@ export const handle = {
 };
 
 export default function AssetActivity() {
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <div className="w-full">
-      {isSelfService ? (
+      {isBaseOrSelfService ? (
         <div className="flex h-full flex-col justify-center">
           <div className="flex flex-col items-center justify-center  text-center">
             <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">

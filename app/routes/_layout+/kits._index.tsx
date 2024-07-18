@@ -17,7 +17,7 @@ import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   getPaginatedAndFilterableKits,
   updateKitsWithBookingCustodians,
@@ -124,12 +124,12 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function KitsIndexPage() {
   const navigate = useNavigate();
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <>
       <Header>
-        {!isSelfService && (
+        {!isBaseOrSelfService && (
           <Button to="new" role="link" aria-label="new kit" icon="kit">
             New kit
           </Button>
@@ -149,7 +149,7 @@ export default function KitsIndexPage() {
             ),
           }}
         >
-          {!isSelfService && (
+          {!isBaseOrSelfService && (
             <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">
@@ -180,7 +180,7 @@ export default function KitsIndexPage() {
             <>
               <Th className="hidden md:table-cell">Description</Th>
               <Th className="hidden md:table-cell">Assets</Th>
-              {!isSelfService && (
+              {!isBaseOrSelfService && (
                 <Th className="hidden md:table-cell">Custodian</Th>
               )}
             </>
@@ -223,7 +223,7 @@ function ListContent({
     };
   }>;
 }) {
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <>
@@ -265,7 +265,7 @@ function ListContent({
       </Td>
 
       <Td className="hidden md:table-cell">{item._count.assets}</Td>
-      {!isSelfService && (
+      {!isBaseOrSelfService && (
         <Td className="hidden md:table-cell">
           {item.custody ? (
             <GrayBadge>

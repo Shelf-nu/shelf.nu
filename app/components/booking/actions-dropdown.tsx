@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId";
 import { tw } from "~/utils/tw";
 import { DeleteBooking } from "./delete-booking";
@@ -26,7 +26,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
     useBookingStatusHelpers(booking);
 
   const submit = useSubmit();
-  const isSelfService = useUserIsSelfService();
+  const { isSelfService } = useUserRoleHelper();
 
   return (
     <DropdownMenu modal={false}>

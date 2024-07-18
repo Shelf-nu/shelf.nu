@@ -41,12 +41,34 @@ export interface PermissionCheckProps {
 const Role2PermissionMap: {
   [K in OrganizationRoles]?: Record<PermissionEntity, PermissionAction[]>;
 } = {
+  [OrganizationRoles.BASE]: {
+    [PermissionEntity.asset]: [PermissionAction.read],
+    [PermissionEntity.booking]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
+    ],
+    [PermissionEntity.qr]: [],
+    [PermissionEntity.category]: [],
+    [PermissionEntity.customField]: [],
+    [PermissionEntity.location]: [],
+    [PermissionEntity.tag]: [],
+    [PermissionEntity.teamMember]: [],
+    [PermissionEntity.workspace]: [],
+    [PermissionEntity.dashboard]: [],
+    [PermissionEntity.generalSettings]: [],
+    [PermissionEntity.subscription]: [],
+    [PermissionEntity.kit]: [PermissionAction.read],
+  },
   [OrganizationRoles.SELF_SERVICE]: {
     [PermissionEntity.asset]: [PermissionAction.read],
     [PermissionEntity.booking]: [
       PermissionAction.create,
       PermissionAction.read,
       PermissionAction.update,
+      PermissionAction.checkout,
+      PermissionAction.checkin,
       PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
     ],
     [PermissionEntity.qr]: [],

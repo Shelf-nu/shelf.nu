@@ -48,7 +48,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const isSelfServiceOrBase =
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE;
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search, status } =
       getParamsValues(searchParams);
@@ -65,7 +67,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         // If status is in the params, we filter based on it
         statuses: [status],
       }),
-      ...(isSelfService && {
+      ...(isSelfServiceOrBase && {
         // If the user is self service, we only show bookings that belong to that user)
         custodianUserId: authSession?.userId,
       }),

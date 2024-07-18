@@ -10,7 +10,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import type { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { type getHints } from "~/utils/client-hints";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -147,7 +147,7 @@ export function BookingForm({
     NewBookingFormSchema(inputFieldIsDisabled, isNewBooking)
   );
 
-  const isSelfService = useUserIsSelfService();
+  const { isBase, isBaseOrSelfService } = useUserRoleHelper();
 
   return (
     <div>
@@ -155,10 +155,8 @@ export function BookingForm({
         {/* Render the actions on top only when the form is in edit mode */}
         {!isNewBooking ? (
           <AbsolutePositionedHeaderActions>
-            {/* When the booking is Completed, there are no actions available for selfService so we don't render it */}
-            {bookingStatus?.isCompleted && isSelfService ? null : (
-              <ActionsDropdown />
-            )}
+            {/* When the booking is Completed, there are no actions available for BASE role so we don't render it */}
+            {bookingStatus?.isCompleted && isBase ? null : <ActionsDropdown />}
 
             {/*  We show the button in all cases, unless the booking is in a final state */}
             {!(
@@ -216,7 +214,7 @@ export function BookingForm({
             ) : null}
 
             {/* When booking is reserved, we show the check-out button */}
-            {bookingStatus?.isReserved && !isSelfService ? (
+            {bookingStatus?.isReserved && !isBase ? (
               <Button
                 disabled={
                   disabled ||
@@ -243,7 +241,7 @@ export function BookingForm({
             ) : null}
 
             {(bookingStatus?.isOngoing || bookingStatus?.isOverdue) &&
-            !isSelfService ? (
+            !isBase ? (
               <Button
                 disabled={disabled}
                 type="submit"
@@ -342,7 +340,7 @@ export function BookingForm({
                   defaultUserId={custodianUserId}
                   disabled={inputFieldIsDisabled}
                   className={
-                    isSelfService
+                    isBaseOrSelfService
                       ? "preview-only-custodian-select pointer-events-none cursor-not-allowed bg-gray-50"
                       : ""
                   }
