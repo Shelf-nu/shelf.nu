@@ -68,31 +68,31 @@ export const QrPreview = ({ qrObj, item }: ObjectType) => {
   });
   return (
     <div className="">
-      <div className="mb-4 flex w-auto justify-center rounded border border-solid bg-white p-6">
-        <QrLabel ref={captureDivRef} data={qrObj} title={item.name} />
-      </div>
-
-      {/* using this button to convert html to png and download image using the a tag below */}
-      <div className="flex items-center gap-3">
-        <Button
-          icon="download"
-          onClick={downloadQr}
-          download={`${slugify(item.name)}-${qrObj?.qr
-            ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
-          ref={downloadQrBtnRef}
-          variant="secondary"
-          className="w-full"
-        >
-          Download
-        </Button>
-        <Button
-          icon="print"
-          variant="secondary"
-          className="w-full"
-          onClick={printQr}
-        >
-          Print
-        </Button>
+      <div className="mb-4 w-auto rounded border border-solid bg-white">
+        <div className="w-full flex justify-center pt-6">
+          <QrLabel ref={captureDivRef} data={qrObj} title={item.name} />
+        </div>
+        <div className="flex items-center gap-3 mt-8 p-6 border-t-[1.1px] border-[#E3E4E8]">
+          <Button
+            icon="download"
+            onClick={downloadQr}
+            download={`${slugify(item.name)}-${qrObj?.qr
+              ?.size}-shelf-qr-code-${qrObj?.qr?.id}.png`}
+            ref={downloadQrBtnRef}
+            variant="secondary"
+            className="w-full"
+          >
+            Download
+          </Button>
+          <Button
+            icon="print"
+            variant="secondary"
+            className="w-full"
+            onClick={printQr}
+          >
+            Print
+          </Button>
+        </div>
       </div>
     </div>
   );
