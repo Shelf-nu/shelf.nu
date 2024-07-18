@@ -71,6 +71,9 @@ export default defineConfig({
     remix({
       serverBuildFile: "remix.js",
       ignoredRouteFiles: ["**/.*"],
+      future: {
+        unstable_fogOfWar: true,
+      },
       routes: async (defineRoutes) => {
         return flatRoutes("routes", defineRoutes);
       },
@@ -93,10 +96,6 @@ export default defineConfig({
             packages: "external",
             bundle: true,
             logLevel: "info",
-
-            future: {
-              unstable_fogOfWar: true,
-            },
           })
           .catch((error: unknown) => {
             console.error(error);
