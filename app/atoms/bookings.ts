@@ -13,6 +13,13 @@ export const addScannedQrIdAtom = atom<null, string[], unknown>(
   }
 );
 
+export const removeScannedQrIdAtom = atom<null, string[], unknown>(
+  null,
+  (_, set, update) => {
+    set(scannedQrIdsAtom, (prev) => prev.filter((qr) => qr !== update));
+  }
+);
+
 /** This atom keeps track of the assets fetched after scanning.  */
 export const fetchedScannedAssetsAtom = atom<AssetWithBooking[]>([]);
 

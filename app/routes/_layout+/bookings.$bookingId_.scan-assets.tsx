@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useState } from "react";
 import { OrganizationRoles } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
@@ -11,6 +11,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { z } from "zod";
 import {
   addScannedQrIdAtom,
+  removeScannedQrIdAtom,
   scannedQrIdsAtom,
   setFetchedScannedAssetAtom,
 } from "~/atoms/bookings";
@@ -22,7 +23,6 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { Spinner } from "~/components/shared/spinner";
 import { ZXingScanner } from "~/components/zxing-scanner";
 import { useClientNotification } from "~/hooks/use-client-notification";
-import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
@@ -148,14 +148,14 @@ export const handle = {
 export default function ScanAssetsForBookings() {
   const { booking } = useLoaderData<typeof loader>();
 
+  const [isFetchingAsset, setIsFetchingAsset] = useState(false);
+
   const fetchedQrIds = useAtomValue(scannedQrIdsAtom);
   const addScannedQrId = useSetAtom(addScannedQrIdAtom);
+  const removeScannedQrId = useSetAtom(removeScannedQrIdAtom);
 
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
-
-  const fetcher = useFetcherWithReset<{ asset: AssetWithBooking }>();
-  const isFetchingAsset = isFormProcessing(fetcher.state);
 
   const setFetchedScannedAsset = useSetAtom(setFetchedScannedAssetAtom);
 
@@ -165,37 +165,39 @@ export default function ScanAssetsForBookings() {
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 140 : vh - 100;
 
-  function handleQrDetectionSuccess(qrId: string) {
+  async function handleQrDetectionSuccess(qrId: string) {
+    setIsFetchingAsset(true);
+
     /**
      * If a qrId is already fetched then we don't have to fetch it again otherwise it will cause to fetch asset infinitely
      * */
     if (fetchedQrIds.includes(qrId)) {
+      sendNotification({
+        title: "Already added",
+        icon: { name: "x", variant: "error" },
+      });
       return;
     }
 
     addScannedQrId(qrId);
 
-    fetcher.submit(
-      { qrId, bookingId: booking.id },
-      { method: "GET", action: "/api/bookings/get-scanned-asset" }
-    );
+    try {
+      const response = await fetch(
+        `/api/bookings/get-scanned-asset?qrId=${qrId}&bookingId=${booking.id}`
+      );
+      const { asset } = await response.json();
+      setFetchedScannedAsset(asset as AssetWithBooking);
+      sendNotification({
+        title: "Asset scanned",
+        message: "Asset is scanned and successfully added to the list.",
+        icon: { name: "success", variant: "success" },
+      });
+    } catch {
+      removeScannedQrId(qrId);
+    } finally {
+      setIsFetchingAsset(false);
+    }
   }
-
-  useEffect(
-    function handleFetcherSuccess() {
-      if (fetcher.data && fetcher.data?.asset) {
-        setFetchedScannedAsset(fetcher.data.asset);
-        fetcher.reset();
-
-        sendNotification({
-          title: "Asset scanned",
-          message: "Asset is scanned and successfully added to the list.",
-          icon: { name: "success", variant: "success" },
-        });
-      }
-    },
-    [fetcher, sendNotification, setFetchedScannedAsset]
-  );
 
   return (
     <>

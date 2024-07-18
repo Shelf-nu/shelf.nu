@@ -56,7 +56,7 @@ export const ZXingScanner = ({
   const { ref } = useZxing({
     deviceId: scannerCameraId,
     constraints: { video: true, audio: false },
-    timeBetweenDecodingAttempts: 100,
+    timeBetweenDecodingAttempts: 1000,
     async onDecodeResult(result) {
       await decodeQRCodes(result.getText());
     },
