@@ -425,7 +425,6 @@ enum OrganizationType {
 
 enum OrganizationRoles {
   ADMIN
-  TEAM_MEMBER
   OWNER
   SELF_SERVICE
 }
