@@ -35,26 +35,17 @@ export function ScanDetails({
               <MapPlaceholder />
             )}
           </div>
-          <div className="p-4 text-text-xs text-gray-600">
-            <h5 className="mb-1">Last location data</h5>
-            <p>Coordinates: {lastScan.coordinates}</p>
-            <p>Date/Time: {lastScan.dateTime}</p>
-            <p>
-              Device:{" "}
-              {lastScan.ua.device.model && lastScan.ua.device.vendor
+
+          <div className="p-4 text-text-xs text-gray-600 border-b-[1.1px]">
+            <div className="flex justify-between py-2"><p>Date/Time</p><p>{lastScan.dateTime}</p></div>
+            <div className="flex justify-between py-2"><p>Coordinates</p><p>{lastScan.coordinates}</p></div>
+            <div className="flex justify-between py-2"><p>Device</p><p>{lastScan.ua.device.model && lastScan.ua.device.vendor
                 ? `${lastScan.ua.device.vendor} - ${lastScan.ua.device.model}`
-                : "Unknown device"}
-            </p>
-            <p>Browser: {lastScan.ua.browser.name}</p>
-            <p>Operating System: {lastScan.ua.os.name}</p>
-            <div className="flex items-center">
-              <p className="inline-block max-w-xs truncate">
-                Scanned By: {lastScan.scannedBy}
-              </p>
-            </div>
-            <div>
-              Source:{" "}
-              {lastScan.manuallyGenerated ? "Manually updated" : "QR code scan"}{" "}
+                : "Unknown device"}</p></div>
+            <div className="flex justify-between py-2"><p>Browser</p><p>{lastScan.ua.browser.name}</p></div>
+            <div className="flex justify-between py-2"><p>OS</p><p>{lastScan.ua.os.name}</p></div>
+            <div className="flex justify-between py-2"><p>Scanned By</p><p>{lastScan.scannedBy}</p></div>
+            <div className="flex justify-between pt-2"><p>Source</p><p>{lastScan.manuallyGenerated ? "Manually updated" : "QR code scan"}{" "}
               <InfoTooltip
                 icon={<HelpIcon />}
                 content={
@@ -77,10 +68,10 @@ export function ScanDetails({
                     </ul>
                   </>
                 }
-              />
-            </div>
-            {hasLocation ? (
-              <p className="mt-1">
+              /></p></div>
+          </div>
+          {hasLocation ? (
+              <div className="rounded-md m-4 flex justify-center py-1 border-[1.3px]">
                 <Button
                   to={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&zoom=15&markers=${latitude},${longitude}`}
                   variant="link"
@@ -89,9 +80,8 @@ export function ScanDetails({
                 >
                   See in Google Maps
                 </Button>
-              </p>
+              </div>
             ) : null}
-          </div>
         </>
       ) : (
         <MapPlaceholder

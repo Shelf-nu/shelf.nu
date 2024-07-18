@@ -8,16 +8,11 @@ export const MapPlaceholder = ({
   title?: string;
   description?: string;
 }) => (
-  <div className="relative">
-    <img
-      src="/static/images/no-location-image.jpg"
-      alt="No scanned location"
-      className="w-full rounded-none"
-    />
-    <div className="absolute top-0 z-10 flex size-full flex-col items-center justify-center px-[15px] text-center md:px-[45px]">
+  <div className="py-14 bg-white rounded-md border-0">
+    <div className="z-10 flex size-full flex-col items-center justify-center px-[15px] text-center md:px-[45px]">
       <div
         className={tw(
-          "border-error-50 bg-error-100 text-error-600",
+          "border-error-50 bg-error-100 text-error-600 mb-4",
           " flex size-14 items-center justify-center rounded-full"
         )}
       >
