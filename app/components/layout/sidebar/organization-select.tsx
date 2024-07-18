@@ -49,7 +49,7 @@ export const OrganizationSelect = ({
                   />
                 )}
 
-                <div className="ml-[3px] line-clamp-1 max-w-[265px] text-ellipsis text-sm text-gray-900">
+                <div className="ml-[3px] line-clamp-1 max-w-[265px] text-ellipsis text-left text-sm text-gray-900">
                   {org.name}
                 </div>
               </div>
