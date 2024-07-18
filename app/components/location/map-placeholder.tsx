@@ -1,5 +1,6 @@
 import { MapIcon } from "~/components/icons/library";
 import { tw } from "~/utils/tw";
+import Icon from "../icons/icon";
 
 export const MapPlaceholder = ({
   title = "Unable to generate map",
@@ -12,11 +13,11 @@ export const MapPlaceholder = ({
     <div className="z-10 flex size-full flex-col items-center justify-center px-[15px] text-center md:px-[45px]">
       <div
         className={tw(
-          "mb-4 border-error-50 bg-error-100 text-error-600",
-          " flex size-14 items-center justify-center rounded-full"
+          "mb-4 border text-gray-500",
+          "flex size-14 p-3 items-center justify-center rounded-md"
         )}
       >
-        <MapIcon />
+        <Icon disableWrap={true} icon="map"/>
       </div>
       <h4>{title}</h4>
       <p>{description}</p>
