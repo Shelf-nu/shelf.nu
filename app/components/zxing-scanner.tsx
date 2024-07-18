@@ -33,13 +33,16 @@ export const ZXingScanner = ({
   const isLoading = isFormProcessing(navigation.state);
 
   // Function to decode the QR code
-  const decodeQRCodes = async (result: string) => {
+  const decodeQRCodes = (result: string) => {
     if (result != null && !isLoading && !incomingIsLoading) {
       const regex = /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
       /** We make sure the value of the QR code matches the structure of Shelf qr codes */
       const match = result.match(regex);
       if (!match) {
-        /** If the QR code does not match the structure of Shelf qr codes, we show an error message */
+        /**
+         * @TODO same as the other comments. Lets implement a way to manage those messages specifically for the scanner and do it all client side
+         * If the QR code does not match the structure of Shelf qr codes, we show an error message
+         * */
         sendNotification({
           title: "QR Code Not Valid",
           message: "Please Scan valid asset QR",
@@ -49,16 +52,16 @@ export const ZXingScanner = ({
       }
 
       const qrId = match[4]; // Get the last segment of the URL as the QR id
-      await onQrDetectionSuccess(qrId);
+      void onQrDetectionSuccess(qrId);
     }
   };
 
   const { ref } = useZxing({
     deviceId: scannerCameraId,
     constraints: { video: true, audio: false },
-    timeBetweenDecodingAttempts: 1000,
-    async onDecodeResult(result) {
-      await decodeQRCodes(result.getText());
+    timeBetweenDecodingAttempts: 50,
+    onDecodeResult(result) {
+      void decodeQRCodes(result.getText());
     },
     onError(cause) {
       throw new ShelfError({

@@ -39,7 +39,7 @@ export const addScannedAssetsToBookingSchema = z.object({
 });
 
 const MD_SNAP_POINT = "450px";
-const MOBILE_SNAP_POINT = "250px";
+const MOBILE_SNAP_POINT = "150px";
 
 export default function ScannedAssetsDrawer({
   className,
@@ -74,6 +74,7 @@ export default function ScannedAssetsDrawer({
       snapPoints={[isMd ? MD_SNAP_POINT : MOBILE_SNAP_POINT, 1]}
       activeSnapPoint={snap}
       setActiveSnapPoint={setSnap}
+      modal={false}
     >
       <DrawerContent
         className={tw("min-h-[700px] overflow-y-hidden", className)}

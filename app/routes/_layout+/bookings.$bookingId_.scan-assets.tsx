@@ -172,10 +172,13 @@ export default function ScanAssetsForBookings() {
      * If a qrId is already fetched then we don't have to fetch it again otherwise it will cause to fetch asset infinitely
      * */
     if (fetchedQrIds.includes(qrId)) {
-      sendNotification({
-        title: "Already added",
-        icon: { name: "x", variant: "error" },
-      });
+      /** For now i comment it.
+       * @TODO I think we shouldnt use the notifications here, but come up with something that works locally inside the scanner(see designs)
+       */
+      // sendNotification({
+      //   title: "Already added",
+      //   icon: { name: "x", variant: "error" },
+      // });
       return;
     }
 
@@ -187,11 +190,12 @@ export default function ScanAssetsForBookings() {
       );
       const { asset } = await response.json();
       setFetchedScannedAsset(asset as AssetWithBooking);
-      sendNotification({
-        title: "Asset scanned",
-        message: "Asset is scanned and successfully added to the list.",
-        icon: { name: "success", variant: "success" },
-      });
+      /** @TODO see comment above, same thing */
+      // sendNotification({
+      //   title: "Asset scanned",
+      //   message: "Asset is scanned and successfully added to the list.",
+      //   icon: { name: "success", variant: "success" },
+      // });
     } catch {
       removeScannedQrId(qrId);
     } finally {
