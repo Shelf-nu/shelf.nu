@@ -80,6 +80,7 @@ export type FailureReason = {
     | "Scanner"
     | "Kit"
     // Other kinds of errors
+    | "DB"
     | "Request validation"
     | "DB constrain violation"
     | "Dev error" // Error that should never happen in production because it's a developer mistake

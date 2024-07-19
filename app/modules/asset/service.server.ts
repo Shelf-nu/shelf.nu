@@ -50,6 +50,7 @@ import {
   maybeUniqueConstraintViolation,
 } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { id } from "~/utils/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
@@ -69,6 +70,7 @@ import {
 // @TODO: Fix the circular dependency
 // eslint-disable-next-line import/no-cycle
 import { createKitsIfNotExists } from "../kit/service.server";
+
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
@@ -710,6 +712,7 @@ export async function createAsset({
         : {
             create: [
               {
+                id: id(),
                 version: 0,
                 errorCorrection: ErrorCorrection["L"],
                 user,
@@ -1894,6 +1897,7 @@ export async function createAssetsFromBackupImport({
             qrCodes: {
               create: [
                 {
+                  id: id(),
                   version: 0,
                   errorCorrection: ErrorCorrection["L"],
                   userId,
