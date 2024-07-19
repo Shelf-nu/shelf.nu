@@ -7,22 +7,20 @@ import type {
   ActionFunctionArgs,
 } from "@remix-run/node";
 import { useLoaderData, useNavigation } from "@remix-run/react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useSetAtom } from "jotai";
 import { z } from "zod";
+import { setFetchedScannedAssetAtom } from "~/atoms/bookings";
 import {
-  addScannedQrIdAtom,
+  displayQrScannerNotificationAtom,
   removeScannedQrIdAtom,
-  scannedQrIdsAtom,
-  setFetchedScannedAssetAtom,
-} from "~/atoms/bookings";
+} from "~/atoms/qr-scanner";
 import ScannedAssetsDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/booking/scanned-assets-drawer";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Spinner } from "~/components/shared/spinner";
-import { ZXingScanner } from "~/components/zxing-scanner";
-import { useClientNotification } from "~/hooks/use-client-notification";
+import { ZXingScanner } from "~/components/zxing-scanner/zxing-scanner";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
@@ -150,52 +148,29 @@ export default function ScanAssetsForBookings() {
 
   const [isFetchingAsset, setIsFetchingAsset] = useState(false);
 
-  const fetchedQrIds = useAtomValue(scannedQrIdsAtom);
-  const addScannedQrId = useSetAtom(addScannedQrIdAtom);
-  const removeScannedQrId = useSetAtom(removeScannedQrIdAtom);
-
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
   const setFetchedScannedAsset = useSetAtom(setFetchedScannedAssetAtom);
+  const removeScannedQrId = useSetAtom(removeScannedQrIdAtom);
 
-  const [sendNotification] = useClientNotification();
+  const displayQrNotification = useSetAtom(displayQrScannerNotificationAtom);
 
   const { videoMediaDevices } = useQrScanner();
   const { vh, isMd } = useViewportHeight();
   const height = isMd ? vh - 140 : vh - 100;
 
   async function handleQrDetectionSuccess(qrId: string) {
-    setIsFetchingAsset(true);
-
-    /**
-     * If a qrId is already fetched then we don't have to fetch it again otherwise it will cause to fetch asset infinitely
-     * */
-    if (fetchedQrIds.includes(qrId)) {
-      /** For now i comment it.
-       * @TODO I think we shouldnt use the notifications here, but come up with something that works locally inside the scanner(see designs)
-       */
-      // sendNotification({
-      //   title: "Already added",
-      //   icon: { name: "x", variant: "error" },
-      // });
-      return;
-    }
-
-    addScannedQrId(qrId);
-
     try {
+      setIsFetchingAsset(true);
+
       const response = await fetch(
         `/api/bookings/get-scanned-asset?qrId=${qrId}&bookingId=${booking.id}`
       );
       const { asset } = await response.json();
       setFetchedScannedAsset(asset as AssetWithBooking);
-      /** @TODO see comment above, same thing */
-      // sendNotification({
-      //   title: "Asset scanned",
-      //   message: "Asset is scanned and successfully added to the list.",
-      //   icon: { name: "success", variant: "success" },
-      // });
+
+      displayQrNotification({ message: "Asset added to list." });
     } catch {
       removeScannedQrId(qrId);
     } finally {

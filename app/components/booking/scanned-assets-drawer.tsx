@@ -10,6 +10,7 @@ import {
   fetchedScannedAssetsCountAtom,
   removeFetchedScannedAssetAtom,
 } from "~/atoms/bookings";
+import { displayQrScannerNotificationAtom } from "~/atoms/qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { type loader } from "~/routes/_layout+/bookings.$bookingId_.scan-assets";
 import { tw } from "~/utils/tw";
@@ -62,6 +63,8 @@ export default function ScannedAssetsDrawer({
   const fetchedScannedAssetsCount = useAtomValue(fetchedScannedAssetsCountAtom);
   const removeFetchedScannedAsset = useSetAtom(removeFetchedScannedAssetAtom);
   const clearFetchedScannedAssets = useSetAtom(clearFetchedScannedAssetsAtom);
+
+  const displayQrNotification = useSetAtom(displayQrScannerNotificationAtom);
 
   const someAssetsCheckedOut = fetchedScannedAssets.some(
     (asset) => asset.status === AssetStatus.CHECKED_OUT
@@ -166,6 +169,9 @@ export default function ScannedAssetsDrawer({
                           icon="trash"
                           onClick={() => {
                             removeFetchedScannedAsset(asset.id);
+                            displayQrNotification({
+                              message: "Asset was removed from list",
+                            });
                           }}
                         />
                       </Td>

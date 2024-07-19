@@ -9,7 +9,7 @@ import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Spinner } from "~/components/shared/spinner";
-import { ZXingScanner } from "~/components/zxing-scanner";
+import { ZXingScanner } from "~/components/zxing-scanner/zxing-scanner";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import { useQrScanner } from "~/hooks/use-qr-scanner";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
