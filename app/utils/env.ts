@@ -107,7 +107,10 @@ export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
   isSecret: true,
 });
 export const SESSION_SECRET = getEnv("SESSION_SECRET");
-export const FINGERPRINT = getEnv("FINGERPRINT");
+export const FINGERPRINT = getEnv("FINGERPRINT", {
+  isSecret: true,
+  isRequired: false,
+});
 
 export const STRIPE_SECRET_KEY = getEnv("STRIPE_SECRET_KEY", {
   isSecret: true,

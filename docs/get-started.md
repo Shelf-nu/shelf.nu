@@ -61,7 +61,7 @@ SUPABASE_URL="https://{STAGING_YOUR_INSTANCE_NAME}.supabase.co"
 SESSION_SECRET="super-duper-s3cret"
 SERVER_URL="http://localhost:3000"
 
-# Used for generating cuid with lowered chance of collision
+# Used for generating cuid with lowered chance of collision. Optional
 FINGERPRINT="a-custom-host-fingerprint"
 
 SMTP_HOST="smtp.yourhost.com"
@@ -160,7 +160,7 @@ Prior to your first deployment, you'll need to do a few things:
 
 - Add a `FLY_API_TOKEN` to your GitHub repo. To do this, go to your user settings on Fly and create a new [token](https://web.fly.io/user/personal_access_tokens/new), then add it to [your repo secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets) with the name `FLY_API_TOKEN`.
 
-- Add a `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`,`SUPABASE_ANON_PUBLIC`, `SERVER_URL`, `FINGERPRINT` and `DATABASE_URL` to your fly app secrets
+- Add a `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`,`SUPABASE_ANON_PUBLIC`, `SERVER_URL` and `DATABASE_URL` to your fly app secrets
 
   > **Note:** To find your `SERVER_URL`, go to [your fly.io dashboard](https://fly.io/dashboard/)
 

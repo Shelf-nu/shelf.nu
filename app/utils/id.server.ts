@@ -1,6 +1,4 @@
 import { init } from "@paralleldrive/cuid2";
-// eslint-disable-next-line import/no-cycle
-import { generateRandomCode } from "~/modules/invite/helpers";
 import { FINGERPRINT } from "./env";
 import { ShelfError } from "./error";
 import { Logger } from "./logger";
@@ -24,7 +22,8 @@ export function id(length?: number) {
     }
     return init({
       length: length || 10,
-      fingerprint: FINGERPRINT || generateRandomCode(10),
+      /** FINGERPRINT is not required but it helps with avoiding collision */
+      ...(FINGERPRINT && { fingerprint: FINGERPRINT }),
     })();
   } catch (cause) {
     Logger.error(
