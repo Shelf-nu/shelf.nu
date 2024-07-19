@@ -1,4 +1,5 @@
 import { init } from "@paralleldrive/cuid2";
+// eslint-disable-next-line import/no-cycle
 import { generateRandomCode } from "~/modules/invite/helpers";
 import { FINGERPRINT } from "./env";
 import { ShelfError } from "./error";

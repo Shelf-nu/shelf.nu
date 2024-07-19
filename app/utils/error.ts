@@ -1,3 +1,4 @@
+import { createId } from "@paralleldrive/cuid2";
 import { Prisma } from "@prisma/client";
 import type { ValidationError } from "./http";
 
@@ -171,7 +172,7 @@ export class ShelfError extends Error {
     this.status = isLikeShelfError(cause)
       ? status || cause.status || 500
       : status || 500;
-    this.traceId = traceId || crypto.randomUUID();
+    this.traceId = traceId || createId();
   }
 }
 
