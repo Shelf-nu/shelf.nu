@@ -33,6 +33,8 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { usePosition } from "~/hooks/use-position";
+
 import { createNote } from "~/modules/asset/service.server";
 import {
   deleteKit,
@@ -314,6 +316,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function KitDetails() {
+  usePosition();
   const { kit, currentBooking, qrObj, lastScan } =
     useLoaderData<typeof loader>();
   const { isBaseOrSelfService } = useUserRoleHelper();
