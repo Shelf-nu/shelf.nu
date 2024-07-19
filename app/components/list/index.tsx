@@ -7,6 +7,7 @@ import {
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 
+import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
@@ -98,6 +99,8 @@ export const List = ({
 
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
+  const isSelfService = useUserIsSelfService();
+
   const hasSelectedItems = selectedBulkItemsCount > 0;
 
   /**
@@ -188,14 +191,17 @@ export const List = ({
                 </div>
               </div>
             </div>
-            <div>{bulkActions}</div>
+            {!isSelfService ? <div>{bulkActions}</div> : null}
           </div>
 
           <Table
-            className={tw("list", bulkActions && "list-with-bulk-actions")}
+            className={tw(
+              "list",
+              bulkActions && !isSelfService && "list-with-bulk-actions"
+            )}
           >
             <ListHeader
-              bulkActions={bulkActions}
+              bulkActions={!isSelfService ? bulkActions : undefined}
               children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
             />
@@ -206,7 +212,9 @@ export const List = ({
                   key={`${item.id}-${i}`}
                   navigate={navigate}
                 >
-                  {bulkActions ? <BulkListItemCheckbox item={item} /> : null}
+                  {bulkActions && !isSelfService ? (
+                    <BulkListItemCheckbox item={item} />
+                  ) : null}
                   <ItemComponent item={item} />
                 </ListItem>
               ))}
