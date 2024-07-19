@@ -73,6 +73,7 @@ export default defineConfig({
       ignoredRouteFiles: ["**/.*"],
       future: {
         // unstable_fogOfWar: true,
+        // unstable_singleFetch: true,
       },
       routes: async (defineRoutes) => {
         return flatRoutes("routes", defineRoutes);
