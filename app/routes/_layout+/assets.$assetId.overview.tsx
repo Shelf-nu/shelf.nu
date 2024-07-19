@@ -321,6 +321,7 @@ export default function AssetOverview() {
                     <div className="ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
                       {asset.valuation.toLocaleString(locale, {
                         currency: asset.organization.currency,
+                        style: "currency",
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}{" "}

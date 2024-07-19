@@ -1,4 +1,3 @@
-import { MapIcon } from "~/components/icons/library";
 import { tw } from "~/utils/tw";
 import Icon from "../icons/icon";
 
@@ -14,7 +13,7 @@ export const MapPlaceholder = ({
       <div
         className={tw(
           "mb-4 border text-gray-500",
-          "flex size-14 items-center justify-center rounded-md p-3"
+          "flex size-14 items-center justify-center rounded-md p-3 shadow"
         )}
       >
         <Icon disableWrap={true} icon="map" />

@@ -97,12 +97,13 @@ export function ScanDetails({
             </div>
           </div>
           {hasLocation ? (
-            <div className="m-4 flex justify-center rounded-md border-[1.3px] py-1">
+            <div className="my-4 flex w-full justify-center px-4 py-1">
               <Button
                 to={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&zoom=15&markers=${latitude},${longitude}`}
-                variant="link"
+                variant="secondary"
                 target="_blank"
                 rel="nofollow noopener noreferrer"
+                className="w-full"
               >
                 See in Google Maps
               </Button>
