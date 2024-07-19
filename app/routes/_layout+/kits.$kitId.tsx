@@ -32,6 +32,7 @@ import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
+import { usePosition } from "~/hooks/use-position";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import { createNote } from "~/modules/asset/service.server";
 import {
@@ -314,6 +315,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function KitDetails() {
+  usePosition();
   const { kit, currentBooking, qrObj, lastScan } =
     useLoaderData<typeof loader>();
   const isSelfService = useUserIsSelfService();

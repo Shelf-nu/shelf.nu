@@ -793,8 +793,9 @@ export function MapIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width={28}
-      height={28}
+      width="100%"
+      height="100%"
+      viewBox="0 0 20 20"
       fill="none"
       {...props}
     >
@@ -802,8 +803,8 @@ export function MapIcon(props: SVGProps<SVGSVGElement>) {
         stroke="currentColor"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth={2}
-        d="m10.5 21-8.167 4.667V7L10.5 2.333M10.5 21l8.167 4.667M10.5 21V2.333m8.167 23.334 7-4.667V2.333l-7 4.667m0 18.667V7m0 0L10.5 2.333"
+        strokeWidth="1.667"
+        d="m6.667 2.5 6.666 15M2.5 14.167 10 10m-3.5 7.5h7c1.4 0 2.1 0 2.635-.273a2.5 2.5 0 0 0 1.092-1.092c.273-.535.273-1.235.273-2.635v-7c0-1.4 0-2.1-.273-2.635a2.5 2.5 0 0 0-1.092-1.093C15.6 2.5 14.9 2.5 13.5 2.5h-7c-1.4 0-2.1 0-2.635.272a2.5 2.5 0 0 0-1.093 1.093C2.5 4.4 2.5 5.1 2.5 6.5v7c0 1.4 0 2.1.272 2.635a2.5 2.5 0 0 0 1.093 1.092C4.4 17.5 5.1 17.5 6.5 17.5Z"
       />
     </svg>
   );
