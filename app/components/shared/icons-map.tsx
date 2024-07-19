@@ -42,11 +42,13 @@ import {
   AssetLabel,
   LockIcon,
   ActiveSwitchIcon,
+  MapIcon,
 } from "../icons/library";
 
 /** The possible options for icons to be rendered in the button */
 export type IconType =
   | "check"
+  | "map"
   | "plus"
   | "trash"
   | "archive"
@@ -97,6 +99,7 @@ type IconsMap = {
 
 export const iconsMap: IconsMap = {
   check: <CheckIcon />,
+  map: <MapIcon />,
   plus: <PlusIcon />,
   trash: <TrashIcon />,
   archive: <ArchiveIcon />,

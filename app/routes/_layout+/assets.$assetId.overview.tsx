@@ -232,42 +232,44 @@ export default function AssetOverview() {
   return (
     <div>
       <ContextualModal />
-      <div className="mt-[-16px] block lg:flex">
+      <div className="mx-[-16px] mt-[-16px] block md:mx-0 lg:flex">
         <div className="flex-1 overflow-hidden">
           <Card className="my-3 px-[-4] py-[-5]">
             <ul className="item-information">
-              <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   ID
                 </span>
-                <div className="w-3/5 text-gray-600">{asset?.id}</div>
+                <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
+                  {asset?.id}
+                </div>
               </li>
-              <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
+              <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
                   Created
                 </span>
-                <div className="w-3/5 text-gray-600">
+                <div className="mt-1 w-3/5 text-gray-600 md:mt-0">
                   {asset && asset.createdAt}
                 </div>
               </li>
 
               {asset?.category ? (
-                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Category
                   </span>
-                  <div className="w-3/5 text-gray-600">
+                  <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
                     <Badge color={asset.category?.color} withDot={false}>
                       {asset.category?.name}
                     </Badge>
                   </div>
                 </li>
               ) : (
-                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Category
                   </span>
-                  <div className="w-3/5 text-gray-600">
+                  <div className="mt-1 text-gray-600 md:mt-0 md:w-3/5">
                     <Badge color={"#808080"} withDot={false}>
                       Uncategorized
                     </Badge>
@@ -275,11 +277,11 @@ export default function AssetOverview() {
                 </li>
               )}
               {location ? (
-                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Location
                   </span>
-                  <div className="-ml-2 w-3/5 text-gray-600">
+                  <div className="-ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
                     <Tag key={location.id} className="ml-2">
                       {location.name}
                     </Tag>
@@ -287,21 +289,21 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset?.description ? (
-                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Description
                   </span>
-                  <div className="w-3/5 whitespace-pre-wrap text-gray-600">
+                  <div className="mt-1 whitespace-pre-wrap text-gray-600 md:mt-0 md:w-3/5">
                     {asset.description}
                   </div>
                 </li>
               ) : null}
               {asset && asset?.tags?.length > 0 ? (
-                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Tags
                   </span>
-                  <div className="-ml-2 w-3/5 text-gray-600">
+                  <div className="-ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
                     {asset.tags.map((tag) => (
                       <Tag key={tag.id} className="ml-2">
                         {tag.name}
@@ -311,19 +313,20 @@ export default function AssetOverview() {
                 </li>
               ) : null}
               {asset?.organization && asset.valuation ? (
-                <li className="flex w-full border-b-[1.1px] border-b-gray-100 p-4">
+                <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                   <span className="w-1/4 text-[14px] font-medium text-gray-900">
                     Value
                   </span>
-                  <div className="-ml-2 mb-2 w-3/5">
-                    <Tag key={asset.valuation} className="ml-2">
-                      <>
-                        {asset.valuation.toLocaleString(locale, {
-                          style: "currency",
-                          currency: asset.organization.currency,
-                        })}
-                      </>
-                    </Tag>
+                  <div className="-ml-2 md:w-3/5">
+                    <div className="ml-2 mt-1 text-gray-600 md:mt-0 md:w-3/5">
+                      {asset.valuation.toLocaleString(locale, {
+                        currency: asset.organization.currency,
+                        style: "currency",
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}{" "}
+                      {asset.organization.currency}
+                    </div>
                   </div>
                 </li>
               ) : null}
@@ -347,14 +350,14 @@ export default function AssetOverview() {
                     return (
                       <li
                         className={tw(
-                          "flex w-full border-b-[1.1px] border-b-gray-100 p-4"
+                          "w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex"
                         )}
                         key={field.id}
                       >
                         <span className="w-1/4 text-[14px] font-medium text-gray-900">
                           {field.customField.name}
                         </span>
-                        <div className="w-3/5 max-w-[250px] text-gray-600">
+                        <div className="mt-1 max-w-[250px] text-gray-600 md:mt-0 md:w-3/5">
                           {isLink(customFieldDisplayValue) ? (
                             <Button
                               role="link"
