@@ -83,6 +83,7 @@ export const NewBookingFormSchema = (
             userId: z.string().optional().nullable(),
           })
         ),
+      description: z.string().optional(),
     })
     .refine(
       (data) =>
@@ -111,6 +112,7 @@ type BookingFormData = {
   bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
   bookingFlags?: BookingFlags;
   assetIds?: string[] | null;
+  description?: string | null;
 };
 
 export function BookingForm({
@@ -122,6 +124,7 @@ export function BookingForm({
   bookingStatus,
   bookingFlags,
   assetIds,
+  description,
 }: BookingFormData) {
   const navigation = useNavigation();
 
@@ -369,6 +372,29 @@ export function BookingForm({
                   }
                 />
               )}
+              <Card className="m-0">
+                <FormRow
+                  rowLabel="Description"
+                  className="mobile-styling-only border-b-0 p-0"
+                >
+                  <Input
+                    label="Description"
+                    inputType="textarea"
+                    hideLabel
+                    name={zo.fields.description()}
+                    disabled={
+                      disabled ||
+                      bookingStatus?.isCompleted ||
+                      bookingStatus?.isCancelled ||
+                      bookingStatus?.isArchived
+                    }
+                    error={zo.errors.description()?.message}
+                    className="mobile-styling-only w-full p-0"
+                    defaultValue={description || undefined}
+                    placeholder="Add a description..."
+                  />
+                </FormRow>
+              </Card>
             </div>
           </div>
         </div>

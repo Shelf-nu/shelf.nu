@@ -208,6 +208,7 @@ export default function BookingsIndexPage({
           className=" overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
+              <Th className="hidden md:table-cell">Description</Th>
               <Th className="hidden md:table-cell"> </Th>
               <Th className="hidden md:table-cell">From</Th>
               <Th className="hidden md:table-cell">To</Th>
@@ -292,6 +293,10 @@ const ListAssetContent = ({
             <ChevronRight />
           </button>
         </div>
+      </Td>
+
+      <Td className="hidden max-w-96 truncate md:table-cell">
+        {item.description}
       </Td>
 
       {/**

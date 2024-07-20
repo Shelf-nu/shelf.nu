@@ -304,18 +304,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         // We are only changing the name so we do things simpler
         if (nameChangeOnly) {
-          const { name } = parseData(
+          const { name, description } = parseData(
             formData,
             z.object({
               name: z.string(),
+              description: z.string().optional(),
             }),
             {
               additionalData: { userId, id, organizationId, role },
             }
           );
-          Object.assign(upsertBookingData, {
-            name,
-          });
+
+          Object.assign(upsertBookingData, { name, description });
         } else {
           /** WE are updating the whole booking */
           const payload = parseData(
@@ -326,7 +326,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             }
           );
 
-          const { name, custodian } = payload;
+          const { name, custodian, description } = payload;
 
           const hints = getHints(request);
           const fmt = "yyyy-MM-dd'T'HH:mm";
@@ -353,6 +353,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             name,
             from,
             to,
+            description,
           });
         }
 

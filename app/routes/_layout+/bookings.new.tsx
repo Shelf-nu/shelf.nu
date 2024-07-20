@@ -122,7 +122,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, custodian, assetIds } = payload;
+    const { name, custodian, assetIds, description } = payload;
     const hints = getHints(request);
 
     const fmt = "yyyy-MM-dd'T'HH:mm";
@@ -144,6 +144,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         custodianTeamMemberId: custodian?.id,
         organizationId,
         name,
+        description,
         from,
         to,
         assetIds,
