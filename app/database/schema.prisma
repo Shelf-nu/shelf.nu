@@ -632,8 +632,9 @@ enum BookingStatus {
 model Booking {
   id String @id @default(cuid())
 
-  name   String
-  status BookingStatus @default(DRAFT)
+  name        String
+  status      BookingStatus @default(DRAFT)
+  description String?       @default("")
 
   activeSchedulerReference String?
 
