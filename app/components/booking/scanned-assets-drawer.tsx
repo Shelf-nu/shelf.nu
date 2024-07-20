@@ -40,7 +40,7 @@ export const addScannedAssetsToBookingSchema = z.object({
 });
 
 const MD_SNAP_POINT = "450px";
-const MOBILE_SNAP_POINT = "150px";
+const MOBILE_SNAP_POINT = "250px";
 
 export default function ScannedAssetsDrawer({
   className,
