@@ -927,6 +927,16 @@ export async function getBookingsForCalendar(params: {
           extendedProps: {
             status: booking.status,
             id: booking.id,
+            name: booking.name,
+            description: booking.description,
+            start: (booking.from as Date).toISOString(),
+            end: (booking.to as Date).toISOString(),
+            custodian: {
+              name: custodianName,
+              image: booking.custodianUser
+                ? booking.custodianUser.profilePicture
+                : undefined,
+            },
           },
         };
       });

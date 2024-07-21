@@ -272,7 +272,7 @@ const ListAssetContent = ({
   return (
     <>
       {/* Item */}
-      <Td className="w-full whitespace-normal p-0 md:p-0">
+      <Td className="w-full min-w-40 whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 py-4 pr-4 md:justify-normal md:pr-6">
           <div className="flex items-center gap-3">
             <div className="min-w-[130px]">
@@ -295,7 +295,7 @@ const ListAssetContent = ({
         </div>
       </Td>
 
-      <Td className="hidden max-w-96 truncate md:table-cell">
+      <Td className="hidden max-w-20 truncate md:table-cell">
         {item.description}
       </Td>
 
