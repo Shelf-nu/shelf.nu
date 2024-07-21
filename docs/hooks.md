@@ -101,3 +101,35 @@ const MyComponent = ({ booking }) => {
   );
 };
 ```
+
+## useQrScanner
+The `useQrScanner` hook is a utility hook that etrieves available video input devices for use in applications that require video input, such as QR code scanners. This hook helps manage the state of video devices, making it easier to implement features that depend on accessing the user's camera.
+
+The hook returns an object with one property:
+`videoMediaDevices`: An array of MediaDeviceInfo objects representing the available video input devices.
+
+### Usage
+
+Here's an example of how to use the `useFetcherWithReset` hook:
+
+```typescript
+import { useQrScanner } from './useQrScanner';
+
+const QRScannerComponent = () => {
+  const { videoMediaDevices } = useQrScanner();
+  const { vh, isMd } = useViewportHeight();
+  const height = isMd ? vh - 132 : vh - 167;
+
+  return (
+    <div style={{ height: `${height}px` }}>
+      {videoMediaDevices && videoMediaDevices.length > 0 ? (
+        <ZXingScanner videoMediaDevices={videoMediaDevices} />
+      ) : (
+        <div className="mt-4 flex flex-col items-center justify-center">
+          <Spinner /> Waiting for permission to access the camera.
+        </div>
+      )}
+    </div>
+  );
+};
+```
