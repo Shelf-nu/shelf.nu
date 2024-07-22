@@ -15,7 +15,9 @@ import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { gifToPng } from "~/utils/gif-to-png";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { id } from "~/utils/id.server";
 import { getParamsValues } from "~/utils/list";
+// eslint-disable-next-line import/no-cycle
 import { generateRandomCode } from "../invite/helpers";
 
 const label: ErrorLabel = "QR";
@@ -79,6 +81,7 @@ export async function createQr({
   kitId?: Kit["id"];
 }) {
   const data = {
+    id: id(),
     ...(userId && {
       user: {
         connect: {
@@ -172,6 +175,7 @@ export async function generateOrphanedCodes({
     const data = Array.from({ length: amount }).map(() => ({
       userId,
       organizationId,
+      id: id(),
     }));
 
     return await db.qr.createMany({
@@ -212,6 +216,7 @@ export async function generateUnclaimedCodesForPrint({
       // Generating codes also prints them so unclaimed codes are marked as printed
       // We generate a random code for the batch
       batchId: batch.id,
+      id: id(),
     }));
 
     await db.qr.createMany({
