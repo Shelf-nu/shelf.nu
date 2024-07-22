@@ -29,7 +29,7 @@ import {
 } from "./email-helpers";
 import type { BookingUpdateIntent, ClientHint, SchedulerData } from "./types";
 import { getBookingWhereInput } from "./utils.server";
-import { createNotes } from "../asset/service.server";
+import { createNotes } from "../note/service.server";
 import { getOrganizationAdminsEmails } from "../organization/service.server";
 import { getUserByID } from "../user/service.server";
 

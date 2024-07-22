@@ -17,7 +17,6 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { Badge } from "~/components/shared/badge";
 import { db } from "~/database/db.server";
-import { createNotes } from "~/modules/asset/service.server";
 import {
   createNotesForBookingUpdate,
   deleteBooking,
@@ -27,6 +26,7 @@ import {
   sendBookingUpdateNotification,
   upsertBooking,
 } from "~/modules/booking/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
