@@ -1,3 +1,4 @@
+import { createId } from "@paralleldrive/cuid2";
 import { Prisma } from "@prisma/client";
 import type { ValidationError } from "./http";
 
@@ -79,7 +80,9 @@ export type FailureReason = {
     | "User"
     | "Scanner"
     | "Kit"
+    | "Note"
     // Other kinds of errors
+    | "DB"
     | "Request validation"
     | "DB constrain violation"
     | "Dev error" // Error that should never happen in production because it's a developer mistake
@@ -170,7 +173,7 @@ export class ShelfError extends Error {
     this.status = isLikeShelfError(cause)
       ? status || cause.status || 500
       : status || 500;
-    this.traceId = traceId || crypto.randomUUID();
+    this.traceId = traceId || createId();
   }
 }
 

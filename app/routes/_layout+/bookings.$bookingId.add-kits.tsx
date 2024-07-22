@@ -39,7 +39,6 @@ import {
 } from "~/components/shared/tabs";
 import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
-import { createNotes } from "~/modules/asset/service.server";
 import {
   getBooking,
   getKitIdsByAssets,
@@ -47,6 +46,7 @@ import {
   upsertBooking,
 } from "~/modules/booking/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";

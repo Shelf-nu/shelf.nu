@@ -24,6 +24,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { maybeUniqueConstraintViolation, ShelfError } from "~/utils/error";
 import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { id } from "~/utils/id.server";
 import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { oneDayFromNow } from "~/utils/one-week-from-now";
@@ -32,11 +33,10 @@ import type { MergeInclude } from "~/utils/utils";
 import type { UpdateKitPayload } from "./types";
 import { GET_KIT_STATIC_INCLUDES, KITS_INCLUDE_FIELDS } from "./types";
 import { getKitsWhereInput } from "./utils.server";
-//@TODO: Fix the circular dependency
-// eslint-disable-next-line import/no-cycle
-import { createNote } from "../asset/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
+import { createNote } from "../note/service.server";
 import { getQr } from "../qr/service.server";
+
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Kit";
@@ -82,6 +82,7 @@ export async function createKit({
         : {
             create: [
               {
+                id: id(),
                 version: 0,
                 errorCorrection: ErrorCorrection["L"],
                 user,

@@ -25,10 +25,8 @@ import {
 } from "~/components/shared/tooltip";
 import { Td } from "~/components/table";
 import { db } from "~/database/db.server";
-import {
-  createBulkKitChangeNotes,
-  getPaginatedAndFilterableAssets,
-} from "~/modules/asset/service.server";
+import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { createBulkKitChangeNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";

@@ -72,7 +72,8 @@ export default defineConfig({
       serverBuildFile: "remix.js",
       ignoredRouteFiles: ["**/.*"],
       future: {
-        unstable_fogOfWar: true,
+        // unstable_fogOfWar: true,
+        // unstable_singleFetch: true,
       },
       routes: async (defineRoutes) => {
         return flatRoutes("routes", defineRoutes);
