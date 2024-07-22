@@ -53,6 +53,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -203,7 +204,7 @@ export default function QrLinkExisting() {
   const { header } = useLoaderData<typeof loader>();
   const { qrId } = useParams();
   const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
 
   /** The id of the asset the user selected to update */
   const [selectedKitId, setSelectedKitId] = useState<string>("");
@@ -223,7 +224,11 @@ export default function QrLinkExisting() {
 
       <Filters className="-mx-4 border-b px-4 py-3">
         <div className="flex flex-1 justify-center pt-3">
-          {!isBaseOrSelfService && (
+          {userHasPermission({
+            roles,
+            entity: PermissionEntity.qr,
+            action: PermissionAction.update,
+          }) && (
             <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">

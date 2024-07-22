@@ -21,6 +21,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { Tag } from "~/components/shared/tag";
 import TextualDivider from "~/components/shared/textual-divider";
+import When from "~/components/when/when";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { ASSET_OVERVIEW_FIELDS } from "~/modules/asset/fields";
@@ -46,6 +47,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -227,7 +229,12 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  const canUpdateAvailability = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
 
   return (
     <div>
@@ -382,7 +389,7 @@ export default function AssetOverview() {
         </div>
 
         <div className="w-full md:w-[360px] lg:ml-4">
-          {!isBaseOrSelfService ? (
+          <When truthy={canUpdateAvailability}>
             <Card className="my-3">
               <fetcher.Form
                 ref={zo.ref}
@@ -401,12 +408,12 @@ export default function AssetOverview() {
                   <Switch
                     name={zo.fields.availableToBook()}
                     disabled={
-                      isBaseOrSelfService || isFormProcessing(fetcher.state)
+                      !canUpdateAvailability || isFormProcessing(fetcher.state)
                     } // Disable for self service users
                     defaultChecked={asset?.availableToBook}
                     required
                     title={
-                      isBaseOrSelfService
+                      !canUpdateAvailability
                         ? "You do not have the permissions to change availability"
                         : "Toggle availability"
                     }
@@ -415,7 +422,7 @@ export default function AssetOverview() {
                 </div>
               </fetcher.Form>
             </Card>
-          ) : null}
+          </When>
 
           {asset?.kit?.name ? (
             <Card className="my-3 py-3">
@@ -449,7 +456,11 @@ export default function AssetOverview() {
           <CustodyCard
             booking={booking}
             custody={asset?.custody || null}
-            hasPermission={!isBaseOrSelfService}
+            hasPermission={userHasPermission({
+              roles,
+              entity: PermissionEntity.custody,
+              action: PermissionAction.read,
+            })}
           />
 
           {asset && (
@@ -461,7 +472,15 @@ export default function AssetOverview() {
               }}
             />
           )}
-          {!isBaseOrSelfService ? <ScanDetails lastScan={lastScan} /> : null}
+          <When
+            truthy={userHasPermission({
+              roles,
+              entity: PermissionEntity.scan,
+              action: PermissionAction.read,
+            })}
+          >
+            <ScanDetails lastScan={lastScan} />
+          </When>
         </div>
       </div>
       <ContextualSidebar />

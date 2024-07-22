@@ -58,6 +58,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -318,7 +319,7 @@ export default function KitDetails() {
   usePosition();
   const { kit, currentBooking, qrObj, lastScan } =
     useLoaderData<typeof loader>();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, roles } = useUserRoleHelper();
   /**
    * User can manage assets if
    * 1. Kit has AVAILABLE status
@@ -350,9 +351,15 @@ export default function KitDetails() {
 
   const noAssets = !kit.assets.length;
 
+  const userRoleCanManageAssets = userHasPermission({
+    roles,
+    entity: PermissionEntity.kit,
+    action: PermissionAction.manageAssets,
+  });
+
   const canManageAssets =
     kitIsAvailable &&
-    !isBaseOrSelfService &&
+    userRoleCanManageAssets &&
     !kitBookings.some((b) =>
       (
         [BookingStatus.ONGOING, BookingStatus.OVERDUE] as BookingStatus[]
@@ -369,7 +376,13 @@ export default function KitDetails() {
           />
         }
       >
-        {!isBaseOrSelfService ? <ActionsDropdown /> : null}
+        {userHasPermission({
+          roles,
+          entity: PermissionEntity.kit,
+          action: PermissionAction.update,
+        }) ? (
+          <ActionsDropdown />
+        ) : null}
         <Button
           to={`/bookings/new?${kit.assets
             .map((a) => `assetId=${a.id}`)
@@ -422,7 +435,11 @@ export default function KitDetails() {
           <CustodyCard
             // @ts-expect-error - we are passing the correct props
             booking={currentBooking || undefined}
-            hasPermission={!isBaseOrSelfService}
+            hasPermission={userHasPermission({
+              roles,
+              entity: PermissionEntity.custody,
+              action: PermissionAction.read,
+            })}
             custody={kit.custody}
           />
 
@@ -438,13 +455,19 @@ export default function KitDetails() {
               type: "kit",
             }}
           />
-          {!isBaseOrSelfService ? <ScanDetails lastScan={lastScan} /> : null}
+          {userHasPermission({
+            roles,
+            entity: PermissionEntity.scan,
+            action: PermissionAction.read,
+          }) ? (
+            <ScanDetails lastScan={lastScan} />
+          ) : null}
         </div>
 
         <div className="w-full lg:ml-6">
           <TextualDivider text="Assets" className="mb-8 lg:hidden" />
           <div className="mb-3 flex gap-4 lg:hidden">
-            {!isBaseOrSelfService ? (
+            {userRoleCanManageAssets ? (
               <Button
                 to="manage-assets"
                 variant="primary"
@@ -468,7 +491,7 @@ export default function KitDetails() {
 
           <div className="flex flex-col md:gap-2">
             <Filters className="responsive-filters mb-2 lg:mb-0">
-              {!isBaseOrSelfService ? (
+              {userRoleCanManageAssets ? (
                 <div className="flex items-center justify-normal gap-6 xl:justify-end">
                   <div className="hidden lg:block">
                     <Button
@@ -534,7 +557,7 @@ function ListContent({
   const { id, mainImage, mainImageExpiration, title, location, category } =
     item;
 
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
   return (
     <>
       <Td className="w-full p-0 md:p-0">
@@ -602,7 +625,11 @@ function ListContent({
           </GrayBadge>
         ) : null}
       </Td>
-      {!isBaseOrSelfService && (
+      {userHasPermission({
+        roles,
+        entity: PermissionEntity.asset,
+        action: PermissionAction.manageAssets,
+      }) && (
         <Td className="pr-4 text-right">
           <AssetRowActionsDropdown asset={item} />
         </Td>

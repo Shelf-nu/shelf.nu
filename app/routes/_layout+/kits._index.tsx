@@ -29,6 +29,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveTeamMemberName } from "~/utils/user";
 
@@ -124,12 +125,23 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function KitsIndexPage() {
   const navigate = useNavigate();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  const canCreateKit = userHasPermission({
+    roles,
+    entity: PermissionEntity.kit,
+    action: PermissionAction.create,
+  });
+
+  const canReadCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.custody,
+    action: PermissionAction.read,
+  });
 
   return (
     <>
       <Header>
-        {!isBaseOrSelfService && (
+        {canCreateKit && (
           <Button to="new" role="link" aria-label="new kit" icon="kit">
             New kit
           </Button>
@@ -149,7 +161,7 @@ export default function KitsIndexPage() {
             ),
           }}
         >
-          {!isBaseOrSelfService && (
+          {canReadCustody && (
             <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">
@@ -180,7 +192,7 @@ export default function KitsIndexPage() {
             <>
               <Th className="hidden md:table-cell">Description</Th>
               <Th className="hidden md:table-cell">Assets</Th>
-              {!isBaseOrSelfService && (
+              {canReadCustody && (
                 <Th className="hidden md:table-cell">Custodian</Th>
               )}
             </>
@@ -223,8 +235,12 @@ function ListContent({
     };
   }>;
 }) {
-  const { isBaseOrSelfService } = useUserRoleHelper();
-
+  const { roles } = useUserRoleHelper();
+  const canReadCustody = userHasPermission({
+    roles,
+    entity: PermissionEntity.custody,
+    action: PermissionAction.read,
+  });
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -265,7 +281,7 @@ function ListContent({
       </Td>
 
       <Td className="hidden md:table-cell">{item._count.assets}</Td>
-      {!isBaseOrSelfService && (
+      {canReadCustody && (
         <Td className="hidden md:table-cell">
           {item.custody ? (
             <GrayBadge>

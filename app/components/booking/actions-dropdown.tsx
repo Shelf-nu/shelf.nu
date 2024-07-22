@@ -11,6 +11,11 @@ import {
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { DeleteBooking } from "./delete-booking";
 import { GenerateBookingPdf } from "./generate-booking-pdf";
@@ -26,7 +31,13 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
     useBookingStatusHelpers(booking);
 
   const submit = useSubmit();
-  const { isSelfService } = useUserRoleHelper();
+  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+
+  const canArchiveBooking = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.archive,
+  });
 
   return (
     <DropdownMenu modal={false}>
@@ -76,7 +87,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
               </Button>
             </DropdownMenuItem>
           ) : null}
-          {isCompleted && !isSelfService ? (
+          {isCompleted && canArchiveBooking ? (
             <DropdownMenuItem asChild>
               <Button
                 variant="link"
@@ -103,7 +114,8 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
               </Button>
             </DropdownMenuItem>
           ) : null}
-          {(isSelfService && isDraft) || !isSelfService ? (
+          {/* Because SELF_SERVICE and BASE can only delete bookings they own and are in draft, we need to handle it like this, rather than with userHasPermission */}
+          {(isBaseOrSelfService && isDraft) || !isBaseOrSelfService ? (
             <DeleteBooking booking={booking} />
           ) : null}
           <Divider className="my-2" />

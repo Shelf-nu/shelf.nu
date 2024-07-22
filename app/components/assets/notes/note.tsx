@@ -2,7 +2,6 @@ import type { Note as NoteType } from "@prisma/client";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
 import { Switch } from "~/components/shared/switch";
 import { Tag } from "~/components/shared/tag";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { WithDateFields } from "~/modules/types";
 import { timeAgo } from "~/utils/time-ago";
 import { ActionsDopdown } from "./actions-dropdown";
@@ -32,23 +31,19 @@ const Update = ({ note }: { note: NoteWithDate; when?: boolean }) => (
   </div>
 );
 
-export const Comment = ({ note }: { note: NoteWithDate; when?: boolean }) => {
-  const { isBaseOrSelfService } = useUserRoleHelper();
-
-  return (
-    <>
-      <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
-        <div>
-          <span className="commentator font-medium text-gray-900">
-            {note.user?.firstName} {note.user?.lastName}
-          </span>{" "}
-          <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
-        </div>
-        {!isBaseOrSelfService ? <ActionsDopdown noteId={note.id} /> : null}
-      </header>
-      <div className="message px-3.5 py-3">
-        <MarkdownViewer content={note.content} />
+export const Comment = ({ note }: { note: NoteWithDate; when?: boolean }) => (
+  <>
+    <header className="flex justify-between border-b px-3.5 py-3 text-text-xs md:text-text-sm">
+      <div>
+        <span className="commentator font-medium text-gray-900">
+          {note.user?.firstName} {note.user?.lastName}
+        </span>{" "}
+        <span className="text-gray-600">{timeAgo(note.createdAt)}</span>
       </div>
-    </>
-  );
-};
+      <ActionsDopdown noteId={note.id} />
+    </header>
+    <div className="message px-3.5 py-3">
+      <MarkdownViewer content={note.content} />
+    </div>
+  </>
+);

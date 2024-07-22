@@ -35,6 +35,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import {
   useClearValueFromParams,
@@ -279,11 +280,13 @@ export default function AssetIndexPage() {
   return (
     <>
       <Header>
-        {userHasPermission({
-          roles,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.create,
-        }) ? (
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.asset,
+            action: PermissionAction.create,
+          })}
+        >
           <>
             <ImportButton
               canImportAssets={userHasPermission({
@@ -302,7 +305,7 @@ export default function AssetIndexPage() {
               New asset
             </Button>
           </>
-        ) : null}
+        </When>
       </Header>
       <AssetsList />
     </>
@@ -323,7 +326,7 @@ export const AssetsList = () => {
     "location",
     "teamMember"
   );
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
 
   return (
     <ListContentWrapper>
@@ -411,7 +414,13 @@ export const AssetsList = () => {
                 </div>
               )}
             />
-            {!isBaseOrSelfService && (
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              })}
+            >
               <DynamicDropdown
                 trigger={
                   <div className="flex cursor-pointer items-center gap-2">
@@ -438,7 +447,7 @@ export const AssetsList = () => {
                   name: "Without custody",
                 }}
               />
-            )}
+            </When>
           </div>
         </div>
       </Filters>
@@ -452,9 +461,15 @@ export const AssetsList = () => {
           <>
             <Th className="hidden md:table-cell">Category</Th>
             <Th className="hidden md:table-cell">Tags</Th>
-            {!isBaseOrSelfService ? (
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              })}
+            >
               <Th className="hidden md:table-cell">Custodian</Th>
-            ) : null}
+            </When>
             <Th className="hidden md:table-cell">Location</Th>
           </>
         }
@@ -487,7 +502,7 @@ const ListAssetContent = ({
   };
 }) => {
   const { category, tags, custody, location, kit } = item;
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
   return (
     <>
       {/* Item */}
@@ -559,7 +574,13 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      {!isBaseOrSelfService ? (
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.custody,
+          action: PermissionAction.read,
+        })}
+      >
         <Td className="hidden md:table-cell">
           {custody ? (
             <GrayBadge>
@@ -592,7 +613,7 @@ const ListAssetContent = ({
             </GrayBadge>
           ) : null}
         </Td>
-      ) : null}
+      </When>
 
       {/* Location */}
       <Td className="hidden md:table-cell">

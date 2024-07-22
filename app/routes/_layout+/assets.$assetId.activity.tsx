@@ -16,6 +16,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
@@ -81,11 +82,20 @@ export const handle = {
 };
 
 export default function AssetActivity() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
 
   return (
     <div className="w-full">
-      {isBaseOrSelfService ? (
+      {userHasPermission({
+        roles,
+        entity: PermissionEntity.note,
+        action: PermissionAction.read,
+      }) ? (
+        <>
+          <TextualDivider text="Notes" className="mb-8 lg:hidden" />
+          <Notes />
+        </>
+      ) : (
         <div className="flex h-full flex-col justify-center">
           <div className="flex flex-col items-center justify-center  text-center">
             <div className="mb-4 inline-flex size-8 items-center justify-center  rounded-full bg-primary-100 p-2 text-primary-600">
@@ -95,11 +105,6 @@ export default function AssetActivity() {
             <p>You are not allowed to view asset notes</p>
           </div>
         </div>
-      ) : (
-        <>
-          <TextualDivider text="Notes" className="mb-8 lg:hidden" />
-          <Notes />
-        </>
       )}
     </div>
   );

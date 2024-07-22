@@ -9,6 +9,8 @@ export enum PermissionAction {
   checkin = "checkin",
   export = "export",
   import = "import",
+  archive = "archive",
+  manageAssets = "manage-assets",
 }
 export enum PermissionEntity {
   asset = "asset",
@@ -24,6 +26,9 @@ export enum PermissionEntity {
   generalSettings = "generalSettings",
   subscription = "subscription",
   kit = "kit",
+  note = "note",
+  scan = "scan",
+  custody = "custody",
 }
 
 //this will come from DB eventually
@@ -37,6 +42,7 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.update,
       PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
+      PermissionAction.manageAssets,
     ],
     [PermissionEntity.qr]: [],
     [PermissionEntity.category]: [],
@@ -49,6 +55,9 @@ export const Role2PermissionMap: {
     [PermissionEntity.generalSettings]: [],
     [PermissionEntity.subscription]: [],
     [PermissionEntity.kit]: [PermissionAction.read],
+    [PermissionEntity.note]: [],
+    [PermissionEntity.scan]: [],
+    [PermissionEntity.custody]: [],
   },
   [OrganizationRoles.SELF_SERVICE]: {
     [PermissionEntity.asset]: [PermissionAction.read],
@@ -59,6 +68,8 @@ export const Role2PermissionMap: {
       PermissionAction.checkout,
       PermissionAction.checkin,
       PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
+      PermissionAction.archive,
+      PermissionAction.manageAssets,
     ],
     [PermissionEntity.qr]: [],
     [PermissionEntity.category]: [],
@@ -71,5 +82,8 @@ export const Role2PermissionMap: {
     [PermissionEntity.generalSettings]: [],
     [PermissionEntity.subscription]: [],
     [PermissionEntity.kit]: [PermissionAction.read],
+    [PermissionEntity.note]: [],
+    [PermissionEntity.scan]: [],
+    [PermissionEntity.custody]: [],
   },
 };
