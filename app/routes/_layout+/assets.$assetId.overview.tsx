@@ -234,7 +234,7 @@ export default function AssetOverview() {
       <ContextualModal />
       <div className="mx-[-16px] mt-[-16px] block md:mx-0 lg:flex">
         <div className="flex-1 overflow-hidden">
-          <Card className="my-3 px-[-4] py-[-5]">
+          <Card className="my-3 md:border px-[-4] py-[-5]">
             <ul className="item-information">
               <li className="w-full border-b-[1.1px] border-b-gray-100 p-4 last:border-b-0 md:flex">
                 <span className="w-1/4 text-[14px] font-medium text-gray-900">
@@ -340,7 +340,7 @@ export default function AssetOverview() {
                 text="Custom fields"
                 className="mb-8 pt-3 lg:hidden"
               />
-              <Card className="my-3 px-[-4] py-[-5]">
+              <Card className="my-3 md:border px-[-4] py-[-5]">
                 <ul className="item-information">
                   {customFieldsValues.map((field, _index) => {
                     const customFieldDisplayValue = getCustomFieldDisplayValue(
@@ -383,7 +383,7 @@ export default function AssetOverview() {
 
         <div className="w-full md:w-[360px] lg:ml-4">
           {!isSelfService ? (
-            <Card className="my-3">
+            <Card className="my-3 md:border">
               <fetcher.Form
                 ref={zo.ref}
                 method="post"
@@ -416,7 +416,7 @@ export default function AssetOverview() {
           ) : null}
 
           {asset?.kit?.name ? (
-            <Card className="my-3 py-3">
+            <Card className="my-3 md:border py-3">
               <div className="flex items-center gap-3">
                 <div className="flex size-11 items-center justify-center rounded-full bg-gray-100/50">
                   <div className="flex size-7 items-center justify-center rounded-full bg-gray-200">
