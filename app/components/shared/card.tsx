@@ -9,7 +9,7 @@ export const Card = ({
 }) => (
   <div
     className={tw(
-      "card my-4 border-y bg-white px-4 py-5 md:rounded md:border",
+      "card my-4 bg-white px-4 py-5 md:rounded",
       className
     )}
   >
