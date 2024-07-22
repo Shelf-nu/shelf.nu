@@ -8,7 +8,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useNavigate } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -40,6 +40,7 @@ import {
   useClearValueFromParams,
   useSearchParamHasValue,
 } from "~/hooks/use-search-param-utils";
+import { useUserOrgRoles } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   bulkDeleteAssets,
@@ -59,7 +60,8 @@ import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
@@ -273,15 +275,24 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetIndexPage() {
-  const { canImportAssets } = useLoaderData<typeof loader>();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const orgRoles = useUserOrgRoles();
 
   return (
     <>
       <Header>
-        {!isBaseOrSelfService ? (
+        {userHasPermission({
+          roles: orgRoles,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.create,
+        }) ? (
           <>
-            <ImportButton canImportAssets={canImportAssets} />
+            <ImportButton
+              canImportAssets={userHasPermission({
+                roles: orgRoles,
+                entity: PermissionEntity.asset,
+                action: PermissionAction.import,
+              })}
+            />
             <Button
               to="new"
               role="link"

@@ -31,7 +31,7 @@ import { data, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { canExportAssets } from "~/utils/subscription.server";
 import { MAX_SIZE } from "./account-details.workspace.new";

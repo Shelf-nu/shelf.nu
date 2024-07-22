@@ -32,9 +32,8 @@ import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { usePosition } from "~/hooks/use-position";
-import { createNote } from "~/modules/asset/service.server";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   deleteKit,
   deleteKitImage,
@@ -58,7 +57,7 @@ import { data, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -316,6 +315,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function KitDetails() {
+  usePosition();
   const { kit, currentBooking, qrObj, lastScan } =
     useLoaderData<typeof loader>();
   const { isBaseOrSelfService } = useUserRoleHelper();
