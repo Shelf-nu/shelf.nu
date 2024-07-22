@@ -80,6 +80,7 @@ export type FailureReason = {
     | "User"
     | "Scanner"
     | "Kit"
+    | "Note"
     // Other kinds of errors
     | "DB"
     | "Request validation"
