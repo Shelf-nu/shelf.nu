@@ -40,7 +40,6 @@ import {
   useClearValueFromParams,
   useSearchParamHasValue,
 } from "~/hooks/use-search-param-utils";
-import { useUserOrgRoles } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   bulkDeleteAssets,
@@ -275,20 +274,20 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetIndexPage() {
-  const orgRoles = useUserOrgRoles();
+  const { roles } = useUserRoleHelper();
 
   return (
     <>
       <Header>
         {userHasPermission({
-          roles: orgRoles,
+          roles,
           entity: PermissionEntity.asset,
           action: PermissionAction.create,
         }) ? (
           <>
             <ImportButton
               canImportAssets={userHasPermission({
-                roles: orgRoles,
+                roles,
                 entity: PermissionEntity.asset,
                 action: PermissionAction.import,
               })}

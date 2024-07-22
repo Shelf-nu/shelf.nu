@@ -10,7 +10,7 @@ export function userHasPermission({
   action,
   entity,
 }: {
-  roles: OrganizationRoles[];
+  roles: OrganizationRoles[] | undefined;
   entity: PermissionEntity;
   action: PermissionAction;
 }) {

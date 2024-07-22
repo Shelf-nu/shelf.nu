@@ -34,6 +34,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -180,8 +181,7 @@ export default function AssetDetailsPage() {
   /** Due to some conflict of types between prisma and remix, we need to use the SerializeFrom type
    * Source: https://github.com/prisma/prisma/discussions/14371
    */
-  const { isBaseOrSelfService } = useUserRoleHelper();
-
+  const { roles } = useUserRoleHelper();
   return (
     <>
       <Header
@@ -210,7 +210,13 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        {!isBaseOrSelfService ? <ActionsDropdown /> : null}
+        {userHasPermission({
+          roles,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.update,
+        }) ? (
+          <ActionsDropdown />
+        ) : null}
 
         <Button
           to={`/bookings/new?assetId=${asset.id}`}
