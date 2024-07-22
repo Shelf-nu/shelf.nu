@@ -103,7 +103,7 @@ const MyComponent = ({ booking }) => {
 ```
 
 ## useQrScanner
-The `useQrScanner` hook is a utility hook that etrieves available video input devices for use in applications that require video input, such as QR code scanners. This hook helps manage the state of video devices, making it easier to implement features that depend on accessing the user's camera.
+The `useQrScanner` hook is a utility hook that retrieves available video input devices for use in applications that require video input, such as QR code scanners. This hook helps manage the state of video devices, making it easier to implement features that depend on accessing the user's camera.
 
 The hook returns an object with one property:
 `videoMediaDevices`: An array of MediaDeviceInfo objects representing the available video input devices.
