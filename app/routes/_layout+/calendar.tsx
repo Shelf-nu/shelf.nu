@@ -4,6 +4,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import type { BookingStatus } from "@prisma/client";
+import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
@@ -16,6 +17,7 @@ import Header from "~/components/layout/header";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
+import { DateS } from "~/components/shared/date";
 import {
   HoverCard,
   HoverCardContent,
@@ -93,7 +95,11 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
 
-export const DATE_FORMAT = "E dd/MM/yyyy hh:mm";
+export const DATE_FORMAT_OPTIONS = {
+  weekday: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+} as const;
 
 // Calendar Component
 const Calendar = () => {
@@ -250,48 +256,57 @@ const Calendar = () => {
 
                 return (
                   <HoverCard openDelay={0} closeDelay={0}>
-                    <HoverCardTrigger className="inline-block w-full">
+                    <HoverCardTrigger className="inline-block w-full truncate">
                       {startTime} | {args.event.title}
                     </HoverCardTrigger>
 
-                    <HoverCardContent
-                      className="pointer-events-none md:w-96"
-                      side="top"
-                    >
-                      <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
-                        {format(new Date(hoveredBooking.start), DATE_FORMAT)}
-                        <ArrowRightIcon className="size-3 text-gray-600" />
-                        {format(new Date(hoveredBooking.end), DATE_FORMAT)}
-                      </div>
-
-                      <p className="mb-3 text-sm font-medium">
-                        {hoveredBooking.name}
-                      </p>
-
-                      <div className="mb-3 flex items-center gap-2">
-                        <Badge
-                          color={bookingStatusColorMap[hoveredBooking.status]}
-                        >
-                          <span className="block lowercase first-letter:uppercase">
-                            {hoveredBooking.status}
-                          </span>
-                        </Badge>
-
-                        <UserBadge
-                          name={hoveredBooking.custodian.name}
-                          img={
-                            hoveredBooking?.custodian.image ??
-                            "/static/images/default_pfp.jpg"
-                          }
-                        />
-                      </div>
-
-                      {hoveredBooking.description ? (
-                        <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
-                          {hoveredBooking.description}
+                    <HoverCardPortal>
+                      <HoverCardContent
+                        className="pointer-events-none md:w-96"
+                        side="top"
+                      >
+                        <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
+                          <DateS
+                            date={hoveredBooking.start}
+                            options={DATE_FORMAT_OPTIONS}
+                          />
+                          <ArrowRightIcon className="size-3 text-gray-600" />
+                          <DateS
+                            date={hoveredBooking.end}
+                            options={DATE_FORMAT_OPTIONS}
+                          />
                         </div>
-                      ) : null}
-                    </HoverCardContent>
+
+                        <p className="mb-3 text-sm font-medium">
+                          {hoveredBooking.name}
+                        </p>
+
+                        <div className="mb-3 flex items-center gap-2">
+                          <Badge
+                            color={bookingStatusColorMap[hoveredBooking.status]}
+                          >
+                            <span className="block lowercase first-letter:uppercase">
+                              {hoveredBooking.status}
+                            </span>
+                          </Badge>
+
+                          <UserBadge
+                            imgClassName="rounded-full"
+                            name={hoveredBooking.custodian.name}
+                            img={
+                              hoveredBooking?.custodian.image ??
+                              "/static/images/default_pfp.jpg"
+                            }
+                          />
+                        </div>
+
+                        {hoveredBooking.description ? (
+                          <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
+                            {hoveredBooking.description}
+                          </div>
+                        ) : null}
+                      </HoverCardContent>
+                    </HoverCardPortal>
                   </HoverCard>
                 );
               }}

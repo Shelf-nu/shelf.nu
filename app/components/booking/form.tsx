@@ -362,16 +362,6 @@ export function BookingForm({
                   assets during the duration of the booking period.
                 </p>
               </Card>
-              {!isNewBooking && (
-                <AddToCalendar
-                  disabled={
-                    disabled ||
-                    bookingStatus?.isDraft ||
-                    bookingStatus?.isCancelled ||
-                    false
-                  }
-                />
-              )}
               <Card className="m-0">
                 <FormRow
                   rowLabel="Description"
@@ -395,6 +385,16 @@ export function BookingForm({
                   />
                 </FormRow>
               </Card>
+              {!isNewBooking && (
+                <AddToCalendar
+                  disabled={
+                    disabled ||
+                    bookingStatus?.isDraft ||
+                    bookingStatus?.isCancelled ||
+                    false
+                  }
+                />
+              )}
             </div>
           </div>
         </div>
