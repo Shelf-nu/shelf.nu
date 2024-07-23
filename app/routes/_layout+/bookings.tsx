@@ -13,7 +13,7 @@ import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
-import LineBreakText from "~/components/line-break-text/line-break-text";
+import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";

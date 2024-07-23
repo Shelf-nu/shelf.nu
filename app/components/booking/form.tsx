@@ -399,7 +399,8 @@ export function BookingForm({
           </div>
         </div>
         {isNewBooking ? (
-          <div className="text-right">
+          <Card className="sticky bottom-0 -mx-6 mb-0 rounded-none border-0 px-6 py-0 text-right">
+            <div className="-mx-6 mb-3 border-t shadow" />
             {assetIds?.map((item, i) => (
               <input
                 key={item}
@@ -408,10 +409,26 @@ export function BookingForm({
                 value={item}
               />
             ))}
-            <Button type="submit" disabled={disabled}>
-              {assetIds ? "Create Booking" : "Check Asset Availability"}
-            </Button>
-          </div>
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                to=".."
+                width="full"
+                disabled={disabled}
+                className="w-1/2 whitespace-nowrap"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={disabled}
+                className="w-1/2 whitespace-nowrap"
+              >
+                {assetIds ? "Create Booking" : "Check Asset Availability"}
+              </Button>
+            </div>
+            <div className="h-3" />
+          </Card>
         ) : null}
       </Form>
     </div>
