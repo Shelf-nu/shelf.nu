@@ -292,10 +292,10 @@ export function BookingForm({
                   />
                 </FormRow>
               </Card>
-              <Card className="m-0 pt-0">
+              <Card className="m-0">
                 <FormRow
                   rowLabel={"Start Date"}
-                  className="mobile-styling-only border-b-0 pb-[10px]"
+                  className="mobile-styling-only border-b-0 pb-[10px] pt-0"
                   required
                 >
                   <Input
