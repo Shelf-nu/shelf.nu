@@ -59,7 +59,7 @@ export default function ScannedAssetsDrawer({
    * At snap point 1 we need to show 1 item
    * At snap point 2 we need to show the full list
    */
-  const SNAP_POINTS = [`130px`, `${vh - 153}px`];
+  const SNAP_POINTS = [`${80 + 53 + 8 + 16}px`, `${vh - 153}px`];
 
   const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0]);
 
