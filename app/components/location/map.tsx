@@ -19,7 +19,12 @@ export const ShelfMap = ({
           longitude: longitude,
           zoom: 15,
         }}
-        style={{ width: "100%", height: "240px" }}
+        style={{
+          width: "100%",
+          height: "240px",
+          borderTopLeftRadius: "6px",
+          borderTopRightRadius: "6px",
+        }}
         mapStyle={`https://api.maptiler.com/maps/streets-v2/style.json?key=${window.env.MAPTILER_TOKEN}`}
       >
         <Map.Marker longitude={longitude} latitude={latitude} anchor="bottom">

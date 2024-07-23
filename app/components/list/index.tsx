@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import React from "react";
 import { useLoaderData } from "@remix-run/react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
@@ -77,17 +78,20 @@ export type ListProps = {
 /**
  * The route is required to export {@link IndexResponse}
  */
-export const List = ({
-  title,
-  ItemComponent,
-  headerChildren,
-  hideFirstHeaderColumn = false,
-  navigate,
-  className,
-  customEmptyStateContent,
-  emptyStateClassName,
-  bulkActions,
-}: ListProps) => {
+export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
+  {
+    title,
+    ItemComponent,
+    headerChildren,
+    hideFirstHeaderColumn = false,
+    navigate,
+    className,
+    customEmptyStateContent,
+    emptyStateClassName,
+    bulkActions,
+  }: ListProps,
+  ref
+) {
   const { items, totalItems, perPage, modelName } =
     useLoaderData<IndexResponse>();
   const { singular, plural } = modelName;
@@ -114,6 +118,7 @@ export const List = ({
 
   return (
     <div
+      ref={ref}
       className={tw(
         "-mx-4 overflow-x-auto border border-gray-200  bg-white md:mx-0 md:rounded",
         className
@@ -225,4 +230,4 @@ export const List = ({
       )}
     </div>
   );
-};
+});

@@ -1,19 +1,12 @@
 import type { Organization, Qr, User } from "@prisma/client";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
+// eslint-disable-next-line import/no-cycle
 import {
   createQr,
   generateCode,
   getQrByAssetId,
   getQrByKitId,
 } from "./service.server";
-
-export const belongsToCurrentUser = (qr: Qr, userId: User["id"]) =>
-  qr.userId === userId;
-
-export const belongsToCurrentUsersOrg = (
-  qr: Qr,
-  orgs?: Organization[]
-): boolean => Boolean(orgs?.find(({ id }) => id === qr.organizationId));
 
 export async function generateQrObj({
   kitId,
@@ -77,3 +70,11 @@ export async function generateQrObj({
     });
   }
 }
+
+export const belongsToCurrentUser = (qr: Qr, userId: User["id"]) =>
+  qr.userId === userId;
+
+export const belongsToCurrentUsersOrg = (
+  qr: Qr,
+  orgs?: Organization[]
+): boolean => Boolean(orgs?.find(({ id }) => id === qr.organizationId));
