@@ -1,11 +1,11 @@
 import type { SerializeFrom } from "@remix-run/node";
 import { Button } from "~/components/shared/button";
 import type { parseScanData } from "~/modules/scan/utils.server";
+import { tw } from "~/utils/tw";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
 import { HelpIcon } from "../icons/library";
 import { InfoTooltip } from "../shared/info-tooltip";
-import { tw } from "~/utils/tw";
 
 export function ScanDetails({
   lastScan,
@@ -104,7 +104,7 @@ export function ScanDetails({
             </div>
           </div>
           {hasLocation ? (
-            <div className="py-3 flex w-full justify-center px-4">
+            <div className="flex w-full justify-center px-4 py-3">
               <Button
                 to={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&zoom=15&markers=${latitude},${longitude}`}
                 variant="secondary"
