@@ -25,6 +25,7 @@ import {
   DrawerDescription,
   DrawerFooter,
   DrawerHeader,
+  DrawerTitle,
 } from "../shared/drawer";
 import { Table, Td, Th } from "../table";
 import When from "../when/when";
@@ -39,9 +40,6 @@ export const addScannedAssetsToBookingSchema = z.object({
   assetIds: z.array(z.string()).min(1),
 });
 
-const MD_SNAP_POINT = "450px";
-const MOBILE_SNAP_POINT = "250px";
-
 export default function ScannedAssetsDrawer({
   className,
   style,
@@ -49,15 +47,16 @@ export default function ScannedAssetsDrawer({
 }: ScannedAssetsDrawerProps) {
   const { booking } = useLoaderData<typeof loader>();
 
-  const { isMd } = useViewportHeight();
+  const { vh } = useViewportHeight();
 
   const zo = useZorm(
     "AddScannedAssetsToBooking",
     addScannedAssetsToBookingSchema
   );
-  const [snap, setSnap] = useState<number | string | null>(
-    isMd ? MD_SNAP_POINT : MOBILE_SNAP_POINT
-  );
+
+  const SNAP_POINT = `${(vh * 30) / 100}px`; // 30% of vh is first snap point
+
+  const [snap, setSnap] = useState<number | string | null>(SNAP_POINT);
 
   const fetchedScannedAssets = useAtomValue(fetchedScannedAssetsAtom);
   const fetchedScannedAssetsCount = useAtomValue(fetchedScannedAssetsCountAtom);
@@ -74,7 +73,7 @@ export default function ScannedAssetsDrawer({
     <Drawer
       open
       dismissible={false}
-      snapPoints={[isMd ? MD_SNAP_POINT : MOBILE_SNAP_POINT, 1]}
+      snapPoints={[SNAP_POINT, 1]}
       activeSnapPoint={snap}
       setActiveSnapPoint={setSnap}
       modal={false}
@@ -83,6 +82,10 @@ export default function ScannedAssetsDrawer({
         className={tw("min-h-[700px] overflow-y-hidden", className)}
         style={style}
       >
+        <DrawerTitle className="sr-only">
+          Add assets to booking via scan
+        </DrawerTitle>
+
         <div className="mx-auto size-full px-4 md:max-w-4xl md:px-0">
           <DrawerHeader className="flex items-center justify-between border-b text-left">
             <DrawerDescription>
