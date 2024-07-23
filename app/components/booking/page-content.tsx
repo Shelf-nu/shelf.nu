@@ -25,6 +25,7 @@ export function BookingPageContent() {
         <BookingForm
           id={booking.id}
           name={booking.name}
+          description={booking.description}
           bookingFlags={bookingFlags}
           startDate={
             booking.from

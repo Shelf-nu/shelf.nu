@@ -13,6 +13,7 @@ import { ChevronRight } from "~/components/icons/library";
 import ContextualModal from "~/components/layout/contextual-modal";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
+import LineBreakText from "~/components/layout/line-break-text";
 import { List } from "~/components/list";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
@@ -207,9 +208,10 @@ export default function BookingsIndexPage({
           bulkActions={<BulkActionsDropdown />}
           ItemComponent={ListAssetContent}
           navigate={(id) => navigate(`/bookings/${id}`)}
-          className=" overflow-x-visible md:overflow-x-auto"
+          className="overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
+              <Th className="hidden md:table-cell">Description</Th>
               <Th className="hidden md:table-cell"> </Th>
               <Th className="hidden md:table-cell">From</Th>
               <Th className="hidden md:table-cell">To</Th>
@@ -273,7 +275,7 @@ const ListAssetContent = ({
   return (
     <>
       {/* Item */}
-      <Td className="w-full whitespace-normal p-0 md:p-0">
+      <Td className="w-full min-w-52 whitespace-normal p-0 md:p-0">
         <div className="flex justify-between gap-3 py-4 pr-4 md:justify-normal md:pr-6">
           <div className="flex items-center gap-3">
             <div className="min-w-[130px]">
@@ -294,6 +296,10 @@ const ListAssetContent = ({
             <ChevronRight />
           </button>
         </div>
+      </Td>
+
+      <Td className="hidden md:table-cell">
+        {item.description ? <LineBreakText text={item.description} /> : null}
       </Td>
 
       {/**

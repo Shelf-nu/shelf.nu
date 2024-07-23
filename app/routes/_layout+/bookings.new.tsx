@@ -24,6 +24,7 @@ import {
   getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
+import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
@@ -43,13 +44,26 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
+    const { organizationId, role, currentOrganization } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      });
     const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+    if (isPersonalOrg(currentOrganization)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed",
+        message:
+          "You can't create bookings for personal workspaces. Please create a Team workspace to create bookings.",
+        label: "Booking",
+        shouldBeCaptured: false,
+      });
+    }
+
     /**
      * We need to fetch the team members to be able to display them in the custodian dropdown.
      */
@@ -122,7 +136,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    const { name, custodian, assetIds } = payload;
+    const { name, custodian, assetIds, description } = payload;
     const hints = getHints(request);
 
     const fmt = "yyyy-MM-dd'T'HH:mm";
@@ -144,6 +158,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         custodianTeamMemberId: custodian?.id,
         organizationId,
         name,
+        description,
         from,
         to,
         assetIds,
