@@ -1,4 +1,4 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { json, redirect } from "@remix-run/node";
 import type {
   ActionFunctionArgs,
@@ -71,7 +71,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 100 per page
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -90,14 +90,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
     const booking = await getBooking({
       id: bookingId,
       organizationId: organizationId,
     });
 
-    /** For self service users, we only allow them to read their own bookings */
-    if (isSelfService && booking.custodianUserId !== authSession.userId) {
+    /** For self service & base users, we only allow them to read their own bookings */
+    if (isSelfServiceOrBase && booking.custodianUserId !== authSession.userId) {
       throw new ShelfError({
         cause: null,
         message: "You are not authorized to view this booking",
@@ -271,13 +270,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       removeKit: PermissionAction.update,
     };
 
-    const { organizationId, role } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: intent2ActionMap[intent],
-    });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const { organizationId, role, isSelfServiceOrBase } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: intent2ActionMap[intent],
+      });
+
     const user = await getUserByID(authSession.userId);
 
     const headers = [
@@ -367,7 +367,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const booking = await upsertBooking(
           upsertBookingData,
           getClientHint(request),
-          isSelfService
+          isSelfServiceOrBase
         );
 
         await createNotesForBookingUpdate(intent, booking, {
@@ -383,7 +383,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
       case "delete": {
-        if (isSelfService) {
+        if (isSelfServiceOrBase) {
           /**
            * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
            * They have delete permissions but shouldnt be able to delete other people's bookings

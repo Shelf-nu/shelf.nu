@@ -1,4 +1,4 @@
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -42,14 +42,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
       action: PermissionAction.read,
     });
-
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
 
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search, status } =
@@ -66,7 +64,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userId: authSession?.userId,
       assetIds: [assetId],
       statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-      ...(isSelfService && {
+      ...(isSelfServiceOrBase && {
         // If the user is self service, we only show bookings that belong to that user)
         custodianUserId: authSession?.userId,
       }),

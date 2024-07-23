@@ -80,11 +80,16 @@ export async function requirePermission({
     userId,
   });
 
+  const role = roles ? roles[0] : undefined;
+
   return {
     organizations,
     organizationId,
     currentOrganization,
-    role: roles ? roles[0] : undefined,
+    role,
+    isSelfServiceOrBase:
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.ADMIN,
   };
 }
 

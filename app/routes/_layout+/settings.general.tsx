@@ -163,7 +163,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
       additionalData: { userId, organizationId },
     });
 
-    const { name, currency, id, selfServiceGroupId, adminGroupId } = payload;
+    const {
+      name,
+      currency,
+      id,
+      selfServiceGroupId,
+      adminGroupId,
+      baseUserGroupId,
+    } = payload;
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
@@ -182,6 +189,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         ssoDetails: {
           selfServiceGroupId: selfServiceGroupId as string,
           adminGroupId: adminGroupId as string,
+          baseUserGroupId: baseUserGroupId as string,
         },
       }),
     });
@@ -202,7 +210,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
 export default function GeneralPage() {
   const { organization, canExportAssets } = useLoaderData<typeof loader>();
-
   return (
     <div className="mb-2.5 flex flex-col justify-between bg-white md:rounded md:border md:border-gray-200 md:px-6 md:py-5">
       <div className=" mb-6">

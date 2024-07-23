@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunction } from "@remix-run/react";
@@ -43,15 +43,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, isSelfServiceOrBase } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.read,
     });
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+
     const searchParams = getCurrentSearchParams(request);
     const { page, perPageParam, search, status } =
       getParamsValues(searchParams);

@@ -178,7 +178,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       additionalData: { userId, id },
     });
 
-    const { name, currency, selfServiceGroupId, adminGroupId } = payload;
+    const {
+      name,
+      currency,
+      selfServiceGroupId,
+      adminGroupId,
+      baseUserGroupId,
+    } = payload;
 
     const formDataFile = await unstable_parseMultipartFormData(
       request,
@@ -198,6 +204,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         ssoDetails: {
           selfServiceGroupId: selfServiceGroupId as string, // We can safely assume this is a string because when ssoDetails are enabled, we require the user to provide a value
           adminGroupId: adminGroupId as string,
+          baseUserGroupId: baseUserGroupId as string,
         },
       }),
     });
