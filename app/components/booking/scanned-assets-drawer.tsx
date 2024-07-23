@@ -54,9 +54,14 @@ export default function ScannedAssetsDrawer({
     addScannedAssetsToBookingSchema
   );
 
-  const SNAP_POINT = `${(vh * 30) / 100}px`; // 30% of vh is first snap point
+  /**
+   * The values represent the size of the drawer in pixels based on its content
+   * At snap point 1 we need to show 1 item
+   * At snap point 2 we need to show the full list
+   */
+  const SNAP_POINTS = [`130px`, `${vh - 153}px`];
 
-  const [snap, setSnap] = useState<number | string | null>(SNAP_POINT);
+  const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0]);
 
   const fetchedScannedAssets = useAtomValue(fetchedScannedAssetsAtom);
   const fetchedScannedAssetsCount = useAtomValue(fetchedScannedAssetsCountAtom);
@@ -73,7 +78,7 @@ export default function ScannedAssetsDrawer({
     <Drawer
       open
       dismissible={false}
-      snapPoints={[SNAP_POINT, 1]}
+      snapPoints={SNAP_POINTS}
       activeSnapPoint={snap}
       setActiveSnapPoint={setSnap}
       modal={false}
