@@ -1,6 +1,7 @@
 import type { SerializeFrom } from "@remix-run/node";
 import { Button } from "~/components/shared/button";
 import type { parseScanData } from "~/modules/scan/utils.server";
+import { tw } from "~/utils/tw";
 import { ShelfMap } from "./map";
 import { MapPlaceholder } from "./map-placeholder";
 import { HelpIcon } from "../icons/library";
@@ -35,7 +36,13 @@ export function ScanDetails({
               <MapPlaceholder />
             )}
           </div>
-          <div className="border-b-[1.1px] p-4 text-text-xs text-gray-600">
+          <div
+            className={tw(
+              "border-b-[1.1px] p-4 text-text-xs text-gray-600",
+              "[&>div>p:first-child]:text-xs [&>div>p:first-child]:font-medium [&>div>p:first-child]:text-gray-900", // Styles for left column
+              "[&>div>p:last-child]:text-right [&>div>p:last-child]:text-sm [&>div>p:last-child]:font-normal [&>div>p:last-child]:text-gray-600" // Styles for right column
+            )}
+          >
             <div className="flex justify-between py-2">
               <p>Date/Time</p>
               <p>{lastScan.dateTime}</p>
@@ -97,7 +104,7 @@ export function ScanDetails({
             </div>
           </div>
           {hasLocation ? (
-            <div className="my-4 flex w-full justify-center px-4 py-1">
+            <div className="flex w-full justify-center px-4 py-3">
               <Button
                 to={`https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&zoom=15&markers=${latitude},${longitude}`}
                 variant="secondary"

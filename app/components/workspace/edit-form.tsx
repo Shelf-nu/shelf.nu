@@ -32,10 +32,15 @@ interface Props {
   className?: string;
 }
 
-export const EditWorkspaceFormSchema = (sso: boolean = false) =>
+export const EditWorkspaceFormSchema = (
+  sso: boolean = false,
+  personalOrg: boolean = false
+) =>
   z.object({
     id: z.string(),
-    name: z.string().min(2, "Name is required"),
+    name: personalOrg
+      ? z.string().optional()
+      : z.string().min(2, "Name is required"),
     logo: z.any().optional(),
     currency: z.custom<Currency>(),
     selfServiceGroupId: sso
@@ -56,7 +61,10 @@ export const WorkspaceEditForm = ({
     useLoaderData<typeof loader>();
   const navigation = useNavigation();
 
-  let schema = EditWorkspaceFormSchema(organization.enabledSso);
+  let schema = EditWorkspaceFormSchema(
+    organization.enabledSso,
+    isPersonalWorkspace
+  );
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = isFormProcessing(navigation.state);
   const fileError = useAtomValue(fileErrorAtom);
@@ -89,7 +97,7 @@ export const WorkspaceEditForm = ({
             className="w-full"
             defaultValue={name || undefined}
             placeholder=""
-            required={zodFieldIsRequired(schema.shape.name)}
+            required={!isPersonalWorkspace}
           />
         </FormRow>
 
