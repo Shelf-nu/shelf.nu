@@ -158,6 +158,7 @@ export async function upsertBooking(
       | "to"
       | "custodianTeamMemberId"
       | "custodianUserId"
+      | "description"
     > & { assetIds: Asset["id"][] }
   >,
   hints: ClientHint,
@@ -171,6 +172,7 @@ export async function upsertBooking(
       custodianTeamMemberId,
       custodianUserId,
       id,
+      description,
       ...rest
     } = booking;
     let data: Prisma.BookingUpdateInput = { ...rest };
@@ -246,6 +248,10 @@ export async function upsertBooking(
           };
         }
       }
+    }
+
+    if (description) {
+      data.description = description;
     }
 
     /** Editing */
@@ -921,6 +927,16 @@ export async function getBookingsForCalendar(params: {
           extendedProps: {
             status: booking.status,
             id: booking.id,
+            name: booking.name,
+            description: booking.description,
+            start: (booking.from as Date).toISOString(),
+            end: (booking.to as Date).toISOString(),
+            custodian: {
+              name: custodianName,
+              image: booking.custodianUser
+                ? booking.custodianUser.profilePicture
+                : undefined,
+            },
           },
         };
       });

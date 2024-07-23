@@ -83,6 +83,7 @@ export const NewBookingFormSchema = (
             userId: z.string().optional().nullable(),
           })
         ),
+      description: z.string().optional(),
     })
     .refine(
       (data) =>
@@ -111,6 +112,7 @@ type BookingFormData = {
   bookingStatus?: ReturnType<typeof useBookingStatusHelpers>;
   bookingFlags?: BookingFlags;
   assetIds?: string[] | null;
+  description?: string | null;
 };
 
 export function BookingForm({
@@ -122,6 +124,7 @@ export function BookingForm({
   bookingStatus,
   bookingFlags,
   assetIds,
+  description,
 }: BookingFormData) {
   const navigation = useNavigation();
 
@@ -292,10 +295,10 @@ export function BookingForm({
                   />
                 </FormRow>
               </Card>
-              <Card className="m-0 pt-0">
+              <Card className="m-0">
                 <FormRow
                   rowLabel={"Start Date"}
-                  className="mobile-styling-only border-b-0 pb-[10px]"
+                  className="mobile-styling-only border-b-0 pb-[10px] pt-0"
                   required
                 >
                   <Input
@@ -359,6 +362,29 @@ export function BookingForm({
                   assets during the duration of the booking period.
                 </p>
               </Card>
+              <Card className="m-0">
+                <FormRow
+                  rowLabel="Description"
+                  className="mobile-styling-only border-b-0 p-0"
+                >
+                  <Input
+                    label="Description"
+                    inputType="textarea"
+                    hideLabel
+                    name={zo.fields.description()}
+                    disabled={
+                      disabled ||
+                      bookingStatus?.isCompleted ||
+                      bookingStatus?.isCancelled ||
+                      bookingStatus?.isArchived
+                    }
+                    error={zo.errors.description()?.message}
+                    className="mobile-styling-only w-full p-0"
+                    defaultValue={description || undefined}
+                    placeholder="Add a description..."
+                  />
+                </FormRow>
+              </Card>
               {!isNewBooking && (
                 <AddToCalendar
                   disabled={
@@ -373,7 +399,8 @@ export function BookingForm({
           </div>
         </div>
         {isNewBooking ? (
-          <div className="text-right">
+          <Card className="sticky bottom-0 -mx-6 mb-0 rounded-none border-0 px-6 py-0 text-right">
+            <div className="-mx-6 mb-3 border-t shadow" />
             {assetIds?.map((item, i) => (
               <input
                 key={item}
@@ -382,10 +409,26 @@ export function BookingForm({
                 value={item}
               />
             ))}
-            <Button type="submit" disabled={disabled}>
-              {assetIds ? "Create Booking" : "Check Asset Availability"}
-            </Button>
-          </div>
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                to=".."
+                width="full"
+                disabled={disabled}
+                className="w-1/2 whitespace-nowrap"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={disabled}
+                className="w-1/2 whitespace-nowrap"
+              >
+                {assetIds ? "Create Booking" : "Check Asset Availability"}
+              </Button>
+            </div>
+            <div className="h-3" />
+          </Card>
         ) : null}
       </Form>
     </div>
