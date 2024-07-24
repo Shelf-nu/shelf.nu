@@ -28,6 +28,7 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Td } from "~/components/table";
+import When from "~/components/when/when";
 import {
   useClearValueFromParams,
   useSearchParamHasValue,
@@ -227,7 +228,7 @@ export default function QrLinkExisting() {
 
       <Filters className="-mx-4 border-b px-4 py-3">
         <div className="flex w-full items-center justify-around gap-6 md:w-auto md:justify-end">
-          {hasFiltersToClear ? (
+          <When truthy={hasFiltersToClear}>
             <div className="hidden gap-6 md:flex">
               <Button
                 as="button"
@@ -240,7 +241,7 @@ export default function QrLinkExisting() {
               </Button>
               <div className="text-gray-500"> | </div>
             </div>
-          ) : null}
+          </When>
 
           <div className="flex w-full justify-around gap-2 p-3 md:w-auto md:justify-end md:p-0 lg:gap-4">
             <DynamicDropdown

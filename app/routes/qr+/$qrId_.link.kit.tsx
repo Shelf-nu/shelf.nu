@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
 } from "~/components/shared/modal";
 import { Td } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -224,11 +225,13 @@ export default function QrLinkExisting() {
 
       <Filters className="-mx-4 border-b px-4 py-3">
         <div className="flex flex-1 justify-center pt-3">
-          {userHasPermission({
-            roles,
-            entity: PermissionEntity.qr,
-            action: PermissionAction.update,
-          }) && (
+          <When
+            truthy={userHasPermission({
+              roles,
+              entity: PermissionEntity.qr,
+              action: PermissionAction.update,
+            })}
+          >
             <DynamicDropdown
               trigger={
                 <div className="flex cursor-pointer items-center gap-2">
@@ -247,7 +250,7 @@ export default function QrLinkExisting() {
               })}
               renderItem={(item) => resolveTeamMemberName(item)}
             />
-          )}
+          </When>
         </div>
       </Filters>
 
