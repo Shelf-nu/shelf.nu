@@ -274,7 +274,7 @@ const ListAssetContent = ({
     <>
       {/* Item */}
       <Td className="w-full min-w-52 whitespace-normal p-0 md:p-0">
-        <div className="flex justify-between gap-3 py-4 pr-4 md:justify-normal md:pr-6">
+        <div className="flex justify-between gap-3 p-4  md:justify-normal md:px-6">
           <div className="flex items-center gap-3">
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block font-medium">

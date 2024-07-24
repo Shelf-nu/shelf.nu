@@ -89,7 +89,7 @@ export async function requirePermission({
     role,
     isSelfServiceOrBase:
       role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.ADMIN,
+      role === OrganizationRoles.BASE,
   };
 }
 
