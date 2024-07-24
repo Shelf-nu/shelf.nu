@@ -209,8 +209,9 @@ export default function BookingsIndexPage({
           className="overflow-x-visible md:overflow-x-auto"
           headerChildren={
             <>
+              <Th className="hidden md:table-cell" />
               <Th className="hidden md:table-cell">Description</Th>
-              <Th className="hidden md:table-cell"> </Th>
+
               <Th className="hidden md:table-cell">From</Th>
               <Th className="hidden md:table-cell">To</Th>
               <Th className="hidden md:table-cell">Custodian</Th>
@@ -296,10 +297,6 @@ const ListAssetContent = ({
         </div>
       </Td>
 
-      <Td className="hidden md:table-cell">
-        {item.description ? <LineBreakText text={item.description} /> : null}
-      </Td>
-
       {/**
        * Optional label when the booking includes assets that are either:
        * 1. Marked as not available for boooking
@@ -316,6 +313,10 @@ const ListAssetContent = ({
             }
           />
         ) : null}
+      </Td>
+
+      <Td className="hidden md:table-cell">
+        {item.description ? <LineBreakText text={item.description} /> : null}
       </Td>
 
       {/* From */}
