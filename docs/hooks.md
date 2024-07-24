@@ -111,7 +111,7 @@ The hook returns an object with one property:
 
 ### Usage
 
-Here's an example of how to use the `useFetcherWithReset` hook:
+Here's an example of how to use the `useQrScanner` hook:
 
 ```typescript
 import { useQrScanner } from './useQrScanner';
