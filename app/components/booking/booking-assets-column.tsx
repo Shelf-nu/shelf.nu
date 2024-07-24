@@ -6,6 +6,7 @@ import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
+import { canUserManageBookingAssets } from "~/utils/bookings";
 import { groupBy } from "~/utils/utils";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import { AvailabilityLabel } from "./availability-label";
@@ -60,6 +61,22 @@ export function BookingAssetsColumn() {
     [items]
   );
 
+  const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
+
+  const manageAssetsDisabled = !canManageAssets
+    ? {
+        reason: isCompleted
+          ? "Booking is completed. You cannot change the assets anymore"
+          : isArchived
+          ? "Booking is archived. You cannot change the assets anymore"
+          : isCancelled
+          ? "Booking is cancelled. You cannot change the assets anymore"
+          : cantManageAssetsAsSelfService
+          ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+          : "You need to select a start and end date and save your booking before you can add assets to your booking",
+      }
+    : false;
+
   return (
     <div className="flex-1">
       <div className=" w-full">
@@ -72,32 +89,24 @@ export function BookingAssetsColumn() {
               <div className=" text-md font-semibold text-gray-900">Assets</div>
               <div>{totalItems} items</div>
             </div>
-            <Button
-              to={manageAssetsUrl}
-              className="whitespace-nowrap"
-              disabled={
-                !booking.from ||
-                !booking.to ||
-                isCompleted ||
-                isArchived ||
-                isCancelled ||
-                cantManageAssetsAsSelfService
-                  ? {
-                      reason: isCompleted
-                        ? "Booking is completed. You cannot change the assets anymore"
-                        : isArchived
-                        ? "Booking is archived. You cannot change the assets anymore"
-                        : isCancelled
-                        ? "Booking is cancelled. You cannot change the assets anymore"
-                        : cantManageAssetsAsSelfService
-                        ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-                        : "You need to select a start and end date and save your booking before you can add assets to your booking",
-                    }
-                  : false
-              }
-            >
-              Manage assets
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button
+                icon="scan"
+                to="scan-assets"
+                variant="outline"
+                disabled={manageAssetsDisabled}
+              >
+                Scan
+              </Button>
+
+              <Button
+                to={manageAssetsUrl}
+                className="whitespace-nowrap"
+                disabled={manageAssetsDisabled}
+              >
+                Manage assets
+              </Button>
+            </div>
           </div>
 
           <div className="overflow-x-auto border border-b-0 border-gray-200 bg-white md:mx-0 md:rounded-b">

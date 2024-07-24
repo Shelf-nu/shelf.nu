@@ -42,6 +42,7 @@ import {
   AssetLabel,
   LockIcon,
   ActiveSwitchIcon,
+  ScanIcon,
   MapIcon,
 } from "../icons/library";
 
@@ -91,7 +92,8 @@ export type IconType =
   | "asset-label"
   | "lock"
   | "activate"
-  | "deactivate";
+  | "deactivate"
+  | "scan";
 
 type IconsMap = {
   [key in IconType]: JSX.Element;
@@ -143,6 +145,7 @@ export const iconsMap: IconsMap = {
   lock: <LockIcon />,
   activate: <ActiveSwitchIcon />,
   deactivate: <XIcon />,
+  scan: <ScanIcon />,
 };
 
 export default iconsMap;

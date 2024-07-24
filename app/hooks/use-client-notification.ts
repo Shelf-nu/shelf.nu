@@ -5,7 +5,7 @@ export function useClientNotification() {
   const fetcher = useFetcher();
   const submitter = ({
     title,
-    message,
+    message = null,
     icon,
   }: Omit<NotificationType, "open" | "senderId">) => {
     fetcher.submit(
