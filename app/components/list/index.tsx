@@ -8,7 +8,7 @@ import {
   setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
@@ -103,7 +103,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
 
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
-  const isSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
 
   const hasSelectedItems = selectedBulkItemsCount > 0;
 
@@ -196,17 +196,17 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 </div>
               </div>
             </div>
-            {!isSelfService ? <div>{bulkActions}</div> : null}
+            {!isBaseOrSelfService ? <div>{bulkActions}</div> : null}
           </div>
 
           <Table
             className={tw(
               "list",
-              bulkActions && !isSelfService && "list-with-bulk-actions"
+              bulkActions && !isBaseOrSelfService && "list-with-bulk-actions"
             )}
           >
             <ListHeader
-              bulkActions={!isSelfService ? bulkActions : undefined}
+              bulkActions={!isBaseOrSelfService ? bulkActions : undefined}
               children={headerChildren}
               hideFirstColumn={hideFirstHeaderColumn}
             />
@@ -217,7 +217,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                   key={`${item.id}-${i}`}
                   navigate={navigate}
                 >
-                  {bulkActions && !isSelfService ? (
+                  {bulkActions && !isBaseOrSelfService ? (
                     <BulkListItemCheckbox item={item} />
                   ) : null}
                   <ItemComponent item={item} />

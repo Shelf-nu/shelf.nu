@@ -1,5 +1,5 @@
 type Props = {
-  truthy: boolean;
+  truthy: boolean | null | undefined;
   children: React.ReactElement;
 };
 

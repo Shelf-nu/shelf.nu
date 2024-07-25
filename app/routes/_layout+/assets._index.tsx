@@ -8,7 +8,7 @@ import type {
 } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useNavigate } from "@remix-run/react";
 import { z } from "zod";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -35,12 +35,13 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import {
   useClearValueFromParams,
   useSearchParamHasValue,
 } from "~/hooks/use-search-param-utils";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   bulkDeleteAssets,
   getPaginatedAndFilterableAssets,
@@ -59,7 +60,8 @@ import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
@@ -273,15 +275,26 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetIndexPage() {
-  const { canImportAssets } = useLoaderData<typeof loader>();
-  const isSelfService = useUserIsSelfService();
+  const { roles } = useUserRoleHelper();
 
   return (
     <>
       <Header>
-        {!isSelfService ? (
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.asset,
+            action: PermissionAction.create,
+          })}
+        >
           <>
-            <ImportButton canImportAssets={canImportAssets} />
+            <ImportButton
+              canImportAssets={userHasPermission({
+                roles,
+                entity: PermissionEntity.asset,
+                action: PermissionAction.import,
+              })}
+            />
             <Button
               to="new"
               role="link"
@@ -292,7 +305,7 @@ export default function AssetIndexPage() {
               New asset
             </Button>
           </>
-        ) : null}
+        </When>
       </Header>
       <AssetsList />
     </>
@@ -313,7 +326,7 @@ export const AssetsList = () => {
     "location",
     "teamMember"
   );
-  const isSelfService = useUserIsSelfService();
+  const { roles } = useUserRoleHelper();
 
   return (
     <ListContentWrapper>
@@ -401,7 +414,13 @@ export const AssetsList = () => {
                 </div>
               )}
             />
-            {!isSelfService && (
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              })}
+            >
               <DynamicDropdown
                 trigger={
                   <div className="flex cursor-pointer items-center gap-2">
@@ -428,7 +447,7 @@ export const AssetsList = () => {
                   name: "Without custody",
                 }}
               />
-            )}
+            </When>
           </div>
         </div>
       </Filters>
@@ -442,9 +461,15 @@ export const AssetsList = () => {
           <>
             <Th className="hidden md:table-cell">Category</Th>
             <Th className="hidden md:table-cell">Tags</Th>
-            {!isSelfService ? (
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.custody,
+                action: PermissionAction.read,
+              })}
+            >
               <Th className="hidden md:table-cell">Custodian</Th>
-            ) : null}
+            </When>
             <Th className="hidden md:table-cell">Location</Th>
           </>
         }
@@ -477,7 +502,7 @@ const ListAssetContent = ({
   };
 }) => {
   const { category, tags, custody, location, kit } = item;
-  const isSelfService = useUserIsSelfService();
+  const { roles } = useUserRoleHelper();
   return (
     <>
       {/* Item */}
@@ -549,7 +574,13 @@ const ListAssetContent = ({
       </Td>
 
       {/* Custodian */}
-      {!isSelfService ? (
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.custody,
+          action: PermissionAction.read,
+        })}
+      >
         <Td className="hidden md:table-cell">
           {custody ? (
             <GrayBadge>
@@ -582,7 +613,7 @@ const ListAssetContent = ({
             </GrayBadge>
           ) : null}
         </Td>
-      ) : null}
+      </When>
 
       {/* Location */}
       <Td className="hidden md:table-cell">
