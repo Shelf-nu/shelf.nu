@@ -1,5 +1,4 @@
 import { useLoaderData, useSubmit } from "@remix-run/react";
-import { Divider } from "@tremor/react";
 import { ChevronRight } from "~/components/icons/library";
 import {
   DropdownMenu,
@@ -19,7 +18,9 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import { DeleteBooking } from "./delete-booking";
 import { GenerateBookingPdf } from "./generate-booking-pdf";
+import { Divider } from "../layout/divider";
 import { Button } from "../shared/button";
+import When from "../when/when";
 
 interface Props {
   fullWidth?: boolean;
@@ -37,6 +38,12 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
     roles,
     entity: PermissionEntity.booking,
     action: PermissionAction.archive,
+  });
+
+  const canCancelBooking = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.cancel,
   });
 
   return (
@@ -60,7 +67,9 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           align="end"
           className="order w-[220px] rounded-md bg-white p-1.5 text-right "
         >
-          {isOngoing || isReserved || isOverdue ? (
+          <When
+            truthy={(isOngoing || isReserved || isOverdue) && canCancelBooking}
+          >
             <DropdownMenuItem asChild>
               <Button
                 variant="link"
@@ -86,8 +95,8 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
                 Cancel
               </Button>
             </DropdownMenuItem>
-          ) : null}
-          {isCompleted && canArchiveBooking ? (
+          </When>
+          <When truthy={isCompleted && canArchiveBooking}>
             <DropdownMenuItem asChild>
               <Button
                 variant="link"
@@ -113,11 +122,16 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
                 Archive
               </Button>
             </DropdownMenuItem>
-          ) : null}
+          </When>
+
           {/* Because SELF_SERVICE and BASE can only delete bookings they own and are in draft, we need to handle it like this, rather than with userHasPermission */}
-          {(isBaseOrSelfService && isDraft) || !isBaseOrSelfService ? (
+
+          <When
+            truthy={(isBaseOrSelfService && isDraft) || !isBaseOrSelfService}
+          >
             <DeleteBooking booking={booking} />
-          ) : null}
+          </When>
+
           <Divider className="my-2" />
           <GenerateBookingPdf
             booking={booking}
