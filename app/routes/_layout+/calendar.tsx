@@ -8,15 +8,10 @@ import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import type { BookingStatus } from "@prisma/client";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  DotIcon,
-} from "@radix-ui/react-icons";
+import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
-import { format } from "date-fns";
 import { ClientOnly } from "remix-utils/client-only";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { ArrowRightIcon } from "~/components/icons/library";
@@ -36,11 +31,7 @@ import When from "~/components/when/when";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import {
-  getStatusClasses,
-  isOneDayEvent,
-  statusClassesOnHover,
-} from "~/utils/calendar";
+import { isOneDayEvent, statusClassesOnHover } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
@@ -49,8 +40,8 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { bookingStatusColorMap } from "./bookings";
 import { tw } from "~/utils/tw";
+import { bookingStatusColorMap } from "./bookings";
 
 export function links() {
   return [{ rel: "stylesheet", href: calendarStyles }];
