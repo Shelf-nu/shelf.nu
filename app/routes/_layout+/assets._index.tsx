@@ -6,7 +6,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import { z } from "zod";
@@ -51,7 +51,7 @@ import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { setCookie, userPrefs } from "~/utils/cookies.server";
+import { userPrefs, getFiltersFromRequest } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -101,6 +101,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
       ]);
+    const { filters, serializedCookie: filtersCookie, redirectNeeded} =
+      await getFiltersFromRequest(request, organizationId);
+
+    if (filters && redirectNeeded) {
+      const cookieParams = new URLSearchParams(filters);
+      return redirect(`/assets?${cookieParams.toString()}`)
+    }
 
     let [
       tierLimit,
@@ -130,6 +137,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableAssets({
         request,
         organizationId,
+        filters,
       }),
     ]);
 
@@ -157,6 +165,27 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
+    const headers = new Headers();
+
+    // Append existing cookies (if any)
+    const cookieHeader = request.headers.get("Cookie");
+    if (cookieHeader) {
+      // Extract existing cookies if needed (optional)
+      // This step may require additional parsing depending on your use case
+      headers.append("Cookie", cookieHeader);
+    }
+
+    // Append the new Set-Cookie headers
+    if (filtersCookie) {
+      headers.append("Set-Cookie", filtersCookie);
+    }
+
+    // Example: Append user preferences cookie (replace with actual logic if needed)
+    const userPrefsCookie = await userPrefs.serialize(cookie);
+    if (userPrefsCookie) {
+      headers.append("Set-Cookie", userPrefsCookie);
+    }
+
     return json(
       data({
         header,
@@ -182,9 +211,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         teamMembers,
         totalTeamMembers,
         rawTeamMembers,
+        filters,
+        organizationId,
       }),
       {
-        headers: [setCookie(await userPrefs.serialize(cookie))],
+        headers,
       }
     );
   } catch (cause) {
