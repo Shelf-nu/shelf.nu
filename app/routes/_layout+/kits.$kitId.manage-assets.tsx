@@ -24,6 +24,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { Td } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { getPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { createBulkKitChangeNotes } from "~/modules/note/service.server";
@@ -464,7 +465,10 @@ export default function ManageAssetsInKit() {
             /**
              * We will select asset only if it is not in custody
              */
-            if (!item.isInOtherCustody) {
+            if (
+              !item.isInOtherCustody &&
+              item.status !== AssetStatus.CHECKED_OUT
+            ) {
               setSelectedAssets((selectedAssets) =>
                 selectedAssets.includes(assetId)
                   ? selectedAssets.filter((id) => id !== assetId)
@@ -529,13 +533,13 @@ const RowComponent = ({
 }) => {
   const selectedAssets = useAtomValue(kitsSelectedAssetsAtom);
   const checked = selectedAssets.some((id) => id === item.id);
-
+  const isCheckedOut = item.status === AssetStatus.CHECKED_OUT;
   return (
     <>
       <Td
         className={tw(
           "w-full p-0 md:p-0",
-          item.isInOtherCustody && "cursor-not-allowed"
+          (item.isInOtherCustody || isCheckedOut) && "cursor-not-allowed"
         )}
       >
         <div className="flex items-center justify-between gap-3 p-4 md:px-6">
@@ -553,7 +557,7 @@ const RowComponent = ({
             </div>
             <div className="flex flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
-                {item.title}
+                {item.title} | {item.status}
               </p>
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -572,7 +576,7 @@ const RowComponent = ({
           </div>
 
           {/* Asset is in custody */}
-          {item.isInOtherCustody ? (
+          <When truthy={item.isInOtherCustody}>
             <TooltipProvider delayDuration={100}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -593,20 +597,46 @@ const RowComponent = ({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          ) : null}
+          </When>
+
+          {/* Asset is in checked out */}
+          <When truthy={isCheckedOut}>
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center justify-center rounded-md border border-warning-200 bg-warning-50 px-1.5 py-0.5 text-center text-warning-700">
+                    Checked out
+                  </div>
+                </TooltipTrigger>
+
+                <TooltipContent side="top" align="end" className="md:w-80">
+                  <h2 className="mb-1 text-xs font-semibold text-gray-700">
+                    Asset is checked out
+                  </h2>
+                  <div className="text-wrap text-xs font-medium text-gray-500">
+                    Asset is currently in checked out via a booking. <br /> Make
+                    sure the asset has an Available status in order to add it to
+                    this kit.
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </When>
         </div>
       </Td>
 
       <Td
         className={
-          item.isInOtherCustody ? "cursor-not-allowed opacity-50" : undefined
+          item.isInOtherCustody || isCheckedOut
+            ? "cursor-not-allowed opacity-50"
+            : undefined
         }
       >
         <FakeCheckbox
           checked={checked}
           className={tw(
             "text-white",
-            item.isInOtherCustody ? "text-gray-200" : "",
+            item.isInOtherCustody || isCheckedOut ? "text-gray-200" : "",
             checked ? "text-primary" : ""
           )}
         />
