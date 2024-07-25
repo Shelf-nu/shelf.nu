@@ -557,7 +557,7 @@ const RowComponent = ({
             </div>
             <div className="flex flex-col gap-y-1">
               <p className="word-break whitespace-break-spaces font-medium">
-                {item.title} | {item.status}
+                {item.title}
               </p>
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
