@@ -12,9 +12,10 @@ export function getStatusClasses(
     "!font-normal",
     "py-[2px] px-[5px]",
     "hover:cursor-pointer",
+    "max-h-[24px]",
   ];
   if (oneDayEvent) {
-    classes.push(" [&>.fc-event-title]:!truncate bg-transparent");
+    classes.push(" [&>.fc-event-title]:!truncate !bg-transparent");
   }
   let statusClasses: string[] = [];
   switch (status) {
@@ -86,7 +87,7 @@ export const statusClassesOnHover: Record<BookingStatus, string> = {
   COMPLETE: "md:!bg-success-100",
 };
 
-export function isOneDayEvent(from: Date, to: Date) {
+export function isOneDayEvent(from: Date | string, to: Date | string) {
   const start = new Date(from);
   const end = new Date(to);
 
