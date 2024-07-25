@@ -4,7 +4,7 @@ import { Link, Outlet } from "@remix-run/react";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { data } from "~/utils/http.server";
 
@@ -36,9 +36,9 @@ export default function SettingsPage() {
     { to: "team", content: "Team" },
   ];
 
-  const userIsSelfService = useUserIsSelfService();
+  const { isBaseOrSelfService } = useUserRoleHelper();
   /** If user is self service, remove the extra items */
-  if (userIsSelfService) {
+  if (isBaseOrSelfService) {
     items = items.filter(
       (item) => !["custom-fields", "team", "general"].includes(item.to)
     );

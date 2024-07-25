@@ -197,6 +197,7 @@ export async function updateOrganization({
   ssoDetails?: {
     selfServiceGroupId: string;
     adminGroupId: string;
+    baseUserGroupId: string;
   };
 }) {
   try {

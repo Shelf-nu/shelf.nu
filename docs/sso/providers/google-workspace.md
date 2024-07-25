@@ -108,7 +108,7 @@ Make sure to add all groups that you want to access Shelf. The **_App attribute_
 
 Once you have the groups ready, you need to add their names in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
 
-Go the the workspace settings and place the name of the ADMIN & SELF SERVICE groups.
+Go the the workspace settings and place the name of the ADMIN, BASE & SELF SERVICE groups.
 
 > [!IMPORTANT]
 > Those fields are case sensitive. The name should be placed exactly as the group name is in Google workspace.

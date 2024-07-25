@@ -3,7 +3,7 @@ import type { Kit } from "@prisma/client";
 import { AssetStatus, BookingStatus } from "@prisma/client";
 import { useLoaderData } from "@remix-run/react";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.add-assets";
 import { groupBy } from "~/utils/utils";
@@ -28,7 +28,7 @@ export function BookingAssetsColumn() {
     totalItems: number;
   }>();
   const hasItems = items?.length > 0;
-  const isSelfService = useUserIsSelfService();
+  const { isBase } = useUserRoleHelper();
   const { isDraft, isReserved, isCompleted, isArchived, isCancelled } =
     useBookingStatusHelpers(booking);
 
@@ -46,8 +46,8 @@ export function BookingAssetsColumn() {
   );
 
   // Self service can only manage assets for bookings that are DRAFT
-  const cantManageAssetsAsSelfService =
-    isSelfService && booking.status !== BookingStatus.DRAFT;
+  const cantManageAssetsAsBase =
+    isBase && booking.status !== BookingStatus.DRAFT;
 
   const { assetsWithoutKits, groupedAssetsWithKits } = useMemo(
     () => ({
@@ -58,6 +58,36 @@ export function BookingAssetsColumn() {
       ),
     }),
     [items]
+  );
+
+  const manageAssetsButtonDisabled = useMemo(
+    () =>
+      !booking.from ||
+      !booking.to ||
+      isCompleted ||
+      isArchived ||
+      isCancelled ||
+      cantManageAssetsAsBase
+        ? {
+            reason: isCompleted
+              ? "Booking is completed. You cannot change the assets anymore"
+              : isArchived
+              ? "Booking is archived. You cannot change the assets anymore"
+              : isCancelled
+              ? "Booking is cancelled. You cannot change the assets anymore"
+              : cantManageAssetsAsBase
+              ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+              : "You need to select a start and end date and save your booking before you can add assets to your booking",
+          }
+        : false,
+    [
+      booking.from,
+      booking.to,
+      isCompleted,
+      isArchived,
+      isCancelled,
+      cantManageAssetsAsBase,
+    ]
   );
 
   return (
@@ -75,26 +105,7 @@ export function BookingAssetsColumn() {
             <Button
               to={manageAssetsUrl}
               className="whitespace-nowrap"
-              disabled={
-                !booking.from ||
-                !booking.to ||
-                isCompleted ||
-                isArchived ||
-                isCancelled ||
-                cantManageAssetsAsSelfService
-                  ? {
-                      reason: isCompleted
-                        ? "Booking is completed. You cannot change the assets anymore"
-                        : isArchived
-                        ? "Booking is archived. You cannot change the assets anymore"
-                        : isCancelled
-                        ? "Booking is cancelled. You cannot change the assets anymore"
-                        : cantManageAssetsAsSelfService
-                        ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-                        : "You need to select a start and end date and save your booking before you can add assets to your booking",
-                    }
-                  : false
-              }
+              disabled={manageAssetsButtonDisabled}
             >
               Manage assets
             </Button>
@@ -110,7 +121,7 @@ export function BookingAssetsColumn() {
                   newButtonRoute: manageAssetsUrl,
                   newButtonContent: "Manage assets",
                   buttonProps: {
-                    disabled: !booking.from || !booking.to,
+                    disabled: manageAssetsButtonDisabled,
                   },
                 }}
               />
@@ -156,7 +167,7 @@ export function BookingAssetsColumn() {
                             <Td> </Td>
 
                             <Td className="pr-4 text-right">
-                              {(!isSelfService && isDraft) || isReserved ? (
+                              {(!isBase && isDraft) || isReserved ? (
                                 <KitRowActionsDropdown kit={kit} />
                               ) : null}
                             </Td>
@@ -187,7 +198,7 @@ export function BookingAssetsColumn() {
 const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
   const { category } = item;
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
-  const isSelfService = useUserIsSelfService();
+  const { isBase } = useUserRoleHelper();
   const { isOngoing, isCompleted, isArchived, isOverdue, isReserved } =
     useBookingStatusHelpers(booking);
 
@@ -254,8 +265,8 @@ const ListAssetContent = ({ item }: { item: AssetWithBooking }) => {
         ) : null}
       </Td>
       <Td className="pr-4 text-right">
-        {/* Self Service can only remove assets if the booking is not started already */}
-        {(isSelfService && (isOngoing || isOverdue || isReserved)) ||
+        {/* Base users can only remove assets if the booking is not started already */}
+        {(isBase && (isOngoing || isOverdue || isReserved)) ||
         isPartOfKit ? null : (
           <AssetRowActionsDropdown asset={item} />
         )}

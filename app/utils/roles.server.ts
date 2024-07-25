@@ -6,7 +6,7 @@ import { ShelfError } from "./error";
 import type {
   PermissionAction,
   PermissionEntity,
-} from "./permissions/permission.validator.server";
+} from "./permissions/permission.data";
 import { validatePermission } from "./permissions/permission.validator.server";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
@@ -80,11 +80,16 @@ export async function requirePermission({
     userId,
   });
 
+  const role = roles ? roles[0] : undefined;
+
   return {
     organizations,
     organizationId,
     currentOrganization,
-    role: roles ? roles[0] : undefined,
+    role,
+    isSelfServiceOrBase:
+      role === OrganizationRoles.SELF_SERVICE ||
+      role === OrganizationRoles.BASE,
   };
 }
 
