@@ -31,6 +31,7 @@ import { GrayBadge } from "~/components/shared/gray-badge";
 import { Image } from "~/components/shared/image";
 import TextualDivider from "~/components/shared/textual-divider";
 import { Td, Th } from "~/components/table";
+import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { usePosition } from "~/hooks/use-position";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
@@ -376,13 +377,16 @@ export default function KitDetails() {
           />
         }
       >
-        {userHasPermission({
-          roles,
-          entity: PermissionEntity.kit,
-          action: PermissionAction.update,
-        }) ? (
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.kit,
+            action: PermissionAction.update,
+          })}
+        >
           <ActionsDropdown />
-        ) : null}
+        </When>
+
         <Button
           to={`/bookings/new?${kit.assets
             .map((a) => `assetId=${a.id}`)
@@ -625,15 +629,17 @@ function ListContent({
           </GrayBadge>
         ) : null}
       </Td>
-      {userHasPermission({
-        roles,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.manageAssets,
-      }) && (
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.asset,
+          action: PermissionAction.manageAssets,
+        })}
+      >
         <Td className="pr-4 text-right">
           <AssetRowActionsDropdown asset={item} />
         </Td>
-      )}
+      </When>
     </>
   );
 }
