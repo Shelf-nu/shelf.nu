@@ -3,8 +3,13 @@ import { useNavigation } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { useUserIsSelfService } from "~/hooks/user-user-is-self-service";
+import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isFormProcessing } from "~/utils/form";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
 import BulkArchiveDialog from "./bulk-archive-dialog";
@@ -60,17 +65,23 @@ function ConditionalDropdown() {
     ].includes(b.status as any)
   );
 
-  const isSelfService = useUserIsSelfService();
+  const { isBase, roles } = useUserRoleHelper();
 
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
   const disabled = selectedBookings.length === 0;
 
-  const archiveDisabled = !allBookingAreCompleted || isSelfService;
+  const canArchiveBooking = userHasPermission({
+    roles,
+    entity: PermissionEntity.booking,
+    action: PermissionAction.archive,
+  });
 
-  const deleteDisabled =
-    (isSelfService && !someBookingInDraft) || isSelfService || isLoading;
+  const archiveDisabled = !allBookingAreCompleted || !canArchiveBooking;
+
+  /** Base users dont have permissions to delete bookings unless they are draft */
+  const deleteDisabled = (isBase && !someBookingInDraft) || isBase || isLoading;
 
   const {
     ref: dropdownRef,

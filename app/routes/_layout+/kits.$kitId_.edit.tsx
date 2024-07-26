@@ -29,7 +29,7 @@ import {
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {

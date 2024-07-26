@@ -32,13 +32,21 @@ interface Props {
   className?: string;
 }
 
-export const EditWorkspaceFormSchema = (sso: boolean = false) =>
+export const EditWorkspaceFormSchema = (
+  sso: boolean = false,
+  personalOrg: boolean = false
+) =>
   z.object({
     id: z.string(),
-    name: z.string().min(2, "Name is required"),
+    name: personalOrg
+      ? z.string().optional()
+      : z.string().min(2, "Name is required"),
     logo: z.any().optional(),
     currency: z.custom<Currency>(),
     selfServiceGroupId: sso
+      ? z.string().min(1, "Self service group id is required")
+      : z.string().optional(),
+    baseUserGroupId: sso
       ? z.string().min(1, "Self service group id is required")
       : z.string().optional(),
     adminGroupId: sso
@@ -56,7 +64,10 @@ export const WorkspaceEditForm = ({
     useLoaderData<typeof loader>();
   const navigation = useNavigation();
 
-  let schema = EditWorkspaceFormSchema(organization.enabledSso);
+  let schema = EditWorkspaceFormSchema(
+    organization.enabledSso,
+    isPersonalWorkspace
+  );
   const zo = useZorm("NewQuestionWizardScreen", schema);
   const disabled = isFormProcessing(navigation.state);
   const fileError = useAtomValue(fileErrorAtom);
@@ -89,7 +100,7 @@ export const WorkspaceEditForm = ({
             className="w-full"
             defaultValue={name || undefined}
             placeholder=""
-            required={zodFieldIsRequired(schema.shape.name)}
+            required={!isPersonalWorkspace}
           />
         </FormRow>
 
@@ -226,6 +237,29 @@ export const WorkspaceEditForm = ({
                 error={zo.errors.selfServiceGroupId()?.message}
                 defaultValue={
                   organization.ssoDetails.selfServiceGroupId || undefined
+                }
+                className="w-full"
+                required
+              />
+            </FormRow>
+            <FormRow
+              rowLabel={`Base user role group id`}
+              subHeading={
+                <div>
+                  Place the Id of the group that should be mapped to the{" "}
+                  <b>Base</b> role.
+                </div>
+              }
+              className="border-b-0 pb-[10px]"
+              required
+            >
+              <Input
+                label={"Base user role group id"}
+                hideLabel
+                name={zo.fields.baseUserGroupId()}
+                error={zo.errors.baseUserGroupId()?.message}
+                defaultValue={
+                  organization.ssoDetails.baseUserGroupId || undefined
                 }
                 className="w-full"
                 required

@@ -250,3 +250,11 @@ dialog {
 .list.list-with-bulk-actions tr td:nth-child(2) > div {
   @apply !pl-0;
 }
+
+.wordwrap {
+  white-space: pre-wrap; /* Webkit */
+  white-space: -moz-pre-wrap; /* Firefox */
+  white-space: -pre-wrap; /* Opera <7 */
+  white-space: -o-pre-wrap; /* Opera 7 */
+  word-wrap: break-word; /* IE */
+}

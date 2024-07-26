@@ -4,16 +4,27 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
 import type { BookingStatus } from "@prisma/client";
+import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
+import { format } from "date-fns";
 import { ClientOnly } from "remix-utils/client-only";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
+import { ArrowRightIcon } from "~/components/icons/library";
 import Header from "~/components/layout/header";
+import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { ButtonGroup } from "~/components/shared/button-group";
+import { DateS } from "~/components/shared/date";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "~/components/shared/hover-card";
 import { Spinner } from "~/components/shared/spinner";
+import { UserBadge } from "~/components/shared/user-badge";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -24,8 +35,9 @@ import { data, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
-} from "~/utils/permissions/permission.validator.server";
+} from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { bookingStatusColorMap } from "./bookings";
 
 export function links() {
   return [{ rel: "stylesheet", href: calendarStyles }];
@@ -33,6 +45,19 @@ export function links() {
 
 export const handle = {
   breadcrumb: () => <Link to="/calendar">Calendar</Link>,
+};
+
+type CalendarExtendedProps = {
+  id: string;
+  status: BookingStatus;
+  name: string;
+  description: string | null;
+  start: string;
+  end: string;
+  custodian: {
+    name: string;
+    image?: string | null;
+  };
 };
 
 // Loader Function to Return Bookings Data
@@ -69,6 +94,12 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header.title) },
 ];
+
+export const DATE_FORMAT_OPTIONS = {
+  weekday: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+} as const;
 
 // Calendar Component
 const Calendar = () => {
@@ -214,6 +245,71 @@ const Calendar = () => {
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
               windowResize={handleWindowResize}
+              eventContent={(args) => {
+                const hoveredBooking = args.event
+                  .extendedProps as CalendarExtendedProps;
+
+                const startTime = format(
+                  new Date(hoveredBooking.start),
+                  "hh:mm"
+                );
+
+                return (
+                  <HoverCard openDelay={0} closeDelay={0}>
+                    <HoverCardTrigger className="inline-block w-full truncate">
+                      {startTime} | {args.event.title}
+                    </HoverCardTrigger>
+
+                    <HoverCardPortal>
+                      <HoverCardContent
+                        className="pointer-events-none md:w-96"
+                        side="top"
+                      >
+                        <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
+                          <DateS
+                            date={hoveredBooking.start}
+                            options={DATE_FORMAT_OPTIONS}
+                          />
+                          <ArrowRightIcon className="size-3 text-gray-600" />
+                          <DateS
+                            date={hoveredBooking.end}
+                            options={DATE_FORMAT_OPTIONS}
+                          />
+                        </div>
+
+                        <p className="mb-3 text-sm font-medium">
+                          {hoveredBooking.name}
+                        </p>
+
+                        <div className="mb-3 flex items-center gap-2">
+                          <Badge
+                            color={bookingStatusColorMap[hoveredBooking.status]}
+                          >
+                            <span className="block lowercase first-letter:uppercase">
+                              {hoveredBooking.status}
+                            </span>
+                          </Badge>
+
+                          <UserBadge
+                            imgClassName="rounded-full"
+                            name={hoveredBooking.custodian.name}
+                            img={
+                              hoveredBooking?.custodian.image ??
+                              "/static/images/default_pfp.jpg"
+                            }
+                          />
+                        </div>
+
+                        {hoveredBooking.description ? (
+                          <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
+                            {hoveredBooking.description}
+                          </div>
+                        ) : null}
+                      </HoverCardContent>
+                    </HoverCardPortal>
+                  </HoverCard>
+                );
+              }}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",
