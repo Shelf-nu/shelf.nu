@@ -1,3 +1,4 @@
+import { isCuid } from "@paralleldrive/cuid2";
 import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
@@ -11,7 +12,6 @@ import { safeRedirect } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
-import { isCuid } from "@paralleldrive/cuid2";
 
 /**
  * Protected routes middleware
