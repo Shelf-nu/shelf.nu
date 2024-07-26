@@ -11,6 +11,7 @@ import { safeRedirect } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
+import { isCuid } from "@paralleldrive/cuid2";
 
 /**
  * Protected routes middleware
@@ -141,13 +142,26 @@ export function cache(seconds: number) {
 export function urlShortener() {
   return createMiddleware(async (c, next) => {
     const urlShortener = process.env.URL_SHORTENER;
-    const url = c.req.url;
+    const serverUrl = process.env.SERVER_URL;
+    const { hostname, pathname } = new URL(c.req.url);
 
     if (!urlShortener) return next();
 
-    if (c.req.url.startsWith(urlShortener)) {
-      const qrId = url.slice(urlShortener.length + 1); // +1 to remove the slash
-      return c.redirect(safeRedirect(`/qr/${qrId}`));
+    if (hostname.startsWith(urlShortener)) {
+      // Remove leading slash
+      const path = pathname.slice(1);
+
+      // Check if the path looks like a QR tag (alphanumeric, certain length)
+      if (isCuid(path)) {
+        // This looks like a QR tag, redirect to /qr/ path
+        return c.redirect(safeRedirect(`https://${serverUrl}/qr/${path}`));
+      } else if (path === "") {
+        // Root path, redirect to main app
+        return c.redirect(safeRedirect(`https://${serverUrl}`));
+      } else {
+        // Any other path, redirect to the same path on main app
+        return c.redirect(safeRedirect(`https://${serverUrl}/${path}`));
+      }
     }
 
     return next();
