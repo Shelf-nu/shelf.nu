@@ -14,7 +14,7 @@ import { ShelfError } from "~/utils/error";
 
 import { importDevBuild } from "./dev/server";
 import { logger } from "./logger";
-import { cache, protect, refreshSession } from "./middleware";
+import { cache, protect, refreshSession, urlShortener } from "./middleware";
 import { authSessionKey, createSessionStorage } from "./session";
 import type { FlashData, SessionData } from "./session";
 
@@ -37,6 +37,11 @@ const mode = env.NODE_ENV === "test" ? "development" : env.NODE_ENV;
 const isProductionMode = mode === "production";
 
 const app = new Hono();
+
+/**
+ * Add url shortner middleware
+ */
+app.use("*", urlShortener());
 
 /**
  * Serve assets files from build/client/assets
