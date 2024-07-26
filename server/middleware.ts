@@ -7,6 +7,7 @@ import {
   validateSession,
 } from "~/modules/auth/service.server";
 import { ShelfError } from "~/utils/error";
+import { safeRedirect } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
@@ -130,5 +131,25 @@ export function cache(seconds: number) {
     }
 
     c.res.headers.set("cache-control", `public, max-age=${seconds}`);
+  });
+}
+
+/**
+ * URL shortner middleware
+ */
+
+export function urlShortener() {
+  return createMiddleware(async (c, next) => {
+    const urlShortener = process.env.URL_SHORTENER;
+    const url = c.req.url;
+
+    if (!urlShortener) return next();
+
+    if (c.req.url.startsWith(urlShortener)) {
+      const qrId = url.slice(urlShortener.length + 1); // +1 to remove the slash
+      return c.redirect(safeRedirect(`/qr/${qrId}`));
+    }
+
+    return next();
   });
 }
