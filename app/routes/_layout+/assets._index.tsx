@@ -52,7 +52,7 @@ import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { userPrefs, getFiltersFromRequest } from "~/utils/cookies.server";
+import { userPrefs, getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -170,27 +170,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    const headers = new Headers();
+    const userPrefsCookie = await userPrefs.serialize(cookie);
+
+
+    const headers = [
+      setCookie(userPrefsCookie),
+      ...(filtersCookie? [setCookie(filtersCookie)] : [])
+    ];
 
     // Append existing cookies (if any)
-    const cookieHeader = request.headers.get("Cookie");
-    if (cookieHeader) {
-      // Extract existing cookies if needed (optional)
-      // This step may require additional parsing depending on your use case
-      headers.append("Cookie", cookieHeader);
-    }
-
-    // Append the new Set-Cookie headers
-    if (filtersCookie) {
-      headers.append("Set-Cookie", filtersCookie);
-    }
-
-    // Example: Append user preferences cookie (replace with actual logic if needed)
-    const userPrefsCookie = await userPrefs.serialize(cookie);
-    if (userPrefsCookie) {
-      headers.append("Set-Cookie", userPrefsCookie);
-    }
-
+  
     return json(
       data({
         header,

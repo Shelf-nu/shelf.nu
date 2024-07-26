@@ -7,7 +7,7 @@ import {
 
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { useCookieDestory } from "~/hooks/use-search-param-utils";
+import { useCookieDestroy } from "~/hooks/use-search-param-utils";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { isSearching } from "~/utils/form";
 import { tw } from "~/utils/tw";
@@ -19,7 +19,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
     useLoaderData<SearchableIndexResponse>();
   const { singular } = modelName;
 
-  const { destoryCookieValues } = useCookieDestory();
+  const { destroyCookieValues } = useCookieDestroy();
 
   const navigation = useNavigation();
   const disabled = isSearching(navigation);
@@ -28,7 +28,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
   const label = searchFieldLabel ? searchFieldLabel : `Search by ${singular}`;
 
   function clearSearch() {
-    destoryCookieValues(["s"]);
+    destroyCookieValues(["s"]);
     setSearchParams((prev) => {
       prev.delete("s");
 

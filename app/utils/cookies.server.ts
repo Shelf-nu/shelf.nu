@@ -1,6 +1,7 @@
 import { createCookie } from "@remix-run/node"; // or cloudflare/deno
 
 import type { Cookie } from "@remix-run/node";
+import { getCurrentSearchParams } from "./http.server";
 
 // find cookie by name from request headers
 export function getCookie(name: string, headers: Headers) {
@@ -89,7 +90,7 @@ export async function initializePerPageCookieOnLayout(request: Request) {
 
 export const createAssetFilterCookie = (orgId: string) =>
   createCookie(`${orgId}_assetFilter`, {
-    path: "/",
+    path: "/assets",
     sameSite: "lax",
     secrets: [process.env.SESSION_SECRET],
     secure: process.env.NODE_ENV === "production",
@@ -100,8 +101,7 @@ export async function getFiltersFromRequest(
   request: Request,
   organizationId: string
 ) {
-  const url = new URL(request.url);
-  let filters = url.searchParams?.toString();
+  let filters = getCurrentSearchParams(request).toString();
   const cookieHeader = request.headers.get("Cookie");
 
   const assetFilterCookie = createAssetFilterCookie(organizationId);
