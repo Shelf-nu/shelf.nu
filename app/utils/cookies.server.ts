@@ -89,34 +89,33 @@ export async function initializePerPageCookieOnLayout(request: Request) {
 
 export const createAssetFilterCookie = (orgId: string) =>
   createCookie(`${orgId}_assetFilter`, {
-    path: '/',
-    sameSite: 'lax',
+    path: "/",
+    sameSite: "lax",
     secrets: [process.env.SESSION_SECRET],
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.NODE_ENV === "production",
     maxAge: 60 * 60 * 24 * 365, // 1 year
   });
 
+export async function getFiltersFromRequest(
+  request: Request,
+  organizationId: string
+) {
+  const url = new URL(request.url);
+  let filters = url.searchParams?.toString();
+  const cookieHeader = request.headers.get("Cookie");
 
-  export async function getFiltersFromRequest(
-    request: Request,
-    organizationId: string
-  ) {
-    const url = new URL(request.url);
-    let filters = url.searchParams?.toString();
-    const cookieHeader = request.headers.get("Cookie");
-  
-    const assetFilterCookie = createAssetFilterCookie(organizationId);
-    if (filters) {
-      // Override the cookie with query params
-      // Serialize the new filters into the cookie
-      const serializedCookie = await assetFilterCookie.serialize(filters);
+  const assetFilterCookie = createAssetFilterCookie(organizationId);
+  if (filters) {
+    // Override the cookie with query params
+    // Serialize the new filters into the cookie
+    const serializedCookie = await assetFilterCookie.serialize(filters);
 
-      return { filters, serializedCookie };
-    } else if (cookieHeader) {
-      // Use existing cookie filter
-      filters = (await assetFilterCookie.parse(cookieHeader)) || {};
-      filters = new URLSearchParams(filters).toString();
-      return { filters,  redirectNeeded: !!filters};
-    }
-    return { filters };
+    return { filters, serializedCookie };
+  } else if (cookieHeader) {
+    // Use existing cookie filter
+    filters = (await assetFilterCookie.parse(cookieHeader)) || {};
+    filters = new URLSearchParams(filters).toString();
+    return { filters, redirectNeeded: !!filters };
   }
+  return { filters };
+}

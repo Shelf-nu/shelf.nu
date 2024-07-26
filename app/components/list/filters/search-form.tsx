@@ -19,8 +19,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
     useLoaderData<SearchableIndexResponse>();
   const { singular } = modelName;
 
-
-  const {destoryCookieValues} = useCookieDestory();
+  const { destoryCookieValues } = useCookieDestory();
 
   const navigation = useNavigation();
   const disabled = isSearching(navigation);
@@ -29,7 +28,7 @@ export const SearchForm = ({ className }: { className?: string }) => {
   const label = searchFieldLabel ? searchFieldLabel : `Search by ${singular}`;
 
   function clearSearch() {
-    destoryCookieValues(['s'])
+    destoryCookieValues(["s"]);
     setSearchParams((prev) => {
       prev.delete("s");
 

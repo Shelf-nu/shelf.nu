@@ -101,12 +101,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
       ]);
-    const { filters, serializedCookie: filtersCookie, redirectNeeded} =
-      await getFiltersFromRequest(request, organizationId);
+    const {
+      filters,
+      serializedCookie: filtersCookie,
+      redirectNeeded,
+    } = await getFiltersFromRequest(request, organizationId);
 
     if (filters && redirectNeeded) {
       const cookieParams = new URLSearchParams(filters);
-      return redirect(`/assets?${cookieParams.toString()}`)
+      return redirect(`/assets?${cookieParams.toString()}`);
     }
 
     let [

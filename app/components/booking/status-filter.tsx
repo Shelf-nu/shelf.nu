@@ -18,13 +18,13 @@ export function StatusFilter({
   const disabled = isFormProcessing(navigation.state);
   const [searchParams, setSearchParams] = useSearchParams();
   const status = searchParams.get("status");
-  const {destoryCookieValues} = useCookieDestory();
+  const { destoryCookieValues } = useCookieDestory();
 
   function handleValueChange(value: string) {
     setSearchParams((prev) => {
       /** If the value is "ALL", we just remove the param */
       if (value === "ALL") {
-        destoryCookieValues(["status"])
+        destoryCookieValues(["status"]);
         prev.delete("status");
         return prev;
       }
