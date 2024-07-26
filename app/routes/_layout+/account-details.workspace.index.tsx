@@ -137,7 +137,7 @@ export default function WorkspacePage() {
   if (tier.id === TierId.free || tier.id === TierId.tier_1) {
     upgradeMessage = (
       <>
-        You cannot create a workspace on a ${tier.name} subscription.{" "}
+        You cannot create a workspace on a {tier.name} subscription.{" "}
         <UpgradeMessage />
       </>
     );

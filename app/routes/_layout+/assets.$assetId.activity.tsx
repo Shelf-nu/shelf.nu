@@ -83,14 +83,15 @@ export const handle = {
 
 export default function AssetActivity() {
   const { roles } = useUserRoleHelper();
+  const canReadNotes = userHasPermission({
+    roles,
+    entity: PermissionEntity.note,
+    action: PermissionAction.read,
+  });
 
   return (
     <div className="w-full">
-      {userHasPermission({
-        roles,
-        entity: PermissionEntity.note,
-        action: PermissionAction.read,
-      }) ? (
+      {canReadNotes ? (
         <>
           <TextualDivider text="Notes" className="mb-8 lg:hidden" />
           <Notes />

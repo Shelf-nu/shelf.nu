@@ -12,6 +12,7 @@ interface Props {
 
 function OptionBuilder({ options, onAdd, onRemove, disabled }: Props) {
   const [opt, setOpt] = useState("");
+  const [error, setError] = useState("");
   return (
     <div className="container flex-1 grow rounded border px-6 py-4 text-[14px] text-gray-600">
       <div className="">
@@ -19,17 +20,22 @@ function OptionBuilder({ options, onAdd, onRemove, disabled }: Props) {
           onChange={({ target }) => setOpt(target.value)}
           label=""
           value={opt}
-          defaultValue={opt}
           placeholder="Type an option here and press enter"
           disabled={disabled}
           className="w-full"
+          error={error}
           hideLabel
           onKeyDown={(e) => {
             if (e.key == "Enter") {
               e.preventDefault();
               if (opt) {
-                onAdd(opt);
-                setOpt("");
+                if (options.includes(opt)) {
+                  setError("Option already exists");
+                } else {
+                  onAdd(opt);
+                  setOpt("");
+                  setError("");
+                }
               }
             }
           }}

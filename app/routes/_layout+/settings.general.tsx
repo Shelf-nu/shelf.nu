@@ -157,7 +157,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const formData = await clonedRequest.formData();
 
     const { enabledSso } = currentOrganization;
-    const schema = EditWorkspaceFormSchema(enabledSso);
+    const schema = EditWorkspaceFormSchema(
+      enabledSso,
+      currentOrganization.type === "PERSONAL"
+    );
 
     const payload = parseData(formData, schema, {
       additionalData: { userId, organizationId },

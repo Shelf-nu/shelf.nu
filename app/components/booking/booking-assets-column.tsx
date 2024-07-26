@@ -60,6 +60,36 @@ export function BookingAssetsColumn() {
     [items]
   );
 
+  const manageAssetsButtonDisabled = useMemo(
+    () =>
+      !booking.from ||
+      !booking.to ||
+      isCompleted ||
+      isArchived ||
+      isCancelled ||
+      cantManageAssetsAsBase
+        ? {
+            reason: isCompleted
+              ? "Booking is completed. You cannot change the assets anymore"
+              : isArchived
+              ? "Booking is archived. You cannot change the assets anymore"
+              : isCancelled
+              ? "Booking is cancelled. You cannot change the assets anymore"
+              : cantManageAssetsAsBase
+              ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
+              : "You need to select a start and end date and save your booking before you can add assets to your booking",
+          }
+        : false,
+    [
+      booking.from,
+      booking.to,
+      isCompleted,
+      isArchived,
+      isCancelled,
+      cantManageAssetsAsBase,
+    ]
+  );
+
   return (
     <div className="flex-1">
       <div className=" w-full">
@@ -75,26 +105,7 @@ export function BookingAssetsColumn() {
             <Button
               to={manageAssetsUrl}
               className="whitespace-nowrap"
-              disabled={
-                !booking.from ||
-                !booking.to ||
-                isCompleted ||
-                isArchived ||
-                isCancelled ||
-                cantManageAssetsAsBase
-                  ? {
-                      reason: isCompleted
-                        ? "Booking is completed. You cannot change the assets anymore"
-                        : isArchived
-                        ? "Booking is archived. You cannot change the assets anymore"
-                        : isCancelled
-                        ? "Booking is cancelled. You cannot change the assets anymore"
-                        : cantManageAssetsAsBase
-                        ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-                        : "You need to select a start and end date and save your booking before you can add assets to your booking",
-                    }
-                  : false
-              }
+              disabled={manageAssetsButtonDisabled}
             >
               Manage assets
             </Button>
@@ -110,7 +121,7 @@ export function BookingAssetsColumn() {
                   newButtonRoute: manageAssetsUrl,
                   newButtonContent: "Manage assets",
                   buttonProps: {
-                    disabled: !booking.from || !booking.to,
+                    disabled: manageAssetsButtonDisabled,
                   },
                 }}
               />

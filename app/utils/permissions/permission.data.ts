@@ -10,6 +10,7 @@ export enum PermissionAction {
   export = "export",
   import = "import",
   archive = "archive",
+  cancel = "cancel",
   manageAssets = "manage-assets",
 }
 export enum PermissionEntity {
@@ -70,6 +71,7 @@ export const Role2PermissionMap: {
       PermissionAction.delete, // This is for the user to delete their own bookings only when they are draft.
       PermissionAction.archive,
       PermissionAction.manageAssets,
+      PermissionAction.cancel,
     ],
     [PermissionEntity.qr]: [],
     [PermissionEntity.category]: [],

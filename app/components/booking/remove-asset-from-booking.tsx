@@ -1,5 +1,5 @@
 import type { Asset } from "@prisma/client";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -13,6 +13,7 @@ import {
 } from "~/components/shared/modal";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import type { BookingWithCustodians } from "~/routes/_layout+/bookings";
+import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
@@ -20,6 +21,8 @@ import { TrashIcon } from "../icons/library";
 export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
   const { booking } = useLoaderData<{ booking: BookingWithCustodians }>();
   const { isArchived, isCompleted } = useBookingStatusHelpers(booking);
+  const navigation = useNavigation();
+  const disabled = isFormProcessing(navigation.state);
 
   return (
     <AlertDialog>
@@ -37,7 +40,7 @@ export const RemoveAssetFromBooking = ({ asset }: { asset: Asset }) => {
               : undefined
           }
           width="full"
-          disabled={isArchived || isCompleted}
+          disabled={disabled || isArchived || isCompleted}
         >
           Remove
         </Button>

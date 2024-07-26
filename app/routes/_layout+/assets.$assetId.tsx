@@ -16,6 +16,7 @@ import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
+import When from "~/components/when/when";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   deleteAsset,
@@ -210,14 +211,15 @@ export default function AssetDetailsPage() {
           </div>
         }
       >
-        {userHasPermission({
-          roles,
-          entity: PermissionEntity.asset,
-          action: PermissionAction.update,
-        }) ? (
+        <When
+          truthy={userHasPermission({
+            roles,
+            entity: PermissionEntity.asset,
+            action: PermissionAction.update,
+          })}
+        >
           <ActionsDropdown />
-        ) : null}
-
+        </When>
         <Button
           to={`/bookings/new?assetId=${asset.id}`}
           role="link"
