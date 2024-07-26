@@ -152,16 +152,10 @@ export function urlShortener() {
       const path = pathname.slice(1);
 
       // Check if the path looks like a QR tag (alphanumeric, certain length)
-      if (isCuid(path)) {
-        // This looks like a QR tag, redirect to /qr/ path
+      if (isCuid(path))
         return c.redirect(safeRedirect(`https://${serverUrl}/qr/${path}`));
-      } else if (path === "") {
-        // Root path, redirect to main app
-        return c.redirect(safeRedirect(`https://${serverUrl}`));
-      } else {
-        // Any other path, redirect to the same path on main app
-        return c.redirect(safeRedirect(`https://${serverUrl}/${path}`));
-      }
+
+      return c.redirect(safeRedirect(`https://${serverUrl}/${path}`));
     }
 
     return next();
