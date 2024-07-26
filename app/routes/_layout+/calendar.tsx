@@ -106,7 +106,7 @@ export const DATE_FORMAT_OPTIONS = {
 } as const;
 
 // Calendar Component
-const Calendar = () => {
+export default function Calendar() {
   const { title } = useLoaderData<typeof loader>();
   const { isMd } = useViewportHeight();
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
@@ -263,9 +263,7 @@ const Calendar = () => {
       </div>
     </>
   );
-};
-
-export default Calendar;
+}
 
 const renderEventCard = (args: EventContentArg) => {
   const event = args.event;
@@ -297,7 +295,7 @@ const renderEventCard = (args: EventContentArg) => {
             <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
           </div>
 
-          <p className="mb-3 text-sm font-medium">{booking.name}</p>
+          <div className="mb-3 mt-1 text-sm font-medium">{booking.name}</div>
 
           <div className="mb-3 flex items-center gap-2">
             <Badge color={bookingStatusColorMap[booking.status]}>
