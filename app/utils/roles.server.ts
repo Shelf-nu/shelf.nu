@@ -106,6 +106,11 @@ export function getRoleFromGroupId(
     groupIds.includes(ssoDetails.selfServiceGroupId)
   ) {
     return OrganizationRoles.SELF_SERVICE;
+  } else if (
+    ssoDetails.baseUserGroupId &&
+    groupIds.includes(ssoDetails.baseUserGroupId)
+  ) {
+    return OrganizationRoles.BASE;
   } else {
     throw new ShelfError({
       cause: null,
@@ -113,6 +118,7 @@ export function getRoleFromGroupId(
       message:
         "The group your user is assigned to is not connected to shelf. Please contact an administrator for more information",
       label: "Auth",
+      additionalData: { ssoDetails, groupIds },
     });
   }
 }
