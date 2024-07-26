@@ -29,12 +29,12 @@ export function checkValueInCookie(
 export function useSearchParamHasValue(...keys: string[]) {
   const [searchParams] = useSearchParams();
   const { isAssetIndexPage, cookieSearchParams } = useAssetIndexMeta();
-  let hasValue = useMemo(
+  const hasValue = useMemo(
     () => keys.map((key) => searchParams.has(key)).some(Boolean),
     [keys, searchParams]
   );
 
-  let hasValueInCookie =
+  const hasValueInCookie =
     isAssetIndexPage && checkValueInCookie(keys, cookieSearchParams);
 
   return hasValue || hasValueInCookie;
