@@ -52,7 +52,11 @@ import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { userPrefs, getFiltersFromRequest, setCookie } from "~/utils/cookies.server";
+import {
+  userPrefs,
+  getFiltersFromRequest,
+  setCookie,
+} from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -171,15 +175,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     };
 
     const userPrefsCookie = await userPrefs.serialize(cookie);
-
-
     const headers = [
       setCookie(userPrefsCookie),
-      ...(filtersCookie? [setCookie(filtersCookie)] : [])
+      ...(filtersCookie ? [setCookie(filtersCookie)] : []),
     ];
-
-    // Append existing cookies (if any)
-  
     return json(
       data({
         header,
