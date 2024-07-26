@@ -22,7 +22,6 @@ export function useAssetIndexMeta() {
   return { filters, isAssetIndexPage, cookieSearchParams, organizationId };
 }
 
-
 /**
  * Returns a boolean indicating whether any of the specified keys have values
  * in the provided cookie search parameters.
@@ -127,7 +126,8 @@ export function useClearValueFromParams(...keys: string[]) {
  * @returns {Object} - An object containing the `destroyCookieValues` function that clears specific keys from cookies.
  */
 export function useCookieDestroy() {
-  const { isAssetIndexPage, cookieSearchParams, organizationId } = useAssetIndexMeta();
+  const { isAssetIndexPage, cookieSearchParams, organizationId } =
+    useAssetIndexMeta();
 
   /**
    * Function to destroy specific keys from cookies if on the asset index page.
