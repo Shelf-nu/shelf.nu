@@ -1,5 +1,8 @@
 import { useState, useRef, useCallback } from "react";
-import type { EventHoveringArg } from "@fullcalendar/core/index.js";
+import type {
+  EventContentArg,
+  EventHoveringArg,
+} from "@fullcalendar/core/index.js";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import listPlugin from "@fullcalendar/list";
 import FullCalendar from "@fullcalendar/react";
@@ -9,7 +12,6 @@ import { ChevronLeftIcon, ChevronRightIcon } from "@radix-ui/react-icons";
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Link, useLoaderData } from "@remix-run/react";
-import { format } from "date-fns";
 import { ClientOnly } from "remix-utils/client-only";
 import FallbackLoading from "~/components/dashboard/fallback-loading";
 import { ArrowRightIcon } from "~/components/icons/library";
@@ -25,10 +27,11 @@ import {
 } from "~/components/shared/hover-card";
 import { Spinner } from "~/components/shared/spinner";
 import { UserBadge } from "~/components/shared/user-badge";
+import When from "~/components/when/when";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { statusClassesOnHover } from "~/utils/calendar";
+import { isOneDayEvent, statusClassesOnHover } from "~/utils/calendar";
 import { getWeekStartingAndEndingDates } from "~/utils/date-fns";
 import { makeShelfError } from "~/utils/error";
 import { data, error } from "~/utils/http.server";
@@ -37,6 +40,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { tw } from "~/utils/tw";
 import { bookingStatusColorMap } from "./bookings";
 
 export function links() {
@@ -102,7 +106,7 @@ export const DATE_FORMAT_OPTIONS = {
 } as const;
 
 // Calendar Component
-const Calendar = () => {
+export default function Calendar() {
   const { title } = useLoaderData<typeof loader>();
   const { isMd } = useViewportHeight();
   const [startingDay, endingDay] = getWeekStartingAndEndingDates(new Date());
@@ -245,71 +249,7 @@ const Calendar = () => {
               eventMouseEnter={handleEventMouseEnter}
               eventMouseLeave={handleEventMouseLeave}
               windowResize={handleWindowResize}
-              eventContent={(args) => {
-                const hoveredBooking = args.event
-                  .extendedProps as CalendarExtendedProps;
-
-                const startTime = format(
-                  new Date(hoveredBooking.start),
-                  "hh:mm"
-                );
-
-                return (
-                  <HoverCard openDelay={0} closeDelay={0}>
-                    <HoverCardTrigger className="inline-block w-full truncate">
-                      {startTime} | {args.event.title}
-                    </HoverCardTrigger>
-
-                    <HoverCardPortal>
-                      <HoverCardContent
-                        className="pointer-events-none md:w-96"
-                        side="top"
-                      >
-                        <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
-                          <DateS
-                            date={hoveredBooking.start}
-                            options={DATE_FORMAT_OPTIONS}
-                          />
-                          <ArrowRightIcon className="size-3 text-gray-600" />
-                          <DateS
-                            date={hoveredBooking.end}
-                            options={DATE_FORMAT_OPTIONS}
-                          />
-                        </div>
-
-                        <p className="mb-3 text-sm font-medium">
-                          {hoveredBooking.name}
-                        </p>
-
-                        <div className="mb-3 flex items-center gap-2">
-                          <Badge
-                            color={bookingStatusColorMap[hoveredBooking.status]}
-                          >
-                            <span className="block lowercase first-letter:uppercase">
-                              {hoveredBooking.status}
-                            </span>
-                          </Badge>
-
-                          <UserBadge
-                            imgClassName="rounded-full"
-                            name={hoveredBooking.custodian.name}
-                            img={
-                              hoveredBooking?.custodian.image ??
-                              "/static/images/default_pfp.jpg"
-                            }
-                          />
-                        </div>
-
-                        {hoveredBooking.description ? (
-                          <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
-                            {hoveredBooking.description}
-                          </div>
-                        ) : null}
-                      </HoverCardContent>
-                    </HoverCardPortal>
-                  </HoverCard>
-                );
-              }}
+              eventContent={renderEventCard}
               eventTimeFormat={{
                 hour: "numeric",
                 minute: "2-digit",
@@ -323,6 +263,61 @@ const Calendar = () => {
       </div>
     </>
   );
-};
+}
 
-export default Calendar;
+const renderEventCard = (args: EventContentArg) => {
+  const event = args.event;
+  const booking = event.extendedProps as CalendarExtendedProps;
+  const _isOneDayEvent = isOneDayEvent(booking.start, booking.end);
+
+  return (
+    <HoverCard openDelay={0} closeDelay={0}>
+      <HoverCardTrigger asChild>
+        <div className={tw("inline-block truncate bg-transparent")}>
+          <When truthy={_isOneDayEvent}>
+            <div className="fc-daygrid-event-dot inline-block" />
+          </When>
+          <DateS
+            date={booking.start}
+            options={{
+              timeStyle: "short",
+            }}
+          />{" "}
+          | {args.event.title}
+        </div>
+      </HoverCardTrigger>
+
+      <HoverCardPortal>
+        <HoverCardContent className="pointer-events-none md:w-96" side="top">
+          <div className="flex w-full items-center gap-x-2 text-xs text-gray-600">
+            <DateS date={booking.start} options={DATE_FORMAT_OPTIONS} />
+            <ArrowRightIcon className="size-3 text-gray-600" />
+            <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
+          </div>
+
+          <div className="mb-3 mt-1 text-sm font-medium">{booking.name}</div>
+
+          <div className="mb-3 flex items-center gap-2">
+            <Badge color={bookingStatusColorMap[booking.status]}>
+              <span className="block lowercase first-letter:uppercase">
+                {booking.status}
+              </span>
+            </Badge>
+
+            <UserBadge
+              imgClassName="rounded-full"
+              name={booking.custodian.name}
+              img={booking?.custodian.image ?? "/static/images/default_pfp.jpg"}
+            />
+          </div>
+
+          {booking.description ? (
+            <div className="wordwrap rounded border border-gray-200 bg-gray-25 p-2 text-gray-500">
+              {booking.description}
+            </div>
+          ) : null}
+        </HoverCardContent>
+      </HoverCardPortal>
+    </HoverCard>
+  );
+};
