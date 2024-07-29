@@ -1,6 +1,6 @@
-import { useNavigation, useSearchParams } from "@remix-run/react";
-import { useCookieDestroy } from "~/hooks/search-params/utils";
+import { useNavigation } from "@remix-run/react";
 import { isFormProcessing } from "~/utils/form";
+import {useSearchParams}  from "~/hooks/search-params/use-search-params";
 import {
   Select,
   SelectContent,
@@ -18,14 +18,12 @@ export function StatusFilter({
   const disabled = isFormProcessing(navigation.state);
   const [searchParams, setSearchParams] = useSearchParams();
   const status = searchParams.get("status");
-  const { destroyCookieValues } = useCookieDestroy();
 
   function handleValueChange(value: string) {
     setSearchParams((prev) => {
       /** If the value is "ALL", we just remove the param */
       if (value === "ALL") {
         //make sure this is added where-ever we are explicitly delteting the searchaprams manually.
-        destroyCookieValues(["status"]);
         prev.delete("status");
         return prev;
       }

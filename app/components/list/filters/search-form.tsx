@@ -2,16 +2,15 @@ import { useRef } from "react";
 import {
   useLoaderData,
   useNavigation,
-  useSearchParams,
 } from "@remix-run/react";
 
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { useCookieDestroy } from "~/hooks/search-params/utils";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { isSearching } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { SearchFieldTooltip } from "./search-field-tooltip";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
 
 export const SearchForm = ({ className }: { className?: string }) => {
   const [_searchParams, setSearchParams] = useSearchParams();
@@ -19,7 +18,6 @@ export const SearchForm = ({ className }: { className?: string }) => {
     useLoaderData<SearchableIndexResponse>();
   const { singular } = modelName;
 
-  const { destroyCookieValues } = useCookieDestroy();
 
   const navigation = useNavigation();
   const disabled = isSearching(navigation);
@@ -28,7 +26,6 @@ export const SearchForm = ({ className }: { className?: string }) => {
   const label = searchFieldLabel ? searchFieldLabel : `Search by ${singular}`;
 
   function clearSearch() {
-    destroyCookieValues(["s"]);
     setSearchParams((prev) => {
       prev.delete("s");
 
