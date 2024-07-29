@@ -141,12 +141,16 @@ export function cache(seconds: number) {
 export function urlShortener() {
   return createMiddleware(async (c, next) => {
     const urlShortener = process.env.URL_SHORTENER;
+    console.log("urlShortener", urlShortener);
     const url = c.req.url;
+    console.log("url", url);
 
     if (!urlShortener) return next();
 
+    console.log("cond", c.req.url.startsWith(urlShortener));
     if (c.req.url.startsWith(urlShortener)) {
       const qrId = url.slice(urlShortener.length + 1); // +1 to remove the slash
+      console.log("qrId", qrId);
       return c.redirect(safeRedirect(`/qr/${qrId}`));
     }
 
