@@ -140,9 +140,10 @@ export function cache(seconds: number) {
 
 export function urlShortener() {
   return createMiddleware(async (c, next) => {
-    const urlShortener = process.env.URL_SHORTENER;
-    console.log("urlShortener", urlShortener);
     const url = c.req.url;
+    const urlShortener = process.env.URL_SHORTENER;
+
+    console.log("urlShortener", urlShortener);
     console.log("url", url);
 
     if (!urlShortener) return next();
