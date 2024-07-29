@@ -135,22 +135,29 @@ export function cache(seconds: number) {
 }
 
 /**
- * URL shortner middleware
+ * URL Shortener middleware with path exclusion
+ *
+ * @param options.excludePaths - Paths to exclude from URL shortening
  */
-
-export function urlShortener() {
+export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
   return createMiddleware(async (c, next) => {
-    const url = c.req.url;
-    const urlShortener = process.env.URL_SHORTENER;
+    // Check if the current request path matches any of the excluded paths
+    const isExcluded = pathMatch(excludePaths, c.req.path);
 
+    if (isExcluded) {
+      // Skip processing for excluded paths
+      return next();
+    }
+
+    const urlShortener = process.env.URL_SHORTENER;
     console.log("urlShortener", urlShortener);
-    console.log("url", url);
+    console.log("url", c.req.path);
 
     if (!urlShortener) return next();
 
-    console.log("cond", c.req.url.startsWith(urlShortener));
-    if (c.req.url.startsWith(urlShortener)) {
-      const qrId = url.slice(urlShortener.length + 1); // +1 to remove the slash
+    console.log("cond", c.req.path.startsWith(urlShortener));
+    if (c.req.path.startsWith(urlShortener)) {
+      const qrId = c.req.path.slice(urlShortener.length + 1); // +1 to remove the slash
       console.log("qrId", qrId);
       return c.redirect(safeRedirect(`/qr/${qrId}`));
     }
