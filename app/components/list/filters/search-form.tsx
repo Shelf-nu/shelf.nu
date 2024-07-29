@@ -7,7 +7,7 @@ import {
 
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { useCookieDestroy } from "~/hooks/use-search-param-utils";
+import { useCookieDestroy } from "~/hooks/search-params/utils";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { isSearching } from "~/utils/form";
 import { tw } from "~/utils/tw";

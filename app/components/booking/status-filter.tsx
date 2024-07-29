@@ -1,5 +1,5 @@
 import { useNavigation, useSearchParams } from "@remix-run/react";
-import { useCookieDestroy } from "~/hooks/use-search-param-utils";
+import { useCookieDestroy } from "~/hooks/search-params/utils";
 import { isFormProcessing } from "~/utils/form";
 import {
   Select,

@@ -40,7 +40,7 @@ import { db } from "~/database/db.server";
 import {
   useClearValueFromParams,
   useSearchParamHasValue,
-} from "~/hooks/use-search-param-utils";
+} from "~/hooks/search-params/utils";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   bulkDeleteAssets,
