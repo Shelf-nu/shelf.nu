@@ -1,3 +1,4 @@
+import { isCuid } from "@paralleldrive/cuid2";
 import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
@@ -135,14 +136,18 @@ export function cache(seconds: number) {
 }
 
 /**
- * URL Shortener middleware with path exclusion
- *
- * @param options.excludePaths - Paths to exclude from URL shortening
+ * URL shortner middleware
  */
+
 export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
   return createMiddleware(async (c, next) => {
+    const { hostname, pathname } = new URL(c.req.url);
+    console.log("hostname", hostname);
+    console.log("pathname", pathname);
+
     // Check if the current request path matches any of the excluded paths
-    const isExcluded = pathMatch(excludePaths, c.req.path);
+    const isExcluded = pathMatch(excludePaths, pathname);
+    console.log("isExcluded", isExcluded);
 
     if (isExcluded) {
       // Skip processing for excluded paths
@@ -150,16 +155,21 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
     }
 
     const urlShortener = process.env.URL_SHORTENER;
-    console.log("urlShortener", urlShortener);
-    console.log("url", c.req.path);
+    const serverUrl = process.env.SERVER_URL;
 
     if (!urlShortener) return next();
 
-    console.log("cond", c.req.path.startsWith(urlShortener));
-    if (c.req.path.startsWith(urlShortener)) {
-      const qrId = c.req.path.slice(urlShortener.length + 1); // +1 to remove the slash
-      console.log("qrId", qrId);
-      return c.redirect(safeRedirect(`/qr/${qrId}`));
+    console.log("urlShortener", urlShortener);
+
+    if (hostname.startsWith(urlShortener)) {
+      // Remove leading slash
+      const path = pathname.slice(1);
+
+      // Check if the path looks like a QR tag (alphanumeric, certain length)
+      if (isCuid(path))
+        return c.redirect(safeRedirect(`https://${serverUrl}/qr/${path}`));
+
+      return c.redirect(safeRedirect(`https://${serverUrl}/${path}`));
     }
 
     return next();
