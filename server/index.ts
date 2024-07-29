@@ -44,7 +44,7 @@ const app = new Hono();
 app.use(
   "*",
   urlShortener({
-    excludePaths: ["/file-assets/", "/healthcheck", "/static/"],
+    excludePaths: ["/file-assets/:path*", "/healthcheck", "/static/:path*"],
   })
 );
 

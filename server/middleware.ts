@@ -141,6 +141,7 @@ export function cache(seconds: number) {
 
 export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
   return createMiddleware(async (c, next) => {
+    console.log("c.req", c.req);
     const { hostname, pathname } = new URL(c.req.url);
     console.log("hostname", hostname);
     console.log("pathname", pathname);
