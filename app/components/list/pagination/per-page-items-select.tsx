@@ -1,4 +1,4 @@
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import {
   Select,
   SelectTrigger,
@@ -6,6 +6,8 @@ import {
   SelectContent,
   SelectItem,
 } from "~/components/forms/select";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
+
 import type { loader } from "~/routes/_layout+/assets._index";
 
 export default function PerPageItemsSelect() {

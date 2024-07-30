@@ -1,12 +1,10 @@
 import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/node";
 import { json, redirect, redirectDocument } from "@remix-run/node";
-import { useSearchParams } from "@remix-run/react";
 import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
-
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
 import {
   createAsset,
   getAllEntriesForCreateAndEdit,

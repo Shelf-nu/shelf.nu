@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect } from "react";
-import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
+import { useFetcher, useLoaderData } from "@remix-run/react";
+
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   bulkDialogAtom,
@@ -10,6 +11,7 @@ import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
 } from "~/atoms/list";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
 import type { action } from "~/routes/api+/assets.bulk-update-location";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";

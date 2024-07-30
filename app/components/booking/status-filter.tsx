@@ -1,4 +1,5 @@
-import { useNavigation, useSearchParams } from "@remix-run/react";
+import { useNavigation } from "@remix-run/react";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
 import { isFormProcessing } from "~/utils/form";
 import {
   Select,
@@ -22,6 +23,7 @@ export function StatusFilter({
     setSearchParams((prev) => {
       /** If the value is "ALL", we just remove the param */
       if (value === "ALL") {
+        //make sure this is added where-ever we are explicitly delteting the searchaprams manually.
         prev.delete("status");
         return prev;
       }

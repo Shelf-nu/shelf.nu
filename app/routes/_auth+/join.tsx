@@ -4,11 +4,8 @@ import type {
   MetaFunction,
 } from "@remix-run/node";
 import { redirect, json } from "@remix-run/node";
-import {
-  useActionData,
-  useNavigation,
-  useSearchParams,
-} from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
+
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -17,6 +14,7 @@ import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import { findUserByEmail } from "~/modules/user/service.server";

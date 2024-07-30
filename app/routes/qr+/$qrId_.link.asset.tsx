@@ -32,7 +32,7 @@ import When from "~/components/when/when";
 import {
   useClearValueFromParams,
   useSearchParamHasValue,
-} from "~/hooks/use-search-param-utils";
+} from "~/hooks/search-params/utils";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getPaginatedAndFilterableAssets,
