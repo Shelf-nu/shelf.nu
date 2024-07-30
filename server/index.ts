@@ -36,15 +36,24 @@ const mode = env.NODE_ENV === "test" ? "development" : env.NODE_ENV;
 
 const isProductionMode = mode === "production";
 
-const app = new Hono();
+const app = new Hono({
+  getPath: (req) => {
+    const url = new URL(req.url);
+    const host = req.headers.get("host");
 
-/**
- * Add url shortner middleware with conditional path exclusion
- */
+    if (host === process.env.URL_SHORTENER) {
+      return "/" + host + url.pathname;
+    }
+
+    return url.pathname;
+  },
+});
+
+// Apply the middleware to all routes
 app.use(
-  "*",
+  `/${process.env.URL_SHORTENER}/:path*`,
   urlShortener({
-    excludePaths: ["/file-assets/:path*", "/healthcheck", "/static/:path*"],
+    excludePaths: ["/file-assets", "/healthcheck", "/static"],
   })
 );
 

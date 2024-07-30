@@ -7,6 +7,7 @@ import {
   refreshAccessToken,
   validateSession,
 } from "~/modules/auth/service.server";
+import { DEFAULT_CUID_LENGTH } from "~/utils/constants";
 import { ShelfError } from "~/utils/error";
 import { safeRedirect } from "~/utils/http.server";
 import { Logger } from "~/utils/logger";
@@ -141,38 +142,45 @@ export function cache(seconds: number) {
 
 export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
   return createMiddleware(async (c, next) => {
-    console.log("c.req", c.req);
-    const { hostname, pathname } = new URL(c.req.url);
-    console.log("hostname", hostname);
-    console.log("pathname", pathname);
+    const fullPath = c.req.path;
+    // Remove the URL_SHORTENER part from the beginning of the path
+    const pathWithoutShortener = fullPath.replace(
+      `/${process.env.URL_SHORTENER}`,
+      ""
+    );
+    const pathParts = pathWithoutShortener.split("/").filter(Boolean);
+    const pathname = "/" + pathParts.join("/");
+
+    console.log(`urlShortener middleware: Processing ${pathname}`);
 
     // Check if the current request path matches any of the excluded paths
-    const isExcluded = pathMatch(excludePaths, pathname);
-    console.log("isExcluded", isExcluded);
-
+    const isExcluded = excludePaths.some((path) => pathname.startsWith(path));
     if (isExcluded) {
-      // Skip processing for excluded paths
+      console.log(
+        `urlShortener middleware: Skipping excluded path ${pathname}`
+      );
       return next();
     }
 
-    const urlShortener = process.env.URL_SHORTENER;
+    const path = pathParts.join("/");
     const serverUrl = process.env.SERVER_URL;
 
-    if (!urlShortener) return next();
-
-    console.log("urlShortener", urlShortener);
-
-    if (hostname.startsWith(urlShortener)) {
-      // Remove leading slash
-      const path = pathname.slice(1);
-
-      // Check if the path looks like a QR tag (alphanumeric, certain length)
-      if (isCuid(path))
-        return c.redirect(safeRedirect(`https://${serverUrl}/qr/${path}`));
-
-      return c.redirect(safeRedirect(`https://${serverUrl}/${path}`));
+    // Check if the path is a single segment and a valid CUID
+    if (
+      pathParts.length === 1 &&
+      isCuid(path, {
+        minLength: DEFAULT_CUID_LENGTH,
+        maxLength: DEFAULT_CUID_LENGTH,
+      })
+    ) {
+      const redirectUrl = `${serverUrl}/qr/${path}`;
+      console.log(`urlShortener middleware: Redirecting QR to ${redirectUrl}`);
+      return c.redirect(safeRedirect(redirectUrl));
     }
 
-    return next();
+    // Handle all other cases
+    const redirectUrl = `${serverUrl}${pathname}`;
+    console.log(`urlShortener middleware: Redirecting to ${redirectUrl}`);
+    return c.redirect(safeRedirect(redirectUrl));
   });
 }
