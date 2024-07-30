@@ -39,9 +39,14 @@ const isProductionMode = mode === "production";
 const app = new Hono();
 
 /**
- * Add url shortner middleware
+ * Add url shortner middleware with conditional path exclusion
  */
-app.use("*", urlShortener());
+app.use(
+  "*",
+  urlShortener({
+    excludePaths: ["/file-assets/:path*", "/healthcheck", "/static/:path*"],
+  })
+);
 
 /**
  * Serve assets files from build/client/assets

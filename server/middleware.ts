@@ -139,13 +139,28 @@ export function cache(seconds: number) {
  * URL shortner middleware
  */
 
-export function urlShortener() {
+export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
   return createMiddleware(async (c, next) => {
+    console.log("c.req", c.req);
+    const { hostname, pathname } = new URL(c.req.url);
+    console.log("hostname", hostname);
+    console.log("pathname", pathname);
+
+    // Check if the current request path matches any of the excluded paths
+    const isExcluded = pathMatch(excludePaths, pathname);
+    console.log("isExcluded", isExcluded);
+
+    if (isExcluded) {
+      // Skip processing for excluded paths
+      return next();
+    }
+
     const urlShortener = process.env.URL_SHORTENER;
     const serverUrl = process.env.SERVER_URL;
-    const { hostname, pathname } = new URL(c.req.url);
 
     if (!urlShortener) return next();
+
+    console.log("urlShortener", urlShortener);
 
     if (hostname.startsWith(urlShortener)) {
       // Remove leading slash
