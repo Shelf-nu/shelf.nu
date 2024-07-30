@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { useSearchParams } from "@remix-run/react";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
+
 import {
   Select,
   SelectContent,

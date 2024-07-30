@@ -1,5 +1,5 @@
 {
-  "plugins": ["tailwindcss"],
+  "plugins": ["tailwindcss", "no-restricted-imports"],
   "extends": [
     "@remix-run/eslint-config",
     "@remix-run/eslint-config/node",
@@ -65,6 +65,17 @@
           "order": "asc",
           "caseInsensitive": true
         }
+      }
+    ],
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "@remix-run/react",
+            "importNames": ["useSearchParams"]
+          }
+        ]
       }
     ]
   },
