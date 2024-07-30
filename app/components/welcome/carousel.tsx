@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { useSearchParams } from "@remix-run/react";
+
 import { ClientOnly } from "remix-utils/client-only";
 import { Pagination, Navigation } from "swiper/modules";
 import { Swiper, SwiperSlide } from "swiper/react";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
 import { Button } from "../shared/button";
 
 export default function WelcomeCarousel() {

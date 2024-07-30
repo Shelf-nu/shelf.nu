@@ -1,7 +1,10 @@
 import { useMemo } from "react";
-import { useLoaderData, useLocation, useSearchParams } from "@remix-run/react";
+import { useLoaderData, useLocation } from "@remix-run/react";
 import Cookies from "js-cookie";
+
 import type { loader } from "~/routes/_layout+/assets._index";
+// eslint-disable-next-line import/no-cycle
+import { useSearchParams } from "./use-search-params";
 
 type SetSearchParams = (
   setter: (prev: URLSearchParams) => URLSearchParams

@@ -4,12 +4,7 @@ import type {
   ActionFunctionArgs,
 } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import {
-  Outlet,
-  useLoaderData,
-  useMatches,
-  useSearchParams,
-} from "@remix-run/react";
+import { Outlet, useLoaderData, useMatches } from "@remix-run/react";
 import { z } from "zod";
 import { UnlinkIcon } from "~/components/icons/library";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
@@ -17,6 +12,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { claimQrCode } from "~/modules/qr/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";

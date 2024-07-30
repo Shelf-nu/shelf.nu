@@ -1,23 +1,19 @@
 import { useRef } from "react";
-import {
-  useLoaderData,
-  useNavigation,
-} from "@remix-run/react";
+import { useLoaderData, useNavigation } from "@remix-run/react";
 
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { isSearching } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import { SearchFieldTooltip } from "./search-field-tooltip";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
 
 export const SearchForm = ({ className }: { className?: string }) => {
   const [_searchParams, setSearchParams] = useSearchParams();
   const { search, modelName, searchFieldLabel } =
     useLoaderData<SearchableIndexResponse>();
   const { singular } = modelName;
-
 
   const navigation = useNavigation();
   const disabled = isSearching(navigation);

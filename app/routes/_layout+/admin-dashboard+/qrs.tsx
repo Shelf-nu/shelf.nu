@@ -1,12 +1,7 @@
 import type { PrintBatch, Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import {
-  Link,
-  useLoaderData,
-  useNavigation,
-  useSearchParams,
-} from "@remix-run/react";
+import { Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { z } from "zod";
 import { GenerateBatchQr } from "~/components/admin/generate-batch-qr";
 import { MarkBatchAsPrinted } from "~/components/admin/mark-batch-as-printed";
@@ -23,6 +18,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params/use-search-params";
 import {
   getPaginatedAndFilterableQrCodes,
   markBatchAsPrinted,
