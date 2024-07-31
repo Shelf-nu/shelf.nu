@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params/utils";
 
 type UseControlledDropdownMenuReturn = {
   ref: React.RefObject<HTMLDivElement>;

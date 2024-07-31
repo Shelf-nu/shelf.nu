@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useLoaderData } from "@remix-run/react";
 import { AnimatePresence } from "framer-motion";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params/utils";
 
 import type { loader } from "~/routes/_layout+/account-details.subscription";
 import { Button } from "../shared/button";

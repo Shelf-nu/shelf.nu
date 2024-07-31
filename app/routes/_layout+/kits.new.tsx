@@ -4,7 +4,7 @@ import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import KitsForm, { NewKitFormSchema } from "~/components/kits/form";
 import Header from "~/components/layout/header";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params/utils";
 import { createKit, updateKitImage } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";

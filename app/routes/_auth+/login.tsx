@@ -14,7 +14,7 @@ import Input from "~/components/forms/input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params/utils";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signInWithEmail } from "~/modules/auth/service.server";
 

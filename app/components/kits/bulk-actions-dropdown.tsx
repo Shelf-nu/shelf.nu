@@ -6,7 +6,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
 import { tw } from "~/utils/tw";
-import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import BulkReleaseCustodyDialog from "./bulk-release-custody-dialog";

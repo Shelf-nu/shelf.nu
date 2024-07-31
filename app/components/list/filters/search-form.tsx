@@ -3,7 +3,7 @@ import { useLoaderData, useNavigation } from "@remix-run/react";
 
 import Input from "~/components/forms/input";
 import { Button } from "~/components/shared/button";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params/utils";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { isSearching } from "~/utils/form";
 import { tw } from "~/utils/tw";

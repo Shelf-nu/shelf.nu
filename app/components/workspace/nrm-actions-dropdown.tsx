@@ -10,7 +10,7 @@ import {
 
 import type { loader } from "~/routes/_layout+/settings.team.nrm";
 import { tw } from "~/utils/tw";
-import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { DeleteMember } from "./delete-member";
 import { Button } from "../shared/button";
 

@@ -13,7 +13,7 @@ import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
 import { config } from "~/config/shelf.config";
 import { onboardingEmailText } from "~/emails/onboarding-email";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params/utils";
 import {
   getAuthUserById,
   signInWithEmail,

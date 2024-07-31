@@ -4,7 +4,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
-import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import BulkActivateDialog from "./bulk-activate-dialog";
 import BulkDeactivateDialog from "./bulk-deactivate-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";

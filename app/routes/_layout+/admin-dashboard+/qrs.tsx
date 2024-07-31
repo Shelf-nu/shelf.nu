@@ -18,7 +18,7 @@ import { List } from "~/components/list";
 import { Filters } from "~/components/list/filters";
 import { Td, Th } from "~/components/table";
 import { db } from "~/database/db.server";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params/utils";
 import {
   getPaginatedAndFilterableQrCodes,
   markBatchAsPrinted,

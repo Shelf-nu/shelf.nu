@@ -2,7 +2,7 @@ import { useLoaderData } from "@remix-run/react";
 import { useHydrated } from "remix-utils/use-hydrated";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 import { tw } from "~/utils/tw";
-import { useControlledDropdownMenu } from "~/utils/use-controlled-dropdown-menu";
+import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import DeleteKit from "./delete-kit";
 import Icon from "../icons/icon";
 import { ChevronRight } from "../icons/library";

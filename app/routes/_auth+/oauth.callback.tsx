@@ -7,7 +7,7 @@ import { z } from "zod";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { config } from "~/config/shelf.config";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params/utils";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
