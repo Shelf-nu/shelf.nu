@@ -6,7 +6,7 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { useNavigation } from "@remix-run/react";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params";
 
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";

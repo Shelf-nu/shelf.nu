@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params";
 
 import {
   Select,

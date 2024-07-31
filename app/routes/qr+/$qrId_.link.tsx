@@ -12,7 +12,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 
 import { db } from "~/database/db.server";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { claimQrCode } from "~/modules/qr/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
