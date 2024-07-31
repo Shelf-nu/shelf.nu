@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useFetcher, useParams } from "@remix-run/react";
 import { atom, useAtom } from "jotai";
-import { useSearchParams } from "~/hooks/search-params/use-search-params";
+import { useSearchParams } from "~/hooks/search-params";
 
 const positionAtom = atom<GeolocationCoordinates | null>(null);
 

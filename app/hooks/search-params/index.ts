@@ -1,10 +1,78 @@
 import { useMemo } from "react";
-import { useLoaderData, useLocation } from "@remix-run/react";
+import {
+  useLoaderData,
+  useLocation,
+  // eslint-disable-next-line no-restricted-imports
+  useSearchParams as remixUseSearchParams,
+} from "@remix-run/react";
 import Cookies from "js-cookie";
 
 import type { loader } from "~/routes/_layout+/assets._index";
-// eslint-disable-next-line import/no-cycle
-import { useSearchParams } from "./use-search-params";
+import { useCurrentOrganization } from "../use-current-organization-id";
+
+/**
+ * Get the types from the ReturnType of the original useSearchParams hook
+ */
+type SearchParamsType = ReturnType<typeof remixUseSearchParams>[0]; // URLSearchParams
+type SetSearchParamsType = ReturnType<typeof remixUseSearchParams>[1];
+
+export const useSearchParams = (): [
+  SearchParamsType,
+  (
+    nextInit: Parameters<SetSearchParamsType>[0],
+    navigateOptions?: Parameters<SetSearchParamsType>[1]
+  ) => void,
+] => {
+  const [searchParams, setSearchParams] = remixUseSearchParams();
+  const { destroyCookieValues } = useCookieDestroy();
+  const isAssetIndexPage = useIsAssetIndexPage();
+  const currentOrganization = useCurrentOrganization();
+
+  /** In those cases, we return the default searchParams and setSearchParams as we dont need to handle cookies */
+  if (!isAssetIndexPage || !currentOrganization) {
+    return [searchParams, setSearchParams];
+  }
+  const customSetSearchParams: (
+    nextInit: Parameters<SetSearchParamsType>[0],
+    navigateOptions?: Parameters<SetSearchParamsType>[1]
+  ) => void = (nextInit, navigateOptions) => {
+    const prevParams = new URLSearchParams(searchParams.toString());
+
+    const checkAndDestroyCookies = (newParams: URLSearchParams) => {
+      const removedKeys: string[] = [];
+      prevParams.forEach((_value, key) => {
+        if (!newParams.has(key)) {
+          removedKeys.push(key);
+        }
+      });
+      if (removedKeys.length > 0) {
+        destroyCookieValues(removedKeys);
+      }
+    };
+
+    if (typeof nextInit === "function") {
+      setSearchParams((prev) => {
+        let newParams = nextInit(prev);
+        // Ensure newParams is an instance of URLSearchParams
+        if (!(newParams instanceof URLSearchParams)) {
+          newParams = new URLSearchParams(newParams as any); // Safely cast to any to handle URLSearchParamsInit types
+        }
+        checkAndDestroyCookies(newParams);
+        return newParams;
+      }, navigateOptions);
+    } else {
+      let newParams = nextInit;
+      // Ensure newParams is an instance of URLSearchParams
+      if (!(newParams instanceof URLSearchParams)) {
+        newParams = new URLSearchParams(newParams as any); // Safely cast to any to handle URLSearchParamsInit types
+      }
+      checkAndDestroyCookies(newParams);
+      setSearchParams(newParams, navigateOptions);
+    }
+  };
+
+  return [searchParams, customSetSearchParams];
+};
 
 type SetSearchParams = (
   setter: (prev: URLSearchParams) => URLSearchParams
@@ -13,17 +81,33 @@ type SetSearchParams = (
 /**
  * Custom hook to gather and return metadata related to the asset index page.
  *
- * @returns {Object} - An object containing the filters, a boolean indicating if it's the asset index page,
+ * @returns - An object containing the filters, a boolean indicating if it's the asset index page,
  * a URLSearchParams object constructed from the filters, and the organization ID.
  */
-export function useAssetIndexMeta() {
-  const location = useLocation();
-  const { filters, organizationId } = useLoaderData<typeof loader>();
-  const isAssetIndexPage = location.pathname === "/assets";
-  const cookieSearchParams = new URLSearchParams(filters);
+export function useAssetIndexCookieSearchParams() {
+  const assetIndexData = useLoaderData<typeof loader>();
+  const isAssetIndexPage = useIsAssetIndexPage();
 
-  return { filters, isAssetIndexPage, cookieSearchParams, organizationId };
+  if (!assetIndexData || !isAssetIndexPage) {
+    return new URLSearchParams();
+  }
+
+  const { filters } = assetIndexData;
+  const cookieSearchParams = new URLSearchParams(
+    isAssetIndexPage && filters && filters !== "" ? filters : ""
+  );
+
+  return cookieSearchParams;
 }
+
+/**
+ * Checks if the current page is the asset index page.
+ * @returns {boolean} - True if the current page is the asset index page, otherwise false.
+ */
+export const useIsAssetIndexPage = (): boolean => {
+  const location = useLocation();
+  return location.pathname === "/assets";
+};
 
 /**
  * Returns a boolean indicating whether any of the specified keys have values
@@ -46,9 +130,10 @@ export function checkValueInCookie(
  * @param {string[]} keys - Array of keys (strings) to check in the URL search parameters and cookies.
  * @returns {boolean} - True if any of the keys have values in the search parameters or in the cookies, otherwise false.
  */
-export function useSearchParamHasValue(...keys: string[]) {
+export function useSearchParamHasValue(...keys: string[]): boolean {
   const [searchParams] = useSearchParams();
-  const { isAssetIndexPage, cookieSearchParams } = useAssetIndexMeta();
+  const cookieSearchParams = useAssetIndexCookieSearchParams();
+  const isAssetIndexPage = useIsAssetIndexPage();
   const hasValue = useMemo(
     () => keys.map((key) => searchParams.has(key)).some(Boolean),
     [keys, searchParams]
@@ -107,14 +192,15 @@ export function destroyCookieValues(
  * @param {string[]} keys - Array of keys (strings) to be cleared from the URL search parameters and cookies.
  * @returns {Function} - A function that, when called, clears the specified keys from the URL search parameters and, if on the asset index page, also from the cookies.
  */
-export function useClearValueFromParams(...keys: string[]) {
+export function useClearValueFromParams(...keys: string[]): Function {
   const [, setSearchParams] = useSearchParams();
-  const { isAssetIndexPage, organizationId, cookieSearchParams } =
-    useAssetIndexMeta();
+  const cookieSearchParams = useAssetIndexCookieSearchParams();
+  const currentOrganization = useCurrentOrganization();
+  const isAssetIndexPage = useIsAssetIndexPage();
 
   function clearValuesFromParams() {
-    if (isAssetIndexPage) {
-      destroyCookieValues(organizationId, keys, cookieSearchParams);
+    if (isAssetIndexPage && currentOrganization && currentOrganization?.id) {
+      destroyCookieValues(currentOrganization.id, keys, cookieSearchParams);
       deleteKeysInSearchParams(keys, setSearchParams);
       return;
     }
@@ -129,8 +215,10 @@ export function useClearValueFromParams(...keys: string[]) {
  * @returns {Object} - An object containing the `destroyCookieValues` function that clears specific keys from cookies.
  */
 export function useCookieDestroy() {
-  const { isAssetIndexPage, cookieSearchParams, organizationId } =
-    useAssetIndexMeta();
+  const cookieSearchParams = useAssetIndexCookieSearchParams();
+  const currentOrganization = useCurrentOrganization();
+  // const isAssetIndexPage = useIsAssetIndexPage();
+  const isAssetIndexPage = false;
 
   /**
    * Function to destroy specific keys from cookies if on the asset index page.
@@ -139,9 +227,9 @@ export function useCookieDestroy() {
    */
   function _destroyCookieValues(keys: string[]) {
     // Check if the current page is the asset index page
-    if (isAssetIndexPage) {
+    if (isAssetIndexPage && currentOrganization && currentOrganization?.id) {
       // Call the destroyCookieValues utility function to delete keys from cookies and update the cookie
-      destroyCookieValues(organizationId, keys, cookieSearchParams);
+      destroyCookieValues(currentOrganization.id, keys, cookieSearchParams);
     }
   }
 
