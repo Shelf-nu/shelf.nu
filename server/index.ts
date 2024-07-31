@@ -41,7 +41,7 @@ const app = new Hono({
     const url = new URL(req.url);
     const host = req.headers.get("host");
 
-    if (host === process.env.URL_SHORTENER) {
+    if (process.env.URL_SHORTENER && host === process.env.URL_SHORTENER) {
       return "/" + host + url.pathname;
     }
 
