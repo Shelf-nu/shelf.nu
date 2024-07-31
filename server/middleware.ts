@@ -1,4 +1,3 @@
-import { isCuid } from "@paralleldrive/cuid2";
 import { createMiddleware } from "hono/factory";
 import { pathToRegexp } from "path-to-regexp";
 import { getSession } from "remix-hono/session";
@@ -7,9 +6,9 @@ import {
   refreshAccessToken,
   validateSession,
 } from "~/modules/auth/service.server";
-import { DEFAULT_CUID_LENGTH } from "~/utils/constants";
 import { ShelfError } from "~/utils/error";
 import { safeRedirect } from "~/utils/http.server";
+import { isQrId } from "~/utils/id/utils";
 import { Logger } from "~/utils/logger";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
@@ -151,14 +150,9 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
     const pathParts = pathWithoutShortener.split("/").filter(Boolean);
     const pathname = "/" + pathParts.join("/");
 
-    console.log(`urlShortener middleware: Processing ${pathname}`);
-
     // Check if the current request path matches any of the excluded paths
     const isExcluded = excludePaths.some((path) => pathname.startsWith(path));
     if (isExcluded) {
-      console.log(
-        `urlShortener middleware: Skipping excluded path ${pathname}`
-      );
       return next();
     }
 
@@ -166,21 +160,13 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
     const serverUrl = process.env.SERVER_URL;
 
     // Check if the path is a single segment and a valid CUID
-    if (
-      pathParts.length === 1 &&
-      isCuid(path, {
-        minLength: DEFAULT_CUID_LENGTH,
-        maxLength: DEFAULT_CUID_LENGTH,
-      })
-    ) {
+    if (pathParts.length === 1 && isQrId(path)) {
       const redirectUrl = `${serverUrl}/qr/${path}`;
-      console.log(`urlShortener middleware: Redirecting QR to ${redirectUrl}`);
       return c.redirect(safeRedirect(redirectUrl));
     }
 
     // Handle all other cases
     const redirectUrl = `${serverUrl}${pathname}`;
-    console.log(`urlShortener middleware: Redirecting to ${redirectUrl}`);
     return c.redirect(safeRedirect(redirectUrl));
   });
 }
