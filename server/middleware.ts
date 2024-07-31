@@ -8,7 +8,7 @@ import {
 } from "~/modules/auth/service.server";
 import { ShelfError } from "~/utils/error";
 import { safeRedirect } from "~/utils/http.server";
-import { isQrId } from "~/utils/id/utils";
+import { isQrId } from "~/utils/id";
 import { Logger } from "~/utils/logger";
 import type { FlashData } from "./session";
 import { authSessionKey } from "./session";
