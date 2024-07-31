@@ -150,9 +150,14 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
     const pathParts = pathWithoutShortener.split("/").filter(Boolean);
     const pathname = "/" + pathParts.join("/");
 
+    // console.log(`urlShortener middleware: Processing ${pathname}`);
+
     // Check if the current request path matches any of the excluded paths
     const isExcluded = excludePaths.some((path) => pathname.startsWith(path));
     if (isExcluded) {
+      // console.log(
+      //   `urlShortener middleware: Skipping excluded path ${pathname}`
+      // );
       return next();
     }
 
@@ -162,11 +167,13 @@ export function urlShortener({ excludePaths }: { excludePaths: string[] }) {
     // Check if the path is a single segment and a valid CUID
     if (pathParts.length === 1 && isQrId(path)) {
       const redirectUrl = `${serverUrl}/qr/${path}`;
-      return c.redirect(safeRedirect(redirectUrl));
+      // console.log(`urlShortener middleware: Redirecting QR to ${redirectUrl}`);
+      return c.redirect(safeRedirect(redirectUrl), 301);
     }
 
     // Handle all other cases
     const redirectUrl = `${serverUrl}${pathname}`;
-    return c.redirect(safeRedirect(redirectUrl));
+    // console.log(`urlShortener middleware: Redirecting to ${redirectUrl}`);
+    return c.redirect(safeRedirect(redirectUrl), 301);
   });
 }
