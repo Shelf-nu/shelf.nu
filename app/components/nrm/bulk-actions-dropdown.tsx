@@ -1,8 +1,8 @@
 import { useAtomValue } from "jotai";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { tw } from "~/utils/tw";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { tw } from "~/utils/tw";
 import BulkDeleteDialog from "./bulk-delete-dialog";
 import { BulkUpdateDialogTrigger } from "../bulk-update-dialog/bulk-update-dialog";
 import { ChevronRight } from "../icons/library";
