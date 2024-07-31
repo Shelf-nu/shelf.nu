@@ -39,6 +39,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     const scan = await createScan({
       userAgent: request.headers.get("user-agent") as string,
+      userId,
       qrId: id,
       deleted: !qr,
     });

@@ -2,6 +2,9 @@ import type { Scan } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import type { ErrorLabel } from "~/utils/error";
+import { createNote } from "../note/service.server";
+import { getOrganizationById } from "../organization/service.server";
+import { getQr } from "../qr/service.server";
 
 const label: ErrorLabel = "Scan";
 
@@ -34,7 +37,7 @@ export async function createScan(params: {
     };
 
     /** If user id is passed, connect to that user */
-    if (userId) {
+    if (userId && userId != "anonymous") {
       Object.assign(data, {
         user: {
           connect: {
@@ -59,9 +62,13 @@ export async function createScan(params: {
       });
     }
 
-    return await db.scan.create({
+    const scan = await db.scan.create({
       data,
     });
+
+    await createScanNote({ userId, qrId, longitude, latitude, manuallyGenerated });
+
+    return scan;
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -134,6 +141,64 @@ export async function getScanByQrId({ qrId }: { qrId: string }) {
       cause,
       message: "Something went wrong while fetching the scan",
       additionalData: { qrId },
+      label,
+    });
+  }
+}
+
+export async function createScanNote({ userId, qrId, latitude, longitude, manuallyGenerated }: {
+  userId?: string | null;
+  qrId: string;
+  latitude?: Scan["latitude"];
+  longitude?: Scan["longitude"];
+  manuallyGenerated?: boolean;
+}) {
+  try {
+    let message = "";
+    const { assetId, organizationId } = await getQr(qrId)
+    if (assetId) {
+      if (userId && userId != "anonymous") {
+        const user = await db.user.findFirst({
+          where: {
+            id: userId,
+          },
+          select: {
+            firstName: true,
+            lastName: true,
+          },
+        });
+
+        const userName = user?.firstName + " " + user?.lastName
+        if (manuallyGenerated) {
+          message = `**${userName}** manually updated the GPS coordinates to **${latitude} ${longitude}**`
+        } else {
+          message = `**${userName}** performed a scan of the asset QR code`
+        }
+        return await createNote({
+          content: message,
+          type: "UPDATE",
+          userId,
+          assetId
+        });
+      } else {
+        if (organizationId) {
+          const { userId: ownerId } = await getOrganizationById(organizationId)
+          message = "An unknown user has performed a scan of the asset QR code"
+          return await createNote({
+            content: message,
+            type: "UPDATE",
+            userId: ownerId,
+            assetId
+          });
+        }
+      }
+    }
+  }
+  catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while creating a scan note",
+      additionalData: { userId, qrId, latitude, longitude, manuallyGenerated },
       label,
     });
   }
