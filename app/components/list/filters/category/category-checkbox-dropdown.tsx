@@ -7,7 +7,7 @@ import { CategorySelectNoCategories } from "~/components/category/category-selec
 
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
-import { useSearchParams } from "~/hooks/search-params/utils";
+import { useSearchParams } from "~/hooks/search-params";
 import type { WithDateFields } from "~/modules/types";
 import { useCategorySearch } from "../../../category/useCategorySearch";
 import Input from "../../../forms/input";

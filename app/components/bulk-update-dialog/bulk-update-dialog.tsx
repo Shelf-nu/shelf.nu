@@ -11,7 +11,7 @@ import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
 } from "~/atoms/list";
-import { useSearchParams } from "~/hooks/search-params/utils";
+import { useSearchParams } from "~/hooks/search-params";
 import type { action } from "~/routes/api+/assets.bulk-update-location";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";

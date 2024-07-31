@@ -4,7 +4,7 @@ import { useAtomValue } from "jotai";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { AssetForm, NewAssetFormSchema } from "~/components/assets/form";
 import Header from "~/components/layout/header";
-import { useSearchParams } from "~/hooks/search-params/utils";
+import { useSearchParams } from "~/hooks/search-params";
 import {
   createAsset,
   getAllEntriesForCreateAndEdit,

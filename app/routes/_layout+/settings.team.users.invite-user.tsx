@@ -19,7 +19,7 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { db } from "~/database/db.server";
-import { useSearchParams } from "~/hooks/search-params/utils";
+import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { createInvite } from "~/modules/invite/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";

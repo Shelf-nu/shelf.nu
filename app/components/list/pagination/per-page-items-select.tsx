@@ -6,7 +6,7 @@ import {
   SelectContent,
   SelectItem,
 } from "~/components/forms/select";
-import { useSearchParams } from "~/hooks/search-params/utils";
+import { useSearchParams } from "~/hooks/search-params";
 
 import type { loader } from "~/routes/_layout+/assets._index";
 

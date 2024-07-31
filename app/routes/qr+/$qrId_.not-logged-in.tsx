@@ -4,7 +4,7 @@ import { useLoaderData } from "@remix-run/react";
 import { z } from "zod";
 import { CuboidIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { useSearchParams } from "~/hooks/search-params/utils";
+import { useSearchParams } from "~/hooks/search-params";
 import { usePosition } from "~/hooks/use-position";
 import { data, getParams } from "~/utils/http.server";
 

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useLoaderData } from "@remix-run/react";
 import type { IndexResponse } from "~/components/list";
-import { useSearchParams } from "~/hooks/search-params/utils";
+import { useSearchParams } from "~/hooks/search-params";
 
 /**
  * This base hook is used to get all the pagination data and actions
