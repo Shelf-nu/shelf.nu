@@ -7,9 +7,11 @@ import {
 import { useZxing } from "react-zxing";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { loader } from "~/routes/_layout+/scanner";
+import { SERVER_URL, URL_SHORTENER } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { Spinner } from "./shared/spinner";
+import { isQrId } from "~/utils/id";
 
 export const ZXingScanner = ({
   videoMediaDevices,
@@ -27,13 +29,30 @@ export const ZXingScanner = ({
   // Function to decode the QR code
   const decodeQRCodes = (result: string) => {
     if (result != null && !isRedirecting) {
-      const regex = /^(https?:\/\/)([^/:]+)(:\d+)?\/qr\/([a-zA-Z0-9]+)$/;
-      /** We make sure the value of the QR code matches the structure of Shelf qr codes */
+      /**
+       * - ^(https?:\/\/[^\/]+\/ matches the protocol, domain, and the initial slash.
+       * - (?:qr\/)? optionally matches the /qr/ part.
+       * - ([a-zA-Z0-9]+))$ matches the QR ID which is the last segment of the URL.
+       */
+      // Regex to match both old and new QR code structures
+      const regex = /^(https?:\/\/[^\/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+
+      /** We make sure the value of the QR code matches the structure of Shelf QR codes */
       const match = result.match(regex);
       if (!match) {
-        /** If the QR code does not match the structure of Shelf qr codes, we show an error message */
+        /** If the QR code does not match the structure of Shelf QR codes, we show an error message */
         sendNotification({
           title: "QR Code Not Valid",
+          message: "Please Scan valid asset QR",
+          icon: { name: "trash", variant: "error" },
+        });
+        return;
+      }
+
+      const qrId = match[2]; // Get the QR id from the URL
+      if (!isQrId(qrId)) {
+        sendNotification({
+          title: "QR ID Not Valid",
           message: "Please Scan valid asset QR",
           icon: { name: "trash", variant: "error" },
         });
@@ -45,7 +64,7 @@ export const ZXingScanner = ({
         message: "Redirecting to mapped asset",
         icon: { name: "success", variant: "success" },
       });
-      const qrId = match[4]; // Get the last segment of the URL as the QR id
+
       navigate(`/qr/${qrId}`);
     }
   };

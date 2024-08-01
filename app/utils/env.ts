@@ -14,6 +14,7 @@ declare global {
       ENABLE_PREMIUM_FEATURES: string;
       MAINTENANCE_MODE: string;
       CHROME_EXECUTABLE_PATH: string;
+      URL_SHORTENER: string;
     };
   }
 }
@@ -223,5 +224,6 @@ export function getBrowserEnv() {
     ENABLE_PREMIUM_FEATURES,
     MAINTENANCE_MODE,
     CHROME_EXECUTABLE_PATH,
+    URL_SHORTENER,
   };
 }
