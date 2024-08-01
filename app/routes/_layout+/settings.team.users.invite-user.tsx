@@ -1,11 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import {
-  useActionData,
-  useNavigation,
-  useSearchParams,
-} from "@remix-run/react";
+import { useActionData, useNavigation } from "@remix-run/react";
 import { useZorm } from "react-zorm";
 import z from "zod";
 import { Form } from "~/components/custom-form";
@@ -23,6 +19,7 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { db } from "~/database/db.server";
+import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization-id";
 import { createInvite } from "~/modules/invite/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";

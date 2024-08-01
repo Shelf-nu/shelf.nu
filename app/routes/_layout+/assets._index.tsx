@@ -6,7 +6,7 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import type { ShouldRevalidateFunctionArgs } from "@remix-run/react";
 import { useNavigate } from "@remix-run/react";
 import { z } from "zod";
@@ -40,7 +40,7 @@ import { db } from "~/database/db.server";
 import {
   useClearValueFromParams,
   useSearchParamHasValue,
-} from "~/hooks/use-search-param-utils";
+} from "~/hooks/search-params";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   bulkDeleteAssets,
@@ -52,7 +52,11 @@ import { getOrganizationTierLimit } from "~/modules/tier/service.server";
 import assetCss from "~/styles/assets.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
-import { setCookie, userPrefs } from "~/utils/cookies.server";
+import {
+  userPrefs,
+  getFiltersFromRequest,
+  setCookie,
+} from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
 import { data, error, parseData } from "~/utils/http.server";
@@ -103,6 +107,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             });
           }),
       ]);
+    const {
+      filters,
+      serializedCookie: filtersCookie,
+      redirectNeeded,
+    } = await getFiltersFromRequest(request, organizationId);
+
+    if (filters && redirectNeeded) {
+      const cookieParams = new URLSearchParams(filters);
+      return redirect(`/assets?${cookieParams.toString()}`);
+    }
 
     let [
       tierLimit,
@@ -132,6 +146,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getPaginatedAndFilterableAssets({
         request,
         organizationId,
+        filters,
       }),
     ]);
 
@@ -159,6 +174,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
+    const userPrefsCookie = await userPrefs.serialize(cookie);
+    const headers = [
+      setCookie(userPrefsCookie),
+      ...(filtersCookie ? [setCookie(filtersCookie)] : []),
+    ];
     return json(
       data({
         header,
@@ -184,9 +204,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         teamMembers,
         totalTeamMembers,
         rawTeamMembers,
+        filters,
+        organizationId,
       }),
       {
-        headers: [setCookie(await userPrefs.serialize(cookie))],
+        headers,
       }
     );
   } catch (cause) {

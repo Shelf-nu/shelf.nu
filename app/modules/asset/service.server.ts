@@ -1368,6 +1368,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeTagsQuery = false,
   excludeSearchFromView = false,
   excludeLocationQuery = false,
+  filters = "",
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1376,13 +1377,18 @@ export async function getPaginatedAndFilterableAssets({
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
   excludeLocationQuery?: boolean;
+  filters?: string;
   /**
    * Set to true if you want the query to be performed by directly accessing the assets table
    *  instead of the AssetSearchView
    */
   excludeSearchFromView?: boolean;
 }) {
-  const searchParams = getCurrentSearchParams(request);
+  const currentFilterParams = new URLSearchParams(filters || "");
+  const searchParams = filters
+    ? currentFilterParams
+    : getCurrentSearchParams(request);
+
   const paramsValues = getParamsValues(searchParams);
   const status =
     searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
