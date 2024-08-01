@@ -8,6 +8,6 @@ The redirection is handled via the `urlShortener` middleware.
 
 Using the shortener is super easy.
 
-1. Add an env variable with your shortner domain: `URL_SHORTENER="https://hey.lo/"`. You can refer to `.env.example` for further example
+1. Add an env variable with your shortner domain: `URL_SHORTENER="hey.lo"`. You can refer to `.env.example` for further example. The domain should not include the protocol (http/https) or a trailing slash
 2. Make sure you point your short domain to your application server
 3. Enjoy
