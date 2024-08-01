@@ -1,7 +1,8 @@
 import { init } from "@paralleldrive/cuid2";
-import { FINGERPRINT } from "./env";
-import { ShelfError } from "./error";
-import { Logger } from "./logger";
+import { DEFAULT_CUID_LENGTH } from "../constants";
+import { FINGERPRINT } from "../env";
+import { ShelfError } from "../error";
+import { Logger } from "../logger";
 
 /**
  * Generate a unique id using cuid2
@@ -21,7 +22,7 @@ export function id(length?: number) {
       );
     }
     return init({
-      length: length || 10,
+      length: length || DEFAULT_CUID_LENGTH,
       /** FINGERPRINT is not required but it helps with avoiding collision */
       ...(FINGERPRINT && { fingerprint: FINGERPRINT }),
     })();
