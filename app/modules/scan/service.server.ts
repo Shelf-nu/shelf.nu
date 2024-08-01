@@ -5,6 +5,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { createNote } from "../note/service.server";
 import { getOrganizationById } from "../organization/service.server";
 import { getQr } from "../qr/service.server";
+import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Scan";
 
@@ -66,7 +67,13 @@ export async function createScan(params: {
       data,
     });
 
-    await createScanNote({ userId, qrId, longitude, latitude, manuallyGenerated });
+    await createScanNote({
+      userId,
+      qrId,
+      longitude,
+      latitude,
+      manuallyGenerated,
+    });
 
     return scan;
   } catch (cause) {
@@ -146,7 +153,13 @@ export async function getScanByQrId({ qrId }: { qrId: string }) {
   }
 }
 
-export async function createScanNote({ userId, qrId, latitude, longitude, manuallyGenerated }: {
+export async function createScanNote({
+  userId,
+  qrId,
+  latitude,
+  longitude,
+  manuallyGenerated,
+}: {
   userId?: string | null;
   qrId: string;
   latitude?: Scan["latitude"];
@@ -155,46 +168,42 @@ export async function createScanNote({ userId, qrId, latitude, longitude, manual
 }) {
   try {
     let message = "";
-    const { assetId, organizationId } = await getQr(qrId)
+    const { assetId, organizationId } = await getQr(qrId);
     if (assetId) {
       if (userId && userId != "anonymous") {
-        const user = await db.user.findFirst({
-          where: {
-            id: userId,
-          },
-          select: {
-            firstName: true,
-            lastName: true,
-          },
-        });
-
-        const userName = user?.firstName + " " + user?.lastName
+        const { firstName, lastName } = await getUserByID(userId)
+        const userName = (firstName ? firstName.trim() : "") + " " + (lastName ? lastName.trim() : "")
         if (manuallyGenerated) {
-          message = `**${userName}** manually updated the GPS coordinates to **${latitude} ${longitude}**`
+          message = `*${userName}* manually updated the GPS coordinates to *${latitude}, ${longitude}*`;
         } else {
-          message = `**${userName}** performed a scan of the asset QR code`
+          message = `*${userName}* performed a scan of the asset QR code`;
         }
         return await createNote({
           content: message,
           type: "UPDATE",
           userId,
-          assetId
+          assetId,
         });
       } else {
         if (organizationId) {
-          const { userId: ownerId } = await getOrganizationById(organizationId)
-          message = "An unknown user has performed a scan of the asset QR code"
+          // If there is an assetId there will always be organization id. This is an extra check for organizationId.
+
+          const { userId: ownerId } = await getOrganizationById(organizationId);
+          message = "An unknown user has performed a scan of the asset QR code";
+
+          /* to create a note we are using user id to track which user created the note
+          but in this case where scanner is anonymous, we are using the user id of the owner
+          of the organization to which the scanner QR belongs */
           return await createNote({
             content: message,
             type: "UPDATE",
             userId: ownerId,
-            assetId
+            assetId,
           });
         }
       }
     }
-  }
-  catch (cause) {
+  } catch (cause) {
     throw new ShelfError({
       cause,
       message: "Something went wrong while creating a scan note",
