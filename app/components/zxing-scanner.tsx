@@ -34,7 +34,7 @@ export const ZXingScanner = ({
        * - ([a-zA-Z0-9]+))$ matches the QR ID which is the last segment of the URL.
        */
       // Regex to match both old and new QR code structures
-      const regex = /^(https?:\/\/[^\/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+      const regex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
 
       /** We make sure the value of the QR code matches the structure of Shelf QR codes */
       const match = result.match(regex);
