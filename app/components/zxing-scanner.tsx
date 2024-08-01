@@ -7,11 +7,10 @@ import {
 import { useZxing } from "react-zxing";
 import { useClientNotification } from "~/hooks/use-client-notification";
 import type { loader } from "~/routes/_layout+/scanner";
-import { SERVER_URL, URL_SHORTENER } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
-import { Spinner } from "./shared/spinner";
 import { isQrId } from "~/utils/id";
+import { Spinner } from "./shared/spinner";
 
 export const ZXingScanner = ({
   videoMediaDevices,
