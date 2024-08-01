@@ -1,6 +1,5 @@
 import { useRouteLoaderData } from "@remix-run/react";
 import type { loader } from "~/routes/_layout+/_layout";
-import { ShelfError } from "~/utils/error";
 
 /**
  * This base hook is used to access the organization from within the _layout route
@@ -11,13 +10,8 @@ export function useCurrentOrganization() {
     "routes/_layout+/_layout"
   );
 
-  if (!layoutData) {
-    throw new ShelfError({
-      cause: null,
-      message:
-        "Something went wrong with fetching your organization details. If the issue persists, please contact support",
-      label: "Organization",
-    });
+  if (!layoutData || !layoutData.organizations) {
+    return undefined;
   }
 
   return layoutData.organizations.find(
